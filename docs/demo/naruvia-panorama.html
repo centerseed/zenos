@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Naruvia — 公司全景圖</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d27;
+    --card-hover: #22263a;
+    --border: #2a2e3f;
+    --accent: #6c8cff;
+    --accent2: #a78bfa;
+    --accent3: #34d399;
+    --accent4: #f59e0b;
+    --warn: #ef4444;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --text-bright: #f8fafc;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    padding: 2rem; max-width: 1200px; margin: 0 auto;
+  }
+
+  /* Header */
+  .header { text-align: center; margin-bottom: 3rem; padding: 2rem;
+    background: linear-gradient(135deg, rgba(108,140,255,0.1), rgba(167,139,250,0.1));
+    border-radius: 16px; border: 1px solid var(--border); }
+  .header h1 { font-size: 2rem; color: var(--text-bright); margin-bottom: 0.5rem; }
+  .header .subtitle { color: var(--text-dim); font-size: 0.95rem; }
+  .header .generated { color: var(--text-dim); font-size: 0.75rem; margin-top: 1rem; opacity: 0.6; }
+
+  /* Section */
+  .section { margin-bottom: 2.5rem; }
+  .section-title { font-size: 1.1rem; color: var(--accent); margin-bottom: 1rem;
+    display: flex; align-items: center; gap: 0.5rem;
+    text-transform: uppercase; letter-spacing: 0.05em; font-weight: 600; }
+  .section-title .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
+  /* Grids */
+  .products-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+  .insights-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 1rem; }
+  .people-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; }
+
+  /* Cards */
+  .product-card { background: var(--card); border: 1px solid var(--border);
+    border-radius: 12px; padding: 1.25rem; transition: all 0.2s; }
+  .product-card:hover { background: var(--card-hover); border-color: var(--accent); }
+  .product-card .name { font-size: 1.15rem; font-weight: 700; color: var(--text-bright); margin-bottom: 0.25rem; }
+  .product-card .desc { font-size: 0.85rem; color: var(--text-dim); margin-bottom: 0.75rem; }
+
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 0.7rem; font-weight: 600; margin-right: 4px; margin-bottom: 4px; }
+  .tag-active { background: rgba(52,211,153,0.15); color: var(--accent3); }
+  .tag-dev { background: rgba(108,140,255,0.15); color: var(--accent); }
+  .tag-plan { background: rgba(245,158,11,0.15); color: var(--accent4); }
+  .tag-infra { background: rgba(167,139,250,0.15); color: var(--accent2); }
+
+  /* Goals */
+  .goals-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .goal-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.25rem; display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .goal-card .goal-text { flex: 1; }
+  .goal-card .goal-name { font-weight: 700; color: var(--text-bright); margin-bottom: 0.25rem; }
+  .goal-card .goal-products { font-size: 0.85rem; color: var(--text-dim); }
+  .goal-card .goal-status { flex-shrink: 0; text-align: right; }
+
+  /* Relationship map */
+  .relationship-map { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 2rem; font-family: 'Courier New', monospace; font-size: 0.8rem;
+    line-height: 1.8; overflow-x: auto; color: var(--text-dim); }
+  .relationship-map .entity { color: var(--accent); font-weight: 700; }
+  .relationship-map .arrow { color: var(--text-dim); }
+  .relationship-map .action { color: var(--accent3); }
+  .relationship-map .warn-text { color: var(--warn); }
+
+  /* Stats bar */
+  .stats-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.75rem; margin-bottom: 2.5rem; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem; text-align: center; }
+  .stat .stat-number { font-size: 1.8rem; font-weight: 800; color: var(--text-bright); }
+  .stat .stat-label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+
+  /* People */
+  .person-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1rem; text-align: center; }
+  .person-card .person-name { font-weight: 700; color: var(--text-bright); margin-bottom: 0.25rem; }
+  .person-card .person-role { font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.5rem; }
+  .person-card .person-scope { font-size: 0.75rem; color: var(--accent); }
+
+  /* Insight cards */
+  .insight-card { background: var(--card); border-radius: 12px; padding: 1.25rem; border-left: 3px solid; }
+  .insight-card.opportunity { border-left-color: var(--accent3); }
+  .insight-card.risk { border-left-color: var(--warn); }
+  .insight-card.question { border-left-color: var(--accent4); }
+  .insight-card .insight-type { font-size: 0.7rem; text-transform: uppercase;
+    letter-spacing: 0.05em; font-weight: 700; margin-bottom: 0.5rem; }
+  .insight-card.opportunity .insight-type { color: var(--accent3); }
+  .insight-card.risk .insight-type { color: var(--warn); }
+  .insight-card.question .insight-type { color: var(--accent4); }
+  .insight-card .insight-title { font-weight: 700; color: var(--text-bright); margin-bottom: 0.5rem; font-size: 0.95rem; }
+  .insight-card .insight-body { font-size: 0.85rem; color: var(--text-dim); }
+
+  .separator { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  .footer { text-align: center; margin-top: 3rem; padding: 1.5rem;
+    border-top: 1px solid var(--border); color: var(--text-dim); font-size: 0.75rem; }
+
+  /* ========== NEW: Problem → Solution Cards ========== */
+  .problem-solution {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .ps-header {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .ps-header:hover { background: var(--card-hover); }
+  .ps-number {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: rgba(239,68,68,0.15); color: var(--warn);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.75rem; font-weight: 800; flex-shrink: 0;
+  }
+  .ps-title { font-weight: 700; color: var(--text-bright); font-size: 0.95rem; flex: 1; }
+  .ps-toggle { color: var(--text-dim); font-size: 0.8rem; transition: transform 0.2s; }
+
+  .ps-body { display: none; padding: 0 1.25rem 1.25rem; }
+  .ps-body.open { display: block; }
+
+  .ps-row {
+    display: grid;
+    grid-template-columns: 1fr 40px 1fr;
+    gap: 0.5rem;
+    align-items: stretch;
+    margin-bottom: 0.75rem;
+  }
+  .ps-before, .ps-after {
+    padding: 1rem;
+    border-radius: 10px;
+    font-size: 0.85rem;
+  }
+  .ps-before {
+    background: rgba(239,68,68,0.06);
+    border: 1px solid rgba(239,68,68,0.15);
+    color: var(--text-dim);
+  }
+  .ps-after {
+    background: rgba(52,211,153,0.06);
+    border: 1px solid rgba(52,211,153,0.15);
+    color: var(--text);
+  }
+  .ps-arrow-col {
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent3); font-size: 1.2rem;
+  }
+  .ps-label {
+    font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: 700; margin-bottom: 0.5rem;
+  }
+  .ps-before .ps-label { color: var(--warn); }
+  .ps-after .ps-label { color: var(--accent3); }
+
+  .ps-how {
+    background: rgba(108,140,255,0.08);
+    border: 1px solid rgba(108,140,255,0.15);
+    border-radius: 10px;
+    padding: 0.75rem 1rem;
+    font-size: 0.8rem;
+    color: var(--accent);
+  }
+  .ps-how strong { color: var(--text-bright); }
+
+  /* ========== Scenario Cards ========== */
+  .scenario-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1rem;
+  }
+  .scenario-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--accent4);
+    margin-bottom: 1rem;
+  }
+  .scenario-flow {
+    display: flex;
+    gap: 0.5rem;
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .scenario-step {
+    flex: 1;
+    min-width: 180px;
+    padding: 0.75rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+  }
+  .scenario-step.now {
+    background: rgba(239,68,68,0.06);
+    border: 1px solid rgba(239,68,68,0.15);
+    color: var(--text-dim);
+  }
+  .scenario-step.onto {
+    background: rgba(52,211,153,0.06);
+    border: 1px solid rgba(52,211,153,0.15);
+    color: var(--text);
+  }
+  .scenario-step .step-label {
+    font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.08em;
+    font-weight: 700; margin-bottom: 0.5rem; display: block;
+  }
+  .scenario-step.now .step-label { color: var(--warn); }
+  .scenario-step.onto .step-label { color: var(--accent3); }
+  .scenario-arrow {
+    display: flex; align-items: center; color: var(--text-dim);
+    font-size: 1.2rem; flex-shrink: 0;
+  }
+
+  /* Summary bar */
+  .summary-bar {
+    background: linear-gradient(135deg, rgba(52,211,153,0.08), rgba(108,140,255,0.08));
+    border: 1px solid rgba(52,211,153,0.2);
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+  .summary-item {
+    text-align: center;
+  }
+  .summary-item .si-number {
+    font-size: 1.5rem; font-weight: 800; color: var(--accent3);
+  }
+  .summary-item .si-label {
+    font-size: 0.75rem; color: var(--text-dim);
+  }
+
+  @media (max-width: 768px) {
+    .ps-row { grid-template-columns: 1fr; }
+    .ps-arrow-col { transform: rotate(90deg); padding: 0.5rem 0; }
+    .scenario-flow { flex-direction: column; }
+    .scenario-arrow { justify-content: center; transform: rotate(90deg); padding: 0.25rem 0; }
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Naruvia 公司全景圖</h1>
+  <p class="subtitle">ZenOS Knowledge Ontology 自動產生 — 你的公司現在長這樣</p>
+  <p class="generated">資料來源：業主對話 + 既有商業文件 ｜ 產生時間：2026-03-21 ｜ Ontology v0.5 (draft)</p>
+</div>
+
+<!-- ==================== PART 1: 現況 ==================== -->
+
+<div class="stats-bar">
+  <div class="stat"><div class="stat-number">4</div><div class="stat-label">產品線</div></div>
+  <div class="stat"><div class="stat-number">3</div><div class="stat-label">活躍目標</div></div>
+  <div class="stat"><div class="stat-number">5</div><div class="stat-label">進行中專案</div></div>
+  <div class="stat"><div class="stat-number">2</div><div class="stat-label">團隊成員</div></div>
+  <div class="stat"><div class="stat-number" style="color: var(--warn);">6</div><div class="stat-label">盲點 / 待釐清</div></div>
+</div>
+
+<!-- Products -->
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--accent);"></span>What — 我們在做什麼</div>
+  <div class="products-grid">
+    <div class="product-card">
+      <div class="name">Paceriz</div><div class="desc">AI 跑步教練 — 個人化訓練計畫 + 數據整合</div>
+      <span class="tag tag-active">已上線</span><span class="tag tag-dev">v2 開發中</span>
+      <div style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-dim);">iOS ✅ Android ✅ Web ⚠️<br>Garmin ✅ Apple Health ✅ Strava 📋</div>
+    </div>
+    <div class="product-card">
+      <div class="name">Zentropy</div><div class="desc">AI 營運系統 — 任務治理與標籤管理</div>
+      <span class="tag tag-active">運作中</span>
+      <div style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-dim);">目前無明確的下一步目標</div>
+    </div>
+    <div class="product-card">
+      <div class="name">Finvoya</div><div class="desc">AI 財務藍圖 — 個人財務規劃工具</div>
+      <span class="tag tag-dev">MVP 開發中</span>
+      <div style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-dim);">目標四月上線</div>
+    </div>
+    <div class="product-card">
+      <div class="name">ZenOS</div><div class="desc">AI 中小企業作業系統 — 知識本體層</div>
+      <span class="tag tag-plan">概念設計中</span>
+      <div style="margin-top: 0.75rem; font-size: 0.8rem; color: var(--text-dim);">定位：面向中小企業的 Palantir</div>
+    </div>
+  </div>
+  <div style="margin-top: 1rem;">
+    <div class="products-grid">
+      <div class="product-card" style="border-color: var(--accent2);">
+        <div class="name" style="color: var(--accent2);">naru_agent</div>
+        <div class="desc">AI Agent 基礎框架 — 供 Paceriz 使用 + 對外技術展示</div>
+        <span class="tag tag-infra">基礎架構</span><span class="tag tag-dev">開發中</span>
+      </div>
+      <div class="product-card" style="border-color: var(--accent2);">
+        <div class="name" style="color: var(--accent2);">Naruvia 官網</div>
+        <div class="desc">公司門面 — 需更新以反映最新產品和服務</div>
+        <span class="tag tag-infra">行銷資產</span><span class="tag tag-plan">待更新</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Goals -->
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--accent4);"></span>Why — 我們現在為什麼而戰</div>
+  <div class="goals-list">
+    <div class="goal-card">
+      <div class="goal-text">
+        <div class="goal-name">Paceriz v2 課表流程驗證 + Agent 導入</div>
+        <div class="goal-products">關聯：Paceriz ← naru_agent<br>讓 AI 教練真正可用，驗證跑者是否願意持續使用新版課表流程</div>
+      </div>
+      <div class="goal-status"><span class="tag tag-dev">進行中</span><div style="font-size: 0.75rem; color: var(--warn); margin-top: 4px;">⚠️ 時程不明</div></div>
+    </div>
+    <div class="goal-card">
+      <div class="goal-text">
+        <div class="goal-name">Finvoya 四月 MVP 上線</div>
+        <div class="goal-products">關聯：Finvoya<br>四月前交出可用的最小產品</div>
+      </div>
+      <div class="goal-status"><span class="tag tag-dev">進行中</span><div style="font-size: 0.75rem; color: var(--warn); margin-top: 4px;">⚠️ 剩 ~10 天</div></div>
+    </div>
+    <div class="goal-card">
+      <div class="goal-text">
+        <div class="goal-name">ZenOS 進入顧問市場</div>
+        <div class="goal-products">關聯：ZenOS、Naruvia 官網<br>用 ZenOS 作為顧問服務的核心產品，打中小企業市場</div>
+      </div>
+      <div class="goal-status"><span class="tag tag-plan">規劃中</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- Relationships -->
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--accent3);"></span>How — 事情之間怎麼連在一起</div>
+  <div class="relationship-map">
+<span class="entity">Paceriz</span> <span class="arrow">──依賴──→</span> <span class="entity">naru_agent</span> <span class="action">（AI 引擎）</span>
+<span class="entity">naru_agent</span> <span class="arrow">──展示──→</span> <span class="entity">Naruvia 官網</span> <span class="action">（技術能力證明）</span>
+<span class="entity">Paceriz</span> <span class="arrow">──需要──→</span> <span class="entity">Naruvia 官網</span> <span class="action">（產品展示更新）</span>
+<span class="entity">ZenOS</span> <span class="arrow">──需要──→</span> <span class="entity">Naruvia 官網</span> <span class="action">（顧問服務入口）</span>
+
+<span class="warn-text">⚠️ Naruvia 官網是三條線的交匯點，但目前狀態：待更新</span>
+
+<span class="entity">Zentropy</span> <span class="arrow">── ? ──→</span> <span class="entity">ZenOS</span> <span class="action">（技術共用？產品合併？待釐清）</span>
+<span class="entity">Finvoya</span> <span class="arrow">── ? ──→</span> <span class="entity">（獨立產品線？ZenOS 展示案例？待釐清）</span>
+  </div>
+</div>
+
+<!-- People -->
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--accent2);"></span>Who — 誰在做什麼</div>
+  <div class="people-grid">
+    <div class="person-card"><div class="person-name">Barry</div><div class="person-role">產品 / 開發 / 決策</div><div class="person-scope">Paceriz · Zentropy · Finvoya · ZenOS · naru_agent</div></div>
+    <div class="person-card"><div class="person-name">行銷夥伴</div><div class="person-role">行銷 / 內容</div><div class="person-scope">Paceriz · 官網 · 對外溝通</div></div>
+    <div class="person-card" style="border: 1px dashed var(--warn);"><div class="person-name" style="color: var(--warn);">?</div><div class="person-role">顧問客戶</div><div class="person-scope">ZenOS 的目標客戶 · 尚未獲取</div></div>
+    <div class="person-card" style="border: 1px dashed var(--warn);"><div class="person-name" style="color: var(--warn);">?</div><div class="person-role">跑者用戶</div><div class="person-scope">Paceriz 的終端用戶 · 規模未知</div></div>
+  </div>
+</div>
+
+<hr class="separator">
+
+<!-- ==================== PART 2: 問題 → Ontology 怎麼解 ==================== -->
+
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--warn);"></span>Ontology 發現的問題 — 以及怎麼解</div>
+  <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1.25rem;">
+    以下 6 個問題是 AI 從您公司的文件和組織結構中自動推斷的。點擊展開查看具體影響和解法。
+  </p>
+
+  <!-- Problem 1 -->
+  <div class="problem-solution">
+    <div class="ps-header" onclick="toggle(this)">
+      <div class="ps-number">1</div>
+      <div class="ps-title">官網是三條產品線的瓶頸，但沒人負責</div>
+      <div class="ps-toggle">▼</div>
+    </div>
+    <div class="ps-body">
+      <div class="ps-row">
+        <div class="ps-before">
+          <div class="ps-label">現在的狀況</div>
+          Paceriz 行銷等官網更新才能推、ZenOS 顧問服務需要官網入口、naru_agent 的技術展示也需要官網。三方互等，但沒有人被指派、沒有時程、沒有人追蹤。
+        </div>
+        <div class="ps-arrow-col">→</div>
+        <div class="ps-after">
+          <div class="ps-label">有 Ontology 之後</div>
+          AI 從依賴關係圖自動偵測到「官網」是三個目標的共同瓶頸。自動觸發提醒：「官網更新阻擋了 3 個活躍目標，建議指派負責人並設定 deadline。」老闆一眼看到優先級。
+        </div>
+      </div>
+      <div class="ps-how">
+        <strong>Ontology 怎麼做到的：</strong>因為每份文件都標注了 What（跟哪個產品有關）和 How（屬於哪個專案），AI 能自動畫出依賴圖。當多條線交匯在一個沒有負責人的節點上，就是瓶頸。這不是人能輕易看到的——散落在不同文件裡的依賴，只有被標籤串起來才浮得出來。
+      </div>
+    </div>
+  </div>
+
+  <!-- Problem 2 -->
+  <div class="problem-solution">
+    <div class="ps-header" onclick="toggle(this)">
+      <div class="ps-number">2</div>
+      <div class="ps-title">一個人扛四條產品線，資源衝突隱性化</div>
+      <div class="ps-toggle">▼</div>
+    </div>
+    <div class="ps-body">
+      <div class="ps-row">
+        <div class="ps-before">
+          <div class="ps-label">現在的狀況</div>
+          Barry 同時是 4 個產品的決策者和唯一開發者。Finvoya 四月要上線（剩 10 天）、Paceriz v2 在開發、ZenOS 在設計。衝突只存在 Barry 的腦中，團隊其他人不知道 Barry 現在的注意力在哪。
+        </div>
+        <div class="ps-arrow-col">→</div>
+        <div class="ps-after">
+          <div class="ps-label">有 Ontology 之後</div>
+          Who 維度標注了每個目標的負責人。AI 發現 Barry 同時是 3 個「進行中」目標的唯一負責人，自動產出資源衝突警示。行銷夥伴可以從 Ontology 看到「Barry 現在優先在做 Finvoya」，不用猜、不用問。
+        </div>
+      </div>
+      <div class="ps-how">
+        <strong>Ontology 怎麼做到的：</strong>把 Who（誰負責）和 Why（目標）交叉比對。當同一個人出現在多個活躍目標的負責人欄位時，自動標記衝突。這是把「老闆腦中隱性的優先級」變成「團隊可見的顯性資訊」。
+      </div>
+    </div>
+  </div>
+
+  <!-- Problem 3 -->
+  <div class="problem-solution">
+    <div class="ps-header" onclick="toggle(this)">
+      <div class="ps-number">3</div>
+      <div class="ps-title">行銷夥伴拿到的「行銷文件」其實是技術文件</div>
+      <div class="ps-toggle">▼</div>
+    </div>
+    <div class="ps-body">
+      <div class="ps-row">
+        <div class="ps-before">
+          <div class="ps-label">現在的狀況</div>
+          Paceriz 的 marketing/ 資料夾裡放的是「運動數據整合功能總覽」——395 行，充滿 Webhook、OAuth、Firestore。行銷夥伴打開後完全無法使用。想做素材，只能等 Barry 有空口頭解釋。
+        </div>
+        <div class="ps-arrow-col">→</div>
+        <div class="ps-after">
+          <div class="ps-label">有 Ontology 之後</div>
+          AI 掃描發現：這份文件的 What 標籤是「Paceriz」、但 Who 標籤是「開發團隊」——一份開發文件被放在 marketing/ 資料夾裡。自動觸發品質警示。同時，AI 從 Ontology 裡的產品資訊 + 既有文件，自動產出行銷夥伴能讀懂的 Context Protocol。
+        </div>
+      </div>
+      <div class="ps-how">
+        <strong>Ontology 怎麼做到的：</strong>每份文件的 Who 標籤記錄了「目標讀者」。當文件的存放位置（marketing/）和目標讀者（開發團隊）矛盾時，就是文件治理問題。更重要的是，Context Protocol 把同一份產品資訊按不同角色的需求重新組裝——行銷看行銷版、開發看開發版，來源是同一個 Ontology。
+      </div>
+    </div>
+  </div>
+
+  <!-- Problem 4 -->
+  <div class="problem-solution">
+    <div class="ps-header" onclick="toggle(this)">
+      <div class="ps-number">4</div>
+      <div class="ps-title">Zentropy 在運作但沒有目標——是資產還是負債？</div>
+      <div class="ps-toggle">▼</div>
+    </div>
+    <div class="ps-body">
+      <div class="ps-row">
+        <div class="ps-before">
+          <div class="ps-label">現在的狀況</div>
+          Zentropy 在跑，但沒有對應的活躍目標。它跟 ZenOS 的關係不明——技術共用？產品合併？獨立發展？這消耗注意力但沒人正式討論過。
+        </div>
+        <div class="ps-arrow-col">→</div>
+        <div class="ps-after">
+          <div class="ps-label">有 Ontology 之後</div>
+          AI 在 What 維度看到 Zentropy 是活躍產品，但在 Why 維度找不到對應的目標。自動標記為「定位待釐清」。老闆可以在全景圖上直接做決策：繼續、合併、還是暫停。決策後 Ontology 更新，所有相關文件的標籤連動調整。
+        </div>
+      </div>
+      <div class="ps-how">
+        <strong>Ontology 怎麼做到的：</strong>What 和 Why 的交叉比對。每個產品（What）應該對應至少一個目標（Why）。當某個產品沒有目標時，要嘛是目標還沒被記錄，要嘛是這個產品真的沒有方向。兩者都需要老闆決策。
+      </div>
+    </div>
+  </div>
+
+  <!-- Problem 5 -->
+  <div class="problem-solution">
+    <div class="ps-header" onclick="toggle(this)">
+      <div class="ps-number">5</div>
+      <div class="ps-title">四個產品都沒有明確的商業模式</div>
+      <div class="ps-toggle">▼</div>
+    </div>
+    <div class="ps-body">
+      <div class="ps-row">
+        <div class="ps-before">
+          <div class="ps-label">現在的狀況</div>
+          Paceriz 怎麼收費？Finvoya 的定價？ZenOS 的顧問費？所有文件裡都沒有出現「收費」「訂閱」「定價」相關的內容。行銷夥伴不知道怎麼定位產品的商業價值。
+        </div>
+        <div class="ps-arrow-col">→</div>
+        <div class="ps-after">
+          <div class="ps-label">有 Ontology 之後</div>
+          AI 在 Context Protocol 的 Why 區塊裡發現「商業動機」欄位全部為空。自動產出完整性警示：「4 個產品的商業模式尚未定義，建議老闆補充。」並附上追問清單，引導老闆一次把 4 個產品的營收路徑想清楚。
+        </div>
+      </div>
+      <div class="ps-how">
+        <strong>Ontology 怎麼做到的：</strong>Context Protocol 有固定的結構（What/Why/How/Who），每個區塊有必填欄位。商業模式是 Why 的必填項。AI 定期掃描所有 Protocol 的完整性，缺漏自動提醒。這不是人力做的——是系統自動的品質治理。
+      </div>
+    </div>
+  </div>
+
+  <!-- Problem 6 -->
+  <div class="problem-solution">
+    <div class="ps-header" onclick="toggle(this)">
+      <div class="ps-number">6</div>
+      <div class="ps-title">跨產品的 AI 故事沒有被整合</div>
+      <div class="ps-toggle">▼</div>
+    </div>
+    <div class="ps-body">
+      <div class="ps-row">
+        <div class="ps-before">
+          <div class="ps-label">現在的狀況</div>
+          naru_agent（AI 框架）、Paceriz（AI 教練）、ZenOS（AI 知識治理）、Zentropy（AI 任務治理）、Finvoya（AI 財務規劃）——五個產品都跟 AI 有關，但對外完全沒有「Naruvia = AI 公司」的統一故事。行銷夥伴無法用一句話解釋公司在做什麼。
+        </div>
+        <div class="ps-arrow-col">→</div>
+        <div class="ps-after">
+          <div class="ps-label">有 Ontology 之後</div>
+          AI 從標籤分析發現：所有產品的 What 都包含「AI」相關標籤，naru_agent 是多個產品的共同依賴。自動產出機會洞察：「您的產品矩陣有一個共同主題（AI Agent），建議建立公司層級的技術品牌敘事。」行銷夥伴可以從 Ontology 直接拉出跨產品的 AI 故事線。
+        </div>
+      </div>
+      <div class="ps-how">
+        <strong>Ontology 怎麼做到的：</strong>當多個產品（What）共享相同的技術標籤（AI、Agent），且有共同的基礎設施依賴（naru_agent），AI 能識別出「跨產品主題」。這是聚合分析——一個人在文件之間跳來跳去很難看到的模式，Ontology 的標籤索引讓它一目了然。
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="separator">
+
+<!-- ==================== PART 3: 日常場景 Before/After ==================== -->
+
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--accent4);"></span>日常場景 — 有 Ontology 之前 vs 之後</div>
+
+  <div class="scenario-card">
+    <div class="scenario-title">場景：行銷夥伴要做 Paceriz 的社群貼文</div>
+    <div class="scenario-flow">
+      <div class="scenario-step now">
+        <span class="step-label">現在</span>
+        打開 marketing/ 資料夾 → 看到 395 行技術文件 → 看不懂 → 問 Barry → Barry 在忙 Finvoya → 等 2 天 → Barry 口頭講 5 分鐘 → 行銷憑記憶寫 → 寫錯功能狀態
+      </div>
+      <div class="scenario-arrow">→</div>
+      <div class="scenario-step onto">
+        <span class="step-label">有 Ontology</span>
+        打開 Paceriz Context Protocol → 直接看到：已上線功能、開發中功能、目標用戶、品牌語言 → 10 分鐘完成貼文 → AI 自動檢查是否跟 Protocol 一致
+      </div>
+    </div>
+  </div>
+
+  <div class="scenario-card">
+    <div class="scenario-title">場景：老闆想知道「現在公司最該先做什麼」</div>
+    <div class="scenario-flow">
+      <div class="scenario-step now">
+        <span class="step-label">現在</span>
+        在腦中盤點 4 個產品的進度 → 打開各產品的 repo 看 → 想起 Finvoya 快到 deadline → 但 Paceriz 的 Agent 也很重要 → 猶豫 → 沒有客觀依據 → 憑直覺決定
+      </div>
+      <div class="scenario-arrow">→</div>
+      <div class="scenario-step onto">
+        <span class="step-label">有 Ontology</span>
+        打開全景圖 → 一眼看到：Finvoya 剩 10 天、Paceriz 時程不明、官網是 3 條線的瓶頸 → 依據依賴關係和 deadline 做優先級排序 → 決策有數據支撐
+      </div>
+    </div>
+  </div>
+
+  <div class="scenario-card">
+    <div class="scenario-title">場景：新的行銷實習生加入團隊</div>
+    <div class="scenario-flow">
+      <div class="scenario-step now">
+        <span class="step-label">現在</span>
+        Barry 花 2 小時口頭介紹 4 個產品 → 實習生做筆記 → 筆記不完整 → 之後每次有問題都要問 Barry → Barry 重複回答 → 實習生還是搞混 Zentropy 和 ZenOS
+      </div>
+      <div class="scenario-arrow">→</div>
+      <div class="scenario-step onto">
+        <span class="step-label">有 Ontology</span>
+        實習生看公司全景圖（15 分鐘）→ 看 Paceriz Context Protocol（10 分鐘）→ 對公司有完整理解 → 之後有問題先查 Ontology → 只有 Ontology 裡沒有的才需要問人
+      </div>
+    </div>
+  </div>
+
+  <div class="scenario-card">
+    <div class="scenario-title">場景：Paceriz v2 上線了，行銷要同步更新所有素材</div>
+    <div class="scenario-flow">
+      <div class="scenario-step now">
+        <span class="step-label">現在</span>
+        開發完成 → Barry 忘記通知行銷 → 行銷 3 天後才知道 → 行銷不確定新功能細節 → 問 Barry → Barry 說「看 IMPLEMENTATION_SUMMARY.md」→ 行銷看不懂 → 又等
+      </div>
+      <div class="scenario-arrow">→</div>
+      <div class="scenario-step onto">
+        <span class="step-label">有 Ontology</span>
+        開發完成 → 更新 Paceriz Protocol（v2 課表流程：已上線）→ AI 自動通知行銷：「Paceriz Protocol 更新了，以下功能狀態變更」→ 行銷讀 Protocol 的行銷版 → 立刻開始做素材
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="separator">
+
+<!-- ==================== PART 4: 效益總結 ==================== -->
+
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--accent3);"></span>導入 Ontology 的預期效益</div>
+
+  <div class="summary-bar">
+    <div class="summary-item">
+      <div class="si-number">2 天 → 25 分鐘</div>
+      <div class="si-label">行銷取得產品 context 的時間</div>
+    </div>
+    <div class="summary-item">
+      <div class="si-number">2 小時 → 25 分鐘</div>
+      <div class="si-label">新人理解公司全貌的時間</div>
+    </div>
+    <div class="summary-item">
+      <div class="si-number">0 → 6 個</div>
+      <div class="si-label">AI 自動偵測的盲點數量</div>
+    </div>
+    <div class="summary-item">
+      <div class="si-number">被動 → 主動</div>
+      <div class="si-label">跨部門資訊同步方式</div>
+    </div>
+  </div>
+
+  <div class="insights-grid">
+    <div class="insight-card opportunity">
+      <div class="insight-type">核心價值</div>
+      <div class="insight-title">老闆的知識不再只在老闆腦裡</div>
+      <div class="insight-body">公司的產品結構、目標、優先級、人員分工——全部從老闆腦中的隱性知識，變成團隊可見的顯性 Ontology。老闆不需要重複回答同樣的問題。</div>
+    </div>
+    <div class="insight-card opportunity">
+      <div class="insight-type">核心價值</div>
+      <div class="insight-title">AI 幫你盯文件品質，不是幫你寫文件</div>
+      <div class="insight-body">AI 不是取代人寫文件——是發現「marketing 資料夾裡放的是技術文件」「Protocol 缺商業模式」「官網沒人負責」這些人力難以持續監控的問題。</div>
+    </div>
+    <div class="insight-card opportunity">
+      <div class="insight-type">核心價值</div>
+      <div class="insight-title">不是新系統，是現有工作的語意層</div>
+      <div class="insight-body">不需要改變任何人的工作習慣。開發繼續寫 spec，行銷繼續做素材。Ontology 在背後自動標注、自動串連、自動監控品質。</div>
+    </div>
+  </div>
+</div>
+
+<hr class="separator">
+
+<!-- ==================== PART 5: 需要老闆決策 ==================== -->
+
+<div class="section">
+  <div class="section-title"><span class="dot" style="background: var(--accent4);"></span>下一步 — 需要您的決策</div>
+  <p style="color: var(--text-dim); font-size: 0.85rem; margin-bottom: 1rem;">
+    以上分析由 AI 自動產生。以下項目需要您確認或補充，才能讓 Ontology 真正運作起來。
+  </p>
+
+  <div class="insights-grid">
+    <div class="insight-card question">
+      <div class="insight-type">決策 1</div>
+      <div class="insight-title">四個產品的優先級</div>
+      <div class="insight-body">資源有限。現在最重要的是哪一個？其他的是維持、暫停、還是合併？</div>
+    </div>
+    <div class="insight-card question">
+      <div class="insight-type">決策 2</div>
+      <div class="insight-title">各產品的商業模式</div>
+      <div class="insight-body">怎麼賺錢？免費增值、訂閱、顧問費？哪個產品先產生營收？</div>
+    </div>
+    <div class="insight-card question">
+      <div class="insight-type">決策 3</div>
+      <div class="insight-title">時程與 deadline</div>
+      <div class="insight-body">Paceriz v2 什麼時候完成？Finvoya 四月幾號？官網誰負責、什麼時候？</div>
+    </div>
+    <div class="insight-card question">
+      <div class="insight-type">決策 4</div>
+      <div class="insight-title">Naruvia 的對外定位</div>
+      <div class="insight-body">一句話：Naruvia 是做什麼的？這決定官網、行銷、ZenOS 的方向。</div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">
+  由 ZenOS Knowledge Ontology 自動產生 · 資料來源：業主對話 + 既有商業文件（非程式碼掃描）<br>
+  導入時間：老闆 30 分鐘對話 · 產出時間：即時 · 持續維護成本：趨近於零<br>
+  <span style="opacity: 0.5;">問題和機會由 AI 從跨產品關係中推斷，不是人工整理的</span>
+</div>
+
+<script>
+function toggle(header) {
+  const body = header.nextElementSibling;
+  const arrow = header.querySelector('.ps-toggle');
+  body.classList.toggle('open');
+  arrow.textContent = body.classList.contains('open') ? '▲' : '▼';
+}
+// Auto-open the first problem to show the pattern
+document.addEventListener('DOMContentLoaded', () => {
+  const first = document.querySelector('.ps-header');
+  if (first) toggle(first);
+});
+</script>
+
+</body>
+</html>

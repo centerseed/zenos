@@ -1,0 +1,229 @@
+---
+name: zenos-sync
+description: >
+  掃描 git log 找出最近變更的文件，比對 ZenOS ontology，批量 propose 更新。
+  支援兩種使用情境：(1) 無引數 = 同步當前專案；(2) 目錄路徑 = 同步指定的外部專案。
+  輔助知識同步 skill——定期執行或在大量文件變更後使用，讓 ontology 跟上 codebase 節奏。
+  當使用者說「同步 ontology」「sync ZenOS」「掃 git 變更」「更新 ontology」「/zenos-sync」，
+  或在一批 commits 後想讓 ontology 跟上，或說「幫我同步 {專案名}」時使用。
+  注意：第一次為某個專案建立 ontology 請用 /zenos-capture {目錄}，
+  /zenos-sync 是為已有 ontology 的專案做增量同步。
+version: 2.0.0
+---
+
+# /zenos-sync — Git 增量同步
+
+你是 ZenOS 的知識治理 agent。任務：從 **git log** 找出最近的文件變更，
+比對現有 ontology，批量 propose 更新，讓 ontology 和 codebase 保持同步。
+
+**適用時機**：已有 ontology 的專案，需要跟上最近的 commits。
+**首次建構**：請改用 `/zenos-capture {目錄路徑}`。
+
+---
+
+## Step 0：確認目標專案和上次 sync 時間
+
+**確認目標路徑：**
+- 有引數（目錄路徑）→ `TARGET = {引數路徑}`，在該目錄執行 git 指令
+- 無引數 → `TARGET = 當前工作目錄`
+
+**讀取上次 sync 狀態：**
+
+```bash
+cat {TARGET}/.zenos-sync-state.json  # 優先找專案目錄
+# 若不存在，找當前目錄的 .zenos-sync-state.json
+```
+
+**如果找不到 .zenos-sync-state.json：**
+> 這個專案還沒有 sync 記錄。
+>
+> 選項：
+> - 輸入天數（如 `7`）→ 掃最近 N 天的 commits
+> - 輸入 `首次建構` → 改用 /zenos-capture 模式掃整個目錄
+> - 輸入日期（如 `2026-01-01`）→ 從那天開始掃
+
+**如果找到：**
+```
+目標專案：{TARGET}
+上次 sync：{last_sync}（{距今 N 天前}）
+```
+
+---
+
+## Step 1：取得 git 變更清單
+
+```bash
+cd {TARGET} && git log --since="{SINCE}" --name-only --pretty=format:"---commit %H%n%s" -- .
+```
+
+**過濾掉噪音（不需要 propose）：**
+- `.venv/`、`__pycache__/`、`*.pyc`、`node_modules/`、`dist/`
+- `*.lock`、`package-lock.json`、`poetry.lock`
+- `tests/fixtures/`、`integration_tests/fixtures/`
+- `.claude/skills/pm-workspace/`（skill eval 資料）
+- `*FIX_REPORT*`、`*VALIDATION_FIX*`、`*CRITICAL_ERRORS_FIX*`（bug fix 記錄）
+
+**如果沒有任何有效變更：**
+> 自 {SINCE} 以來沒有影響知識層的新 commits。Ontology 已是最新。
+
+更新 last_sync 後結束。
+
+**顯示掃描摘要：**
+```
+找到 {N} 個 commits，{M} 個有效文件變更：
+  *.md 文件    ：{n} 個
+  源碼（*.py等）：{n} 個
+  配置文件     ：{n} 個（跳過）
+```
+
+---
+
+## Step 2：判斷每個變更對 ontology 的影響
+
+### 高影響（必須處理）
+
+| 路徑模式 | 可能影響 |
+|----------|----------|
+| `CLAUDE.md`、`README.md` | 骨架層整體描述 |
+| `docs/01-specs/`、`docs/*spec*`、`*SPEC*.md` | 功能規格 → 可能新模組/目標 |
+| `docs/04-frds/`、`*FRD*.md` | 功能需求 → 可能新 entity |
+| `docs/architecture/`、`*ARCHITECTURE*.md` | 架構決策 → 關係圖 |
+| `docs/09-agent/`、`naru_agent/` | AI agent 設計 |
+| `FIRESTORE_STRUCTURE.md`、`docs/data_schemas/` | 資料結構 |
+| `*COMPLETE_REFACTOR*`、`*REFACTOR_SUMMARY*` | 大規模架構變更 |
+| `domains/`（新增檔案） | 可能新 domain/module |
+
+### 中影響（選擇性處理）
+
+| 路徑模式 | 處理建議 |
+|----------|----------|
+| `docs/02-api/`、`api/` 新路由 | 更新 API module entry |
+| `docs/guides/`、`docs/services/` | 更新文件 entry |
+| `domains/{name}/` 修改 | 更新對應 module entry |
+
+### 低影響（跳過）
+
+- `tests/`、`integration_tests/` — 測試代碼不影響知識層
+- `deployment/`、`Dockerfile`、`*.yaml` — 基礎設施
+- `requirements.txt`、`pyproject.toml` — 依賴管理
+
+---
+
+## Step 3：比對現有 ontology
+
+對高/中影響文件：
+
+```
+search_ontology(query=文件路徑關鍵詞 或 commit message 關鍵詞)
+→ 找到 entry → 判斷 summary 是否還準確
+→ 找不到 → 需要新建 entry
+→ commit message 暗示新模組 → 標記為骨架層 proposal
+```
+
+利用 **commit message** 推斷變更的 why/how，比讀全文快：
+- `feat: add ACWR safety check` → 新功能，影響 ACWR module entry
+- `refactor: split WeeklyPlan into v2/v3` → 架構變更，可能需要新實體
+- `fix: correct ACWR calculation` → bug fix，不需要 propose
+
+---
+
+## Step 4：神經層 — 批量自動寫入 draft
+
+```
+進度：神經層更新中...
+  [1/5] CLAUDE.md（更新）→ ✅
+  [2/5] docs/01-specs/SPEC-weekly-plan-v3.md（新增）→ ✅
+  [3/5] domains/training_plan/service.py（跳過，源碼）
+  ...
+```
+
+每個 document entry：
+```
+upsert_document(
+  title = 從路徑或文件 H1 取得,
+  source = {
+    "type": "github",
+    "uri": 如果有 git remote → 構建 GitHub URL；否則 file://{絕對路徑},
+    "adapter": "github"
+  },
+  tags = {
+    "what": [關聯實體名稱，從 commit message 或路徑推斷],
+    "why": commit message 或文件目的（一句話）,
+    "how": 文件類型（spec/frd/guide/refactor），
+    "who": [推斷的讀者，如 ["開發", "PM"]]
+  },
+  summary = 基於 commit message + 路徑 + 必要時讀文件片段的語意摘要,
+  confirmed_by_user = False
+)
+```
+
+**何時讀全文**：commit message 不夠清楚 + 這是 P0 文件時，才讀全文。
+
+---
+
+## Step 5：骨架層 — 列出等待確認
+
+```
+── 骨架層 Proposals（需要你確認）────────────────
+
+[1] 新增實體
+  名稱：Weekly Plan V3
+  類型：module
+  觸發：SPEC-weekly-plan-v3.md 新增（commit: "feat: add v3 weekly plan")
+  摘要：第三版週訓練計劃，解決 V2 的 ACWR 衝突問題
+
+[2] 更新實體：ACWR Safety Module
+  變更：how 從「計算訓練負荷比值」更新為「整合 V3 衝突解決器」
+  觸發：domains/acwr/ 的 3 個 commits
+
+────────────────────────────────────────────────
+輸入要確認的編號，或「全部」，或「略過」：
+```
+
+---
+
+## Step 6：更新 last_sync
+
+```json
+{
+  "project": "{TARGET 的絕對路徑}",
+  "last_sync": "2026-03-21T10:30:00+08:00",
+  "stats": {
+    "commits_scanned": 15,
+    "files_processed": 8,
+    "neural_layer_updated": 6,
+    "skeleton_confirmed": 2,
+    "skeleton_drafted": 1
+  }
+}
+```
+
+存到 `{TARGET}/.zenos-sync-state.json`（若 TARGET 是外部專案）或 `.zenos-sync-state.json`（當前目錄）。
+
+---
+
+## Step 7：Summary
+
+```
+✅ /zenos-sync 完成
+
+專案：{TARGET}
+掃描範圍：{SINCE} → 現在（{N} 個 commits，{M} 個有效文件）
+
+神經層（自動 draft）：新增 {n} + 更新 {n}
+骨架層：確認 {n} + Draft {n}
+
+下次 sync 從：{現在時間}
+→ 呼叫 list_unconfirmed() 查看待確認 drafts
+→ 呼叫 run_staleness_check() 偵測過時 entry
+```
+
+---
+
+## 注意事項
+
+- **增量，不是全量**：只看 `--since` 以後的變更，避免重複處理
+- **commit message 優先**：先用 message 推斷，讀全文是最後手段
+- **外部專案支援**：引數是目錄路徑時，所有 git/file 操作都在那個目錄執行
+- **Why/How 一律 draft**：意圖性維度不自動確認
+- **首次建構不適用**：沒有 last_sync 記錄時，引導用戶用 `/zenos-capture {目錄}` 代替

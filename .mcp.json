@@ -1,0 +1,20 @@
+{
+  "mcpServers": {
+    "zentropy": {
+      "type": "streamable-http",
+      "url": "https://api.zentropy.cc/mcp",
+      "oauth": {
+        "authorizationUrl": "https://api.zentropy.cc/api/oauth/mcp/authorize",
+        "tokenUrl": "https://api.zentropy.cc/api/oauth/mcp/token",
+        "clientId": "claude-code",
+        "scopes": [
+          "read:tasks",
+          "write:inbox",
+          "read:knowledge",
+          "write:knowledge",
+          "read:profile"
+        ]
+      }
+    }
+  }
+}

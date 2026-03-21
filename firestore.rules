@@ -1,0 +1,34 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Phase 1 MVP: 單租戶，MCP server 用 service account 存取
+    // Phase 2 多租戶時改為 tenantId 隔離 + auth token 驗證
+
+    // 骨架層：實體
+    match /entities/{entityId} {
+      allow read, write: if true;  // MVP: service account 存取，無需 auth rules
+
+      // 實體間關係
+      match /relationships/{relId} {
+        allow read, write: if true;
+      }
+    }
+
+    // 神經層：文件語意代理
+    match /documents/{docId} {
+      allow read, write: if true;
+    }
+
+    // Context Protocol
+    match /protocols/{protocolId} {
+      allow read, write: if true;
+    }
+
+    // 盲點分析
+    match /blindspots/{blindspotId} {
+      allow read, write: if true;
+    }
+  }
+}

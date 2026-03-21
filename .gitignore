@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+dist/
+
+# Environment
+.env
+
+# Claude Code (contains tokens)
+.claude/mcp.json
+.claude/settings.local.json
+
+# Skill eval workspace (dev artifacts, not product)
+.claude/skills/pm-workspace/
+
+# Firebase
+firebase-debug.log
+
+# ZenOS sync state
+.zenos-sync-state.json
