@@ -91,7 +91,19 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 - 核心業務概念（如 ACWR、Training Plan、Rizo AI）
 - 服務之間的依賴關係
 
+**模組粒度控制（重要）**：
+- 預估每個 module 下會有多少文件。如果 > 10 個，**必須拆分成更細的子 module**
+- 拆分依據：按業務領域（如 Training Plan / Workout Data / Readiness Metrics），不是按技術層（如 API / Domain / Core）
+- 例如：不要建一個「API Service」module 塞 98 個 docs，而是拆成「訓練計畫」「運動數據」「AI 教練」等業務 module
+- 目標：每個 module 下 3-10 個 document entries
+
+**Relationship 建立（必做）**：
+- 用 `add_relationship()` 連接 product → module（`contains`）
+- 用 `add_relationship()` 連接 module → module（`depends_on`、`feeds_into`）
+- 骨架層沒有 relationship = 不完整，一定要建
+
 彙整後，**一次性**呈現骨架層 proposals（見下方確認 UI），等用戶確認後寫入 Firestore。
+確認後，**立即用 `add_relationship()` 建立所有關係**，不要留到後面。
 
 ### C3. 第二階段：P1 文件 — 讀 + 建 document entry
 
@@ -106,7 +118,7 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 
 每份 document entry 包含：
 - `title`：從路徑或文件 H1 標題取得
-- `source.uri`：如果是 git repo 且有 remote，構建 GitHub URL；否則用 `file://{絕對路徑}`
+- `source.uri`：**嚴格按照「知識分析流程 Step 3」的 GitHub URL 構建步驟**（git remote 解析 + git root 相對路徑）
 - `tags.what`：關聯的實體（從文件內容或路徑推斷）
 - `tags.why`：這份文件為什麼存在（一句話）
 - `tags.how`：文件類型（spec/frd/guide/architecture）
@@ -124,7 +136,16 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
   [2/{n}] ...
 ```
 
-### C5. Summary
+### C5. 自動品質檢查與盲點分析（必做）
+
+建構完成後，**自動執行**以下兩個檢查，不需要用戶觸發：
+
+1. `run_quality_check()` — 9 項品質檢查，回報分數和未通過項目
+2. `run_blindspot_analysis()` — 推斷知識盲點，寫入 blindspots
+
+如果品質分數 < 70 或有 failed 項目，**主動提出修正建議**（例如拆分過大的 module、補 relationship）。
+
+### C6. Summary
 
 ```
 ✅ 首次建構完成：{目錄名稱}
@@ -132,15 +153,20 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 骨架層（entities）：
   • 確認 {n} 個實體（你逐一確認的）
   • Draft {n} 個實體（你略過的，待後續確認）
+  • Relationships：{n} 個（product→module、module→module）
 
 神經層（documents）：
   • P1 精讀 entry：{n} 個
   • P2/P3 快速 entry：{n} 個
 
+品質檢查：{分數}/100
+  通過：{n} 項 | 未通過：{n} 項
+  {列出未通過項目}
+
+盲點分析：{n} 個 blindspot 已記錄
+
 下一步：
   → 呼叫 list_unconfirmed() 查看所有待確認 drafts
-  → 呼叫 run_quality_check() 評估 ontology 品質
-  → 呼叫 run_blindspot_analysis() 推斷知識盲點
 ```
 
 ---
@@ -185,10 +211,19 @@ upsert_document(
 )
 ```
 
-文件 entry 的 `source.uri`：
-- 如果是 GitHub 上的檔案 → 用 GitHub URL
-- 如果是本地 git repo 且有 remote → 構建 GitHub URL
-- 否則 → `file://{絕對路徑}`
+文件 entry 的 `source.uri`（**必須嚴格遵守**）：
+
+構建 GitHub URL 的步驟：
+1. 在檔案所在目錄執行 `git remote get-url origin` 取得 remote URL
+2. 從 remote URL 解析 owner/repo（例如 `https://github.com/centerseed/havital.git` → `centerseed/havital`）
+3. 執行 `git rev-parse --show-toplevel` 取得 git root 絕對路徑
+4. 用「檔案絕對路徑 - git root 路徑」算出相對路徑
+5. 取得預設分支：`git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null` 或 fallback 到 `main`
+6. 組合：`https://github.com/{owner}/{repo}/blob/{branch}/{相對路徑}`
+
+**禁止**：從目錄名推斷 repo 名稱、省略子目錄路徑。
+
+若無 git remote → `file://{絕對路徑}`（並在 summary 中標記）
 
 ### Step 4：骨架層列出等待確認
 
