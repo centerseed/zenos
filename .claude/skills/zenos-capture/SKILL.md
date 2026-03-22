@@ -276,3 +276,43 @@ write(collection="documents", data={
 - **不存原始內容**：只存語意摘要，原文留在來源（Git/Drive）
 - **首次建構先骨架後神經**：先確認實體結構，再大量建文件 entry
 - **快**：核心價值是在知識產生點捕獲，速度比完美更重要
+
+---
+
+## MCP Server 驗證規則（違反會被阻擋）
+
+以下規則由 MCP Server 強制執行，write 操作違反時會回傳 ValueError 並告知正確值。
+
+### Entity 命名規則
+- **禁止括號標註**：不可用 `"訓練計畫 (Training Plan)"` 或 `"Training Plan Module (iOS)"`，直接用乾淨的名稱如 `"訓練計畫"` 或 `"Training Plan Module"`
+- 長度 2-80 字元，前後空白會被自動 strip
+- 同 type + name 不可重複（重複時 Server 會回傳既有 entity 的 ID，改用 update）
+
+### Entity 必填驗證
+- `type` 必須是：`product` / `module` / `goal` / `role` / `project`
+- `status` 必須是：`active` / `paused` / `completed` / `planned`
+- `tags` 必須包含四維：`what` / `why` / `how` / `who`
+- **Module 的 `parent_id` 是強制必填**（不是 warning，是阻擋）
+- `parent_id` 指向的 entity 必須已經存在
+
+### Relationship 驗證
+- `source_entity_id` 和 `target_entity_id` 必須都是已存在的 entity
+- `type` 必須是：`depends_on` / `serves` / `owned_by` / `part_of` / `blocks` / `related_to`
+
+### Blindspot 驗證
+- `severity` 必須是：`red` / `yellow` / `green`
+- `related_entity_ids` 裡的每個 ID 必須都存在
+
+### Document 驗證
+- `source.type` 必須是：`github` / `gdrive` / `notion` / `upload`
+- `linked_entity_ids` 裡的每個 ID 必須都存在
+
+### Protocol 驗證
+- `entity_id` 必須是已存在的 entity
+- `content` 必須包含四維：`what` / `why` / `how` / `who`
+
+### 建議的寫入順序
+1. 先建 product entity（拿到 ID）
+2. 再建 module entity（帶 parent_id 指向 product）
+3. 再建 relationships（source/target 都已存在）
+4. 最後建 documents（linked_entity_ids 都已存在）

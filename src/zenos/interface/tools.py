@@ -903,6 +903,45 @@ async def analyze(
 
 
 # ===================================================================
+# Tool 8: purge_all — delete all ontology data
+# ===================================================================
+
+
+@mcp.tool(tags={"admin"})
+async def purge_all(confirm_text: str) -> dict:
+    """刪除所有 ontology 資料（entities/documents/protocols/blindspots/relationships）。
+
+    ⚠️ 危險操作：不可逆。Tasks 不受影響。
+
+    Args:
+        confirm_text: 必須輸入 "DELETE ALL ONTOLOGY" 才會執行
+    """
+    if confirm_text != "DELETE ALL ONTOLOGY":
+        return {
+            "error": "SAFETY_CHECK",
+            "message": "Must provide confirm_text='DELETE ALL ONTOLOGY' to proceed.",
+        }
+
+    from zenos.infrastructure.firestore_repo import get_db
+
+    db = get_db()
+
+    deleted: dict[str, int] = {}
+    for col_name in ["entities", "documents", "protocols", "blindspots"]:
+        count = 0
+        async for doc in db.collection(col_name).stream():
+            # For entities, also delete sub-collection "relationships"
+            if col_name == "entities":
+                async for rel_doc in doc.reference.collection("relationships").stream():
+                    await rel_doc.reference.delete()
+            await doc.reference.delete()
+            count += 1
+        deleted[col_name] = count
+
+    return {"status": "PURGED", "deleted": deleted}
+
+
+# ===================================================================
 # Entrypoint
 # ===================================================================
 

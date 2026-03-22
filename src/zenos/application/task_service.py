@@ -60,6 +60,16 @@ class TaskService:
 
     async def create_task(self, data: dict) -> TaskResult:
         """Create a new task with priority recommendation and context assembly."""
+        # Priority enum validation
+        priority_val = data.get("priority")
+        if priority_val:
+            valid_priorities = [p.value for p in TaskPriority]
+            if priority_val not in valid_priorities:
+                raise ValueError(
+                    f"Invalid priority '{priority_val}'. "
+                    f"Must be one of: {', '.join(valid_priorities)}"
+                )
+
         status = data.get("status", TaskStatus.BACKLOG)
         if not is_valid_initial_status(status):
             raise ValueError(

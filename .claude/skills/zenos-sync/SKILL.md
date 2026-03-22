@@ -114,7 +114,7 @@ cd {TARGET} && git log --since="{SINCE}" --name-only --pretty=format:"---commit 
 對高/中影響文件：
 
 ```
-search_ontology(query=文件路徑關鍵詞 或 commit message 關鍵詞)
+search(query=文件路徑關鍵詞 或 commit message 關鍵詞)
 → 找到 entry → 判斷 summary 是否還準確
 → 找不到 → 需要新建 entry
 → commit message 暗示新模組 → 標記為骨架層 proposal
@@ -139,8 +139,8 @@ search_ontology(query=文件路徑關鍵詞 或 commit message 關鍵詞)
 
 每個 document entry：
 ```
-upsert_document(
-  title = 從路徑或文件 H1 取得,
+write(collection="documents", data={
+  title: 從路徑或文件 H1 取得,
   source = {
     "type": "github",
     "uri": 如果有 git remote → 構建 GitHub URL；否則 file://{絕對路徑},
@@ -153,8 +153,8 @@ upsert_document(
     "who": [推斷的讀者，如 ["開發", "PM"]]
   },
   summary = 基於 commit message + 路徑 + 必要時讀文件片段的語意摘要,
-  confirmed_by_user = False
-)
+  confirmed_by_user: False
+})
 ```
 
 **何時讀全文**：commit message 不夠清楚 + 這是 P0 文件時，才讀全文。
@@ -214,8 +214,8 @@ upsert_document(
 骨架層：確認 {n} + Draft {n}
 
 下次 sync 從：{現在時間}
-→ 呼叫 list_unconfirmed() 查看待確認 drafts
-→ 呼叫 run_staleness_check() 偵測過時 entry
+→ 呼叫 search(confirmed_only=false) 查看待確認 drafts
+→ 呼叫 analyze(check_type="staleness") 偵測過時 entry
 ```
 
 ---
@@ -227,3 +227,29 @@ upsert_document(
 - **外部專案支援**：引數是目錄路徑時，所有 git/file 操作都在那個目錄執行
 - **Why/How 一律 draft**：意圖性維度不自動確認
 - **首次建構不適用**：沒有 last_sync 記錄時，引導用戶用 `/zenos-capture {目錄}` 代替
+
+---
+
+## MCP Server 驗證規則（違反會被阻擋）
+
+以下規則由 MCP Server 強制執行，write 操作違反時會回傳 ValueError 並告知正確值。
+
+### Entity 命名規則
+- **禁止括號標註**：不可用 `"訓練計畫 (Training Plan)"` 或 `"Training Plan Module (iOS)"`
+- 長度 2-80 字元，前後空白自動 strip
+- 同 type + name 不可重複（Server 會回傳既有 ID，改用 update）
+
+### Entity 必填驗證
+- `type`：`product` / `module` / `goal` / `role` / `project`
+- `status`：`active` / `paused` / `completed` / `planned`
+- `tags` 必須含四維：`what` / `why` / `how` / `who`
+- **Module 的 `parent_id` 強制必填**，且指向的 entity 必須已存在
+
+### Relationship / Blindspot / Document / Protocol
+- Relationship：source/target entity 必須存在，type 必須是合法 enum
+- Blindspot：severity 必須是 `red` / `yellow` / `green`，related_entity_ids 必須都存在
+- Document：source.type 必須是 `github` / `gdrive` / `notion` / `upload`，linked_entity_ids 必須都存在
+- Protocol：entity_id 必須存在，content 必須含 what/why/how/who
+
+### 寫入順序（必須遵守）
+1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents

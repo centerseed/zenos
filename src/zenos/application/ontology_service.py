@@ -6,6 +6,7 @@ Each public method corresponds to one MCP tool's business logic.
 
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 
@@ -15,9 +16,14 @@ from zenos.domain.models import (
     Document,
     DocumentTags,
     Entity,
+    EntityStatus,
+    EntityType,
     Protocol,
     Relationship,
+    RelationshipType,
+    Severity,
     Source,
+    SourceType,
     SplitRecommendation,
     TagConfidence,
     Tags,
@@ -136,11 +142,85 @@ class OntologyService:
         """Create or update an entity with integrated governance logic.
 
         Steps:
-          1. Build and persist the entity
-          2. Apply tag-confidence classification
-          3. Check split criteria (if entity has an ID for relationship lookup)
-          4. Return entity + governance advice
+          1. Validate input data
+          2. Build and persist the entity
+          3. Apply tag-confidence classification
+          4. Check split criteria (if entity has an ID for relationship lookup)
+          5. Return entity + governance advice
         """
+        # --- Validation ---
+
+        # 1. name: strip, length 2-80, no trailing parenthetical
+        name = data.get("name", "")
+        if isinstance(name, str):
+            name = name.strip()
+            data["name"] = name
+        if not name or len(name) < 2 or len(name) > 80:
+            raise ValueError("Entity name must be 2-80 characters.")
+        if re.search(r'\([^)]+\)$', name):
+            raise ValueError(
+                f"Entity name '{name}' must not end with parenthetical annotation "
+                f"like '(English)' or '(iOS)'. Use a clean name without parentheses."
+            )
+
+        # 2. type enum
+        entity_type = data.get("type", "")
+        valid_types = [e.value for e in EntityType]
+        if entity_type not in valid_types:
+            raise ValueError(
+                f"Invalid entity type '{entity_type}'. "
+                f"Must be one of: {', '.join(valid_types)}"
+            )
+
+        # 3. status enum
+        status = data.get("status", "active")
+        valid_statuses = [s.value for s in EntityStatus]
+        if status not in valid_statuses:
+            raise ValueError(
+                f"Invalid entity status '{status}'. "
+                f"Must be one of: {', '.join(valid_statuses)}"
+            )
+
+        # 4. tags must have four dimensions
+        tags_data = data.get("tags")
+        if not isinstance(tags_data, (dict, Tags)):
+            raise ValueError("Tags must be a dict with keys: what, why, how, who")
+        if isinstance(tags_data, dict):
+            missing = [k for k in ("what", "why", "how", "who") if k not in tags_data]
+            if missing:
+                raise ValueError(
+                    f"Tags missing required dimensions: {', '.join(missing)}. "
+                    f"All four (what, why, how, who) are required."
+                )
+
+        # 5. module must have parent_id
+        if entity_type == "module" and not data.get("parent_id"):
+            raise ValueError(
+                "Module entity must have parent_id set to the owning product's entity ID. "
+                "Without parent_id, the module will not appear in the Dashboard."
+            )
+
+        # 6. parent_id existence
+        parent_id = data.get("parent_id")
+        if parent_id:
+            parent = await self._entities.get_by_id(parent_id)
+            if parent is None:
+                raise ValueError(
+                    f"parent_id '{parent_id}' does not exist. "
+                    f"Create the parent entity first."
+                )
+
+        # 7. duplicate name+type check (new entity only)
+        if not data.get("id"):
+            existing = await self._entities.get_by_name(name)
+            if existing and existing.type == entity_type:
+                raise ValueError(
+                    f"Entity '{name}' (type={entity_type}) already exists "
+                    f"(id={existing.id}). To update it, provide id='{existing.id}'."
+                )
+
+        # --- Build entity ---
+
         tags = Tags(**data["tags"]) if isinstance(data.get("tags"), dict) else data["tags"]
         entity = Entity(
             name=data["name"],
@@ -157,14 +237,7 @@ class OntologyService:
 
         saved = await self._entities.upsert(entity)
 
-        # Governance: warn if module has no parent_id
         warnings: list[str] = []
-        if saved.type == "module" and not saved.parent_id:
-            warnings.append(
-                "Module entity has no parent_id. "
-                "It will not appear under any product in the Dashboard. "
-                "Set parent_id to the owning product's entity ID."
-            )
 
         # Governance: tag confidence
         tag_confidence = apply_tag_confidence(saved.tags)
@@ -191,6 +264,20 @@ class OntologyService:
         description: str,
     ) -> Relationship:
         """Add a directed relationship between two entities."""
+        # --- Validation ---
+        source = await self._entities.get_by_id(source_id)
+        if source is None:
+            raise ValueError(f"Source entity '{source_id}' not found. Verify the entity ID.")
+        target = await self._entities.get_by_id(target_id)
+        if target is None:
+            raise ValueError(f"Target entity '{target_id}' not found. Verify the entity ID.")
+        valid_rel_types = [r.value for r in RelationshipType]
+        if rel_type not in valid_rel_types:
+            raise ValueError(
+                f"Invalid relationship type '{rel_type}'. "
+                f"Must be one of: {', '.join(valid_rel_types)}"
+            )
+
         rel = Relationship(
             source_entity_id=source_id,
             target_id=target_id,
@@ -201,6 +288,24 @@ class OntologyService:
 
     async def upsert_document(self, data: dict) -> Document:
         """Create or update a neural-layer document entry."""
+        # --- Validation ---
+        source_data = data.get("source", {})
+        if isinstance(source_data, dict):
+            source_type = source_data.get("type", "")
+            valid_source_types = [s.value for s in SourceType]
+            if source_type and source_type not in valid_source_types:
+                raise ValueError(
+                    f"Invalid source type '{source_type}'. "
+                    f"Must be one of: {', '.join(valid_source_types)}"
+                )
+        for eid in data.get("linked_entity_ids", []):
+            entity = await self._entities.get_by_id(eid)
+            if entity is None:
+                raise ValueError(
+                    f"Entity '{eid}' in linked_entity_ids not found. "
+                    f"Verify the entity ID."
+                )
+
         source_data = data["source"]
         source = Source(**source_data) if isinstance(source_data, dict) else source_data
         tags_data = data["tags"]
@@ -221,6 +326,24 @@ class OntologyService:
 
     async def upsert_protocol(self, data: dict) -> Protocol:
         """Create or update a context protocol."""
+        # --- Validation ---
+        entity_id = data.get("entity_id", "")
+        if entity_id:
+            entity = await self._entities.get_by_id(entity_id)
+            if entity is None:
+                raise ValueError(
+                    f"Entity '{entity_id}' not found. "
+                    f"Protocol must link to an existing entity."
+                )
+        content = data.get("content", {})
+        if isinstance(content, dict):
+            missing = [k for k in ("what", "why", "how", "who") if k not in content]
+            if missing:
+                raise ValueError(
+                    f"Protocol content missing: {', '.join(missing)}. "
+                    f"Must include: what, why, how, who"
+                )
+
         from zenos.domain.models import Gap
 
         gaps_data = data.get("gaps", [])
@@ -243,6 +366,26 @@ class OntologyService:
 
     async def add_blindspot(self, data: dict) -> Blindspot:
         """Record a new blindspot finding."""
+        # --- Validation ---
+        severity = data.get("severity", "")
+        valid_severities = [s.value for s in Severity]
+        if severity not in valid_severities:
+            raise ValueError(
+                f"Invalid severity '{severity}'. "
+                f"Must be one of: {', '.join(valid_severities)}"
+            )
+        if not data.get("description", "").strip():
+            raise ValueError("Blindspot description is required and cannot be empty.")
+        if not data.get("suggested_action", "").strip():
+            raise ValueError("Blindspot suggested_action is required and cannot be empty.")
+        for eid in data.get("related_entity_ids", []):
+            entity = await self._entities.get_by_id(eid)
+            if entity is None:
+                raise ValueError(
+                    f"Entity '{eid}' in related_entity_ids not found. "
+                    f"Verify the entity ID."
+                )
+
         blindspot = Blindspot(
             description=data["description"],
             severity=data["severity"],
