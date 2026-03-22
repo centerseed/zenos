@@ -1,0 +1,105 @@
+name: Deploy
+
+# Only runs on main push, after CI passes.
+# Deploys only the components whose files actually changed.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dashboard/**"
+      - "firestore.rules"
+      - "firestore.indexes.json"
+      # MCP Server deploy (Cloud Run) is manual for now —
+      # uncomment when GCP service account is configured:
+      # - "src/**"
+      # - "Dockerfile"
+
+jobs:
+  # Gate: CI must pass first
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    needs: ci
+    outputs:
+      dashboard: ${{ steps.changes.outputs.dashboard }}
+      firestore: ${{ steps.changes.outputs.firestore }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed paths
+        id: changes
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          if echo "$CHANGED" | grep -qE '^dashboard/'; then
+            echo "dashboard=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dashboard=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if echo "$CHANGED" | grep -qE '^firestore\.(rules|indexes\.json)$'; then
+            echo "firestore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "firestore=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy-dashboard:
+    name: Deploy Dashboard
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.dashboard == 'true'
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to Firebase Hosting
+        run: npx firebase-tools deploy --only hosting --non-interactive
+        working-directory: .
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
+
+      - name: Post-deploy verification
+        run: |
+          sleep 5
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://zenos-naruvia.web.app)
+          if [ "$HTTP_STATUS" = "200" ]; then
+            echo "✓ Dashboard is accessible (HTTP $HTTP_STATUS)"
+          else
+            echo "✗ Dashboard returned HTTP $HTTP_STATUS"
+            exit 1
+          fi
+
+  deploy-firestore:
+    name: Deploy Firestore Rules
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.firestore == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Firestore rules + indexes
+        run: npx firebase-tools deploy --only firestore --non-interactive
+        env:
+          FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
