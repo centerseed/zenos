@@ -1,9 +1,20 @@
-"""ZenOS MCP Server — exposes ontology operations as MCP tools.
+"""ZenOS MCP Server — 7 consolidated tools for ontology + action layer.
 
-Provides 17 tools across three categories:
-  - Consumer tools (7): read-only queries for AI agents consuming context
-  - Governance tools (7): read-write operations for ontology maintenance
-  - Governance engine tools (3): ontology-wide analysis and health checks
+Consolidated from 17 tools to 7, optimized for agent comprehension:
+  1. search   — find and list across all collections
+  2. get      — retrieve one specific item by name or ID
+  3. read_source — read raw file content via adapter
+  4. write    — create/update ontology entries
+  5. confirm  — approve knowledge drafts or accept/reject tasks
+  6. task     — create, update, and list action items
+  7. analyze  — run governance health checks
+
+Design principles (from MCP tool description research):
+  - Each tool answers ONE agent question ("I want to find...", "I want to write...")
+  - Descriptions include Purpose, When to use, When NOT to use, Limitations
+  - Cross-references between tools to prevent wrong-tool selection
+  - Flat parameters preferred over nested dicts where possible
+  - readOnlyHint / idempotentHint annotations for client optimization
 
 Usage:
   MCP_TRANSPORT=stdio  python -m zenos.interface.tools   # default
@@ -13,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import os
+import time
 from dataclasses import asdict
 from datetime import datetime
 
@@ -23,12 +35,14 @@ from fastmcp import FastMCP
 from zenos.application.governance_service import GovernanceService
 from zenos.application.ontology_service import OntologyService
 from zenos.application.source_service import SourceService
+from zenos.application.task_service import TaskService
 from zenos.infrastructure.firestore_repo import (
     FirestoreBlindspotRepository,
     FirestoreDocumentRepository,
     FirestoreEntityRepository,
     FirestoreProtocolRepository,
     FirestoreRelationshipRepository,
+    FirestoreTaskRepository,
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
 
@@ -39,8 +53,51 @@ from zenos.infrastructure.github_adapter import GitHubAdapter
 ZENOS_API_KEY = os.environ.get("ZENOS_API_KEY", "")
 
 
+class PartnerKeyValidator:
+    """Validates API keys against Firestore partners collection.
+
+    Caches active partner keys in memory with a configurable TTL
+    to avoid a Firestore read on every request.
+    """
+
+    def __init__(self, ttl: int = 300):
+        self._cache: dict[str, dict] = {}
+        self._cache_ts: float = 0
+        self._ttl = ttl
+
+    async def validate(self, key: str) -> dict | None:
+        """Return partner data if *key* belongs to an active partner."""
+        now = time.time()
+        if now - self._cache_ts > self._ttl:
+            await self._refresh_cache()
+        return self._cache.get(key)
+
+    async def _refresh_cache(self) -> None:
+        from zenos.infrastructure.firestore_repo import get_db
+
+        db = get_db()
+        docs = db.collection("partners").where("status", "==", "active").stream()
+        new_cache: dict[str, dict] = {}
+        async for doc in docs:
+            data = doc.to_dict()
+            api_key = data.get("apiKey", "")
+            if api_key:
+                new_cache[api_key] = data
+        self._cache = new_cache
+        self._cache_ts = time.time()
+
+
+_partner_validator = PartnerKeyValidator()
+
+
 class ApiKeyMiddleware:
-    """Pure ASGI middleware — compatible with SSE streaming."""
+    """Pure ASGI middleware — compatible with SSE streaming.
+
+    Authentication order:
+    1. If ZENOS_API_KEY env var is empty → skip auth (local dev / stdio).
+    2. Check against ZENOS_API_KEY (superadmin, backward-compatible).
+    3. Check against Firestore partners collection (multi-key).
+    """
 
     def __init__(self, app):
         self.app = app
@@ -53,21 +110,34 @@ class ApiKeyMiddleware:
         if not ZENOS_API_KEY:
             return await self.app(scope, receive, send)
 
-        headers = dict(scope.get("headers", []))
-        auth = headers.get(b"authorization", b"").decode()
+        key = self._extract_key(scope)
 
-        # Check Authorization header
-        if auth.startswith("Bearer ") and auth[7:] == ZENOS_API_KEY:
+        # 1. Superadmin key (env var)
+        if key and key == ZENOS_API_KEY:
             return await self.app(scope, receive, send)
 
-        # Check query param fallback
-        from urllib.parse import parse_qs
-        qs = parse_qs(scope.get("query_string", b"").decode())
-        if qs.get("api_key", [None])[0] == ZENOS_API_KEY:
-            return await self.app(scope, receive, send)
+        # 2. Partner key (Firestore)
+        if key:
+            partner = await _partner_validator.validate(key)
+            if partner is not None:
+                return await self.app(scope, receive, send)
 
         response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
         return await response(scope, receive, send)
+
+    @staticmethod
+    def _extract_key(scope) -> str | None:
+        """Extract API key from Authorization header or query param."""
+        headers = dict(scope.get("headers", []))
+        auth_header = headers.get(b"authorization", b"").decode()
+        if auth_header.startswith("Bearer "):
+            return auth_header[7:]
+
+        from urllib.parse import parse_qs
+
+        qs = parse_qs(scope.get("query_string", b"").decode())
+        keys = qs.get("api_key", [])
+        return keys[0] if keys else None
 
 
 # ──────────────────────────────────────────────
@@ -85,6 +155,7 @@ relationship_repo = FirestoreRelationshipRepository()
 document_repo = FirestoreDocumentRepository()
 protocol_repo = FirestoreProtocolRepository()
 blindspot_repo = FirestoreBlindspotRepository()
+task_repo = FirestoreTaskRepository()
 
 source_adapter = GitHubAdapter()
 
@@ -107,6 +178,12 @@ governance_service = GovernanceService(
 source_service = SourceService(
     document_repo=document_repo,
     source_adapter=source_adapter,
+)
+
+task_service = TaskService(
+    task_repo=task_repo,
+    entity_repo=entity_repo,
+    blindspot_repo=blindspot_repo,
 )
 
 
@@ -147,111 +224,267 @@ def _convert_datetimes(data: dict) -> dict:
 
 
 # ===================================================================
-# Consumer Tools (7) — read-only queries
+# Tool 1: search — find and list across all collections
 # ===================================================================
 
 
-@mcp.tool()
-async def get_protocol(entity_name: str) -> dict:
-    """取得某個產品或實體的 Context Protocol。
-
-    當 AI agent 需要了解一個產品/模組/專案的完整 context 時使用。
-    例如：行銷 agent 在撰寫素材前先讀取產品 context，開發 agent
-    在實作前先了解模組的設計意圖與限制。
-
-    Args:
-        entity_name: 實體名稱（如 "Paceriz"、"ZenOS"）
-    """
-    result = await ontology_service.get_protocol(entity_name)
-    if result is None:
-        return {"error": "NOT_FOUND", "message": f"No protocol found for '{entity_name}'"}
-    return _serialize(result)
-
-
-@mcp.tool()
-async def list_entities(type_filter: str | None = None) -> dict:
-    """列出 ontology 中的所有實體（產品、模組、目標、角色、專案）。
-
-    當 AI agent 需要瀏覽公司的骨架層結構時使用。可選擇按類型篩選。
-    用於建立全景圖、查看公司有哪些產品/模組等。
-
-    Args:
-        type_filter: 可選，按實體類型篩選（product/module/goal/role/project）
-    """
-    entities = await ontology_service.list_entities(type_filter=type_filter)
-    return {
-        "entities": [_serialize(e) for e in entities],
-        "count": len(entities),
-    }
-
-
-@mcp.tool()
-async def get_entity(entity_name: str) -> dict:
-    """取得單一實體的完整資訊，包含其所有關係。
-
-    當 AI agent 需要深入了解某個實體及其與其他實體的關聯時使用。
-    回傳實體的四維標籤（What/Why/How/Who）、狀態、以及所有
-    上下游依賴關係。
-
-    Args:
-        entity_name: 實體名稱
-    """
-    result = await ontology_service.get_entity(entity_name)
-    if result is None:
-        return {"error": "NOT_FOUND", "message": f"Entity '{entity_name}' not found"}
-    return _serialize(result)
-
-
-@mcp.tool()
-async def list_blindspots(
-    entity_name: str | None = None,
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def search(
+    query: str = "",
+    collection: str = "all",
+    status: str | None = None,
     severity: str | None = None,
+    entity_name: str | None = None,
+    assignee: str | None = None,
+    created_by: str | None = None,
+    confirmed_only: bool | None = None,
+    limit: int = 50,
 ) -> dict:
-    """列出 ontology 中的盲點（AI 推斷出的知識缺口）。
+    """搜尋和列出 ontology 及任務中的所有內容。
 
-    當 AI agent 需要了解公司知識體系中缺少什麼、哪些地方有風險時使用。
-    盲點是 ZenOS 的核心差異化：從跨產品關係圖中推斷老闆沒注意到的問題。
+    這是你探索 ZenOS 知識庫的主要入口。當你需要「找東西」時用這個。
+    支援關鍵字搜尋（跨所有集合）或按集合過濾列出。
+
+    使用時機：
+    - 不確定要找什麼 → query="關鍵字"，collection="all"
+    - 列出某類東西 → collection="entities"，可加 status 過濾
+    - 看待確認項目 → confirmed_only=False
+    - 查任務 → collection="tasks"，可加 assignee/created_by 過濾
+
+    不要用這個工具的情境：
+    - 已知確切名稱要看完整資料 → 用 get
+    - 要讀原始文件內容 → 用 read_source
+    - 要搜尋任務 → collection="tasks"（在這裡，不需要用 task 工具）
+
+    限制：關鍵字搜尋，非語意搜尋。query 最長 200 字。
 
     Args:
-        entity_name: 可選，按實體名稱篩選
-        severity: 可選，按嚴重程度篩選（red/yellow/green）
+        query: 搜尋關鍵字（空字串 = 列出全部）
+        collection: 搜尋範圍。all/entities/documents/protocols/blindspots/tasks
+        status: 按狀態過濾（如 active/open/todo/in_progress，逗號分隔多值）
+        severity: 按嚴重度過濾 blindspots（red/yellow/green）
+        entity_name: 按實體名稱過濾（blindspots 和 documents 用）
+        assignee: 按被指派者過濾 tasks（Inbox 視角）
+        created_by: 按建立者過濾 tasks（Outbox 視角）
+        confirmed_only: true=只看已確認 / false=只看未確認 / 不傳=全部
+        limit: 回傳上限，預設 50
     """
-    blindspots = await ontology_service.list_blindspots(
-        entity_name=entity_name,
-        severity=severity,
+    results: dict = {}
+
+    # Keyword search mode (cross-collection)
+    if query.strip() and collection == "all":
+        search_results = await ontology_service.search(query)
+        results["results"] = [_serialize(r) for r in search_results[:limit]]
+        results["count"] = len(results["results"])
+
+        # Also search tasks by title/description keyword
+        all_tasks = await task_service.list_tasks(limit=200)
+        query_lower = query.lower()
+        matched_tasks = [
+            t for t in all_tasks
+            if query_lower in t.title.lower()
+            or query_lower in t.description.lower()
+        ][:limit]
+        if matched_tasks:
+            results["tasks"] = [_serialize(t) for t in matched_tasks]
+
+        return results
+
+    # Collection-specific listing
+    collections = (
+        [collection] if collection != "all"
+        else ["entities", "documents", "protocols", "blindspots", "tasks"]
     )
-    return {
-        "blindspots": [_serialize(b) for b in blindspots],
-        "count": len(blindspots),
-    }
+
+    for col in collections:
+        if col == "entities":
+            type_filter = status if status in (
+                "product", "module", "goal", "role", "project"
+            ) else None
+            entities = await ontology_service.list_entities(type_filter=type_filter)
+            if confirmed_only is not None:
+                entities = [
+                    e for e in entities
+                    if e.confirmed_by_user == confirmed_only
+                ]
+            items = [_serialize(e) for e in entities[:limit]]
+            results["entities"] = items
+
+        elif col == "documents":
+            docs = await ontology_service._documents.list_all()
+            if entity_name:
+                entity = await ontology_service._entities.get_by_name(entity_name)
+                if entity and entity.id:
+                    docs = [
+                        d for d in docs if entity.id in d.linked_entity_ids
+                    ]
+            if confirmed_only is not None:
+                docs = [d for d in docs if d.confirmed_by_user == confirmed_only]
+            results["documents"] = [_serialize(d) for d in docs[:limit]]
+
+        elif col == "protocols":
+            # Protocols don't have list_all, collect via entities
+            if confirmed_only is False:
+                protos = await ontology_service._protocols.list_unconfirmed()
+            else:
+                entities = await ontology_service.list_entities()
+                protos = []
+                for e in entities:
+                    if e.id:
+                        p = await ontology_service._protocols.get_by_entity(e.id)
+                        if p:
+                            if confirmed_only is None or p.confirmed_by_user == confirmed_only:
+                                protos.append(p)
+            results["protocols"] = [_serialize(p) for p in protos[:limit]]
+
+        elif col == "blindspots":
+            blindspots = await ontology_service.list_blindspots(
+                entity_name=entity_name, severity=severity
+            )
+            if confirmed_only is not None:
+                blindspots = [
+                    b for b in blindspots
+                    if b.confirmed_by_user == confirmed_only
+                ]
+            results["blindspots"] = [_serialize(b) for b in blindspots[:limit]]
+
+        elif col == "tasks":
+            status_list = status.split(",") if status else None
+            tasks = await task_service.list_tasks(
+                assignee=assignee,
+                created_by=created_by,
+                status=status_list,
+                limit=limit,
+            )
+            results["tasks"] = [_serialize(t) for t in tasks]
+
+    return results
 
 
-@mcp.tool()
-async def get_document(doc_id: str) -> dict:
-    """取得單一文件的 ontology entry（語意代理）。
+# ===================================================================
+# Tool 2: get — retrieve one specific item
+# ===================================================================
 
-    當 AI agent 需要了解某份文件的 metadata（標題、標籤、摘要、
-    來源、連結的實體）時使用。這是神經層的 entry，不是文件內容本身。
-    若需要讀取文件原始內容，請使用 read_source。
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def get(
+    collection: str,
+    name: str | None = None,
+    id: str | None = None,
+) -> dict:
+    """取得一個特定項目的完整資訊。
+
+    當你已經知道要找的東西的名稱或 ID 時用這個。
+    回傳該項目的所有欄位，包括四維標籤、關係、gaps 等完整資訊。
+
+    使用時機：
+    - 知道實體名稱 → get(collection="entities", name="Paceriz")
+    - 知道 Protocol → get(collection="protocols", name="Paceriz")
+    - 知道文件 ID → get(collection="documents", id="doc-abc")
+    - 知道任務 ID → get(collection="tasks", id="task-001")
+
+    不要用這個工具的情境：
+    - 不確定名稱 → 用 search
+    - 要讀文件原始內容 → 先用這個拿 metadata，再用 read_source
 
     Args:
-        doc_id: 文件的 Firestore document ID
+        collection: entities/documents/protocols/blindspots/tasks
+        name: 項目名稱（entities 和 protocols 支援按名稱查詢）
+        id: 項目 ID（所有集合都支援）
     """
-    result = await ontology_service.get_document(doc_id)
-    if result is None:
-        return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
-    return _serialize(result)
+    if not name and not id:
+        return {"error": "INVALID_INPUT", "message": "Must provide either name or id"}
+
+    if collection == "entities":
+        if name:
+            result = await ontology_service.get_entity(name)
+        elif id:
+            entity = await entity_repo.get_by_id(id)
+            if entity is None:
+                return {"error": "NOT_FOUND", "message": f"Entity '{id}' not found"}
+            rels = await relationship_repo.list_by_entity(id)
+            from zenos.application.ontology_service import EntityWithRelationships
+            result = EntityWithRelationships(entity=entity, relationships=rels)
+        else:
+            result = None
+        if result is None:
+            return {"error": "NOT_FOUND", "message": f"Entity not found"}
+        return _serialize(result)
+
+    elif collection == "protocols":
+        if name:
+            result = await ontology_service.get_protocol(name)
+        elif id:
+            result = await protocol_repo.get_by_entity(id)
+        else:
+            result = None
+        if result is None:
+            return {"error": "NOT_FOUND", "message": "Protocol not found"}
+        return _serialize(result)
+
+    elif collection == "documents":
+        doc_id = id or name
+        if not doc_id:
+            return {"error": "INVALID_INPUT", "message": "Provide id for documents"}
+        result = await ontology_service.get_document(doc_id)
+        if result is None:
+            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+        return _serialize(result)
+
+    elif collection == "blindspots":
+        if not id:
+            return {"error": "INVALID_INPUT", "message": "Provide id for blindspots"}
+        result = await blindspot_repo.get_by_id(id)
+        if result is None:
+            return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
+        return _serialize(result)
+
+    elif collection == "tasks":
+        if not id:
+            return {"error": "INVALID_INPUT", "message": "Provide id for tasks"}
+        result = await task_repo.get_by_id(id)
+        if result is None:
+            return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
+        return _serialize(result)
+
+    else:
+        return {
+            "error": "INVALID_INPUT",
+            "message": f"Unknown collection '{collection}'. "
+            f"Use: entities, documents, protocols, blindspots, tasks",
+        }
 
 
-@mcp.tool()
+# ===================================================================
+# Tool 3: read_source — read raw file content
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
 async def read_source(doc_id: str) -> dict:
-    """讀取文件的原始內容（透過 source adapter 從 GitHub 等來源取得）。
+    """讀取文件的原始內容（透過 adapter 從 GitHub 等來源取得）。
 
-    當 AI agent 需要讀取實際的文件內容（而非僅 metadata）時使用。
-    先用 get_document 確認文件存在，再用此 tool 讀取原始內容。
+    這個工具讀取的是實際的文件內容，不是 ontology metadata。
+    請先用 get(collection="documents", id=...) 確認文件存在，
+    再用這個工具讀取原始內容。
+
+    使用時機：
+    - 需要文件的實際文字內容（程式碼、文件正文）
+    - 先用 get 看過 metadata，確認相關後再讀原文
+
+    限制：目前只支援 GitHub adapter。檔案 > 1MB 需要特殊處理。
 
     Args:
-        doc_id: 文件的 Firestore document ID
+        doc_id: 文件的 ID（從 search 或 get 取得）
     """
     try:
         content = await source_service.read_source(doc_id)
@@ -266,246 +499,146 @@ async def read_source(doc_id: str) -> dict:
         return {"error": "ADAPTER_ERROR", "message": str(e)}
 
 
-@mcp.tool()
-async def search_ontology(query: str) -> dict:
-    """在整個 ontology 中搜尋（跨實體、文件、Protocol）。
-
-    當 AI agent 不確定要找的東西在哪裡時使用。輸入關鍵字，
-    回傳所有匹配的實體、文件、Protocol，按相關度排序。
-    適合用於探索性查詢、找出相關 context。
-
-    Args:
-        query: 搜尋關鍵字（支援多個詞，用空格分隔）
-    """
-    if not query or not query.strip():
-        return {"error": "INVALID_INPUT", "message": "Query must not be empty"}
-    results = await ontology_service.search(query)
-    return {
-        "results": [_serialize(r) for r in results],
-        "count": len(results),
-    }
-
-
 # ===================================================================
-# Governance Tools (7) — read-write operations
+# Tool 4: write — create/update ontology entries
 # ===================================================================
 
 
-@mcp.tool()
-async def upsert_entity(
-    name: str,
-    type: str,
-    summary: str,
-    tags: dict,
-    status: str = "active",
+@mcp.tool(
+    tags={"write"},
+    annotations={"idempotentHint": True},
+)
+async def write(
+    collection: str,
+    data: dict,
     id: str | None = None,
-    parent_id: str | None = None,
-    details: dict | None = None,
-    confirmed_by_user: bool = False,
 ) -> dict:
-    """建立或更新一個骨架層實體。
+    """建立或更新 ontology 中的知識條目。
 
-    當 AI agent 需要在 ontology 中新增或修改產品、模組、目標、角色、
-    專案時使用。會自動執行治理邏輯：標籤信心度分類和拆分建議。
-    新建時不需要提供 id，系統會自動生成。
+    當你需要記錄、更新或修改公司知識庫時用這個。
+    根據 collection 參數決定寫入哪個集合，data 的格式因集合而異。
+
+    使用時機：
+    - 記錄新實體 → collection="entities"
+    - 註冊文件 → collection="documents"
+    - 建立 Protocol → collection="protocols"
+    - 記錄盲點 → collection="blindspots"
+    - 建立關係 → collection="relationships"
+
+    不要用這個工具的情境：
+    - 管理任務（建立/更新） → 用 task
+    - 確認 draft → 用 confirm
+    - 分析 ontology 健康度 → 用 analyze
+
+    各集合必填欄位：
+
+    entities: name, type(product/module/goal/role/project), summary,
+              tags({what, why, how, who})
+    documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
+               summary
+    protocols: entity_id, entity_name, content({what, why, how, who})
+    blindspots: description, severity(red/yellow/green), suggested_action
+    relationships: source_entity_id, target_entity_id, type(depends_on/serves/
+                   owned_by/part_of/blocks/related_to), description
 
     Args:
-        name: 實體名稱
-        type: 實體類型（product/module/goal/role/project）
-        summary: 一句話摘要
-        tags: 四維標籤，格式 {"what": "...", "why": "...", "how": "...", "who": "..."}
-        status: 狀態（active/paused/completed/planned），預設 active
-        id: 可選，更新時提供既有 ID
-        parent_id: 可選，父實體 ID
-        details: 可選，額外結構化資訊
-        confirmed_by_user: 是否已經由人確認，預設 false
+        collection: entities/documents/protocols/blindspots/relationships
+        data: 集合對應的欄位（見上方說明）
+        id: 更新時提供既有 ID，不提供則新增
     """
-    data = {
-        "name": name,
-        "type": type,
-        "summary": summary,
-        "tags": tags,
-        "status": status,
-        "id": id,
-        "parent_id": parent_id,
-        "details": details,
-        "confirmed_by_user": confirmed_by_user,
-    }
     try:
-        result = await ontology_service.upsert_entity(data)
-        return _serialize(result)
+        if id:
+            data["id"] = id
+
+        if collection == "entities":
+            result = await ontology_service.upsert_entity(data)
+            return _serialize(result)
+
+        elif collection == "documents":
+            result = await ontology_service.upsert_document(data)
+            return _serialize(result)
+
+        elif collection == "protocols":
+            result = await ontology_service.upsert_protocol(data)
+            return _serialize(result)
+
+        elif collection == "blindspots":
+            result = await ontology_service.add_blindspot(data)
+            return _serialize(result)
+
+        elif collection == "relationships":
+            result = await ontology_service.add_relationship(
+                source_id=data["source_entity_id"],
+                target_id=data["target_entity_id"],
+                rel_type=data["type"],
+                description=data["description"],
+            )
+            return _serialize(result)
+
+        else:
+            return {
+                "error": "INVALID_INPUT",
+                "message": f"Unknown collection '{collection}'. "
+                f"Use: entities, documents, protocols, blindspots, relationships",
+            }
     except (ValueError, KeyError, TypeError) as e:
         return {"error": "INVALID_INPUT", "message": str(e)}
 
 
-@mcp.tool()
-async def add_relationship(
-    source_entity_id: str,
-    target_entity_id: str,
-    type: str,
-    description: str,
+# ===================================================================
+# Tool 5: confirm — approve knowledge drafts or task deliveries
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"write"},
+)
+async def confirm(
+    collection: str,
+    id: str,
+    accepted: bool = True,
+    rejection_reason: str | None = None,
 ) -> dict:
-    """在兩個實體之間建立有向關係。
+    """確認（批准）一個 AI 產出的 draft 或驗收一個已完成的任務。
 
-    當 AI agent 發現兩個實體之間有依賴、服務、歸屬等關係時使用。
-    關係類型包括：depends_on、serves、owned_by、part_of、blocks、related_to。
+    ZenOS 核心原則：AI 產出 = draft，人確認 = 生效。
+    這個工具統一處理兩種確認：
+    1. 知識確認：把 ontology entry 從 draft 標記為「已確認」
+    2. 任務驗收：接受或打回一個 status=review 的任務
 
-    Args:
-        source_entity_id: 來源實體 ID
-        target_entity_id: 目標實體 ID
-        type: 關係類型（depends_on/serves/owned_by/part_of/blocks/related_to）
-        description: 關係描述
-    """
-    try:
-        result = await ontology_service.add_relationship(
-            source_id=source_entity_id,
-            target_id=target_entity_id,
-            rel_type=type,
-            description=description,
-        )
-        return _serialize(result)
-    except (ValueError, TypeError) as e:
-        return {"error": "INVALID_INPUT", "message": str(e)}
+    使用時機：
+    - 確認 ontology 條目 → confirm(collection="entities", id="...")
+    - 接受任務交付 → confirm(collection="tasks", id="...", accepted=True)
+    - 打回任務重做 → confirm(collection="tasks", id="...", accepted=False,
+                             rejection_reason="...")
 
-
-@mcp.tool()
-async def upsert_document(
-    title: str,
-    source: dict,
-    tags: dict,
-    summary: str,
-    linked_entity_ids: list[str] | None = None,
-    status: str = "current",
-    id: str | None = None,
-    confirmed_by_user: bool = False,
-) -> dict:
-    """建立或更新一個神經層文件 entry（語意代理）。
-
-    當 AI agent 需要在 ontology 中註冊一份新文件或更新既有文件的
-    metadata 時使用。這不是上傳文件內容，而是建立文件的語意代理，
-    包含標題、來源、標籤、摘要等 metadata。
+    不要用這個工具的情境：
+    - 更新任務狀態（非驗收） → 用 task(action="update")
+    - 修改 ontology 內容 → 用 write
 
     Args:
-        title: 文件標題
-        source: 來源資訊，格式 {"type": "github", "uri": "...", "adapter": "github"}
-        tags: 四維標籤，格式 {"what": [...], "why": "...", "how": "...", "who": [...]}
-        summary: 文件摘要
-        linked_entity_ids: 可選，關聯的實體 ID 列表
-        status: 文件狀態（current/stale/archived/draft/conflict），預設 current
-        id: 可選，更新時提供既有 ID
-        confirmed_by_user: 是否已經由人確認，預設 false
-    """
-    data = {
-        "title": title,
-        "source": source,
-        "tags": tags,
-        "summary": summary,
-        "linked_entity_ids": linked_entity_ids or [],
-        "status": status,
-        "id": id,
-        "confirmed_by_user": confirmed_by_user,
-    }
-    try:
-        result = await ontology_service.upsert_document(data)
-        return _serialize(result)
-    except (ValueError, KeyError, TypeError) as e:
-        return {"error": "INVALID_INPUT", "message": str(e)}
-
-
-@mcp.tool()
-async def upsert_protocol(
-    entity_id: str,
-    entity_name: str,
-    content: dict,
-    gaps: list[dict] | None = None,
-    version: str = "1.0",
-    id: str | None = None,
-    confirmed_by_user: bool = False,
-) -> dict:
-    """建立或更新一個 Context Protocol。
-
-    Context Protocol 是 ontology 的 view——從 ontology 自動生成，
-    人微調確認。當 AI agent 需要為某個實體建立或更新其 Protocol 時使用。
-
-    Args:
-        entity_id: 對應的實體 ID
-        entity_name: 對應的實體名稱
-        content: Protocol 內容，格式 {"what": {...}, "why": {...}, "how": {...}, "who": {...}}
-        gaps: 可選，已知缺口列表，格式 [{"description": "...", "priority": "red/yellow/green"}]
-        version: 版本號，預設 "1.0"
-        id: 可選，更新時提供既有 ID
-        confirmed_by_user: 是否已經由人確認，預設 false
-    """
-    data = {
-        "entity_id": entity_id,
-        "entity_name": entity_name,
-        "content": content,
-        "gaps": gaps or [],
-        "version": version,
-        "id": id,
-        "confirmed_by_user": confirmed_by_user,
-    }
-    try:
-        result = await ontology_service.upsert_protocol(data)
-        return _serialize(result)
-    except (ValueError, KeyError, TypeError) as e:
-        return {"error": "INVALID_INPUT", "message": str(e)}
-
-
-@mcp.tool()
-async def add_blindspot(
-    description: str,
-    severity: str,
-    suggested_action: str,
-    related_entity_ids: list[str] | None = None,
-    status: str = "open",
-    id: str | None = None,
-    confirmed_by_user: bool = False,
-) -> dict:
-    """記錄一個新發現的盲點。
-
-    當 AI agent 在分析 ontology 時發現知識缺口、風險或矛盾時使用。
-    盲點是 ZenOS 的核心差異化功能：從跨產品關係圖中推斷問題。
-
-    Args:
-        description: 盲點描述
-        severity: 嚴重程度（red/yellow/green）
-        suggested_action: 建議的處理方式
-        related_entity_ids: 可選，相關的實體 ID 列表
-        status: 狀態（open/acknowledged/resolved），預設 open
-        id: 可選，更新時提供既有 ID
-        confirmed_by_user: 是否已經由人確認，預設 false
-    """
-    data = {
-        "description": description,
-        "severity": severity,
-        "suggested_action": suggested_action,
-        "related_entity_ids": related_entity_ids or [],
-        "status": status,
-        "id": id,
-        "confirmed_by_user": confirmed_by_user,
-    }
-    try:
-        result = await ontology_service.add_blindspot(data)
-        return _serialize(result)
-    except (ValueError, KeyError, TypeError) as e:
-        return {"error": "INVALID_INPUT", "message": str(e)}
-
-
-@mcp.tool()
-async def confirm(collection: str, id: str) -> dict:
-    """將一個 AI 產出的 draft 標記為「人已確認」。
-
-    ZenOS 的核心原則：AI 產出 = draft，人確認 = 生效。
-    當使用者審閱過某個實體/文件/Protocol/盲點後，用此 tool 確認。
-
-    Args:
-        collection: 集合名稱（entities/documents/protocols/blindspots）
-        id: 該項目的 ID
+        collection: entities/documents/protocols/blindspots/tasks
+        id: 項目 ID
+        accepted: 任務驗收用。true=通過，false=打回。知識確認忽略此參數。
+        rejection_reason: accepted=false 時必填，打回原因
     """
     try:
-        result = await ontology_service.confirm(collection, id)
-        return result
+        if collection == "tasks":
+            result = await task_service.confirm_task(
+                task_id=id,
+                accepted=accepted,
+                rejection_reason=rejection_reason,
+            )
+            response = _serialize(result.task)
+            if result.cascade_updates:
+                response["cascadeUpdates"] = [
+                    {"taskId": c.task_id, "change": c.change, "reason": c.reason}
+                    for c in result.cascade_updates
+                ]
+            return response
+        else:
+            result = await ontology_service.confirm(collection, id)
+            return result
     except ValueError as e:
         error_msg = str(e)
         if "not found" in error_msg.lower():
@@ -513,74 +646,204 @@ async def confirm(collection: str, id: str) -> dict:
         return {"error": "INVALID_INPUT", "message": error_msg}
 
 
-@mcp.tool()
-async def list_unconfirmed(collection: str | None = None) -> dict:
-    """列出所有尚未經人確認的項目。
+# ===================================================================
+# Tool 6: task — create, update, and list action items
+# ===================================================================
 
-    用於治理流程：查看哪些 AI 產出還需要人工審閱確認。
-    可按集合篩選，或一次列出所有集合的未確認項目。
+
+@mcp.tool(
+    tags={"write"},
+)
+async def task(
+    action: str,
+    title: str | None = None,
+    created_by: str | None = None,
+    id: str | None = None,
+    description: str | None = None,
+    assignee: str | None = None,
+    priority: str | None = None,
+    status: str | None = None,
+    linked_entities: list[str] | None = None,
+    linked_protocol: str | None = None,
+    linked_blindspot: str | None = None,
+    due_date: str | None = None,
+    blocked_by: list[str] | None = None,
+    blocked_reason: str | None = None,
+    acceptance_criteria: list[str] | None = None,
+    result: str | None = None,
+) -> dict:
+    """管理知識驅動的行動項目（Action Layer）。
+
+    任務是 ontology 的 output 路徑——從知識洞察產生的具體行動。
+    每個任務透過 linked_entities/linked_blindspot 連結回 ontology，
+    讓收到任務的人/agent 自動獲得相關 context。
+
+    使用時機：
+    - 建任務 → action="create"（必填：title, created_by）
+    - 改狀態 → action="update"（必填：id。改 status/assignee/priority 等）
+    - 列任務 → 不要用這個，用 search(collection="tasks") 更靈活
+
+    狀態流：backlog → todo → in_progress → review → done → archived
+            任何狀態可 → cancelled。blocked 是特殊狀態（需填 blocked_reason）。
+    注意：不能用 update 把 status 改成 done（必須走 confirm 驗收流程）。
+
+    不要用這個工具的情境：
+    - 查任務列表 → 用 search(collection="tasks")
+    - 驗收任務 → 用 confirm(collection="tasks")
 
     Args:
-        collection: 可選，按集合篩選（entities/documents/protocols/blindspots）
+        action: "create" 或 "update"
+        title: 任務標題，動詞開頭（create 必填）
+        created_by: 建立者 UID（create 必填）
+        id: 任務 ID（update 必填）
+        description: 任務描述
+        assignee: 被指派者 UID
+        priority: critical/high/medium/low（不傳時 AI 自動推薦）
+        status: 目標狀態（update 用，需通過合法性驗證）
+        linked_entities: 關聯的 entity IDs
+        linked_protocol: 關聯的 Protocol ID
+        linked_blindspot: 觸發的 blindspot ID
+        due_date: 到期日 ISO-8601（如 "2026-03-29"）
+        blocked_by: 阻塞此任務的 task IDs
+        blocked_reason: blocked 狀態時必填
+        acceptance_criteria: 驗收條件列表
+        result: 完成產出描述（status=review 時填寫）
     """
     try:
-        result = await ontology_service.list_unconfirmed(collection)
-        # Serialize each item in each collection
-        serialized: dict = {}
-        for col_name, items in result.items():
-            serialized[col_name] = [_serialize(item) for item in items]
-        return serialized
+        if action == "create":
+            if not title:
+                return {"error": "INVALID_INPUT", "message": "title is required for create"}
+            if not created_by:
+                return {"error": "INVALID_INPUT", "message": "created_by is required for create"}
+
+            # Parse due_date string to datetime
+            parsed_due = None
+            if due_date:
+                try:
+                    parsed_due = datetime.fromisoformat(due_date)
+                except (ValueError, TypeError):
+                    return {"error": "INVALID_INPUT", "message": f"Invalid due_date format: {due_date}"}
+
+            data = {
+                "title": title,
+                "created_by": created_by,
+                "description": description or "",
+                "assignee": assignee,
+                "priority": priority,
+                "status": status or "backlog",
+                "linked_entities": linked_entities or [],
+                "linked_protocol": linked_protocol,
+                "linked_blindspot": linked_blindspot,
+                "due_date": parsed_due,
+                "blocked_by": blocked_by or [],
+                "acceptance_criteria": acceptance_criteria or [],
+            }
+            task_result = await task_service.create_task(data)
+            response = _serialize(task_result.task)
+            return response
+
+        elif action == "update":
+            if not id:
+                return {"error": "INVALID_INPUT", "message": "id is required for update"}
+
+            updates: dict = {}
+            if status is not None:
+                updates["status"] = status
+            if assignee is not None:
+                updates["assignee"] = assignee
+            if priority is not None:
+                updates["priority"] = priority
+            if description is not None:
+                updates["description"] = description
+            if blocked_reason is not None:
+                updates["blocked_reason"] = blocked_reason
+            if result is not None:
+                updates["result"] = result
+            if blocked_by is not None:
+                updates["blocked_by"] = blocked_by
+            if acceptance_criteria is not None:
+                updates["acceptance_criteria"] = acceptance_criteria
+            if due_date is not None:
+                try:
+                    updates["due_date"] = datetime.fromisoformat(due_date)
+                except (ValueError, TypeError):
+                    return {"error": "INVALID_INPUT", "message": f"Invalid due_date: {due_date}"}
+
+            task_result = await task_service.update_task(id, updates)
+            response = _serialize(task_result.task)
+            if task_result.cascade_updates:
+                response["cascadeUpdates"] = [
+                    {"taskId": c.task_id, "change": c.change, "reason": c.reason}
+                    for c in task_result.cascade_updates
+                ]
+            return response
+
+        else:
+            return {
+                "error": "INVALID_INPUT",
+                "message": f"Unknown action '{action}'. Use: create, update",
+            }
     except ValueError as e:
         return {"error": "INVALID_INPUT", "message": str(e)}
 
 
 # ===================================================================
-# Governance Engine Tools (3) — ontology-wide analysis
+# Tool 7: analyze — governance health checks
 # ===================================================================
 
 
-@mcp.tool()
-async def run_quality_check() -> dict:
-    """執行 ontology 品質檢查（9 項檢查清單）。
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def analyze(
+    check_type: str = "all",
+) -> dict:
+    """執行 ontology 治理健康檢查。
 
-    對整個 ontology 進行全面品質評估，包括：實體完整性、
-    標籤品質、關係覆蓋率、Protocol 涵蓋度等。
-    回傳總分（0-100）和每項檢查的通過/失敗/警告狀態。
-    適合在每次大幅修改後或定期健檢時使用。
+    分析整個知識庫的品質、新鮮度和潛在盲點。
+    結果可用來發現問題、建立改善任務。
+
+    使用時機：
+    - 定期健檢 → analyze(check_type="all")
+    - 只看品質分數 → analyze(check_type="quality")
+    - 找過時內容 → analyze(check_type="staleness")
+    - 推斷盲點 → analyze(check_type="blindspot")
+
+    不要用這個工具的情境：
+    - 搜尋或列出條目 → 用 search
+    - 更新 ontology 內容 → 用 write
+
+    Args:
+        check_type: "all" / "quality" / "staleness" / "blindspot"
     """
-    report = await governance_service.run_quality_check()
-    return _serialize(report)
+    results: dict = {}
 
+    if check_type in ("all", "quality"):
+        report = await governance_service.run_quality_check()
+        results["quality"] = _serialize(report)
 
-@mcp.tool()
-async def run_staleness_check() -> dict:
-    """偵測 ontology 中的陳舊模式（staleness patterns）。
+    if check_type in ("all", "staleness"):
+        warnings = await governance_service.run_staleness_check()
+        results["staleness"] = {
+            "warnings": [_serialize(w) for w in warnings],
+            "count": len(warnings),
+        }
 
-    掃描所有實體和文件，找出長時間未更新、可能已過時的項目。
-    回傳每個陳舊警告的模式、描述、影響範圍和建議處理方式。
-    適合定期執行，確保 ontology 保持新鮮。
-    """
-    warnings = await governance_service.run_staleness_check()
-    return {
-        "warnings": [_serialize(w) for w in warnings],
-        "count": len(warnings),
-    }
+    if check_type in ("all", "blindspot"):
+        blindspots = await governance_service.run_blindspot_analysis()
+        results["blindspots"] = {
+            "blindspots": [_serialize(b) for b in blindspots],
+            "count": len(blindspots),
+        }
 
+    if not results:
+        return {
+            "error": "INVALID_INPUT",
+            "message": f"Unknown check_type '{check_type}'. Use: all, quality, staleness, blindspot",
+        }
 
-@mcp.tool()
-async def run_blindspot_analysis() -> dict:
-    """執行跨實體的盲點推斷分析。
-
-    透過交叉比對 ontology 各層（實體、文件、關係），自動推斷
-    出可能存在但尚未被記錄的知識盲點。這是 ZenOS 最核心的
-    差異化功能——從跨產品關係圖中推斷老闆沒注意到的問題。
-    分析結果會產生新的 Blindspot entries。
-    """
-    blindspots = await governance_service.run_blindspot_analysis()
-    return {
-        "blindspots": [_serialize(b) for b in blindspots],
-        "count": len(blindspots),
-    }
+    return results
 
 
 # ===================================================================

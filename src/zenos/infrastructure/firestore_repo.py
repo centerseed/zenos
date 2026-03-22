@@ -19,6 +19,7 @@ from zenos.domain.models import (
     Relationship,
     Source,
     Tags,
+    Task,
 )
 
 # ---------------------------------------------------------------------------
@@ -557,4 +558,152 @@ class FirestoreBlindspotRepository:
         results: list[Blindspot] = []
         async for doc in query.stream():
             results.append(_dict_to_blindspot(doc.id, doc.to_dict()))
+        return results
+
+    async def get_by_id(self, blindspot_id: str) -> Blindspot | None:
+        snap = await self._col.document(blindspot_id).get()
+        if not snap.exists:
+            return None
+        return _dict_to_blindspot(snap.id, snap.to_dict())  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Task helpers
+# ---------------------------------------------------------------------------
+
+
+def _task_to_dict(task: Task) -> dict[str, Any]:
+    raw: dict[str, Any] = {
+        "title": task.title,
+        "description": task.description,
+        "status": task.status,
+        "priority": task.priority,
+        "priority_reason": task.priority_reason,
+        "assignee": task.assignee,
+        "created_by": task.created_by,
+        "linked_entities": task.linked_entities,
+        "linked_protocol": task.linked_protocol,
+        "linked_blindspot": task.linked_blindspot,
+        "context_summary": task.context_summary,
+        "due_date": task.due_date,
+        "blocked_by": task.blocked_by,
+        "blocked_reason": task.blocked_reason,
+        "acceptance_criteria": task.acceptance_criteria,
+        "completed_by": task.completed_by,
+        "confirmed_by_creator": task.confirmed_by_creator,
+        "rejection_reason": task.rejection_reason,
+        "result": task.result,
+        "created_at": task.created_at,
+        "updated_at": task.updated_at,
+        "completed_at": task.completed_at,
+    }
+    return to_firestore_dict(raw)
+
+
+def _dict_to_task(doc_id: str, data: dict[str, Any]) -> Task:
+    d = from_firestore_dict(data)
+    return Task(
+        id=doc_id,
+        title=d.get("title", ""),
+        description=d.get("description", ""),
+        status=d.get("status", "backlog"),
+        priority=d.get("priority", "medium"),
+        priority_reason=d.get("priority_reason", ""),
+        assignee=d.get("assignee"),
+        created_by=d.get("created_by", ""),
+        linked_entities=d.get("linked_entities", []),
+        linked_protocol=d.get("linked_protocol"),
+        linked_blindspot=d.get("linked_blindspot"),
+        context_summary=d.get("context_summary", ""),
+        due_date=_to_dt(d.get("due_date")),
+        blocked_by=d.get("blocked_by", []),
+        blocked_reason=d.get("blocked_reason"),
+        acceptance_criteria=d.get("acceptance_criteria", []),
+        completed_by=d.get("completed_by"),
+        confirmed_by_creator=d.get("confirmed_by_creator", False),
+        rejection_reason=d.get("rejection_reason"),
+        result=d.get("result"),
+        created_at=_to_dt(d.get("created_at")) or _now(),
+        updated_at=_to_dt(d.get("updated_at")) or _now(),
+        completed_at=_to_dt(d.get("completed_at")),
+    )
+
+
+class FirestoreTaskRepository:
+    """Firestore-backed TaskRepository."""
+
+    def __init__(self, db: AsyncClient | None = None) -> None:
+        self._db = db or get_db()
+        self._col = self._db.collection("tasks")
+
+    async def get_by_id(self, task_id: str) -> Task | None:
+        snap = await self._col.document(task_id).get()
+        if not snap.exists:
+            return None
+        return _dict_to_task(snap.id, snap.to_dict())  # type: ignore[arg-type]
+
+    async def upsert(self, task: Task) -> Task:
+        now = _now()
+        task.updated_at = now
+        data = _task_to_dict(task)
+
+        if task.id is None:
+            task.created_at = now
+            data["createdAt"] = now
+            _, doc_ref = await self._col.add(data)
+            task.id = doc_ref.id
+        else:
+            await self._col.document(task.id).set(data, merge=True)
+
+        return task
+
+    async def list_all(
+        self,
+        *,
+        assignee: str | None = None,
+        created_by: str | None = None,
+        status: list[str] | None = None,
+        priority: str | None = None,
+        linked_entity: str | None = None,
+        include_archived: bool = False,
+        limit: int = 50,
+    ) -> list[Task]:
+        q: Any = self._col
+
+        if assignee is not None:
+            q = q.where("assignee", "==", assignee)
+        if created_by is not None:
+            q = q.where("createdBy", "==", created_by)
+        if priority is not None:
+            q = q.where("priority", "==", priority)
+        if linked_entity is not None:
+            q = q.where("linkedEntities", "array_contains", linked_entity)
+
+        q = q.limit(limit)
+        results: list[Task] = []
+        async for doc in q.stream():
+            task = _dict_to_task(doc.id, doc.to_dict())
+            # Client-side filter for status (Firestore can't do IN + other filters easily)
+            if status and task.status not in status:
+                continue
+            if not include_archived and task.status == "archived":
+                continue
+            results.append(task)
+
+        return results
+
+    async def list_blocked_by(self, task_id: str) -> list[Task]:
+        q = self._col.where("blockedBy", "array_contains", task_id)
+        results: list[Task] = []
+        async for doc in q.stream():
+            results.append(_dict_to_task(doc.id, doc.to_dict()))
+        return results
+
+    async def list_pending_review(self) -> list[Task]:
+        q = self._col.where("status", "==", "review").where(
+            "confirmedByCreator", "==", False
+        )
+        results: list[Task] = []
+        async for doc in q.stream():
+            results.append(_dict_to_task(doc.id, doc.to_dict()))
         return results

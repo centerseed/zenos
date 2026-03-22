@@ -179,6 +179,123 @@ ZenOS 做法：
 
 ---
 
+## Who 的三層消費模型
+
+### 問題：角色是「員工」還是「agent」？
+
+不同公司處於 AI 採用光譜的不同位置：
+
+```
+無 Agent ←————————————→ Agent-Native
+傳統 SMB          混合型           AI-driven
+角色=員工      角色=員工+工具      角色=員工+獨立Agent
+```
+
+Who 的設計必須在整個光譜上都能運作，且不能因為公司治理模式不同而需要不同 schema。
+
+### 解法：三層分離
+
+```
+Ontology 層（ZenOS 管）
+┌─────────────────────────────────┐
+│  Who: [marketing, product, ...] │  ← 純職能角色
+└─────────────────────────────────┘
+              │
+公司層（老闆/主管設定，全公司可見）
+┌─────────────────────────────────┐
+│  marketing → Barry, 小美         │  ← 角色→員工
+└─────────────────────────────────┘
+              │
+個人層（員工自己設定，只有自己看得到）
+┌─────────────────────────────────┐
+│  Barry → agent-1, agent-2, ...  │  ← 員工→agents
+└─────────────────────────────────┘
+```
+
+| 層 | 誰設定 | 誰看得到 | 變動頻率 | ZenOS 管不管 |
+|----|--------|---------|---------|------------|
+| 職能角色 | ZenOS AI + 人確認 | 全公司 | 低 | ✅ 管 |
+| 角色→員工 | 老闆/主管 | 全公司 | 中 | ✅ 管（Phase 1+ Dashboard） |
+| 員工→agents | 員工自己 | 只有自己 | 高 | ❌ 不管 |
+
+**第三層為什麼不管：** Agent 本質是 skill，員工隨時可能新增、修改、停用。靜態綁定的維護成本隨 agent 數量線性增長。而且公司派工到「Barry」就結束了——Barry 底下開了 5 個 agent 還是自己手做，是他的事。
+
+### Pull Model：Agent 自宣告身份
+
+不是 ZenOS 把 context 推給 agent，而是 agent 來的時候自己說「我是 marketing」，然後拉走需要的 context。
+
+```
+傳統思路（Push / 綁定）：
+  ZenOS 維護一張表：marketing → [agent-1, agent-2, 小明]
+  agent-3 出現了 → 要有人去更新這張表
+  ❌ 維護成本隨 agent 數量線性增長
+
+正確思路（Pull / 自宣告）：
+  每個 agent 的 skill 定義裡寫著：我的職能是 marketing
+  agent 透過 MCP 讀 ontology 時，自帶 role filter
+  ✅ 新增 agent = 新增 skill，零綁定成本
+```
+
+### Agent 身份宣告指引（用戶端設定）
+
+ZenOS 不參與員工底下 agents 的關係管理，但提供指引讓用戶方便設定 agent 身份。
+
+**方式一：在 Skill / System Prompt 中宣告（推薦）**
+
+```markdown
+# Social Media Agent
+
+你是負責社群媒體的 agent。
+你的職能角色：marketing
+
+## ZenOS Context 設定
+讀取 ontology 時使用以下過濾：
+- who: marketing
+- 額外關注：brand, content
+```
+
+Agent 透過 MCP 呼叫 ZenOS 時帶入角色：
+```
+query_ontology(who: "marketing")
+→ 回傳所有 Who 包含 marketing 的 entry
+```
+
+**方式二：在用戶環境設定檔中集中管理（進階）**
+
+```yaml
+# ~/.zenos/agent-routing.yaml（存在員工本地環境）
+# 這個檔案只有員工自己看得到，ZenOS 不讀取也不管理
+
+my_agents:
+  copywriter-agent:
+    roles: [marketing]
+    focus: [brand, content]  # 可選：進一步縮小 context 範圍
+
+  analytics-agent:
+    roles: [marketing, product]
+    focus: [metrics, campaign-performance]
+
+  social-agent:
+    roles: [marketing]
+    focus: [social-media, community]
+```
+
+**方式三：不設定（傳統員工）**
+
+沒有 agent 的員工直接透過 Dashboard 或 MCP 讀 ontology，以自己被指派的角色過濾。第三層不存在，零設定成本。
+
+### 演化路徑
+
+同一間公司從「無 agent」演化到「agent-native」時，ontology 零改動——只改第二層（公司 Dashboard）和第三層（員工本地設定）：
+
+```
+Phase 0（無 agent）：  Who = 角色 → 人直接讀
+Phase 1（開始用 agent）：Who = 角色 → 人讀 + 工具型 agent 讀
+Phase 2（agent-native）：Who = 角色 → 人偶爾讀 + 多個獨立 agent 各自讀
+```
+
+---
+
 ## 設計原則
 
 1. **ZenOS 不取代原有的組織治理** — Owner 只管 ontology entry 的正確性，不管原始文件的業務簽核

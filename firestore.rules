@@ -3,32 +3,44 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Phase 1 MVP: 單租戶，MCP server 用 service account 存取
-    // Phase 2 多租戶時改為 tenantId 隔離 + auth token 驗證
+    // ── Partners: read own document only, writes via Admin SDK ──
+    match /partners/{partnerId} {
+      allow read: if request.auth != null
+                  && resource.data.email == request.auth.token.email;
+      allow write: if false;
+    }
 
-    // 骨架層：實體
+    // ── Ontology collections: authenticated read, writes via Admin SDK ──
+
     match /entities/{entityId} {
-      allow read, write: if true;  // MVP: service account 存取，無需 auth rules
+      allow read: if request.auth != null;
+      allow write: if false;
 
-      // 實體間關係
       match /relationships/{relId} {
-        allow read, write: if true;
+        allow read: if request.auth != null;
+        allow write: if false;
       }
     }
 
-    // 神經層：文件語意代理
     match /documents/{docId} {
-      allow read, write: if true;
+      allow read: if request.auth != null;
+      allow write: if false;
     }
 
-    // Context Protocol
     match /protocols/{protocolId} {
-      allow read, write: if true;
+      allow read: if request.auth != null;
+      allow write: if false;
     }
 
-    // 盲點分析
     match /blindspots/{blindspotId} {
-      allow read, write: if true;
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // ── Action Layer: tasks ──
+    match /tasks/{taskId} {
+      allow read: if request.auth != null;
+      allow write: if false;  // All writes via Admin SDK (MCP server)
     }
   }
 }

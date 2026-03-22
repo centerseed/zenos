@@ -62,6 +62,24 @@ class BlindspotStatus(str, Enum):
     RESOLVED = "resolved"
 
 
+class TaskStatus(str, Enum):
+    BACKLOG = "backlog"
+    TODO = "todo"
+    IN_PROGRESS = "in_progress"
+    REVIEW = "review"
+    DONE = "done"
+    ARCHIVED = "archived"
+    BLOCKED = "blocked"
+    CANCELLED = "cancelled"
+
+
+class TaskPriority(str, Enum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
 # ──────────────────────────────────────────────
 # Skeleton Layer (骨架層)
 # ──────────────────────────────────────────────
@@ -229,3 +247,40 @@ class QualityReport:
     passed: list[QualityCheckItem]
     failed: list[QualityCheckItem]
     warnings: list[QualityCheckItem]
+
+
+# ──────────────────────────────────────────────
+# Action Layer (任務管理)
+# ──────────────────────────────────────────────
+
+@dataclass
+class Task:
+    """Action Layer task: a knowledge-driven action item.
+
+    Tasks live above the ontology layer. They reference ontology entries
+    via linked_entities / linked_protocol / linked_blindspot, but have
+    their own lifecycle (status, priority, assignee, due date).
+    """
+    title: str
+    status: str  # TaskStatus value
+    priority: str  # TaskPriority value
+    created_by: str
+    id: str | None = None
+    description: str = ""
+    priority_reason: str = ""
+    assignee: str | None = None
+    linked_entities: list[str] = field(default_factory=list)
+    linked_protocol: str | None = None
+    linked_blindspot: str | None = None
+    context_summary: str = ""
+    due_date: datetime | None = None
+    blocked_by: list[str] = field(default_factory=list)
+    blocked_reason: str | None = None
+    acceptance_criteria: list[str] = field(default_factory=list)
+    completed_by: str | None = None
+    confirmed_by_creator: bool = False
+    rejection_reason: str | None = None
+    result: str | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+    completed_at: datetime | None = None

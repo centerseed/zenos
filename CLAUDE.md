@@ -27,7 +27,10 @@ Phase 0 — 概念驗證。還沒寫程式碼，在打磨核心流程設計。
 - ✅ 架構模式決策：選模式 A（分散 agents + 共享 context）— Firestore + MCP + ZenOS 治理服務
 - ✅ 跨 agent context 共享研究：8 種方法比較，MCP 是唯一滿足所有條件的方案
 - ✅ 企業導入治理文件：Who + Owner 分離、部門架構映射、Proposal 問答集
-- 📋 下一步：讓行銷夥伴試讀 Protocol，驗證可用性
+- ✅ Who 三層消費模型：職能角色→員工→agents，Pull Model，agent 自宣告身份
+- ✅ Action Layer 設計：任務模型（Ontology Context + 行動屬性）、Kanban 狀態流、優先度 AI 推薦、Inbox/Outbox 雙視角
+- ✅ Dashboard 擴展為六件事：全景圖、確認佇列、Protocol、Storage Map、任務看板、團隊設定
+- 📋 下一步：Architect 確認 Action Layer MCP 介面規格 + Dashboard v1 頁面實作優先級
 
 ---
 
@@ -124,8 +127,13 @@ docs/
 | 三層治理系統 | 事件源層（偵測 CRUD）→ 治理引擎層（AI 分析）→ 確認同步層（人確認 + 級聯更新） | Part 7 |
 | Governance Daemon | Phase 2 常駐服務：事件佇列 + AI 分析 + 自動更新神經層 + 骨架層待確認 | Part 7 |
 | Adapter 架構 | 統一介面 + 多生態系 Adapter（Git/Google/MS/Notion），文件留用戶端 | Part 7 |
-| ZenOS Dashboard | 唯一自建 UI，做四件事：全景圖、確認佇列、Protocol viewer、Storage Map。不做文件管理 | Part 7 |
+| ZenOS Dashboard | 唯一自建 UI，做六件事：全景圖、確認佇列、Protocol viewer、Storage Map、任務看板、團隊設定。不做文件管理 | Part 7 |
 | Who + Owner 分離 | Who = 多值（context 分發給哪些角色），Owner = 單值（治理問責誰來確認） | enterprise-governance.md |
+| Who 三層模型 | 職能角色（ontology）→ 員工（公司層）→ agents（個人層）。ZenOS 管前兩層，第三層員工自理 | Part 0 + enterprise-governance.md |
+| Pull Model | Agent 自宣告身份（在 skill 裡寫職能角色），透過 MCP query 帶 role filter 拉 context。ZenOS 不維護 agent registry | enterprise-governance.md |
+| Action Layer | Ontology 的 output 路徑——任務管理。Ontology Context + 行動屬性（優先度/狀態/指派/期限/依賴/驗收）。UI 和 MCP 對稱 | Part 7.1 |
+| Inbox / Outbox | 任務的雙視角——「派給我的」和「我派出的」。人和 agent 共用同一套模型 | Part 7.1 |
+| confirmedByCreator | 任務驗收機制——執行者標記 review，派任者確認 done 或 rejected。與 confirmedByUser（知識確認）合併在確認佇列 | Part 7.1 |
 | Conversation Adapter | AI 對話作為事件源——知識捕獲在產生點，透過 Skill + MCP 直接 propose ontology 更新 | Part 7 Adapter 架構 |
 
 ---
@@ -148,6 +156,10 @@ docs/
 14. **「什麼都沒有」不是障礙：Stage 0 只需對話，不需要任何儲存層。漸進式信任的威力**
 15. **Adapter 架構是擴展的關鍵：統一介面 + 多 Adapter，新增生態系 = 新增 Adapter，Engine 零改動**
 16. **Conversation Adapter 是被 dogfooding 發現的：AI 對話產出的知識不在任何檔案系統裡，捕獲點必須在產生點**
+17. **Who 不能寫死「角色是人還是 agent」：不同公司在 AI 採用光譜上位置不同，Who = 職能角色，消費端自行綁定**
+18. **Agent 本質是 skill，靜態綁定不可行：Pull Model（agent 自宣告身份）而非 Push Model（ZenOS 推送 context）**
+19. **任務是 ontology context + Who 三層模型 + 生命週期的交匯點：Action Layer 不只是功能，是驗證 ontology 品質的唯一手段**
+20. **UI 和 MCP 必須對稱：自然語言對話容易遺失全貌，UI 補充 agent 低效的地方（全局總覽、批次操作、進度追蹤）**
 
 ---
 
