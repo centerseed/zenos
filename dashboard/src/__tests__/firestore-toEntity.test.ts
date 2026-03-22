@@ -1,18 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-
-// Mock firebase before importing firestore
-vi.mock("firebase/firestore", () => ({
-  collection: vi.fn(),
-  query: vi.fn(),
-  where: vi.fn(),
-  getDocs: vi.fn(),
-  doc: vi.fn(),
-  getDoc: vi.fn(),
-}));
-vi.mock("@/lib/firebase", () => ({
-  getDbInstance: vi.fn(),
-}));
-
+import { describe, it, expect } from "vitest";
 import { toEntity } from "@/lib/firestore";
 
 // Helper: fake Firestore Timestamp

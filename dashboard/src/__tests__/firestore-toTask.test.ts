@@ -1,17 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
-
-vi.mock("firebase/firestore", () => ({
-  collection: vi.fn(),
-  query: vi.fn(),
-  where: vi.fn(),
-  getDocs: vi.fn(),
-  doc: vi.fn(),
-  getDoc: vi.fn(),
-}));
-vi.mock("@/lib/firebase", () => ({
-  getDbInstance: vi.fn(),
-}));
-
+import { describe, it, expect } from "vitest";
 import { toTask } from "@/lib/firestore";
 
 function fakeTimestamp(date: Date) {
