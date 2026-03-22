@@ -97,13 +97,19 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 - 例如：不要建一個「API Service」module 塞 98 個 docs，而是拆成「訓練計畫」「運動數據」「AI 教練」等業務 module
 - 目標：每個 module 下 3-10 個 document entries
 
+**Module 層級設定（必做）**：
+- 每個 module entity 的 `parent_id` **必須**指向所屬的 product entity ID
+- 子 module 的 `parent_id` 指向父 module
+- 頂層 product 的 `parent_id` 為 null
+- **沒有 parent_id 的 module = Dashboard 上看不到，等於沒建**
+
 **Relationship 建立（必做）**：
-- 用 `add_relationship()` 連接 product → module（`contains`）
-- 用 `add_relationship()` 連接 module → module（`depends_on`、`feeds_into`）
+- 用 `write(collection="relationships", data={...})` 連接 product → module（`contains`）
+- 用 `write(collection="relationships", data={...})` 連接 module → module（`depends_on`、`feeds_into`）
 - 骨架層沒有 relationship = 不完整，一定要建
 
 彙整後，**一次性**呈現骨架層 proposals（見下方確認 UI），等用戶確認後寫入 Firestore。
-確認後，**立即用 `add_relationship()` 建立所有關係**，不要留到後面。
+確認後，**立即用 `write(collection="relationships", data={...})` 建立所有關係**，不要留到後面。
 
 ### C3. 第二階段：P1 文件 — 讀 + 建 document entry
 
@@ -112,7 +118,7 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 ```
 進度：P1 規格文件
   [1/{n}] docs/01-specs/plan-overview-v2.md → 讀取中...
-    → upsert_document() ✅  (id: xxx)
+    → write(collection="documents") ✅  (id: xxx)
   [2/{n}] docs/01-specs/SPEC-weekly-plan-v2.md → ...
 ```
 
@@ -140,8 +146,8 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 
 建構完成後，**自動執行**以下兩個檢查，不需要用戶觸發：
 
-1. `run_quality_check()` — 9 項品質檢查，回報分數和未通過項目
-2. `run_blindspot_analysis()` — 推斷知識盲點，寫入 blindspots
+1. `analyze(check_type="quality")` — 9 項品質檢查，回報分數和未通過項目
+2. `analyze(check_type="blindspot")` — 推斷知識盲點，寫入 blindspots
 
 如果品質分數 < 70 或有 failed 項目，**主動提出修正建議**（例如拆分過大的 module、補 relationship）。
 
@@ -166,7 +172,7 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 盲點分析：{n} 個 blindspot 已記錄
 
 下一步：
-  → 呼叫 list_unconfirmed() 查看所有待確認 drafts
+  → 呼叫 search(confirmed_only=false) 查看所有待確認 drafts
 ```
 
 ---
@@ -196,7 +202,7 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 
 ### Step 2：比對現有 ontology
 
-每個候選寫入前先 `search_ontology(query=名稱或關鍵詞)` 避免重複：
+每個候選寫入前先 `search(query=名稱或關鍵詞)` 避免重複：
 - 找到且資訊吻合 → 跳過
 - 找到但需更新 → 標記「更新」
 - 找不到 → 標記「新增」
@@ -204,11 +210,11 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 ### Step 3：神經層自動寫入 draft
 
 ```
-upsert_document(
+write(collection="documents", data={
   title, source, tags, summary,
   linked_entity_ids,
-  confirmed_by_user = False
-)
+  confirmed_by_user: False
+})
 ```
 
 文件 entry 的 `source.uri`（**必須嚴格遵守**）：
@@ -258,7 +264,7 @@ upsert_document(
 
 神經層（自動 draft）：• {文件標題} → documents/{id}
 骨架層（你確認的）：• {實體名稱} → entities/{id}
-待確認：呼叫 list_unconfirmed() 查看
+待確認：呼叫 search(confirmed_only=false) 查看
 ```
 
 ---

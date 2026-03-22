@@ -49,6 +49,7 @@ class UpsertEntityResult:
     entity: Entity
     tag_confidence: TagConfidence
     split_recommendation: SplitRecommendation | None
+    warnings: list[str] | None = None
 
 
 # ──────────────────────────────────────────────
@@ -156,6 +157,15 @@ class OntologyService:
 
         saved = await self._entities.upsert(entity)
 
+        # Governance: warn if module has no parent_id
+        warnings: list[str] = []
+        if saved.type == "module" and not saved.parent_id:
+            warnings.append(
+                "Module entity has no parent_id. "
+                "It will not appear under any product in the Dashboard. "
+                "Set parent_id to the owning product's entity ID."
+            )
+
         # Governance: tag confidence
         tag_confidence = apply_tag_confidence(saved.tags)
 
@@ -170,6 +180,7 @@ class OntologyService:
             entity=saved,
             tag_confidence=tag_confidence,
             split_recommendation=split_rec,
+            warnings=warnings or None,
         )
 
     async def add_relationship(

@@ -23,12 +23,15 @@ Usage:
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from dataclasses import asdict
 from datetime import datetime
 
 from starlette.responses import JSONResponse
+
+logger = logging.getLogger("zenos.auth")
 
 from fastmcp import FastMCP
 
@@ -75,16 +78,24 @@ class PartnerKeyValidator:
     async def _refresh_cache(self) -> None:
         from zenos.infrastructure.firestore_repo import get_db
 
-        db = get_db()
-        docs = db.collection("partners").where("status", "==", "active").stream()
-        new_cache: dict[str, dict] = {}
-        async for doc in docs:
-            data = doc.to_dict()
-            api_key = data.get("apiKey", "")
-            if api_key:
-                new_cache[api_key] = data
-        self._cache = new_cache
-        self._cache_ts = time.time()
+        try:
+            db = get_db()
+            docs = db.collection("partners").where("status", "==", "active").stream()
+            new_cache: dict[str, dict] = {}
+            async for doc in docs:
+                data = doc.to_dict()
+                api_key = data.get("apiKey", "")
+                if api_key:
+                    new_cache[api_key] = data
+            self._cache = new_cache
+            self._cache_ts = time.time()
+            logger.info("Partner cache refreshed: %d active keys", len(new_cache))
+        except Exception:
+            logger.exception("Failed to refresh partner cache from Firestore")
+            # Don't update _cache_ts so next request retries
+            # But if cache is empty and keeps failing, we need a fallback
+            if not self._cache:
+                self._cache_ts = time.time()  # avoid hammering Firestore
 
 
 _partner_validator = PartnerKeyValidator()
@@ -111,6 +122,7 @@ class ApiKeyMiddleware:
             return await self.app(scope, receive, send)
 
         key = self._extract_key(scope)
+        path = scope.get("path", "")
 
         # 1. Superadmin key (env var)
         if key and key == ZENOS_API_KEY:
@@ -121,6 +133,12 @@ class ApiKeyMiddleware:
             partner = await _partner_validator.validate(key)
             if partner is not None:
                 return await self.app(scope, receive, send)
+            logger.warning(
+                "Auth rejected: key=%.8s... path=%s cache_size=%d",
+                key, path, len(_partner_validator._cache),
+            )
+        else:
+            logger.debug("Auth rejected: no key provided, path=%s", path)
 
         response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
         return await response(scope, receive, send)
@@ -534,6 +552,8 @@ async def write(
 
     entities: name, type(product/module/goal/role/project), summary,
               tags({what, why, how, who})
+              選填但重要：parent_id（module 必須設為所屬 product 的 entity ID，
+              否則 Dashboard 上不會顯示在該 product 下）
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary
     protocols: entity_id, entity_name, content({what, why, how, who})
@@ -552,7 +572,10 @@ async def write(
 
         if collection == "entities":
             result = await ontology_service.upsert_entity(data)
-            return _serialize(result)
+            response = _serialize(result)
+            if result.warnings:
+                response["warnings"] = result.warnings
+            return response
 
         elif collection == "documents":
             result = await ontology_service.upsert_document(data)
@@ -851,11 +874,16 @@ async def analyze(
 # ===================================================================
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
+
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     if transport in ("sse", "http"):
         port = int(os.environ.get("PORT", "8080"))
         app = ApiKeyMiddleware(mcp.http_app(transport="streamable-http"))
         import uvicorn
-        uvicorn.run(app, host="0.0.0.0", port=port)
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
     else:
         mcp.run(transport="stdio")
