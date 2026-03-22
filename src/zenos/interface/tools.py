@@ -31,9 +31,9 @@ from datetime import datetime
 
 from starlette.responses import JSONResponse
 
-logger = logging.getLogger("zenos.auth")
-
 from fastmcp import FastMCP
+
+logger = logging.getLogger(__name__)
 
 from zenos.application.governance_service import GovernanceService
 from zenos.application.ontology_service import OntologyService
@@ -202,6 +202,7 @@ task_service = TaskService(
     task_repo=task_repo,
     entity_repo=entity_repo,
     blindspot_repo=blindspot_repo,
+    document_repo=document_repo,
 )
 
 
@@ -587,7 +588,31 @@ async def write(
 
         elif collection == "blindspots":
             result = await ontology_service.add_blindspot(data)
-            return _serialize(result)
+            response = _serialize(result)
+
+            # Red blindspots auto-create a draft task for immediate attention
+            if result.severity == "red":
+                # Infer assignee from related entities' who tag
+                assignee = None
+                for eid in (result.related_entity_ids or []):
+                    entity = await entity_repo.get_by_id(eid)
+                    if entity and entity.tags.who:
+                        assignee = entity.tags.who
+                        break
+
+                auto_task_data = {
+                    "title": f"處理盲點：{result.description[:30]}",
+                    "source_type": "blindspot",
+                    "linked_blindspot": result.id,
+                    "linked_entities": result.related_entity_ids or [],
+                    "status": "backlog",
+                    "created_by": "system",
+                    "assignee": assignee,
+                }
+                auto_task_result = await task_service.create_task(auto_task_data)
+                response["auto_created_task"] = _serialize(auto_task_result.task)
+
+            return response
 
         elif collection == "relationships":
             result = await ontology_service.add_relationship(
@@ -621,6 +646,8 @@ async def confirm(
     id: str,
     accepted: bool = True,
     rejection_reason: str | None = None,
+    mark_stale_entity_ids: list[str] | None = None,
+    new_blindspot: dict | None = None,
 ) -> dict:
     """確認（批准）一個 AI 產出的 draft 或驗收一個已完成的任務。
 
@@ -644,6 +671,8 @@ async def confirm(
         id: 項目 ID
         accepted: 任務驗收用。true=通過，false=打回。知識確認忽略此參數。
         rejection_reason: accepted=false 時必填，打回原因
+        mark_stale_entity_ids: 任務完成時，標記這些 entity 的相關文件為 stale（僅 tasks 集合生效）
+        new_blindspot: 任務完成時發現的新盲點（{description, severity, related_entity_ids, suggested_action}）
     """
     try:
         if collection == "tasks":
@@ -651,6 +680,8 @@ async def confirm(
                 task_id=id,
                 accepted=accepted,
                 rejection_reason=rejection_reason,
+                mark_stale_entity_ids=mark_stale_entity_ids,
+                new_blindspot=new_blindspot,
             )
             response = _serialize(result.task)
             if result.cascade_updates:
@@ -689,6 +720,7 @@ async def task(
     linked_entities: list[str] | None = None,
     linked_protocol: str | None = None,
     linked_blindspot: str | None = None,
+    source_type: str | None = None,
     due_date: str | None = None,
     blocked_by: list[str] | None = None,
     blocked_reason: str | None = None,
@@ -757,6 +789,7 @@ async def task(
                 "linked_entities": linked_entities or [],
                 "linked_protocol": linked_protocol,
                 "linked_blindspot": linked_blindspot,
+                "source_type": source_type or "",
                 "due_date": parsed_due,
                 "blocked_by": blocked_by or [],
                 "acceptance_criteria": acceptance_criteria or [],

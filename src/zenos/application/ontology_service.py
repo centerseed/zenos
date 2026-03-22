@@ -294,13 +294,11 @@ class OntologyService:
             await self._protocols.upsert(protocol)
 
         elif collection == "blindspots":
-            # BlindspotRepository doesn't have get_by_id; list_all + filter
-            all_blindspots = await self._blindspots.list_all()
-            target = next((b for b in all_blindspots if b.id == item_id), None)
+            target = await self._blindspots.get_by_id(item_id)
             if target is None:
                 raise ValueError(f"Blindspot '{item_id}' not found")
             target.confirmed_by_user = True
-            await self._blindspots.add(target)  # re-add to persist update
+            await self._blindspots.add(target)
 
         else:
             raise ValueError(

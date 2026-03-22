@@ -1,10 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { toEntity } from "@/lib/firestore";
-
-// Helper: fake Firestore Timestamp
-function fakeTimestamp(date: Date) {
-  return { toDate: () => date };
-}
+import { fakeTimestamp } from "./testHelpers";
 
 describe("toEntity", () => {
   const validData = {

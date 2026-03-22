@@ -1,9 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { toTask } from "@/lib/firestore";
-
-function fakeTimestamp(date: Date) {
-  return { toDate: () => date };
-}
+import { fakeTimestamp } from "./testHelpers";
 
 describe("toTask", () => {
   const validData = {

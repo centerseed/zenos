@@ -142,6 +142,20 @@ export function toTask(id: string, data: Record<string, unknown>): Task {
   };
 }
 
+export function toPartner(id: string, data: Record<string, unknown>): Partner {
+  return {
+    id,
+    email: data.email as string,
+    displayName: data.displayName as string,
+    apiKey: data.apiKey as string,
+    authorizedEntityIds: (data.authorizedEntityIds as string[]) ?? [],
+    isAdmin: (data.isAdmin as boolean) ?? false,
+    status: (data.status as Partner["status"]) ?? "active",
+    createdAt: (data.createdAt as { toDate?: () => Date })?.toDate?.() ?? new Date(),
+    updatedAt: (data.updatedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(),
+  };
+}
+
 /** Fetch tasks with optional filters */
 export async function getTasks(filters?: {
   statuses?: string[];
