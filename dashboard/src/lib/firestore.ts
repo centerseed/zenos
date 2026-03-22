@@ -7,7 +7,7 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { getDbInstance } from "./firebase";
-import type { Entity, Relationship, Blindspot, DocumentEntry, Task } from "@/types";
+import type { Entity, Relationship, Blindspot, DocumentEntry, Task, Partner } from "@/types";
 
 export function toEntity(id: string, data: Record<string, unknown>): Entity {
   return {
@@ -126,6 +126,7 @@ export function toTask(id: string, data: Record<string, unknown>): Task {
     linkedEntities: (data.linkedEntities as string[]) ?? [],
     linkedProtocol: (data.linkedProtocol as string) ?? null,
     linkedBlindspot: (data.linkedBlindspot as string) ?? null,
+    sourceType: (data.sourceType as string) ?? "",
     contextSummary: (data.contextSummary as string) ?? "",
     dueDate: (data.dueDate as { toDate?: () => Date })?.toDate?.() ?? null,
     blockedBy: (data.blockedBy as string[]) ?? [],
@@ -170,6 +171,25 @@ export async function getTasks(filters?: {
   const q = query(collection(getDbInstance(), "tasks"), ...constraints);
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => toTask(d.id, d.data()));
+}
+
+/** Fetch all partners */
+export async function getAllPartners(): Promise<Partner[]> {
+  const snapshot = await getDocs(collection(getDbInstance(), "partners"));
+  return snapshot.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      email: data.email as string,
+      displayName: data.displayName as string,
+      apiKey: data.apiKey as string,
+      authorizedEntityIds: (data.authorizedEntityIds as string[]) ?? [],
+      isAdmin: (data.isAdmin as boolean) ?? false,
+      status: (data.status as Partner["status"]) ?? "active",
+      createdAt: (data.createdAt as { toDate: () => Date })?.toDate?.() ?? new Date(),
+      updatedAt: (data.updatedAt as { toDate: () => Date })?.toDate?.() ?? new Date(),
+    };
+  });
 }
 
 /** Fetch tasks linked to an entity */
