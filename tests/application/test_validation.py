@@ -424,3 +424,121 @@ class TestTaskPriorityValidation:
         })
         # Should not raise, priority comes from recommend_priority
         assert result.task.priority is not None
+
+
+# ===========================================================================
+# Fuzzy similarity check — prevent semantically duplicate entities
+# ===========================================================================
+
+
+class TestFuzzySimilarityCheck:
+    """Verify that creating an entity with a name similar to an existing one
+    raises ValueError with context about the similar entities."""
+
+    @pytest.mark.asyncio
+    async def test_substring_match_blocks(self):
+        """'Paceriz' should be blocked if 'Paceriz API Service' already exists."""
+        repos = _mock_repos()
+        existing = Entity(
+            name="Paceriz API Service", type="product", summary="Backend API",
+            tags=Tags(what="API", why="serve", how="Flask", who="devs"),
+            id="existing-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError, match="similar"):
+            await svc.upsert_entity(_valid_entity_data(name="Paceriz"))
+
+    @pytest.mark.asyncio
+    async def test_reverse_substring_match_blocks(self):
+        """'Paceriz API Service' should be blocked if 'Paceriz' already exists."""
+        repos = _mock_repos()
+        existing = Entity(
+            name="Paceriz", type="product", summary="Running app",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            id="existing-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError, match="similar"):
+            await svc.upsert_entity(_valid_entity_data(name="Paceriz API Service"))
+
+    @pytest.mark.asyncio
+    async def test_token_overlap_blocks(self):
+        """'Paceriz iOS App' should be blocked if 'Paceriz API Service' exists
+        because they share the token 'paceriz'."""
+        repos = _mock_repos()
+        existing = Entity(
+            name="Paceriz API Service", type="product", summary="Backend",
+            tags=Tags(what="API", why="serve", how="Flask", who="devs"),
+            id="existing-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError, match="similar"):
+            await svc.upsert_entity(_valid_entity_data(name="Paceriz iOS App"))
+
+    @pytest.mark.asyncio
+    async def test_error_includes_context(self):
+        """Error message should include existing entity's summary, tags, modules."""
+        repos = _mock_repos()
+        existing = Entity(
+            name="Paceriz API Service", type="product",
+            summary="Flask backend for running coach",
+            tags=Tags(what="REST API", why="serve data", how="Flask+Firestore", who="iOS app"),
+            id="existing-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError) as exc_info:
+            await svc.upsert_entity(_valid_entity_data(name="Paceriz"))
+
+        msg = str(exc_info.value)
+        assert "Paceriz API Service" in msg
+        assert "existing-1" in msg
+        assert "Flask backend" in msg
+        assert "REST API" in msg
+
+    @pytest.mark.asyncio
+    async def test_force_bypasses_fuzzy_check(self):
+        """force=true in data should skip the fuzzy similarity check."""
+        repos = _mock_repos()
+        existing = Entity(
+            name="Paceriz API Service", type="product", summary="Backend",
+            tags=Tags(what="API", why="serve", how="Flask", who="devs"),
+            id="existing-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity(
+            _valid_entity_data(name="Paceriz", force=True)
+        )
+        assert result.entity.name == "Paceriz"
+
+    @pytest.mark.asyncio
+    async def test_completely_different_name_passes(self):
+        """'ZenOS' should not be flagged when 'Paceriz' exists."""
+        repos = _mock_repos()
+        existing = Entity(
+            name="Paceriz", type="product", summary="Running app",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            id="existing-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity(
+            _valid_entity_data(name="ZenOS", summary="Knowledge ontology")
+        )
+        assert result.entity.name == "ZenOS"

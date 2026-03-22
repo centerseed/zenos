@@ -80,6 +80,39 @@ class OntologyService:
         self._blindspots = blindspot_repo
 
     # ──────────────────────────────────────────
+    # Internal helpers
+    # ──────────────────────────────────────────
+
+    @staticmethod
+    def _find_similar_entities(name: str, candidates: list[Entity]) -> list[Entity]:
+        """Find entities with names similar to `name`.
+
+        Similarity rules:
+        - name is a substring of candidate (or vice versa), case-insensitive
+        - significant token overlap (ignoring short tokens like "AI", "v2")
+        """
+        name_lower = name.lower()
+        name_tokens = {t for t in re.split(r'[\s\-_]+', name_lower) if len(t) > 2}
+
+        similar: list[Entity] = []
+        for ent in candidates:
+            ent_lower = ent.name.lower()
+            if ent_lower == name_lower:
+                continue  # exact match handled by check #7
+
+            # substring match
+            if name_lower in ent_lower or ent_lower in name_lower:
+                similar.append(ent)
+                continue
+
+            # token overlap (at least one significant shared token)
+            ent_tokens = {t for t in re.split(r'[\s\-_]+', ent_lower) if len(t) > 2}
+            if name_tokens & ent_tokens:
+                similar.append(ent)
+
+        return similar
+
+    # ──────────────────────────────────────────
     # Consumer-facing use cases (消費端)
     # ──────────────────────────────────────────
 
@@ -218,6 +251,36 @@ class OntologyService:
                     f"Entity '{name}' (type={entity_type}) already exists "
                     f"(id={existing.id}). To update it, provide id='{existing.id}'."
                 )
+
+            # 8. fuzzy similarity check — prevent semantically duplicate products
+            all_same_type = await self._entities.list_all(type_filter=entity_type)
+            similar = self._find_similar_entities(name, all_same_type)
+            if similar:
+                lines = [
+                    f"Found {len(similar)} similar {entity_type} entity(ies). "
+                    f"Are you sure '{name}' is not a duplicate?\n"
+                ]
+                for ent in similar:
+                    modules = [
+                        e for e in await self._entities.list_all(type_filter="module")
+                        if e.parent_id == ent.id
+                    ] if ent.type == "product" else []
+                    lines.append(
+                        f"  - \"{ent.name}\" (id={ent.id})\n"
+                        f"    summary: {ent.summary}\n"
+                        f"    tags.what: {ent.tags.what}\n"
+                        f"    status: {ent.status}, confirmed: {ent.confirmed_by_user}"
+                    )
+                    if modules:
+                        mod_names = ", ".join(m.name for m in modules[:5])
+                        lines.append(f"    modules ({len(modules)}): {mod_names}")
+                lines.append(
+                    f"\nIf '{name}' is genuinely different, add "
+                    f"force=true to data to skip this check. "
+                    f"If it's the same, use id='<existing_id>' to update."
+                )
+                if not data.get("force"):
+                    raise ValueError("\n".join(lines))
 
         # --- Build entity ---
 
