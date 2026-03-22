@@ -272,6 +272,7 @@ class Task:
     linked_entities: list[str] = field(default_factory=list)
     linked_protocol: str | None = None
     linked_blindspot: str | None = None
+    source_type: str = ""
     context_summary: str = ""
     due_date: datetime | None = None
     blocked_by: list[str] = field(default_factory=list)

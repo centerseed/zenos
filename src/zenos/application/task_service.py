@@ -9,9 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from zenos.domain.models import Task, TaskPriority, TaskStatus
+from zenos.domain.models import Blindspot, Task, TaskPriority, TaskStatus
 from zenos.domain.repositories import (
     BlindspotRepository,
+    DocumentRepository,
     EntityRepository,
     TaskRepository,
 )
@@ -46,10 +47,12 @@ class TaskService:
         task_repo: TaskRepository,
         entity_repo: EntityRepository,
         blindspot_repo: BlindspotRepository,
+        document_repo: DocumentRepository | None = None,
     ) -> None:
         self._tasks = task_repo
         self._entities = entity_repo
         self._blindspots = blindspot_repo
+        self._documents = document_repo
 
     # ──────────────────────────────────────────
     # Create
@@ -96,7 +99,7 @@ class TaskService:
         priority = data.get("priority") or rec_priority
 
         # Context summary assembly
-        context_summary = self._assemble_context(
+        context_summary = await self._assemble_context(
             linked_entities, linked_blindspot
         )
 
@@ -111,6 +114,7 @@ class TaskService:
             linked_entities=linked_entity_ids,
             linked_protocol=data.get("linked_protocol"),
             linked_blindspot=linked_blindspot_id,
+            source_type=data.get("source_type", ""),
             context_summary=context_summary,
             due_date=due_date,
             blocked_by=blocked_by,
@@ -172,7 +176,12 @@ class TaskService:
     # ──────────────────────────────────────────
 
     async def confirm_task(
-        self, task_id: str, accepted: bool, rejection_reason: str | None = None
+        self,
+        task_id: str,
+        accepted: bool,
+        rejection_reason: str | None = None,
+        mark_stale_entity_ids: list[str] | None = None,
+        new_blindspot: dict | None = None,
     ) -> TaskResult:
         """Accept or reject a task in review status."""
         task = await self._tasks.get_by_id(task_id)
@@ -198,6 +207,26 @@ class TaskService:
                 if bs and bs.status != "resolved":
                     bs.status = "resolved"
                     await self._blindspots.add(bs)  # re-add to persist
+
+            # Mark related documents as stale when entities are outdated
+            if mark_stale_entity_ids and self._documents:
+                for eid in mark_stale_entity_ids:
+                    entity_docs = await self._documents.list_by_entity(eid)
+                    for edoc in entity_docs:
+                        if edoc.status != "stale":
+                            edoc.status = "stale"
+                            await self._documents.upsert(edoc)
+
+            # Create new blindspot discovered during task completion
+            if new_blindspot:
+                bs_obj = Blindspot(
+                    description=new_blindspot.get("description", ""),
+                    severity=new_blindspot.get("severity", "yellow"),
+                    related_entity_ids=new_blindspot.get("related_entity_ids", []),
+                    suggested_action=new_blindspot.get("suggested_action", ""),
+                    confirmed_by_user=False,
+                )
+                await self._blindspots.add(bs_obj)
         else:
             if not rejection_reason:
                 raise ValueError("rejection_reason is required when rejecting")
@@ -251,8 +280,7 @@ class TaskService:
 
         return cascades
 
-    @staticmethod
-    def _assemble_context(linked_entities, linked_blindspot) -> str:
+    async def _assemble_context(self, linked_entities, linked_blindspot) -> str:
         """Build a concise context summary from ontology references."""
         parts: list[str] = []
 
@@ -266,5 +294,17 @@ class TaskService:
             parts.append(
                 f"觸發盲點：{linked_blindspot.description[:50]}"
             )
+
+        # Enrich with related document titles for richer context
+        if self._documents and linked_entities:
+            doc_titles: list[str] = []
+            for entity in linked_entities:
+                if entity.id and len(doc_titles) < 3:
+                    related_docs = await self._documents.list_by_entity(entity.id)
+                    for rd in related_docs:
+                        if len(doc_titles) < 3:
+                            doc_titles.append(rd.title)
+            if doc_titles:
+                parts.append(f"相關文件：{'、'.join(doc_titles)}")
 
         return "。".join(parts) if parts else ""
