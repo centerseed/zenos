@@ -27,11 +27,19 @@ class EntityRepository(TypingProtocol):
 
     async def list_unconfirmed(self) -> list[Entity]: ...
 
+    async def list_by_parent(self, parent_id: str) -> list[Entity]: ...
+
 
 class RelationshipRepository(TypingProtocol):
     """Persistence interface for skeleton-layer relationships."""
 
     async def list_by_entity(self, entity_id: str) -> list[Relationship]: ...
+
+    async def find_duplicate(
+        self, source_entity_id: str, target_id: str, rel_type: str,
+    ) -> Relationship | None:
+        """Find an existing relationship with the same source, target, and type."""
+        ...
 
     async def add(self, rel: Relationship) -> Relationship: ...
 

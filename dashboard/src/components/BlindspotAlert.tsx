@@ -17,15 +17,15 @@ export function BlindspotAlert({ blindspots }: BlindspotAlertProps) {
       {critical.map((b) => (
         <div
           key={b.id}
-          className="bg-red-50 border border-red-200 rounded-lg p-4"
+          className="bg-red-900/30 border border-red-800 rounded-lg p-4"
         >
           <div className="flex items-start gap-2">
             <span className="text-red-500 mt-0.5">●</span>
             <div>
-              <p className="text-sm font-medium text-red-800">
+              <p className="text-sm font-medium text-red-400">
                 {b.description}
               </p>
-              <p className="text-xs text-red-600 mt-1">{b.suggestedAction}</p>
+              <p className="text-xs text-red-500 mt-1">{b.suggestedAction}</p>
             </div>
           </div>
         </div>
@@ -33,15 +33,15 @@ export function BlindspotAlert({ blindspots }: BlindspotAlertProps) {
       {warnings.map((b) => (
         <div
           key={b.id}
-          className="bg-yellow-50 border border-yellow-200 rounded-lg p-4"
+          className="bg-yellow-900/30 border border-yellow-800 rounded-lg p-4"
         >
           <div className="flex items-start gap-2">
             <span className="text-yellow-500 mt-0.5">●</span>
             <div>
-              <p className="text-sm font-medium text-yellow-800">
+              <p className="text-sm font-medium text-yellow-400">
                 {b.description}
               </p>
-              <p className="text-xs text-yellow-600 mt-1">
+              <p className="text-xs text-yellow-500 mt-1">
                 {b.suggestedAction}
               </p>
             </div>

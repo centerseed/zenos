@@ -27,7 +27,19 @@ def _collect_searchable_text_entity(entity: Entity) -> str:
     """Collect all searchable text from an entity."""
     parts = [entity.name, entity.summary, entity.type]
     if isinstance(entity.tags, Tags):
-        parts.extend([entity.tags.what, entity.tags.why, entity.tags.how, entity.tags.who])
+        what = entity.tags.what
+        who = entity.tags.who
+        # Handle both list[str] and str formats
+        if isinstance(what, list):
+            parts.extend(what)
+        else:
+            parts.append(what)
+        parts.append(entity.tags.why)
+        parts.append(entity.tags.how)
+        if isinstance(who, list):
+            parts.extend(who)
+        else:
+            parts.append(who)
     return " ".join(parts)
 
 

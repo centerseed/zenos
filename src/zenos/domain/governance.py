@@ -35,7 +35,7 @@ from .models import (
 
 def check_split_criteria(
     entity: Entity,
-    related_docs: list[Document],
+    related_docs: list[Entity | Document],
     dependencies: list[Relationship],
 ) -> SplitRecommendation:
     """Decide whether an entity deserves its own module ontology.
@@ -73,7 +73,11 @@ def check_split_criteria(
     # audience set, the entity serves multiple reader groups.
     all_who: set[str] = set()
     for doc in related_docs:
-        for w in doc.tags.who:
+        who_val = doc.tags.who
+        # Handle both list[str] and str formats
+        if isinstance(who_val, str):
+            who_val = [who_val] if who_val else []
+        for w in who_val:
             all_who.add(w.strip().lower())
     if len(all_who) > 1:
         score += 1
@@ -130,30 +134,23 @@ def apply_tag_confidence(tags: Tags | DocumentTags) -> TagConfidence:
     confirmed: list[str] = []
     draft: list[str] = []
 
+    def _has_content(val: str | list[str]) -> bool:
+        """Check if a tag value has meaningful content (works for str or list)."""
+        if isinstance(val, list):
+            return bool(val) and any(w.strip() for w in val)
+        return bool(val) and bool(val.strip())
+
     # What: factual — high confidence
-    if isinstance(tags, Tags):
-        if tags.what.strip():
-            confirmed.append("what")
-        else:
-            draft.append("what")
+    if _has_content(tags.what):
+        confirmed.append("what")
     else:
-        # DocumentTags: what is list[str]
-        if tags.what and any(w.strip() for w in tags.what):
-            confirmed.append("what")
-        else:
-            draft.append("what")
+        draft.append("what")
 
     # Who: factual — high confidence
-    if isinstance(tags, Tags):
-        if tags.who.strip():
-            confirmed.append("who")
-        else:
-            draft.append("who")
+    if _has_content(tags.who):
+        confirmed.append("who")
     else:
-        if tags.who and any(w.strip() for w in tags.who):
-            confirmed.append("who")
-        else:
-            draft.append("who")
+        draft.append("who")
 
     # Why: intent — always draft
     draft.append("why")
@@ -177,7 +174,7 @@ _ROLE_DISAPPEAR_THRESHOLD = timedelta(days=90)  # "三個月沒出現"
 
 def detect_staleness(
     entities: list[Entity],
-    documents: list[Document],
+    documents: list[Entity | Document],
     relationships: list[Relationship],
     *,
     now: datetime | None = None,
@@ -195,10 +192,33 @@ def detect_staleness(
 
     warnings: list[StalenessWarning] = []
     entity_map = {e.id: e for e in entities if e.id}
-    docs_by_entity: dict[str, list[Document]] = {}
+    docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
-        for eid in doc.linked_entity_ids:
-            docs_by_entity.setdefault(eid, []).append(doc)
+        # Support both Document (linked_entity_ids) and Entity (parent_id)
+        if isinstance(doc, Document):
+            for eid in doc.linked_entity_ids:
+                docs_by_entity.setdefault(eid, []).append(doc)
+        elif hasattr(doc, "parent_id") and doc.parent_id:
+            docs_by_entity.setdefault(doc.parent_id, []).append(doc)
+
+    def _doc_title(d: Entity | Document) -> str:
+        return d.title if isinstance(d, Document) else d.name
+
+    def _doc_status(d: Entity | Document) -> str:
+        return d.status
+
+    def _doc_last_reviewed(d: Entity | Document) -> datetime:
+        if isinstance(d, Document):
+            return d.last_reviewed_at or d.updated_at
+        return d.last_reviewed_at or d.updated_at
+
+    def _doc_who(d: Entity | Document) -> list[str]:
+        if isinstance(d, Document):
+            return d.tags.who
+        who = d.tags.who
+        if isinstance(who, str):
+            return [who] if who else []
+        return who
 
     # --- Pattern 1: Feature updated but docs lagging ---
     # If an entity was updated recently but its linked docs were not,
@@ -208,22 +228,22 @@ def detect_staleness(
             continue
         linked_docs = docs_by_entity.get(entity.id, [])
         for doc in linked_docs:
-            if doc.status == DocumentStatus.ARCHIVED:
+            if _doc_status(doc) == DocumentStatus.ARCHIVED:
                 continue
             # Entity updated after doc was last touched
-            doc_last = doc.last_reviewed_at or doc.updated_at
+            doc_last = _doc_last_reviewed(doc)
             if entity.updated_at > doc_last + _STALENESS_THRESHOLD:
                 warnings.append(StalenessWarning(
                     pattern="feature_updated_docs_lagging",
                     description=(
                         f"Entity '{entity.name}' was updated on "
                         f"{entity.updated_at.date()}, but document "
-                        f"'{doc.title}' hasn't been reviewed since "
+                        f"'{_doc_title(doc)}' hasn't been reviewed since "
                         f"{doc_last.date()}"
                     ),
                     affected_entity_ids=[entity.id],
                     affected_document_ids=[doc.id] if doc.id else [],
-                    suggested_action=f"Review document '{doc.title}' for accuracy",
+                    suggested_action=f"Review document '{_doc_title(doc)}' for accuracy",
                 ))
 
     # --- Pattern 2: Goal completed but not closed ---
@@ -298,11 +318,11 @@ def detect_staleness(
         # Check if any current document references this role in Who
         found_recent = False
         for doc in documents:
-            if doc.status == DocumentStatus.ARCHIVED:
+            if _doc_status(doc) == DocumentStatus.ARCHIVED:
                 continue
-            doc_who_lower = {w.strip().lower() for w in doc.tags.who}
+            doc_who_lower = {w.strip().lower() for w in _doc_who(doc)}
             if role_name_lower in doc_who_lower:
-                doc_last = doc.last_reviewed_at or doc.updated_at
+                doc_last = _doc_last_reviewed(doc)
                 if now - doc_last < _ROLE_DISAPPEAR_THRESHOLD:
                     found_recent = True
                     break
@@ -329,7 +349,7 @@ def detect_staleness(
 
 def analyze_blindspots(
     entities: list[Entity],
-    documents: list[Document],
+    documents: list[Entity | Document],
     relationships: list[Relationship],
 ) -> list[Blindspot]:
     """Infer blind spots by cross-referencing ontology layers.
@@ -345,10 +365,47 @@ def analyze_blindspots(
     """
     blindspots: list[Blindspot] = []
     entity_map = {e.id: e for e in entities if e.id}
-    docs_by_entity: dict[str, list[Document]] = {}
+    docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
-        for eid in doc.linked_entity_ids:
-            docs_by_entity.setdefault(eid, []).append(doc)
+        if isinstance(doc, Document):
+            for eid in doc.linked_entity_ids:
+                docs_by_entity.setdefault(eid, []).append(doc)
+        elif hasattr(doc, "parent_id") and doc.parent_id:
+            docs_by_entity.setdefault(doc.parent_id, []).append(doc)
+
+    def _d_title(d: Entity | Document) -> str:
+        return d.title if isinstance(d, Document) else d.name
+
+    def _d_status(d: Entity | Document) -> str:
+        return d.status
+
+    def _d_what(d: Entity | Document) -> list[str]:
+        if isinstance(d, Document):
+            return d.tags.what
+        w = d.tags.what
+        if isinstance(w, str):
+            return [w] if w else []
+        return w
+
+    def _d_who(d: Entity | Document) -> list[str]:
+        if isinstance(d, Document):
+            return d.tags.who
+        w = d.tags.who
+        if isinstance(w, str):
+            return [w] if w else []
+        return w
+
+    def _d_uri(d: Entity | Document) -> str:
+        if isinstance(d, Document):
+            return d.source.uri
+        if d.sources:
+            return d.sources[0].get("uri", "")
+        return ""
+
+    def _d_linked_ids(d: Entity | Document) -> list[str]:
+        if isinstance(d, Document):
+            return [eid for eid in d.linked_entity_ids if eid]
+        return [d.parent_id] if d.parent_id else []
 
     # --- 1. Document placed in wrong location ---
     # If a doc's source URI path contains a category keyword that
@@ -362,10 +419,12 @@ def analyze_blindspots(
         "finance": {"finance", "財務", "accounting"},
     }
     for doc in documents:
-        if doc.status == DocumentStatus.ARCHIVED:
+        if _d_status(doc) == DocumentStatus.ARCHIVED:
             continue
-        uri_lower = doc.source.uri.lower()
-        doc_what_lower = {w.strip().lower() for w in doc.tags.what}
+        uri_lower = _d_uri(doc).lower()
+        if not uri_lower:
+            continue
+        doc_what_lower = {w.strip().lower() for w in _d_what(doc)}
         for category, keywords in _CATEGORY_KEYWORDS.items():
             # Check if the URI path suggests this category
             path_match = any(f"/{kw}/" in uri_lower or uri_lower.startswith(f"{kw}/") for kw in keywords)
@@ -378,14 +437,14 @@ def analyze_blindspots(
             # Mismatch: path says one thing, content says another
             blindspots.append(Blindspot(
                 description=(
-                    f"Document '{doc.title}' is in a {category} path "
-                    f"({doc.source.uri}) but its What tags "
-                    f"({', '.join(doc.tags.what)}) suggest different content"
+                    f"Document '{_d_title(doc)}' is in a {category} path "
+                    f"({_d_uri(doc)}) but its What tags "
+                    f"({', '.join(_d_what(doc))}) suggest different content"
                 ),
                 severity=Severity.YELLOW,
-                related_entity_ids=[eid for eid in doc.linked_entity_ids if eid],
+                related_entity_ids=_d_linked_ids(doc),
                 suggested_action=(
-                    f"Review whether '{doc.title}' belongs in its current location "
+                    f"Review whether '{_d_title(doc)}' belongs in its current location "
                     f"or should be moved"
                 ),
             ))
@@ -399,7 +458,7 @@ def analyze_blindspots(
         if not entity.id:
             continue
         linked = docs_by_entity.get(entity.id, [])
-        current_docs = [d for d in linked if d.status != DocumentStatus.ARCHIVED]
+        current_docs = [d for d in linked if _d_status(d) != DocumentStatus.ARCHIVED]
         if len(current_docs) < 2:
             blindspots.append(Blindspot(
                 description=(
@@ -420,29 +479,29 @@ def analyze_blindspots(
     _PROBLEM_INDICATORS = {"待修復", "已確認問題", "bug", "issue", "fix needed", "known issue", "todo"}
     _SCHEDULE_INDICATORS = {"排程", "scheduled", "planned", "sprint", "milestone", "deadline", "時程"}
     for doc in documents:
-        if doc.status == DocumentStatus.ARCHIVED:
+        if _d_status(doc) == DocumentStatus.ARCHIVED:
             continue
-        how_lower = doc.tags.how.lower()
+        how_lower = (doc.tags.how if hasattr(doc.tags, 'how') else "").lower()
         has_problem = any(ind in how_lower for ind in _PROBLEM_INDICATORS)
         has_schedule = any(ind in how_lower for ind in _SCHEDULE_INDICATORS)
         if has_problem and not has_schedule:
             blindspots.append(Blindspot(
                 description=(
-                    f"Document '{doc.title}' mentions confirmed problems "
+                    f"Document '{_d_title(doc)}' mentions confirmed problems "
                     f"but has no scheduled resolution"
                 ),
                 severity=Severity.RED,
-                related_entity_ids=[eid for eid in doc.linked_entity_ids if eid],
+                related_entity_ids=_d_linked_ids(doc),
                 suggested_action=(
                     f"Add timeline or priority for resolving issues in "
-                    f"'{doc.title}'"
+                    f"'{_d_title(doc)}'"
                 ),
             ))
 
     # --- 4. One-off docs ratio too high ---
     # If archived/draft docs > 2x current docs, knowledge noise is high.
-    current_docs = [d for d in documents if d.status in (DocumentStatus.CURRENT,)]
-    archivable_docs = [d for d in documents if d.status in (DocumentStatus.ARCHIVED, DocumentStatus.STALE)]
+    current_docs = [d for d in documents if _d_status(d) in (DocumentStatus.CURRENT,)]
+    archivable_docs = [d for d in documents if _d_status(d) in (DocumentStatus.ARCHIVED, DocumentStatus.STALE)]
     if current_docs and len(archivable_docs) > 2 * len(current_docs):
         blindspots.append(Blindspot(
             description=(
@@ -463,7 +522,7 @@ def analyze_blindspots(
     # intermediate evolution may be unrecorded.
     if len(documents) >= 2:
         sorted_docs = sorted(
-            [d for d in documents if d.status != DocumentStatus.ARCHIVED],
+            [d for d in documents if _d_status(d) != DocumentStatus.ARCHIVED],
             key=lambda d: d.updated_at,
         )
         six_months = timedelta(days=180)
@@ -473,9 +532,9 @@ def analyze_blindspots(
                 blindspots.append(Blindspot(
                     description=(
                         f"Timeline gap of {gap.days} days between "
-                        f"'{sorted_docs[i-1].title}' "
+                        f"'{_d_title(sorted_docs[i-1])}' "
                         f"({sorted_docs[i-1].updated_at.date()}) and "
-                        f"'{sorted_docs[i].title}' "
+                        f"'{_d_title(sorted_docs[i])}' "
                         f"({sorted_docs[i].updated_at.date()}). "
                         f"Intermediate changes may be unrecorded"
                     ),
@@ -499,9 +558,9 @@ def analyze_blindspots(
         # Check if any non-archived doc targets this role
         has_doc = False
         for doc in documents:
-            if doc.status == DocumentStatus.ARCHIVED:
+            if _d_status(doc) == DocumentStatus.ARCHIVED:
                 continue
-            if any(role_lower in w.strip().lower() for w in doc.tags.who):
+            if any(role_lower in w.strip().lower() for w in _d_who(doc)):
                 has_doc = True
                 break
         if not has_doc:
@@ -556,7 +615,7 @@ def analyze_blindspots(
 
 def run_quality_check(
     entities: list[Entity],
-    documents: list[Document],
+    documents: list[Entity | Document],
     protocols: list[Protocol],
     blindspots: list[Blindspot],
     relationships: list[Relationship],
@@ -567,10 +626,32 @@ def run_quality_check(
     """
     items: list[QualityCheckItem] = []
     entity_map = {e.id: e for e in entities if e.id}
-    docs_by_entity: dict[str, list[Document]] = {}
+    docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
-        for eid in doc.linked_entity_ids:
-            docs_by_entity.setdefault(eid, []).append(doc)
+        if isinstance(doc, Document):
+            for eid in doc.linked_entity_ids:
+                docs_by_entity.setdefault(eid, []).append(doc)
+        elif hasattr(doc, "parent_id") and doc.parent_id:
+            docs_by_entity.setdefault(doc.parent_id, []).append(doc)
+
+    def _qc_title(d: Entity | Document) -> str:
+        return d.title if isinstance(d, Document) else d.name
+
+    def _qc_status(d: Entity | Document) -> str:
+        return d.status
+
+    def _qc_linked(d: Entity | Document) -> list[str]:
+        if isinstance(d, Document):
+            return d.linked_entity_ids
+        return [d.parent_id] if d.parent_id else []
+
+    def _qc_who(d: Entity | Document) -> list[str]:
+        if isinstance(d, Document):
+            return d.tags.who
+        w = d.tags.who
+        if isinstance(w, str):
+            return [w] if w else []
+        return w
 
     # --- 1. Can the boss read the panorama in 2 minutes? ---
     # Proxy: total summary length of all entities should be manageable.
@@ -648,20 +729,20 @@ def run_quality_check(
     ))
 
     # --- 5. Every document has a linked module? ---
-    unlinked = [d for d in documents if not d.linked_entity_ids and d.status != DocumentStatus.ARCHIVED]
+    unlinked = [d for d in documents if not _qc_linked(d) and _qc_status(d) != DocumentStatus.ARCHIVED]
     check5_ok = len(unlinked) == 0
     items.append(QualityCheckItem(
         name="documents_linked",
         passed=check5_ok,
         detail=(
             f"{len(unlinked)} non-archived document(s) without linked entities"
-            + (f": {', '.join(d.title for d in unlinked[:5])}" if unlinked else "")
+            + (f": {', '.join(_qc_title(d) for d in unlinked[:5])}" if unlinked else "")
         ),
     ))
 
     # --- 6. Archive suggestions have rationale? ---
     # Archived docs should have a summary explaining why.
-    archived = [d for d in documents if d.status == DocumentStatus.ARCHIVED]
+    archived = [d for d in documents if _qc_status(d) == DocumentStatus.ARCHIVED]
     no_rationale = [d for d in archived if not d.summary.strip()]
     check6_ok = len(no_rationale) == 0
     items.append(QualityCheckItem(
@@ -699,8 +780,8 @@ def run_quality_check(
         role_lower = role.name.strip().lower()
         has_doc = any(
             role_lower in w.strip().lower()
-            for d in documents if d.status != DocumentStatus.ARCHIVED
-            for w in d.tags.who
+            for d in documents if _qc_status(d) != DocumentStatus.ARCHIVED
+            for w in _qc_who(d)
         )
         if not has_doc:
             roles_without_docs.append(role)
@@ -722,7 +803,7 @@ def run_quality_check(
     bad_granularity = []
     for mod in modules:
         linked = docs_by_entity.get(mod.id, [])
-        current = [d for d in linked if d.status != DocumentStatus.ARCHIVED]
+        current = [d for d in linked if _qc_status(d) != DocumentStatus.ARCHIVED]
         count = len(current)
         if count < 3 or count > 10:
             bad_granularity.append((mod, count))

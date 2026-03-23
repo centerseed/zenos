@@ -1,7 +1,9 @@
 "use client";
 
+import React from "react";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
+import { AppNav } from "@/components/AppNav";
 import { McpConfigBlock } from "@/components/McpConfigBlock";
 import Link from "next/link";
 
@@ -12,43 +14,25 @@ function SetupPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-3xl mx-auto px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="text-xl font-bold text-gray-900 hover:text-gray-600">
-            ZenOS
-          </Link>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500">
-              {partner.displayName}
-            </span>
-            <button
-              onClick={signOut}
-              className="text-sm text-gray-400 hover:text-gray-600 cursor-pointer"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
+      <AppNav />
 
       <main className="max-w-3xl mx-auto px-6 py-8">
-        <h2 className="text-2xl font-bold text-gray-900 mb-2">
+        <h2 className="text-2xl font-bold text-white mb-2">
           Set up your AI Agent
         </h2>
-        <p className="text-gray-500 mb-8">
+        <p className="text-[#71717A] mb-8">
           Connect your Claude Code to ZenOS so your AI agent has full context
           about your projects.
         </p>
 
         {/* MCP Config */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6 mb-8">
+        <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6 mb-8">
           <McpConfigBlock apiKey={partner.apiKey} />
         </div>
 
         {/* Steps */}
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <h3 className="font-semibold text-gray-900 mb-4">
+        <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
+          <h3 className="font-semibold text-white mb-4">
             Setup steps
           </h3>
           <ol className="space-y-4">
@@ -62,7 +46,7 @@ function SetupPage() {
                     href="https://docs.anthropic.com/en/docs/claude-code/overview"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline"
+                    className="text-blue-400 hover:underline"
                   >
                     Anthropic&apos;s docs
                   </a>
@@ -76,7 +60,7 @@ function SetupPage() {
               description={
                 <>
                   In your project directory, create or edit{" "}
-                  <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm">
+                  <code className="bg-[#1F1F23] px-1.5 py-0.5 rounded text-sm text-[#FAFAFA]">
                     .claude/mcp.json
                   </code>
                 </>
@@ -89,16 +73,31 @@ function SetupPage() {
             />
             <Step
               number={4}
-              title="Restart Claude Code"
-              description="Close and reopen Claude Code for the MCP settings to take effect."
+              title="Install ZenOS Skills"
+              description={
+                <>
+                  Copy the prompt below and paste it into Claude Code. It will automatically download and install the ZenOS skills.
+                </>
+              }
             />
+
+            {/* Skill install prompt */}
+            <div className="ml-11 mb-4">
+              <SkillInstallBlock />
+            </div>
+
             <Step
               number={5}
+              title="Restart Claude Code"
+              description="Close and reopen Claude Code for the MCP settings and skills to take effect."
+            />
+            <Step
+              number={6}
               title="Verify"
               description={
                 <>
                   Type{" "}
-                  <code className="bg-gray-100 px-1.5 py-0.5 rounded text-sm">
+                  <code className="bg-[#1F1F23] px-1.5 py-0.5 rounded text-sm text-[#FAFAFA]">
                     list all products
                   </code>{" "}
                   in Claude Code. If you see your project, you&apos;re all set!
@@ -111,7 +110,7 @@ function SetupPage() {
         <div className="mt-8 text-center">
           <Link
             href="/"
-            className="text-sm text-blue-600 hover:underline"
+            className="text-sm text-blue-400 hover:underline"
           >
             Back to projects
           </Link>
@@ -132,14 +131,48 @@ function Step({
 }) {
   return (
     <li className="flex gap-4">
-      <div className="flex-shrink-0 w-7 h-7 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-sm font-medium">
+      <div className="flex-shrink-0 w-7 h-7 bg-blue-900/50 text-blue-400 rounded-full flex items-center justify-center text-sm font-medium">
         {number}
       </div>
       <div>
-        <h4 className="font-medium text-gray-900">{title}</h4>
-        <p className="text-sm text-gray-500 mt-1">{description}</p>
+        <h4 className="font-medium text-white">{title}</h4>
+        <p className="text-sm text-[#71717A] mt-1">{description}</p>
       </div>
     </li>
+  );
+}
+
+const SKILL_INSTALL_PROMPT = `Download ZenOS skills from GitHub and install them into this project.
+
+1. Fetch all folders starting with "zenos-" from https://github.com/centerseed/zenos/tree/main/.claude/skills/
+2. For each folder (zenos-setup, zenos-capture, zenos-sync), download the SKILL.md file
+3. Save them to .claude/skills/{folder-name}/SKILL.md in this project
+4. Verify by listing .claude/skills/zenos-*/SKILL.md`;
+
+function SkillInstallBlock() {
+  const [copied, setCopied] = React.useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(SKILL_INSTALL_PROMPT);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="bg-[#0A0A0C] rounded-lg border border-[#1F1F23] overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-[#1F1F23]">
+        <span className="text-xs text-[#71717A]">Paste this into Claude Code</span>
+        <button
+          onClick={handleCopy}
+          className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer"
+        >
+          {copied ? "Copied!" : "Copy"}
+        </button>
+      </div>
+      <pre className="px-4 py-3 text-sm text-[#FAFAFA] whitespace-pre-wrap font-mono leading-relaxed">
+        {SKILL_INSTALL_PROMPT}
+      </pre>
+    </div>
   );
 }
 

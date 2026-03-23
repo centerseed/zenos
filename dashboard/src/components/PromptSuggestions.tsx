@@ -17,7 +17,7 @@ export function PromptSuggestions({ projectName }: PromptSuggestionsProps) {
 
   return (
     <div>
-      <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">
+      <h3 className="text-sm font-medium text-[#71717A] uppercase tracking-wide mb-3">
         Try these prompts
       </h3>
       <div className="grid gap-2">
@@ -41,10 +41,10 @@ function CopyablePrompt({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="flex items-center justify-between w-full text-left bg-blue-50 hover:bg-blue-100 border border-blue-100 rounded-lg px-4 py-3 text-sm text-blue-800 transition-colors cursor-pointer group"
+      className="flex items-center justify-between w-full text-left bg-blue-900/20 hover:bg-blue-900/30 border border-blue-900/50 rounded-lg px-4 py-3 text-sm text-blue-300 transition-colors cursor-pointer group"
     >
       <span>&ldquo;{text}&rdquo;</span>
-      <span className="text-xs text-blue-400 group-hover:text-blue-600 ml-3 whitespace-nowrap">
+      <span className="text-xs text-blue-500 group-hover:text-blue-300 ml-3 whitespace-nowrap">
         {copied ? "Copied!" : "Copy"}
       </span>
     </button>

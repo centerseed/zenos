@@ -8,3 +8,10 @@
 | 2026-03-21 | alexkung | 馬拉松後段掉速的心理生物學模型（Psychobiological model） | https://www.threads.com/@alexkung/post/DWFd_u5Eokw | 分享自己跑全馬後半段心率沒到頂但大腦先投降的經驗，提出賽前心理疲勞管理跟碳水超補一樣重要 |
 | 2026-03-21 | kyogre2y_4305 | 週訓練日記 3/16-3/21（間歇、配速跑、田徑場） | https://www.threads.com/@kyogre2y_4305/post/DWJb8GQEqxU | 稱讚課表扎實有節奏，分享間歇隔天安排輕鬆有氧的經驗，提醒 3/19 間歇接 3/20 配速跑累積負荷較高，鼓勵 5K 破 20 |
 | 2026-03-21 | tszyiu1999 | 訓練日記 #321 — 30 分鐘輕鬆跑維持有氧基礎（目標 2027 渣馬 sub 3） | https://www.threads.com/@tszyiu1999/post/DWJaAbUkyuw | 稱讚 321 篇的堅持，指出心率分佈 100% 在有氧區很漂亮，分享自己以前輕鬆跑飄到 Zone 3 的教訓，鼓勵 sub 3 |
+
+## 2026-03-22
+
+| 日期 | 貼文作者 | 貼文主題 | 貼文 URL | 留言內容摘要 |
+|------|--------|--------|---------|---------|
+| 2026-03-22 | yiiiinch | 人生初半馬，台中城市馬完賽（8K 直上 21K，得 ITBS） | https://www.threads.com/@yiiiinch/post/DV_NfvmE_oZ | 短評式幽默回應：「等等 最長跑 8K 就直上半馬？膝蓋：我沒有同意這件事」純聊天，未提 Paceriz |
+| 2026-03-22 | qingxi.x | 海風馬拉松初全馬完賽，8 分速，遇 83 歲阿伯跑全馬 | https://www.threads.com/@qingxi.x/post/DWL5kG0EskY | 短評式幽默回應：「補給站停一下就被 83 歲阿伯超車 哈哈哈哈 這畫面太好笑了吧」純聊天，未提 Paceriz |

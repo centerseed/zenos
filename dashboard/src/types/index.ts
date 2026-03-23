@@ -7,28 +7,39 @@ export interface Partner {
   apiKey: string;
   authorizedEntityIds: string[];
   isAdmin: boolean;
-  status: "active" | "suspended";
+  status: "active" | "suspended" | "invited";
+  invitedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
 
 export interface Tags {
-  what: string;
+  what: string | string[];
   why: string;
   how: string;
-  who: string;
+  who: string | string[];
+}
+
+export interface Source {
+  uri: string;
+  label: string;
+  type: string;
 }
 
 export interface Entity {
   id: string;
   name: string;
-  type: "product" | "module" | "goal" | "role" | "project";
+  type: "product" | "module" | "goal" | "role" | "project" | "document";
   summary: string;
   tags: Tags;
-  status: "active" | "paused" | "completed" | "planned";
+  status: "active" | "paused" | "completed" | "planned" | "current" | "stale" | "draft" | "conflict";
   parentId: string | null;
   details: Record<string, unknown> | null;
   confirmedByUser: boolean;
+  owner: string | null;
+  sources: Source[];
+  visibility: "public" | "restricted";
+  lastReviewedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -53,14 +64,8 @@ export interface Blindspot {
   createdAt: Date;
 }
 
-export interface DocumentEntry {
-  id: string;
-  title: string;
-  summary: string;
-  linkedEntityIds: string[];
-  status: "current" | "stale" | "archived" | "draft" | "conflict";
-  confirmedByUser: boolean;
-}
+/** @deprecated Use Entity with type="document" instead */
+export type DocumentEntry = Entity;
 
 export type TaskStatus = "backlog" | "todo" | "in_progress" | "review" | "done" | "archived" | "blocked" | "cancelled";
 export type TaskPriority = "critical" | "high" | "medium" | "low";

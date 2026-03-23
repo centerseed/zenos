@@ -1,0 +1,15 @@
+.git
+.github
+.claude
+.firebase
+dashboard/node_modules
+dashboard/.next
+dashboard/out
+docs
+threads-*
+*.md
+tests/
+scripts/
+__pycache__
+*.pyc
+.env*

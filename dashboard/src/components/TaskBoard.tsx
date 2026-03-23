@@ -18,11 +18,11 @@ const COLUMN_LABELS: Record<string, string> = {
 };
 
 const COLUMN_HEADER_COLORS: Record<string, string> = {
-  todo: "bg-blue-50 text-blue-700",
-  in_progress: "bg-yellow-50 text-yellow-700",
-  review: "bg-purple-50 text-purple-700",
-  blocked: "bg-red-50 text-red-700",
-  backlog: "bg-gray-50 text-gray-500",
+  todo: "bg-blue-900/50 text-blue-400",
+  in_progress: "bg-yellow-900/50 text-yellow-400",
+  review: "bg-purple-900/50 text-purple-400",
+  blocked: "bg-red-900/50 text-red-400",
+  backlog: "bg-[#1F1F23] text-[#71717A]",
 };
 
 export function TaskBoard({ tasks }: TaskBoardProps) {
@@ -43,18 +43,18 @@ export function TaskBoard({ tasks }: TaskBoardProps) {
         return (
           <div key={status} className="flex-shrink-0 w-72">
             <div
-              className={`rounded-t-lg px-3 py-2 flex items-center justify-between ${COLUMN_HEADER_COLORS[status] ?? "bg-gray-50 text-gray-500"}`}
+              className={`rounded-t-lg px-3 py-2 flex items-center justify-between ${COLUMN_HEADER_COLORS[status] ?? "bg-[#1F1F23] text-[#71717A]"}`}
             >
               <span className="text-xs font-semibold uppercase">
                 {COLUMN_LABELS[status] ?? status}
               </span>
-              <span className="text-xs font-medium rounded-full bg-white/60 px-2 py-0.5">
+              <span className="text-xs font-medium rounded-full bg-white/10 px-2 py-0.5">
                 {columnTasks.length}
               </span>
             </div>
-            <div className="bg-gray-50 rounded-b-lg p-2 space-y-2 min-h-[120px]">
+            <div className="bg-[#0A0A0B] rounded-b-lg p-2 space-y-2 min-h-[120px] border-x border-b border-[#1F1F23]">
               {columnTasks.length === 0 ? (
-                <p className="text-xs text-gray-400 text-center py-6">No tasks</p>
+                <p className="text-xs text-[#71717A] text-center py-6">No tasks</p>
               ) : (
                 columnTasks.map((task) => (
                   <TaskCard key={task.id} task={task} />

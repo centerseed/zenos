@@ -10,6 +10,7 @@ import {
 import {
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut as firebaseSignOut,
   GoogleAuthProvider,
   type User,
@@ -33,6 +34,7 @@ interface AuthState {
 interface AuthContextValue extends AuthState {
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  refetchPartner: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -56,8 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const q = query(
           collection(getDbInstance(), "partners"),
-          where("email", "==", user.email),
-          where("status", "==", "active")
+          where("email", "==", user.email)
         );
         const snapshot = await getDocs(q);
 
@@ -81,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           authorizedEntityIds: data.authorizedEntityIds ?? [],
           isAdmin: data.isAdmin ?? false,
           status: data.status,
+          invitedBy: data.invitedBy ?? null,
           createdAt: data.createdAt?.toDate() ?? new Date(),
           updatedAt: data.updatedAt?.toDate() ?? new Date(),
         };
@@ -95,9 +97,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return unsubscribe;
   }, []);
 
+  const refetchPartner = async () => {
+    const currentUser = getAuthInstance().currentUser;
+    if (!currentUser?.email) return;
+    try {
+      const q = query(
+        collection(getDbInstance(), "partners"),
+        where("email", "==", currentUser.email)
+      );
+      const snapshot = await getDocs(q);
+      if (snapshot.empty) return;
+      const doc = snapshot.docs[0];
+      const data = doc.data();
+      const partner: Partner = {
+        id: doc.id,
+        email: data.email,
+        displayName: data.displayName,
+        apiKey: data.apiKey,
+        authorizedEntityIds: data.authorizedEntityIds ?? [],
+        isAdmin: data.isAdmin ?? false,
+        status: data.status,
+        invitedBy: data.invitedBy ?? null,
+        createdAt: data.createdAt?.toDate() ?? new Date(),
+        updatedAt: data.updatedAt?.toDate() ?? new Date(),
+      };
+      setState({ user: currentUser, partner, loading: false, error: null });
+    } catch (err) {
+      console.error("Failed to refetch partner:", err);
+    }
+  };
+
   const signInWithGoogle = async () => {
     const provider = new GoogleAuthProvider();
-    await signInWithPopup(getAuthInstance(), provider);
+    try {
+      await signInWithPopup(getAuthInstance(), provider);
+    } catch {
+      // Popup blocked or failed — fallback to redirect
+      await signInWithRedirect(getAuthInstance(), provider);
+    }
   };
 
   const signOut = async () => {
@@ -105,7 +142,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ ...state, signInWithGoogle, signOut, refetchPartner }}>
       {children}
     </AuthContext.Provider>
   );

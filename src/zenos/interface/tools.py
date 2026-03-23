@@ -26,28 +26,40 @@ from __future__ import annotations
 import logging
 import os
 import time
+from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime
 
+from dotenv import load_dotenv
 from starlette.responses import JSONResponse
 
 from fastmcp import FastMCP
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
+from zenos.application.governance_ai import GovernanceAI
 from zenos.application.governance_service import GovernanceService
 from zenos.application.ontology_service import OntologyService
 from zenos.application.source_service import SourceService
 from zenos.application.task_service import TaskService
+from zenos.infrastructure.llm_client import create_llm_client
 from zenos.infrastructure.firestore_repo import (
     FirestoreBlindspotRepository,
-    FirestoreDocumentRepository,
+    FirestoreDocumentRepository,  # kept for legacy backward compat
     FirestoreEntityRepository,
     FirestoreProtocolRepository,
     FirestoreRelationshipRepository,
     FirestoreTaskRepository,
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
+
+# ──────────────────────────────────────────────
+# Agent Identity — ContextVar for partner data
+# ──────────────────────────────────────────────
+
+_current_partner: ContextVar[dict | None] = ContextVar("current_partner", default=None)
 
 # ──────────────────────────────────────────────
 # API Key authentication middleware
@@ -126,13 +138,21 @@ class ApiKeyMiddleware:
 
         # 1. Superadmin key (env var)
         if key and key == ZENOS_API_KEY:
-            return await self.app(scope, receive, send)
+            token = _current_partner.set({"displayName": "superadmin", "email": "admin"})
+            try:
+                return await self.app(scope, receive, send)
+            finally:
+                _current_partner.reset(token)
 
         # 2. Partner key (Firestore)
         if key:
             partner = await _partner_validator.validate(key)
             if partner is not None:
-                return await self.app(scope, receive, send)
+                token = _current_partner.set(partner)
+                try:
+                    return await self.app(scope, receive, send)
+                finally:
+                    _current_partner.reset(token)
             logger.warning(
                 "Auth rejected: key=%.8s... path=%s cache_size=%d",
                 key, path, len(_partner_validator._cache),
@@ -177,24 +197,33 @@ task_repo = FirestoreTaskRepository()
 
 source_adapter = GitHubAdapter()
 
+# GovernanceAI: LLM-based auto-inference (optional, depends on env config)
+_governance_ai: GovernanceAI | None = None
+try:
+    _llm_client = create_llm_client()
+    _governance_ai = GovernanceAI(_llm_client)
+    logger.info("GovernanceAI initialized with model: %s", _llm_client.model)
+except Exception:
+    logger.warning("GovernanceAI disabled: LLM client initialization failed", exc_info=True)
+
 ontology_service = OntologyService(
     entity_repo=entity_repo,
     relationship_repo=relationship_repo,
     document_repo=document_repo,
     protocol_repo=protocol_repo,
     blindspot_repo=blindspot_repo,
+    governance_ai=_governance_ai,
 )
 
 governance_service = GovernanceService(
     entity_repo=entity_repo,
-    document_repo=document_repo,
     relationship_repo=relationship_repo,
     protocol_repo=protocol_repo,
     blindspot_repo=blindspot_repo,
 )
 
 source_service = SourceService(
-    document_repo=document_repo,
+    entity_repo=entity_repo,
     source_adapter=source_adapter,
 )
 
@@ -202,7 +231,7 @@ task_service = TaskService(
     task_repo=task_repo,
     entity_repo=entity_repo,
     blindspot_repo=blindspot_repo,
-    document_repo=document_repo,
+    governance_ai=_governance_ai,
 )
 
 
@@ -333,16 +362,17 @@ async def search(
             results["entities"] = items
 
         elif col == "documents":
-            docs = await ontology_service._documents.list_all()
+            # Query document entities (type="document") from entities collection
+            doc_entities = await ontology_service._entities.list_all(type_filter="document")
             if entity_name:
                 entity = await ontology_service._entities.get_by_name(entity_name)
                 if entity and entity.id:
-                    docs = [
-                        d for d in docs if entity.id in d.linked_entity_ids
+                    doc_entities = [
+                        d for d in doc_entities if d.parent_id == entity.id
                     ]
             if confirmed_only is not None:
-                docs = [d for d in docs if d.confirmed_by_user == confirmed_only]
-            results["documents"] = [_serialize(d) for d in docs[:limit]]
+                doc_entities = [d for d in doc_entities if d.confirmed_by_user == confirmed_only]
+            results["documents"] = [_serialize(d) for d in doc_entities[:limit]]
 
         elif col == "protocols":
             # Protocols don't have list_all, collect via entities
@@ -451,6 +481,7 @@ async def get(
         doc_id = id or name
         if not doc_id:
             return {"error": "INVALID_INPUT", "message": "Provide id for documents"}
+        # Try entity(type=document) first, then legacy documents
         result = await ontology_service.get_document(doc_id)
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
@@ -551,10 +582,12 @@ async def write(
 
     各集合必填欄位：
 
-    entities: name, type(product/module/goal/role/project), summary,
+    entities: name, type(product/module/goal/role/project/document), summary,
               tags({what, why, how, who})
-              選填但重要：parent_id（module 必須設為所屬 product 的 entity ID，
-              否則 Dashboard 上不會顯示在該 product 下）
+              選填：parent_id（module 必須設為所屬 product 的 entity ID）
+              選填：owner（負責人名稱，如 "Barry"）
+              選填：sources([{uri, label, type}]) 或 append_sources（追加不覆蓋）
+              選填：visibility（"public" | "restricted"，預設 public）
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary
     protocols: entity_id, entity_name, content({what, why, how, who})
@@ -579,6 +612,7 @@ async def write(
             return response
 
         elif collection == "documents":
+            # Backward compat: collection="documents" now creates entity(type="document")
             result = await ontology_service.upsert_document(data)
             return _serialize(result)
 
@@ -768,6 +802,11 @@ async def task(
         if action == "create":
             if not title:
                 return {"error": "INVALID_INPUT", "message": "title is required for create"}
+            # Auto-fill created_by from partner identity if not provided
+            if not created_by:
+                partner = _current_partner.get()
+                if partner:
+                    created_by = partner.get("displayName", "unknown")
             if not created_by:
                 return {"error": "INVALID_INPUT", "message": "created_by is required for create"}
 
@@ -902,44 +941,6 @@ async def analyze(
     return results
 
 
-# ===================================================================
-# Tool 8: purge_all — delete all ontology data
-# ===================================================================
-
-
-@mcp.tool(tags={"admin"})
-async def purge_all(confirm_text: str) -> dict:
-    """刪除所有 ontology 資料（entities/documents/protocols/blindspots/relationships）。
-
-    ⚠️ 危險操作：不可逆。Tasks 不受影響。
-
-    Args:
-        confirm_text: 必須輸入 "DELETE ALL ONTOLOGY" 才會執行
-    """
-    if confirm_text != "DELETE ALL ONTOLOGY":
-        return {
-            "error": "SAFETY_CHECK",
-            "message": "Must provide confirm_text='DELETE ALL ONTOLOGY' to proceed.",
-        }
-
-    from zenos.infrastructure.firestore_repo import get_db
-
-    db = get_db()
-
-    deleted: dict[str, int] = {}
-    for col_name in ["entities", "documents", "protocols", "blindspots"]:
-        count = 0
-        async for doc in db.collection(col_name).stream():
-            # For entities, also delete sub-collection "relationships"
-            if col_name == "entities":
-                async for rel_doc in doc.reference.collection("relationships").stream():
-                    await rel_doc.reference.delete()
-            await doc.reference.delete()
-            count += 1
-        deleted[col_name] = count
-
-    return {"status": "PURGED", "deleted": deleted}
-
 
 # ===================================================================
 # Entrypoint
@@ -954,7 +955,22 @@ if __name__ == "__main__":
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
     if transport in ("sse", "http"):
         port = int(os.environ.get("PORT", "8080"))
-        app = ApiKeyMiddleware(mcp.http_app(transport="streamable-http"))
+
+        from starlette.applications import Starlette
+        from starlette.routing import Mount, Route
+        from zenos.interface.admin_api import admin_routes
+
+        http_app = mcp.http_app(transport="streamable-http", stateless_http=True)
+        mcp_app = ApiKeyMiddleware(http_app)
+
+        app = Starlette(
+            routes=[
+                *[Route(r.path, r.endpoint, methods=r.methods) for r in admin_routes],
+                Mount("/", app=mcp_app),
+            ],
+            lifespan=http_app.lifespan,
+        )
+
         import uvicorn
         uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
     else:

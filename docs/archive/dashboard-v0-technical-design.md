@@ -25,13 +25,16 @@
 
 ### 2. 部署位置
 
-**結論：Vercel（免費方案足夠）**
+**結論：Firebase Hosting（zenos-naruvia.web.app）**
 
 | 選項 | 優點 | 缺點 | 結論 |
 |------|------|------|------|
-| Vercel | Next.js 原生支援、零設定部署、preview deploy | 免費方案有限制 | ✅ |
-| Firebase Hosting | 同一個 GCP project | 對 Next.js 的 SSR 支援不完整 | ❌ |
+| Firebase Hosting | 同一個 GCP project、Next.js static export 完美支援、免費額度充足 | 不支援 SSR（但我們用 static export 不需要） | ✅ |
+| Vercel | Next.js 原生支援、preview deploy | 多一個服務商、免費方案有限制 | ❌ |
 | Cloud Run | 已經跑 MCP server | 需要自己管 Docker，過重 | ❌ |
+
+部署指令：`cd /Users/wubaizong/接案/ZenOS && firebase deploy --only hosting`
+Next.js config：`output: "export"`，靜態輸出到 `dashboard/out/`
 
 ### 3. API key 管理
 
@@ -399,16 +402,15 @@ class PartnerKeyValidator:
 
 ---
 
-### Task 7：Vercel 部署 + 網域
+### Task 7：Firebase Hosting 部署
 
 **角色：** Developer
 **預估：** 半天
 
 **Done Criteria：**
-- [ ] Dashboard 部署到 Vercel
-- [ ] 環境變數設定（Firebase config）
-- [ ] 設定自訂網域（如 `dashboard.zenos.app` 或類似）⚠️ 待 Barry 確認網域
-- [ ] Firebase Auth 的 authorized domains 加入 Vercel 網域
+- [ ] Dashboard 部署到 Firebase Hosting（zenos-naruvia.web.app）
+- [ ] `next.config.ts` 設定 `output: "export"`
+- [ ] `firebase.json` 設定 `hosting.public: "dashboard/out"` + SPA rewrites
 - [ ] 部署後 E2E 驗證：登入 → 看到專案 → 進 setup → 複製 config → 看到概覽
 
 ---

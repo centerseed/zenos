@@ -3,10 +3,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // ── Partners: read own document only, writes via Admin SDK ──
+    // ── Partners: authenticated users can read all (for People Matrix),
+    //    writes via Admin SDK only ──
     match /partners/{partnerId} {
-      allow read: if request.auth != null
-                  && resource.data.email == request.auth.token.email;
+      allow read: if request.auth != null;
       allow write: if false;
     }
 

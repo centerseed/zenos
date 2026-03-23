@@ -122,23 +122,34 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
   [2/{n}] docs/01-specs/SPEC-weekly-plan-v2.md → ...
 ```
 
-每份 document entry 包含：
-- `title`：從路徑或文件 H1 標題取得
-- `source.uri`：**嚴格按照「知識分析流程 Step 3」的 GitHub URL 構建步驟**（git remote 解析 + git root 相對路徑）
-- `tags.what`：關聯的實體（從文件內容或路徑推斷）
+每份 document entry 包含（注意：`write(collection="documents")` 會自動建立 `entity(type="document")`）：
+- `title`：從路徑或文件 H1 標題取得（映射為 entity.name）
+- `source`：`{type, uri, adapter}`，**嚴格按照「知識分析流程 Step 3」的 GitHub URL 構建步驟**（git remote 解析 + git root 相對路徑）。映射為 entity.sources[0]
+- `tags.what`：關聯的實體（list[str]，從文件內容或路徑推斷）
 - `tags.why`：這份文件為什麼存在（一句話）
 - `tags.how`：文件類型（spec/frd/guide/architecture）
-- `tags.who`：目標讀者（開發/PM/行銷）
+- `tags.who`：目標讀者（list[str]，如 ["開發", "PM"]）
 - `summary`：2-3 句語意摘要——這份文件在知識體系中的定位，不是全文節錄
+- `linked_entity_ids`：關聯的 entity IDs（第一個映射為 parent_id，其餘自動建立 relationships）
 - `confirmed_by_user = false`（全部先 draft）
 
-### C4. 第三階段：P2/P3 文件 — 快速建 entry（不讀全文）
+### C4. 第三階段：P2/P3 文件 — 追加到 entity.sources（不建獨立 entity）
 
-對 P2/P3 文件，用路徑推斷 metadata，**不讀全文**（速度優先）：
+P2/P3 文件不值得成為獨立節點，用 `append_sources` 追加到所屬 entity：
 
 ```
-進度：P2/P3 文件（快速）
-  [1/{n}] docs/02-api/... → entry ✅
+write(collection="entities", id={parent_entity_id}, data={
+  name: {existing_name},
+  type: {existing_type},
+  summary: {existing_summary},
+  tags: {existing_tags},
+  append_sources: [{uri: GitHub URL, label: 檔名, type: "github"}]
+})
+```
+
+```
+進度：P2/P3 文件（追加 sources）
+  [1/{n}] docs/02-api/... → append to 訓練計畫.sources ✅
   [2/{n}] ...
 ```
 
@@ -210,12 +221,16 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 ### Step 3：神經層自動寫入 draft
 
 ```
+# 寫入前先查重：用 search(collection="documents", query="{source.uri}")
+# 檢查同 URL 的 document 是否已存在。已存在就跳過，不重複建立。
 write(collection="documents", data={
   title, source, tags, summary,
   linked_entity_ids,
   confirmed_by_user: False
 })
 ```
+
+> **linked_entity_ids 必帶**：你在掃描時已經知道這份文件跟哪個 entity 相關，直接帶上。不確定時才省略，server 會用 GovernanceAI 兜底推斷。
 
 文件 entry 的 `source.uri`（**必須嚴格遵守**）：
 
@@ -315,4 +330,4 @@ write(collection="documents", data={
 1. 先建 product entity（拿到 ID）
 2. 再建 module entity（帶 parent_id 指向 product）
 3. 再建 relationships（source/target 都已存在）
-4. 最後建 documents（linked_entity_ids 都已存在）
+4. 建 documents（帶 linked_entity_ids + 寫入前用 source.uri 查重，已存在就跳過）

@@ -137,27 +137,27 @@ search(query=文件路徑關鍵詞 或 commit message 關鍵詞)
   ...
 ```
 
-每個 document entry：
+**高價值文件（spec/架構/PRD）→ 建 document entity：**
 ```
 write(collection="documents", data={
-  title: 從路徑或文件 H1 取得,
-  source = {
-    "type": "github",
-    "uri": 如果有 git remote → 構建 GitHub URL；否則 file://{絕對路徑},
-    "adapter": "github"
-  },
-  tags = {
-    "what": [關聯實體名稱，從 commit message 或路徑推斷],
-    "why": commit message 或文件目的（一句話）,
-    "how": 文件類型（spec/frd/guide/refactor），
-    "who": [推斷的讀者，如 ["開發", "PM"]]
-  },
-  summary = 基於 commit message + 路徑 + 必要時讀文件片段的語意摘要,
-  confirmed_by_user: False
+  title: 從路徑或文件 H1 取得（映射為 entity.name）,
+  source: {type: "github", uri: GitHub URL, adapter: "github"},
+  tags: {what: [關聯實體名稱], why: "文件目的", how: "spec/frd/guide", who: ["開發", "PM"]},
+  summary: 語意摘要,
+  linked_entity_ids: [所屬 entity ID]（第一個映射為 parent_id）,
+  confirmed_by_user: false
 })
 ```
 
-**何時讀全文**：commit message 不夠清楚 + 這是 P0 文件時，才讀全文。
+**低價值文件（guides/雜項）→ 追加到 entity.sources：**
+```
+write(collection="entities", id={parent_entity_id}, data={
+  ...existing fields...,
+  append_sources: [{uri: GitHub URL, label: 檔名, type: "github"}]
+})
+```
+
+**何時讀全文**：commit message 不夠清楚 + 這是高價值文件時，才讀全文。
 
 ---
 
@@ -248,8 +248,8 @@ write(collection="documents", data={
 ### Relationship / Blindspot / Document / Protocol
 - Relationship：source/target entity 必須存在，type 必須是合法 enum
 - Blindspot：severity 必須是 `red` / `yellow` / `green`，related_entity_ids 必須都存在
-- Document：source.type 必須是 `github` / `gdrive` / `notion` / `upload`，linked_entity_ids 必須都存在
+- Document：source.type 必須是 `github` / `gdrive` / `notion` / `upload`。linked_entity_ids 盡量帶上（你掃描時知道屬於誰）。寫入前用 source.uri 查重，已存在就跳過
 - Protocol：entity_id 必須存在，content 必須含 what/why/how/who
 
-### 寫入順序（必須遵守）
-1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents
+### 寫入順序（建議）
+1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents（帶 linked_entity_ids + source.uri 查重）

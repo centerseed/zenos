@@ -17,9 +17,9 @@ interface ProjectStat {
 export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
   if (entities.length === 0) {
     return (
-      <div className="bg-white rounded-lg border border-gray-200 p-6">
-        <h3 className="text-sm font-semibold text-gray-900 mb-4">Projects Progress</h3>
-        <p className="text-sm text-gray-400 text-center py-4">No projects yet</p>
+      <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
+        <h3 className="text-sm font-semibold text-white mb-4">Projects Progress</h3>
+        <p className="text-sm text-[#71717A] text-center py-4">No projects yet</p>
       </div>
     );
   }
@@ -37,8 +37,8 @@ export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
     .sort((a, b) => b.percent - a.percent);
 
   return (
-    <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <h3 className="text-sm font-semibold text-gray-900 mb-4">Projects Progress</h3>
+    <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
+      <h3 className="text-sm font-semibold text-white mb-4">Projects Progress</h3>
       <div className="space-y-4">
         {stats.map(({ entity, total, done, percent }) => {
           let barColor = "bg-red-500";
@@ -48,21 +48,21 @@ export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
           return (
             <div key={entity.id}>
               <div className="flex items-center justify-between mb-1">
-                <span className="text-sm font-medium text-gray-700">
+                <span className="text-sm font-medium text-[#FAFAFA]">
                   {entity.name}
                 </span>
-                <span className="text-xs text-gray-500">
+                <span className="text-xs text-[#71717A]">
                   {done}/{total}
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex-1 bg-gray-200 rounded-full h-2">
+                <div className="flex-1 bg-[#1F1F23] rounded-full h-2">
                   <div
                     className={`${barColor} rounded-full h-2 transition-all`}
                     style={{ width: `${percent}%` }}
                   />
                 </div>
-                <span className="text-xs font-medium text-gray-600 w-10 text-right">
+                <span className="text-xs font-medium text-[#71717A] w-10 text-right">
                   {percent}%
                 </span>
               </div>

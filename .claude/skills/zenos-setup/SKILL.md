@@ -57,7 +57,7 @@ python .claude/skills/zenos-setup/scripts/setup.py --token {用戶輸入的 toke
 ✅ 設定完成！
 
 已寫入 .claude/mcp.json：
-  zenos (Cloud) → https://zenos-mcp-xxx.run.app/sse
+  zenos (Cloud) → https://zenos-mcp-xxx.run.app/mcp
 
 下一步：
 1. 重啟 Claude Code（Cmd+R 或關掉重開）
@@ -72,7 +72,7 @@ python .claude/skills/zenos-setup/scripts/setup.py --token {用戶輸入的 toke
   "mcpServers": {
     "zenos": {
       "type": "http",
-      "url": "https://zenos-mcp-165893875709.asia-east1.run.app/sse?api_key={TOKEN}"
+      "url": "https://zenos-mcp-165893875709.asia-east1.run.app/mcp?api_key={TOKEN}"
     }
   }
 }

@@ -7,19 +7,37 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { getDbInstance } from "./firebase";
-import type { Entity, Relationship, Blindspot, DocumentEntry, Task, Partner } from "@/types";
+import type { Entity, Relationship, Blindspot, Task, Partner } from "@/types";
 
 export function toEntity(id: string, data: Record<string, unknown>): Entity {
+  // Normalize tags.what and tags.who to always be arrays
+  const rawTags = (data.tags ?? {}) as Record<string, unknown>;
+  const normalizeTagList = (val: unknown): string | string[] => {
+    if (Array.isArray(val)) return val as string[];
+    if (typeof val === "string") return val;
+    return [];
+  };
+  const tags = {
+    what: normalizeTagList(rawTags.what),
+    why: (rawTags.why as string) ?? "",
+    how: (rawTags.how as string) ?? "",
+    who: normalizeTagList(rawTags.who),
+  };
+
   return {
     id,
     name: data.name as string,
     type: data.type as Entity["type"],
     summary: data.summary as string,
-    tags: data.tags as Entity["tags"],
+    tags,
     status: (data.status as Entity["status"]) ?? "active",
     parentId: (data.parentId as string) ?? null,
     details: (data.details as Record<string, unknown>) ?? null,
     confirmedByUser: (data.confirmedByUser as boolean) ?? false,
+    owner: (data.owner as string) ?? null,
+    sources: (data.sources as Entity["sources"]) ?? [],
+    visibility: (data.visibility as Entity["visibility"]) ?? "public",
+    lastReviewedAt: (data.lastReviewedAt as { toDate?: () => Date })?.toDate?.() ?? null,
     createdAt: (data.createdAt as { toDate: () => Date })?.toDate?.() ?? new Date(),
     updatedAt: (data.updatedAt as { toDate: () => Date })?.toDate?.() ?? new Date(),
   };
@@ -103,11 +121,12 @@ export async function getBlindspots(entityId: string): Promise<Blindspot[]> {
   });
 }
 
-/** Count documents linked to an entity */
+/** Count document entities linked to an entity (via parentId) */
 export async function countDocuments(entityId: string): Promise<number> {
   const q = query(
-    collection(getDbInstance(), "documents"),
-    where("linkedEntityIds", "array-contains", entityId)
+    collection(getDbInstance(), "entities"),
+    where("type", "==", "document"),
+    where("parentId", "==", entityId)
   );
   const snapshot = await getDocs(q);
   return snapshot.size;
@@ -151,6 +170,7 @@ export function toPartner(id: string, data: Record<string, unknown>): Partner {
     authorizedEntityIds: (data.authorizedEntityIds as string[]) ?? [],
     isAdmin: (data.isAdmin as boolean) ?? false,
     status: (data.status as Partner["status"]) ?? "active",
+    invitedBy: (data.invitedBy as string) ?? null,
     createdAt: (data.createdAt as { toDate?: () => Date })?.toDate?.() ?? new Date(),
     updatedAt: (data.updatedAt as { toDate?: () => Date })?.toDate?.() ?? new Date(),
   };
@@ -190,20 +210,53 @@ export async function getTasks(filters?: {
 /** Fetch all partners */
 export async function getAllPartners(): Promise<Partner[]> {
   const snapshot = await getDocs(collection(getDbInstance(), "partners"));
+  return snapshot.docs.map((d) => toPartner(d.id, d.data()));
+}
+
+/** Fetch ALL entities (all types, not just products) */
+export async function getAllEntities(): Promise<Entity[]> {
+  const snapshot = await getDocs(collection(getDbInstance(), "entities"));
+  return snapshot.docs.map((d) => toEntity(d.id, d.data()));
+}
+
+/** Fetch ALL blindspots (not filtered by entity) */
+export async function getAllBlindspots(): Promise<Blindspot[]> {
+  const snapshot = await getDocs(collection(getDbInstance(), "blindspots"));
   return snapshot.docs.map((d) => {
     const data = d.data();
     return {
       id: d.id,
-      email: data.email as string,
-      displayName: data.displayName as string,
-      apiKey: data.apiKey as string,
-      authorizedEntityIds: (data.authorizedEntityIds as string[]) ?? [],
-      isAdmin: (data.isAdmin as boolean) ?? false,
-      status: (data.status as Partner["status"]) ?? "active",
+      description: data.description as string,
+      severity: data.severity as Blindspot["severity"],
+      relatedEntityIds: (data.relatedEntityIds as string[]) ?? [],
+      suggestedAction: data.suggestedAction as string,
+      status: (data.status as Blindspot["status"]) ?? "open",
+      confirmedByUser: (data.confirmedByUser as boolean) ?? false,
       createdAt: (data.createdAt as { toDate: () => Date })?.toDate?.() ?? new Date(),
-      updatedAt: (data.updatedAt as { toDate: () => Date })?.toDate?.() ?? new Date(),
     };
   });
+}
+
+/** Fetch ALL relationships across all entities (parallel subcollection reads) */
+export async function getAllRelationships(): Promise<Relationship[]> {
+  // First get all entity IDs
+  const entities = await getAllEntities();
+  // Parallel fetch all subcollections
+  const allRels = await Promise.all(
+    entities.map((e) => getRelationships(e.id))
+  );
+  // Flatten and deduplicate by id
+  const seen = new Set<string>();
+  const result: Relationship[] = [];
+  for (const rels of allRels) {
+    for (const r of rels) {
+      if (!seen.has(r.id)) {
+        seen.add(r.id);
+        result.push(r);
+      }
+    }
+  }
+  return result;
 }
 
 /** Fetch tasks linked to an entity */

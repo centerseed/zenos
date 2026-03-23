@@ -9,10 +9,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from zenos.domain.models import Blindspot, Task, TaskPriority, TaskStatus
+from zenos.domain.models import Blindspot, EntityType, Task, TaskPriority, TaskStatus
 from zenos.domain.repositories import (
     BlindspotRepository,
-    DocumentRepository,
     EntityRepository,
     TaskRepository,
 )
@@ -47,12 +46,13 @@ class TaskService:
         task_repo: TaskRepository,
         entity_repo: EntityRepository,
         blindspot_repo: BlindspotRepository,
-        document_repo: DocumentRepository | None = None,
+        document_repo: object | None = None,  # deprecated, kept for backward compat
+        governance_ai: object | None = None,
     ) -> None:
         self._tasks = task_repo
         self._entities = entity_repo
         self._blindspots = blindspot_repo
-        self._documents = document_repo
+        self._governance_ai = governance_ai
 
     # ──────────────────────────────────────────
     # Create
@@ -78,6 +78,23 @@ class TaskService:
 
         # Build linked context for priority recommendation
         linked_entity_ids = data.get("linked_entities", [])
+
+        # GovernanceAI: auto-infer entity links if none provided
+        if not linked_entity_ids and self._governance_ai:
+            all_entities = await self._entities.list_all()
+            if all_entities:
+                entity_dicts = [
+                    {
+                        "id": e.id, "name": e.name, "type": e.type,
+                    }
+                    for e in all_entities
+                ]
+                linked_entity_ids = self._governance_ai.infer_task_links(
+                    title=data.get("title", ""),
+                    description=data.get("description", ""),
+                    existing_entities=entity_dicts,
+                )
+
         linked_entities = []
         for eid in linked_entity_ids:
             entity = await self._entities.get_by_id(eid)
@@ -218,14 +235,14 @@ class TaskService:
                     bs.status = "resolved"
                     await self._blindspots.add(bs)  # re-add to persist
 
-            # Mark related documents as stale when entities are outdated
-            if mark_stale_entity_ids and self._documents:
+            # Mark related document entities as stale when entities are outdated
+            if mark_stale_entity_ids:
                 for eid in mark_stale_entity_ids:
-                    entity_docs = await self._documents.list_by_entity(eid)
-                    for edoc in entity_docs:
-                        if edoc.status != "stale":
-                            edoc.status = "stale"
-                            await self._documents.upsert(edoc)
+                    child_entities = await self._entities.list_by_parent(eid)
+                    for child in child_entities:
+                        if child.type == EntityType.DOCUMENT and child.status != "stale":
+                            child.status = "stale"
+                            await self._entities.upsert(child)
 
             # Create new blindspot discovered during task completion
             if new_blindspot:
@@ -305,15 +322,15 @@ class TaskService:
                 f"觸發盲點：{linked_blindspot.description[:50]}"
             )
 
-        # Enrich with related document titles for richer context
-        if self._documents and linked_entities:
+        # Enrich with related document entity names for richer context
+        if linked_entities:
             doc_titles: list[str] = []
             for entity in linked_entities:
                 if entity.id and len(doc_titles) < 3:
-                    related_docs = await self._documents.list_by_entity(entity.id)
-                    for rd in related_docs:
-                        if len(doc_titles) < 3:
-                            doc_titles.append(rd.title)
+                    children = await self._entities.list_by_parent(entity.id)
+                    for child in children:
+                        if child.type == EntityType.DOCUMENT and len(doc_titles) < 3:
+                            doc_titles.append(child.name)
             if doc_titles:
                 parts.append(f"相關文件：{'、'.join(doc_titles)}")
 

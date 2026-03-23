@@ -129,6 +129,13 @@ def _to_dt(val: Any) -> datetime | None:
 # ---------------------------------------------------------------------------
 
 
+def _normalize_tag_list(val: str | list[str]) -> list[str]:
+    """Ensure a tag value is always a list[str]."""
+    if isinstance(val, str):
+        return [val] if val else []
+    return val
+
+
 def _entity_to_dict(entity: Entity) -> dict[str, Any]:
     raw: dict[str, Any] = {
         "name": entity.name,
@@ -137,17 +144,30 @@ def _entity_to_dict(entity: Entity) -> dict[str, Any]:
         "status": entity.status,
         "summary": entity.summary,
         "tags": {
-            "what": entity.tags.what,
+            "what": _normalize_tag_list(entity.tags.what),
             "why": entity.tags.why,
             "how": entity.tags.how,
-            "who": entity.tags.who,
+            "who": _normalize_tag_list(entity.tags.who),
         },
         "details": entity.details,
         "confirmed_by_user": entity.confirmed_by_user,
+        "owner": entity.owner,
+        "sources": entity.sources,
+        "visibility": entity.visibility,
+        "last_reviewed_at": entity.last_reviewed_at,
         "created_at": entity.created_at,
         "updated_at": entity.updated_at,
     }
     return to_firestore_dict(raw)
+
+
+def _coerce_tag_list(val: Any) -> list[str]:
+    """Coerce a tag field to list[str], handling legacy string format."""
+    if isinstance(val, list):
+        return val
+    if isinstance(val, str):
+        return [val] if val else []
+    return []
 
 
 def _dict_to_entity(doc_id: str, data: dict[str, Any]) -> Entity:
@@ -161,13 +181,17 @@ def _dict_to_entity(doc_id: str, data: dict[str, Any]) -> Entity:
         status=d.get("status", "active"),
         summary=d.get("summary", ""),
         tags=Tags(
-            what=tags_raw.get("what", ""),
+            what=_coerce_tag_list(tags_raw.get("what", [])),
             why=tags_raw.get("why", ""),
             how=tags_raw.get("how", ""),
-            who=tags_raw.get("who", ""),
+            who=_coerce_tag_list(tags_raw.get("who", [])),
         ),
         details=d.get("details"),
         confirmed_by_user=d.get("confirmed_by_user", False),
+        owner=d.get("owner"),
+        sources=d.get("sources", []),
+        visibility=d.get("visibility", "public"),
+        last_reviewed_at=_to_dt(d.get("last_reviewed_at")),
         created_at=_to_dt(d.get("created_at")) or _now(),
         updated_at=_to_dt(d.get("updated_at")) or _now(),
     )
@@ -393,6 +417,13 @@ class FirestoreEntityRepository:
             results.append(_dict_to_entity(doc.id, doc.to_dict()))
         return results
 
+    async def list_by_parent(self, parent_id: str) -> list[Entity]:
+        query = self._col.where("parentId", "==", parent_id)
+        results: list[Entity] = []
+        async for doc in query.stream():
+            results.append(_dict_to_entity(doc.id, doc.to_dict()))
+        return results
+
 
 class FirestoreRelationshipRepository:
     """Firestore-backed RelationshipRepository.
@@ -412,6 +443,20 @@ class FirestoreRelationshipRepository:
         async for doc in self._col(entity_id).stream():
             results.append(_dict_to_rel(doc.id, doc.to_dict()))
         return results
+
+    async def find_duplicate(
+        self, source_entity_id: str, target_id: str, rel_type: str,
+    ) -> Relationship | None:
+        """Find an existing relationship with the same source, target, and type."""
+        col = self._col(source_entity_id)
+        query = (
+            col.where("targetId", "==", target_id)
+               .where("type", "==", rel_type)
+               .limit(1)
+        )
+        async for doc in query.stream():
+            return _dict_to_rel(doc.id, doc.to_dict())
+        return None
 
     async def add(self, rel: Relationship) -> Relationship:
         data = _rel_to_dict(rel)
@@ -466,6 +511,17 @@ class FirestoreDocumentRepository:
         async for doc in query.stream():
             results.append(_dict_to_document(doc.id, doc.to_dict()))
         return results
+
+    async def update_linked_entities(self, doc_id: str, linked_entity_ids: list[str]) -> None:
+        """Update only the linkedEntityIds field of a document.
+
+        This bypasses full upsert validation so that GovernanceAI auto-linking
+        does not trigger another round of document validation.
+        """
+        await self._col.document(doc_id).set(
+            {"linkedEntityIds": linked_entity_ids},
+            merge=True,
+        )
 
     async def list_unconfirmed(self) -> list[Document]:
         query = self._col.where("confirmedByUser", "==", False)

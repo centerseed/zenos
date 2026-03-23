@@ -17,6 +17,7 @@ class EntityType(str, Enum):
     GOAL = "goal"
     ROLE = "role"
     PROJECT = "project"
+    DOCUMENT = "document"
 
 
 class EntityStatus(str, Enum):
@@ -24,6 +25,11 @@ class EntityStatus(str, Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     PLANNED = "planned"
+    # Document-specific statuses (only valid when type="document")
+    CURRENT = "current"
+    STALE = "stale"
+    DRAFT = "draft"
+    CONFLICT = "conflict"
 
 
 class RelationshipType(str, Enum):
@@ -86,16 +92,21 @@ class TaskPriority(str, Enum):
 
 @dataclass
 class Tags:
-    """Four-dimensional tag set for skeleton-layer entities."""
-    what: str
+    """Four-dimensional tag set for entities.
+
+    what/who are list[str] to support multiple topics/audiences (unified
+    with the old DocumentTags format). Reading from Firestore, legacy
+    string values are automatically wrapped in a list.
+    """
+    what: list[str] | str
     why: str
     how: str
-    who: str
+    who: list[str] | str
 
 
 @dataclass
 class Entity:
-    """Skeleton-layer entity: product, module, goal, role, or project."""
+    """Skeleton-layer entity: product, module, goal, role, project, or document."""
     name: str
     type: str  # EntityType value
     summary: str
@@ -105,6 +116,10 @@ class Entity:
     parent_id: str | None = None
     details: dict | None = None
     confirmed_by_user: bool = False
+    owner: str | None = None  # Phase 0: simple name string (e.g. "Barry")
+    sources: list[dict] = field(default_factory=list)  # [{uri, label, type}]
+    visibility: str = "public"  # "public" | "restricted"
+    last_reviewed_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
 

@@ -13,7 +13,7 @@ import pytest
 
 from zenos.application.ontology_service import OntologyService
 from zenos.application.task_service import TaskService
-from zenos.domain.models import Entity, Tags
+from zenos.domain.models import Entity, Relationship, Tags
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +30,7 @@ def _mock_repos() -> dict:
     relationship_repo = AsyncMock()
     relationship_repo.add = AsyncMock(side_effect=lambda r: r)
     relationship_repo.list_by_entity = AsyncMock(return_value=[])
+    relationship_repo.find_duplicate = AsyncMock(return_value=None)
 
     document_repo = AsyncMock()
     document_repo.list_by_entity = AsyncMock(return_value=[])
@@ -367,7 +368,9 @@ class TestUpsertDocumentValidation:
             "tags": {"what": ["api"], "why": "ref", "how": "REST", "who": ["dev"]},
             "summary": "API spec doc",
         })
-        assert result.title == "API Spec"
+        # upsert_document now returns Entity(type="document")
+        assert result.name == "API Spec"
+        assert result.type == "document"
 
 
 # ---------------------------------------------------------------------------
@@ -542,3 +545,304 @@ class TestFuzzySimilarityCheck:
             _valid_entity_data(name="ZenOS", summary="Knowledge ontology")
         )
         assert result.entity.name == "ZenOS"
+
+
+# ===========================================================================
+# Relationship dedup — prevent duplicate relationships
+# ===========================================================================
+
+
+class TestRelationshipDedup:
+    """Verify that add_relationship returns existing relationship instead of
+    creating a duplicate when source+target+type match."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_relationship_returns_existing(self):
+        """If a relationship with same source+target+type exists, return it."""
+        repos = _mock_repos()
+        entity = Entity(
+            id="ent-1", name="A", type="product",
+            summary="X", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        existing_rel = Relationship(
+            id="rel-existing",
+            source_entity_id="ent-1",
+            target_id="ent-2",
+            type="depends_on",
+            description="original",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=entity)
+        repos["relationship_repo"].find_duplicate = AsyncMock(return_value=existing_rel)
+        svc = _make_service(repos)
+
+        result = await svc.add_relationship("ent-1", "ent-2", "depends_on", "duplicate attempt")
+        assert result.id == "rel-existing"
+        assert result.description == "original"
+        # add should NOT have been called
+        repos["relationship_repo"].add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_creates_new(self):
+        """If no duplicate exists, create normally."""
+        repos = _mock_repos()
+        entity = Entity(
+            id="ent-1", name="A", type="product",
+            summary="X", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=entity)
+        repos["relationship_repo"].find_duplicate = AsyncMock(return_value=None)
+        svc = _make_service(repos)
+
+        result = await svc.add_relationship("ent-1", "ent-2", "depends_on", "new rel")
+        assert result.type == "depends_on"
+        repos["relationship_repo"].add.assert_called_once()
+
+
+# ===========================================================================
+# Entity sources dedup — prevent duplicate URIs in sources
+# ===========================================================================
+
+
+class TestSourcesDedup:
+    """Verify that sources are deduplicated by URI on entity creation."""
+
+    @pytest.mark.asyncio
+    async def test_duplicate_uris_removed(self):
+        """Duplicate URIs in sources should be collapsed to one."""
+        repos = _mock_repos()
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity(_valid_entity_data(
+            sources=[
+                {"uri": "https://example.com/a.md", "label": "A", "type": "github"},
+                {"uri": "https://example.com/a.md", "label": "A copy", "type": "github"},
+                {"uri": "https://example.com/b.md", "label": "B", "type": "github"},
+            ]
+        ))
+        assert len(result.entity.sources) == 2
+        uris = [s["uri"] for s in result.entity.sources]
+        assert uris == ["https://example.com/a.md", "https://example.com/b.md"]
+
+    @pytest.mark.asyncio
+    async def test_append_sources_dedup(self):
+        """append_sources should not add URIs that already exist on entity."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1", name="Paceriz", type="product",
+            summary="App", tags=Tags(what="x", why="x", how="x", who="x"),
+            sources=[{"uri": "https://example.com/a.md", "label": "A", "type": "github"}],
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "append_sources": [
+                {"uri": "https://example.com/a.md", "label": "A dup", "type": "github"},
+                {"uri": "https://example.com/new.md", "label": "New", "type": "github"},
+            ],
+        })
+        assert len(result.entity.sources) == 2
+        uris = [s.get("uri") for s in result.entity.sources]
+        assert "https://example.com/a.md" in uris
+        assert "https://example.com/new.md" in uris
+
+
+# ===========================================================================
+# Auto-infer module parent for L3 entities
+# ===========================================================================
+
+
+class TestAutoInferModuleParent:
+    """Verify that L3 entities (document/goal/role/project) with parent_id
+    pointing to a Product or null get auto-inferred to the best matching Module."""
+
+    @pytest.mark.asyncio
+    async def test_document_with_product_parent_auto_inferred_to_module(self):
+        """parent_id pointing to a product should be auto-corrected to the
+        best matching module under that product."""
+        repos = _mock_repos()
+
+        product = Entity(
+            id="prod-1", name="Paceriz", type="product",
+            summary="Running coach app",
+            tags=Tags(what=["running", "coaching"], why="fitness", how="AI", who=["athletes"]),
+        )
+        module_training = Entity(
+            id="mod-training", name="Training Plan", type="module",
+            parent_id="prod-1",
+            summary="AI training plan generation",
+            tags=Tags(what=["training", "plan", "schedule"], why="periodization", how="AI", who=["coach"]),
+        )
+        module_data = Entity(
+            id="mod-data", name="Data Integration", type="module",
+            parent_id="prod-1",
+            summary="Sport data ingestion",
+            tags=Tags(what=["data", "integration", "sync"], why="tracking", how="API", who=["dev"]),
+        )
+
+        def mock_get_by_id(eid):
+            lookup = {"prod-1": product, "mod-training": module_training, "mod-data": module_data}
+            return lookup.get(eid)
+
+        def mock_list_all(type_filter=None):
+            if type_filter == "module":
+                return [module_training, module_data]
+            if type_filter == "document":
+                return []  # no existing documents
+            return [product, module_training, module_data]
+
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=mock_get_by_id)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(side_effect=mock_list_all)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "name": "Weekly Training Template",
+            "type": "document",
+            "summary": "Default weekly training schedule template",
+            "tags": {"what": ["training", "template", "schedule"], "why": "reference", "how": "markdown", "who": ["coach"]},
+            "parent_id": "prod-1",  # Points to product, should be corrected
+        })
+
+        # Should be re-parented to mod-training (best tags.what overlap)
+        assert result.entity.parent_id == "mod-training"
+        # Should have a warning about the auto-inference
+        assert result.warnings is not None
+        assert any("自動推斷" in w for w in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_document_with_null_parent_auto_inferred_to_module(self):
+        """parent_id=null should be auto-inferred to the best matching module."""
+        repos = _mock_repos()
+
+        module_api = Entity(
+            id="mod-api", name="API Service", type="module",
+            parent_id="prod-1",
+            summary="REST API endpoints",
+            tags=Tags(what=["api", "rest", "endpoints"], why="integration", how="Flask", who=["dev"]),
+        )
+        module_ui = Entity(
+            id="mod-ui", name="Dashboard UI", type="module",
+            parent_id="prod-1",
+            summary="Frontend dashboard",
+            tags=Tags(what=["dashboard", "ui", "frontend"], why="visualization", how="React", who=["dev"]),
+        )
+
+        def mock_list_all(type_filter=None):
+            if type_filter == "module":
+                return [module_api, module_ui]
+            if type_filter == "document":
+                return []  # no existing documents
+            return [module_api, module_ui]
+
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=None)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(side_effect=mock_list_all)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "name": "API Authentication Guide",
+            "type": "document",
+            "summary": "How to authenticate with the REST API",
+            "tags": {"what": ["api", "authentication", "rest"], "why": "reference", "how": "OAuth", "who": ["dev"]},
+            # No parent_id — should be inferred
+        })
+
+        # Should be parented to mod-api (best tags.what overlap: "api", "rest")
+        assert result.entity.parent_id == "mod-api"
+        assert result.warnings is not None
+        assert any("自動推斷" in w for w in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_document_with_module_parent_unchanged(self):
+        """If parent_id already points to a module, no change should occur."""
+        repos = _mock_repos()
+
+        module = Entity(
+            id="mod-1", name="Training Plan", type="module",
+            parent_id="prod-1",
+            summary="Training",
+            tags=Tags(what=["training"], why="fitness", how="AI", who=["coach"]),
+        )
+
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[])
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "name": "Training Doc",
+            "type": "document",
+            "summary": "A doc about training",
+            "tags": {"what": ["training"], "why": "ref", "how": "md", "who": ["coach"]},
+            "parent_id": "mod-1",  # Already a module
+        })
+
+        assert result.entity.parent_id == "mod-1"
+        # No auto-inference warning expected
+        if result.warnings:
+            assert not any("自動推斷" in w for w in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_product_entity_not_affected(self):
+        """Product entities should not trigger module parent inference."""
+        repos = _mock_repos()
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[])
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "name": "New Product",
+            "type": "product",
+            "summary": "A new product",
+            "tags": {"what": ["product"], "why": "business", "how": "SaaS", "who": ["team"]},
+        })
+
+        assert result.entity.parent_id is None
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_first_module_when_no_tag_overlap(self):
+        """When no tags overlap but product_id is known, fall back to first module."""
+        repos = _mock_repos()
+
+        product = Entity(
+            id="prod-1", name="Paceriz", type="product",
+            summary="Running app",
+            tags=Tags(what=["running"], why="fitness", how="AI", who=["athletes"]),
+        )
+        module = Entity(
+            id="mod-1", name="Core Module", type="module",
+            parent_id="prod-1",
+            summary="Core",
+            tags=Tags(what=["core", "engine"], why="foundation", how="Python", who=["dev"]),
+        )
+
+        def mock_get_by_id(eid):
+            return {"prod-1": product, "mod-1": module}.get(eid)
+
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=mock_get_by_id)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[module])
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "name": "Completely Unrelated Doc",
+            "type": "document",
+            "summary": "Something with no tag overlap",
+            "tags": {"what": ["zebra", "unicorn"], "why": "mystery", "how": "magic", "who": ["wizard"]},
+            "parent_id": "prod-1",
+        })
+
+        # Should fall back to first module under the product
+        assert result.entity.parent_id == "mod-1"

@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
+import { AppNav } from "@/components/AppNav";
 import { TaskBoard } from "@/components/TaskBoard";
 import { TaskFilters } from "@/components/TaskFilters";
 import { PulseBar } from "@/components/PulseBar";
@@ -93,47 +94,19 @@ function TasksPage() {
 
   return (
     <div className="min-h-screen">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="text-xl font-bold text-gray-900 hover:text-gray-600">
-              ZenOS
-            </Link>
-            <nav className="flex items-center gap-4 text-sm">
-              <Link href="/" className="text-gray-500 hover:text-gray-900">
-                Projects
-              </Link>
-              <span className="font-semibold text-gray-900 underline underline-offset-4">
-                Tasks
-              </span>
-            </nav>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500">
-              {partner?.displayName}
-            </span>
-            <button
-              onClick={signOut}
-              className="text-sm text-gray-400 hover:text-gray-600 cursor-pointer"
-            >
-              Sign out
-            </button>
-          </div>
-        </div>
-      </header>
+      <AppNav />
 
       <main className="max-w-7xl mx-auto px-6 py-8">
         {/* View Mode Toggle */}
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-gray-900">Tasks</h2>
-          <div className="flex items-center rounded-lg overflow-hidden border border-gray-200">
+          <h2 className="text-lg font-semibold text-white">Tasks</h2>
+          <div className="flex items-center rounded-lg overflow-hidden border border-[#1F1F23]">
             <button
               onClick={() => setViewMode("pulse")}
               className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
                 viewMode === "pulse"
-                  ? "bg-gray-900 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  ? "bg-white text-[#0A0A0B]"
+                  : "bg-[#111113] text-[#71717A] hover:bg-[#1F1F23]"
               }`}
             >
               Pulse
@@ -142,8 +115,8 @@ function TasksPage() {
               onClick={() => setViewMode("kanban")}
               className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
                 viewMode === "kanban"
-                  ? "bg-gray-900 text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  ? "bg-white text-[#0A0A0B]"
+                  : "bg-[#111113] text-[#71717A] hover:bg-[#1F1F23]"
               }`}
             >
               Kanban
@@ -155,7 +128,7 @@ function TasksPage() {
         {viewMode === "pulse" && (
           <>
             {loading ? (
-              <div className="text-gray-400 text-sm">Loading pulse data...</div>
+              <div className="text-[#71717A] text-sm">Loading pulse data...</div>
             ) : (
               <div className="space-y-6">
                 <PulseBar tasks={tasks} />
@@ -171,15 +144,15 @@ function TasksPage() {
         {viewMode === "kanban" && (
           <>
             {/* Tabs */}
-            <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
+            <div className="flex items-center gap-1 mb-4 border-b border-[#1F1F23]">
               {TABS.map((tab) => (
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
                   className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors ${
                     activeTab === tab.key
-                      ? "border-blue-600 text-blue-600"
-                      : "border-transparent text-gray-500 hover:text-gray-700"
+                      ? "border-blue-500 text-blue-400"
+                      : "border-transparent text-[#71717A] hover:text-white"
                   }`}
                 >
                   {tab.label}
@@ -199,10 +172,10 @@ function TasksPage() {
 
             {/* Board */}
             {loading ? (
-              <div className="text-gray-400 text-sm">Loading tasks...</div>
+              <div className="text-[#71717A] text-sm">Loading tasks...</div>
             ) : filteredKanbanTasks.length === 0 ? (
-              <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-                <p className="text-gray-500">
+              <div className="text-center py-12 bg-[#111113] rounded-lg border border-[#1F1F23]">
+                <p className="text-[#71717A]">
                   No tasks yet. Create tasks via MCP tools in Claude Code.
                 </p>
               </div>

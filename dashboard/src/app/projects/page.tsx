@@ -63,7 +63,7 @@ function ProjectPageInner() {
   if (loading || !data) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <div className="text-gray-400">Loading...</div>
+        <div className="text-[#71717A]">Loading...</div>
       </div>
     );
   }
@@ -74,28 +74,28 @@ function ProjectPageInner() {
 
   return (
     <div className="min-h-screen">
-      <header className="bg-white border-b border-gray-200">
+      <header className="border-b border-[#1F1F23]">
         <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-6">
-            <Link href="/" className="text-xl font-bold text-gray-900 hover:text-gray-600">
+            <Link href="/" className="text-xl font-bold text-white hover:text-[#71717A]">
               ZenOS
             </Link>
             <nav className="flex items-center gap-4 text-sm">
-              <Link href="/" className="text-gray-500 hover:text-gray-900">
-                Projects
+              <Link href="/" className="text-[#71717A] hover:text-white">
+                Panorama
               </Link>
-              <Link href="/tasks" className="text-gray-500 hover:text-gray-900">
+              <Link href="/tasks" className="text-[#71717A] hover:text-white">
                 Tasks
               </Link>
             </nav>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-500">
+            <span className="text-sm text-[#71717A]">
               {partner?.displayName}
             </span>
             <button
               onClick={signOut}
-              className="text-sm text-gray-400 hover:text-gray-600 cursor-pointer"
+              className="text-sm text-[#71717A] hover:text-white cursor-pointer"
             >
               Sign out
             </button>
@@ -105,19 +105,19 @@ function ProjectPageInner() {
 
       <main className="max-w-5xl mx-auto px-6 py-8 space-y-8">
         {criticalBlindspots.length > 0 && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-            <p className="text-sm font-medium text-red-800">
+          <div className="bg-red-900/30 border border-red-800 rounded-lg p-4">
+            <p className="text-sm font-medium text-red-400">
               {criticalBlindspots.length} critical issue{criticalBlindspots.length > 1 ? "s" : ""} detected
             </p>
           </div>
         )}
 
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-1">
+          <h2 className="text-2xl font-bold text-white mb-1">
             {project.name}
           </h2>
-          <p className="text-gray-500 mb-4">{project.summary}</p>
-          <div className="flex gap-6 text-sm text-gray-400">
+          <p className="text-[#71717A] mb-4">{project.summary}</p>
+          <div className="flex gap-6 text-sm text-[#71717A]">
             <span>{children.filter((c) => c.type === "module").length} modules</span>
             <span>{documentCount} documents</span>
             <span>{blindspots.length} blindspots</span>
@@ -125,7 +125,7 @@ function ProjectPageInner() {
         </div>
 
         <div>
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">
+          <h3 className="text-lg font-semibold text-white mb-4">
             Modules
           </h3>
           <EntityTree entities={children} allEntities={allEntities} />
@@ -133,7 +133,7 @@ function ProjectPageInner() {
 
         {blindspots.length > 0 && (
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+            <h3 className="text-lg font-semibold text-white mb-4">
               Blindspots
             </h3>
             <BlindspotAlert blindspots={blindspots} />
@@ -143,8 +143,8 @@ function ProjectPageInner() {
         <PromptSuggestions projectName={project.name} />
 
         <div className="pt-4">
-          <Link href="/" className="text-sm text-blue-600 hover:underline">
-            Back to projects
+          <Link href="/" className="text-sm text-blue-400 hover:underline">
+            Back to panorama
           </Link>
         </div>
       </main>
@@ -155,7 +155,7 @@ function ProjectPageInner() {
 export default function Page() {
   return (
     <AuthGuard>
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="text-gray-400">Loading...</div></div>}>
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="text-[#71717A]">Loading...</div></div>}>
         <ProjectPageInner />
       </Suspense>
     </AuthGuard>

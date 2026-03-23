@@ -11,7 +11,7 @@ import json
 import os
 import sys
 
-CLOUD_RUN_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app/sse"
+CLOUD_RUN_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
 MCP_CONFIG_PATH = ".claude/mcp.json"
 
 

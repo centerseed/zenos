@@ -12,6 +12,8 @@ describe("toEntity", () => {
     parentId: "parent-123",
     details: { version: "2.0" },
     confirmedByUser: true,
+    sources: [{ uri: "https://example.com", label: "github", type: "github" }],
+    lastReviewedAt: fakeTimestamp(new Date("2026-02-15")),
     createdAt: fakeTimestamp(new Date("2026-01-01")),
     updatedAt: fakeTimestamp(new Date("2026-03-01")),
   };
@@ -28,6 +30,8 @@ describe("toEntity", () => {
     expect(entity.parentId).toBe("parent-123");
     expect(entity.details).toEqual({ version: "2.0" });
     expect(entity.confirmedByUser).toBe(true);
+    expect(entity.sources).toEqual([{ uri: "https://example.com", label: "github", type: "github" }]);
+    expect(entity.lastReviewedAt).toEqual(new Date("2026-02-15"));
     expect(entity.createdAt).toEqual(new Date("2026-01-01"));
     expect(entity.updatedAt).toEqual(new Date("2026-03-01"));
   });
@@ -99,6 +103,8 @@ describe("toEntity", () => {
     expect(entity.parentId).toBeNull();
     expect(entity.details).toBeNull();
     expect(entity.confirmedByUser).toBe(false);
+    expect(entity.sources).toEqual([]);
+    expect(entity.lastReviewedAt).toBeNull();
     expect(entity.createdAt).toBeInstanceOf(Date);
     expect(entity.updatedAt).toBeInstanceOf(Date);
   });

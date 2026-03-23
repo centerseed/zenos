@@ -206,8 +206,8 @@ class TestSearchTool:
         with patch("zenos.interface.tools.ontology_service") as mock_os, \
              patch("zenos.interface.tools.task_service") as mock_ts:
             mock_os.list_entities = AsyncMock(return_value=[])
-            mock_os._documents = AsyncMock()
-            mock_os._documents.list_all = AsyncMock(return_value=[])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[])
             mock_os._protocols = AsyncMock()
             mock_os._protocols.list_unconfirmed = AsyncMock(return_value=[])
             mock_os.list_blindspots = AsyncMock(return_value=[])

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import type { Entity, Relationship } from "@/types";
 import { getRelationships } from "@/lib/firestore";
 
@@ -18,10 +18,10 @@ const typeIcons: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
-  active: "bg-green-100 text-green-700",
-  paused: "bg-yellow-100 text-yellow-700",
-  planned: "bg-blue-100 text-blue-700",
-  completed: "bg-gray-100 text-gray-500",
+  active: "bg-green-900/50 text-green-400",
+  paused: "bg-yellow-900/50 text-yellow-400",
+  planned: "bg-blue-900/50 text-blue-400",
+  completed: "bg-[#1F1F23] text-[#71717A]",
 };
 
 function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Entity[] }) {
@@ -43,17 +43,17 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
     allEntities.find((e) => e.id === id)?.name ?? id;
 
   return (
-    <div className="border border-gray-200 rounded-lg bg-white">
+    <div className="border border-[#1F1F23] rounded-lg bg-[#111113]">
       <button
         onClick={handleToggle}
-        className="w-full text-left p-4 hover:bg-gray-50 transition-colors cursor-pointer"
+        className="w-full text-left p-4 hover:bg-[#1F1F23] transition-colors cursor-pointer"
       >
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-2">
             <span>{typeIcons[entity.type] ?? "📄"}</span>
             <div>
-              <h4 className="font-medium text-gray-900">{entity.name}</h4>
-              <p className="text-sm text-gray-500 mt-1">{entity.summary}</p>
+              <h4 className="font-medium text-white">{entity.name}</h4>
+              <p className="text-sm text-[#71717A] mt-1">{entity.summary}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -62,7 +62,7 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
             >
               {entity.status}
             </span>
-            <span className="text-gray-400 text-sm">
+            <span className="text-[#71717A] text-sm">
               {expanded ? "▲" : "▼"}
             </span>
           </div>
@@ -70,19 +70,19 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
       </button>
 
       {expanded && (
-        <div className="border-t border-gray-100 p-4 bg-gray-50">
+        <div className="border-t border-[#1F1F23] p-4 bg-[#0A0A0B]">
           {loadingRels ? (
-            <p className="text-sm text-gray-400">Loading relationships...</p>
+            <p className="text-sm text-[#71717A]">Loading relationships...</p>
           ) : relationships.length === 0 ? (
-            <p className="text-sm text-gray-400">No relationships</p>
+            <p className="text-sm text-[#71717A]">No relationships</p>
           ) : (
             <ul className="space-y-2">
               {relationships.map((rel) => (
-                <li key={rel.id} className="text-sm text-gray-600 flex items-center gap-2">
-                  <span className="text-gray-400">{rel.type.replace(/_/g, " ")}</span>
+                <li key={rel.id} className="text-sm text-[#FAFAFA] flex items-center gap-2">
+                  <span className="text-[#71717A]">{rel.type.replace(/_/g, " ")}</span>
                   <span className="font-medium">{getEntityName(rel.targetId)}</span>
                   {rel.description && (
-                    <span className="text-gray-400">— {rel.description}</span>
+                    <span className="text-[#71717A]">— {rel.description}</span>
                   )}
                 </li>
               ))}
@@ -114,7 +114,7 @@ export function EntityTree({ entities, allEntities }: EntityTreeProps) {
         if (!items || items.length === 0) return null;
         return (
           <div key={type}>
-            <h3 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-3">
+            <h3 className="text-sm font-medium text-[#71717A] uppercase tracking-wide mb-3">
               {typeIcons[type]} {type}s ({items.length})
             </h3>
             <div className="space-y-2">

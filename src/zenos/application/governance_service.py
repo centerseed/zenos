@@ -13,12 +13,12 @@ from zenos.domain.governance import (
 )
 from zenos.domain.models import (
     Blindspot,
+    EntityType,
     QualityReport,
     StalenessWarning,
 )
 from zenos.domain.repositories import (
     BlindspotRepository,
-    DocumentRepository,
     EntityRepository,
     ProtocolRepository,
     RelationshipRepository,
@@ -31,13 +31,12 @@ class GovernanceService:
     def __init__(
         self,
         entity_repo: EntityRepository,
-        document_repo: DocumentRepository,
-        relationship_repo: RelationshipRepository,
-        protocol_repo: ProtocolRepository,
-        blindspot_repo: BlindspotRepository,
+        document_repo: object | None = None,  # deprecated, kept for backward compat
+        relationship_repo: RelationshipRepository | None = None,
+        protocol_repo: ProtocolRepository | None = None,
+        blindspot_repo: BlindspotRepository | None = None,
     ) -> None:
         self._entities = entity_repo
-        self._documents = document_repo
         self._relationships = relationship_repo
         self._protocols = protocol_repo
         self._blindspots = blindspot_repo
@@ -59,13 +58,15 @@ class GovernanceService:
     async def run_quality_check(self) -> QualityReport:
         """Run the full 9-item quality checklist across the ontology.
 
-        Fetches all entities, documents, protocols, blindspots, and
-        relationships, then delegates to domain.governance.run_quality_check.
+        Fetches all entities (including type=document), protocols, blindspots,
+        and relationships, then delegates to domain.governance.run_quality_check.
         """
-        entities = await self._entities.list_all()
-        documents = await self._documents.list_all()
+        all_entities = await self._entities.list_all()
+        # Split: non-document entities vs document entities
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
         blindspots = await self._blindspots.list_all()
-        relationships = await self._load_all_relationships(entities)
+        relationships = await self._load_all_relationships(all_entities)
 
         # Collect all protocols
         protocols = []
@@ -86,12 +87,13 @@ class GovernanceService:
     async def run_staleness_check(self) -> list[StalenessWarning]:
         """Detect staleness patterns across entities and documents.
 
-        Fetches all entities, documents, and relationships, then
-        delegates to domain.governance.detect_staleness.
+        Fetches all entities and relationships, then delegates to
+        domain.governance.detect_staleness.
         """
-        entities = await self._entities.list_all()
-        documents = await self._documents.list_all()
-        relationships = await self._load_all_relationships(entities)
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
+        relationships = await self._load_all_relationships(all_entities)
 
         return detect_staleness(
             entities=entities,
@@ -102,12 +104,13 @@ class GovernanceService:
     async def run_blindspot_analysis(self) -> list[Blindspot]:
         """Infer blind spots by cross-referencing ontology layers.
 
-        Fetches all entities, documents, and relationships, then
-        delegates to domain.governance.analyze_blindspots.
+        Fetches all entities and relationships, then delegates to
+        domain.governance.analyze_blindspots.
         """
-        entities = await self._entities.list_all()
-        documents = await self._documents.list_all()
-        relationships = await self._load_all_relationships(entities)
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
+        relationships = await self._load_all_relationships(all_entities)
 
         return analyze_blindspots(
             entities=entities,

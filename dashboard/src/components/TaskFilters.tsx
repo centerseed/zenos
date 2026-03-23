@@ -67,17 +67,17 @@ export function TaskFilters({
       <div className="relative" ref={statusRef}>
         <button
           onClick={() => setStatusOpen(!statusOpen)}
-          className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+          className="text-sm border border-[#1F1F23] rounded-lg px-3 py-1.5 bg-[#111113] hover:bg-[#1F1F23] text-[#FAFAFA] cursor-pointer"
         >
           Status{selectedStatuses.length > 0 ? ` (${selectedStatuses.length})` : ""}
-          <span className="ml-1 text-gray-400">&#9662;</span>
+          <span className="ml-1 text-[#71717A]">&#9662;</span>
         </button>
         {statusOpen && (
-          <div className="absolute z-10 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-48">
+          <div className="absolute z-10 mt-1 bg-[#111113] border border-[#1F1F23] rounded-lg shadow-lg py-1 w-48">
             {ALL_STATUSES.map((status) => (
               <label
                 key={status}
-                className="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-50 cursor-pointer text-sm text-gray-700"
+                className="flex items-center gap-2 px-3 py-1.5 hover:bg-[#1F1F23] cursor-pointer text-sm text-[#FAFAFA]"
               >
                 <input
                   type="checkbox"
@@ -91,7 +91,7 @@ export function TaskFilters({
             {selectedStatuses.length > 0 && (
               <button
                 onClick={() => onStatusChange([])}
-                className="w-full text-left px-3 py-1.5 text-xs text-blue-600 hover:bg-gray-50 cursor-pointer"
+                className="w-full text-left px-3 py-1.5 text-xs text-blue-400 hover:bg-[#1F1F23] cursor-pointer"
               >
                 Clear all
               </button>
@@ -106,7 +106,7 @@ export function TaskFilters({
         onChange={(e) =>
           onPriorityChange(e.target.value ? (e.target.value as TaskPriority) : null)
         }
-        className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-700 cursor-pointer"
+        className="text-sm border border-[#1F1F23] rounded-lg px-3 py-1.5 bg-[#111113] text-[#FAFAFA] cursor-pointer"
       >
         <option value="">All priorities</option>
         {ALL_PRIORITIES.map((p) => (
