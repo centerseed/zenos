@@ -31,3 +31,14 @@ export function getDbInstance(): Firestore {
   if (!_db) _db = getFirestore(getApp());
   return _db;
 }
+
+// Dev-only: expose signInWithCustomToken for E2E testing
+if (process.env.NODE_ENV !== "production" && typeof window !== "undefined") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__signInWithCustomToken = async (
+    token: string
+  ) => {
+    const { signInWithCustomToken } = await import("firebase/auth");
+    return signInWithCustomToken(getAuthInstance(), token);
+  };
+}

@@ -3,3 +3,5 @@ node_modules/
 .env.local
 .env*.local
 out/
+scripts/qa-service-account.json
+playwright/.auth/

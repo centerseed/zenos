@@ -14,12 +14,18 @@ import type { Entity, Blindspot, Relationship, Task } from "@/types";
 
 // ─── Types ───
 
-/** L3 entity types that can be expanded under a module */
-const L3_TYPES = ["document", "goal", "role", "project"] as const;
-type L3Type = (typeof L3_TYPES)[number];
+/** All expandable types (entity L3 + task) */
+const EXPANDABLE_TYPES = ["document", "task", "goal", "role", "project"] as const;
+type ExpandableType = (typeof EXPANDABLE_TYPES)[number];
 
-/** Expanded modules state: moduleId -> list of expanded L3 types */
-type ExpandedModules = Record<string, L3Type[]>;
+/** Pure entity L3 types (non-task) */
+const ENTITY_L3_TYPES = ["document", "goal", "role", "project"] as const;
+
+/** Default expand types when clicking a module */
+const DEFAULT_EXPAND_TYPES: ExpandableType[] = ["document", "task"];
+
+/** Expanded modules state: moduleId -> list of expanded types */
+type ExpandedModules = Record<string, ExpandableType[]>;
 
 // ─── Helpers ───
 
@@ -53,6 +59,7 @@ const TYPE_COLORS: Record<string, string> = {
   role: "#F59E0B",
   document: "#06B6D4",
   project: "#F43F5E",
+  task: "#F97316",
 };
 
 const TYPE_LABELS: Record<string, string> = {
@@ -62,6 +69,7 @@ const TYPE_LABELS: Record<string, string> = {
   role: "Role",
   document: "Document",
   project: "Project",
+  task: "Task",
 };
 
 const ROLE_COLORS: Record<string, string> = {
@@ -129,9 +137,9 @@ function TypeFilterPopover({
 }: {
   moduleId: string;
   moduleName: string;
-  expandedTypes: L3Type[];
-  availableTypes: Record<L3Type, number>;
-  onToggle: (moduleId: string, type: L3Type) => void;
+  expandedTypes: ExpandableType[];
+  availableTypes: Record<ExpandableType, number>;
+  onToggle: (moduleId: string, type: ExpandableType) => void;
   onClose: () => void;
   style?: React.CSSProperties;
 }) {
@@ -147,6 +155,9 @@ function TypeFilterPopover({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [onClose]);
 
+  // Display order: Document → Task → Goal → Role → Project
+  const displayOrder: ExpandableType[] = ["document", "task", "goal", "role", "project"];
+
   return (
     <div
       ref={popoverRef}
@@ -156,7 +167,7 @@ function TypeFilterPopover({
       <div className="text-xs text-[#FAFAFA]/50 mb-2 truncate">
         Expand: {moduleName}
       </div>
-      {L3_TYPES.map((type) => {
+      {displayOrder.map((type) => {
         const count = availableTypes[type] ?? 0;
         if (count === 0) return null;
         const checked = expandedTypes.includes(type);
@@ -234,7 +245,7 @@ function Sidebar({
   focusProduct: string | null;
   setFocusProduct: (id: string | null) => void;
   expandedModules: ExpandedModules;
-  onToggleModuleType: (moduleId: string, type: L3Type) => void;
+  onToggleModuleType: (moduleId: string, type: ExpandableType) => void;
 }) {
   const products = entities.filter((e) => e.type === "product");
   const modules = entities.filter((e) => e.type === "module");
@@ -247,27 +258,30 @@ function Sidebar({
   // Track which module popover is open
   const [popoverModuleId, setPopoverModuleId] = useState<string | null>(null);
 
-  // Compute available L3 types per module
+  // Compute available types per module (entity L3 + task)
   const availableTypesPerModule = useMemo(() => {
-    const result: Record<string, Record<L3Type, number>> = {};
+    const result: Record<string, Record<ExpandableType, number>> = {};
     for (const m of modules) {
-      const counts: Record<L3Type, number> = { document: 0, goal: 0, role: 0, project: 0 };
+      const counts: Record<ExpandableType, number> = { document: 0, task: 0, goal: 0, role: 0, project: 0 };
       for (const e of entities) {
-        if (e.parentId === m.id && L3_TYPES.includes(e.type as L3Type)) {
-          counts[e.type as L3Type]++;
+        if (e.parentId === m.id && ENTITY_L3_TYPES.includes(e.type as (typeof ENTITY_L3_TYPES)[number])) {
+          counts[e.type as ExpandableType]++;
         }
+      }
+      for (const t of tasks) {
+        if (t.linkedEntities.includes(m.id)) counts.task++;
       }
       result[m.id] = counts;
     }
     return result;
-  }, [modules, entities]);
+  }, [modules, entities, tasks]);
 
   // Count total L3 children per module
   const l3CountPerModule = useMemo(() => {
     const result: Record<string, number> = {};
     for (const m of modules) {
       result[m.id] = entities.filter(
-        (e) => e.parentId === m.id && L3_TYPES.includes(e.type as L3Type)
+        (e) => e.parentId === m.id && ENTITY_L3_TYPES.includes(e.type as (typeof ENTITY_L3_TYPES)[number])
       ).length;
     }
     return result;
@@ -386,7 +400,7 @@ function Sidebar({
                           moduleId={m.id}
                           moduleName={m.name}
                           expandedTypes={expandedModules[m.id] ?? []}
-                          availableTypes={availableTypesPerModule[m.id] ?? { document: 0, goal: 0, role: 0, project: 0 }}
+                          availableTypes={availableTypesPerModule[m.id] ?? { document: 0, task: 0, goal: 0, role: 0, project: 0 }}
                           onToggle={onToggleModuleType}
                           onClose={() => setPopoverModuleId(null)}
                         />
@@ -399,7 +413,7 @@ function Sidebar({
                           .filter(
                             (e) =>
                               e.parentId === m.id &&
-                              expandedModules[m.id]?.includes(e.type as L3Type)
+                              expandedModules[m.id]?.includes(e.type as ExpandableType)
                           )
                           .map((e) => (
                             <div
@@ -509,6 +523,8 @@ function GraphCanvas({
   focusProduct,
   expandedModules,
   onToggleModuleType,
+  onExpandModule,
+  onCollapseModule,
 }: {
   entities: Entity[];
   relationships: Relationship[];
@@ -518,7 +534,9 @@ function GraphCanvas({
   onSelect: (id: string) => void;
   focusProduct: string | null;
   expandedModules: ExpandedModules;
-  onToggleModuleType: (moduleId: string, type: L3Type) => void;
+  onToggleModuleType: (moduleId: string, type: ExpandableType) => void;
+  onExpandModule: (moduleId: string) => void;
+  onCollapseModule: (moduleId: string) => void;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ForceGraph, setForceGraph] = useState<any>(null);
@@ -528,8 +546,8 @@ function GraphCanvas({
   const [dims, setDims] = useState({ width: 800, height: 600 });
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
-  // Double-click popover state
-  const [dblClickPopover, setDblClickPopover] = useState<{
+  // Click popover state (shown when module is expanded)
+  const [clickPopover, setClickPopover] = useState<{
     moduleId: string;
     x: number;
     y: number;
@@ -555,9 +573,9 @@ function GraphCanvas({
 
   useEffect(() => {
     if (!fgRef.current) return;
-    fgRef.current.d3Force("charge")?.strength(-200).distanceMax(300);
-    fgRef.current.d3Force("link")?.distance(80);
-    fgRef.current.d3Force("center")?.strength(0.08);
+    fgRef.current.d3Force("charge")?.strength(-150).distanceMax(250);
+    fgRef.current.d3Force("link")?.distance(70);
+    fgRef.current.d3Force("center")?.strength(0.15);
   }, [ForceGraph]);
 
   const blindspotSet = useMemo(() => {
@@ -574,22 +592,25 @@ function GraphCanvas({
     [entities]
   );
 
-  // Available L3 types per module (for the popover)
+  // Available expandable types per module (entity L3 + task)
   const availableTypesPerModule = useMemo(() => {
-    const result: Record<string, Record<L3Type, number>> = {};
+    const result: Record<string, Record<ExpandableType, number>> = {};
     for (const e of entities) {
       if (e.type === "module") {
-        const counts: Record<L3Type, number> = { document: 0, goal: 0, role: 0, project: 0 };
+        const counts: Record<ExpandableType, number> = { document: 0, task: 0, goal: 0, role: 0, project: 0 };
         for (const child of entities) {
-          if (child.parentId === e.id && L3_TYPES.includes(child.type as L3Type)) {
-            counts[child.type as L3Type]++;
+          if (child.parentId === e.id && ENTITY_L3_TYPES.includes(child.type as (typeof ENTITY_L3_TYPES)[number])) {
+            counts[child.type as ExpandableType]++;
           }
+        }
+        for (const t of tasks) {
+          if (t.linkedEntities.includes(e.id)) counts.task++;
         }
         result[e.id] = counts;
       }
     }
     return result;
-  }, [entities]);
+  }, [entities, tasks]);
 
   const graphData = useMemo(() => {
     const entityIds = new Set(entities.map((e) => e.id));
@@ -601,7 +622,7 @@ function GraphCanvas({
       // L3: check if parent module has this type expanded
       if (e.parentId) {
         const expandedTypes = expandedModules[e.parentId];
-        if (expandedTypes?.includes(e.type as L3Type)) return true;
+        if (expandedTypes?.includes(e.type as ExpandableType)) return true;
       }
       return false;
     };
@@ -650,7 +671,8 @@ function GraphCanvas({
       }
     }
 
-    const nodes = entities
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nodes: any[] = entities
       .filter((e) => visibleIds.has(e.id))
       .map((e) => ({
         id: e.id,
@@ -697,6 +719,34 @@ function GraphCanvas({
       }
     }
 
+    // Task nodes for expanded modules
+    const taskNodeIds = new Set<string>();
+    for (const [moduleId, types] of Object.entries(expandedModules)) {
+      if (!types.includes("task")) continue;
+      if (!visibleIds.has(moduleId)) continue;
+      const moduleTasks = tasks.filter((t) => t.linkedEntities.includes(moduleId));
+      for (const t of moduleTasks) {
+        const nodeId = `task:${t.id}`;
+        if (!taskNodeIds.has(nodeId)) {
+          taskNodeIds.add(nodeId);
+          nodes.push({
+            id: nodeId,
+            name: t.title,
+            type: "task",
+            parentId: moduleId,
+            confirmed: true,
+            hasBlindspot: false,
+            days: Math.floor((Date.now() - t.updatedAt.getTime()) / 86400000),
+            taskCount: 0,
+            val: 5,
+            taskStatus: t.status,
+            taskPriority: t.priority,
+          });
+          links.push({ source: nodeId, target: moduleId, type: "task" });
+        }
+      }
+    }
+
     return { nodes, links };
   }, [entities, relationships, blindspotSet, tasks, focusProduct, expandedModules, entityMap]);
 
@@ -704,11 +754,15 @@ function GraphCanvas({
   useEffect(() => {
     if (!fgRef.current) return;
     const fg = fgRef.current;
+    if (!fg.graphData || typeof fg.graphData !== "function") return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const currentData = fg.graphData() as any;
+    if (!currentData?.nodes) return;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodeMap = new Map<string, any>();
     for (const n of graphData.nodes) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fgNode = fg.graphData().nodes.find((gn: any) => gn.id === n.id);
+      const fgNode = currentData.nodes.find((gn: any) => gn.id === n.id);
       if (fgNode) nodeMap.set(n.id, fgNode);
     }
 
@@ -751,7 +805,10 @@ function GraphCanvas({
       const x = node.x as number;
       const y = node.y as number;
       const r = Math.sqrt(node.val as number) * 2.8;
-      const color = TYPE_COLORS[node.type as string] ?? "#6366F1";
+      const isTaskNode = node.type === "task";
+      const taskStatus = node.taskStatus as string | undefined;
+      const isBlocked = isTaskNode && taskStatus === "blocked";
+      const color = isBlocked ? "#EF4444" : (TYPE_COLORS[node.type as string] ?? "#6366F1");
       const isSelected = selectedId === node.id;
       const isHovered = hoveredNode === node.id;
       const isDimmed =
@@ -763,6 +820,11 @@ function GraphCanvas({
       ctx.save();
       if (isDimmed) ctx.globalAlpha = 0.12;
 
+      // Blocked task glow
+      if (isBlocked && !isDimmed) {
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = "#EF4444";
+      }
       // Blindspot glow
       if (node.hasBlindspot && !isDimmed) {
         ctx.shadowBlur = 25;
@@ -805,8 +867,8 @@ function GraphCanvas({
       ctx.shadowBlur = 0;
       ctx.shadowColor = "transparent";
 
-      // Task count badge
-      if ((node.taskCount as number) > 0 && !isDimmed) {
+      // Task count badge (only for non-task nodes)
+      if (!isTaskNode && (node.taskCount as number) > 0 && !isDimmed) {
         const badgeR = 5;
         const bx = x + r * 0.7;
         const by = y - r * 0.7;
@@ -823,6 +885,35 @@ function GraphCanvas({
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(String(node.taskCount), bx, by);
+      }
+
+      // Task status badge
+      if (isTaskNode && taskStatus && !isDimmed) {
+        const statusAbbr =
+          taskStatus === "done" ? "✓" :
+          taskStatus === "in_progress" ? "▶" :
+          taskStatus === "blocked" ? "!" :
+          taskStatus === "review" ? "R" : "·";
+        const statusColor =
+          taskStatus === "done" ? "#10B981" :
+          taskStatus === "in_progress" ? "#3B82F6" :
+          taskStatus === "blocked" ? "#EF4444" : "#F97316";
+        const badgeR = 4.5;
+        const bx = x + r * 0.7;
+        const by = y - r * 0.7;
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeR, 0, 2 * Math.PI);
+        ctx.fillStyle = "#111";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(bx, by, badgeR - 0.5, 0, 2 * Math.PI);
+        ctx.fillStyle = statusColor;
+        ctx.fill();
+        ctx.font = `bold 7px -apple-system, sans-serif`;
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(statusAbbr, bx, by);
       }
 
       // Label
@@ -856,12 +947,14 @@ function GraphCanvas({
   const linkColor = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any) => {
-      if (!hoveredNode && !selectedId) return "rgba(255,255,255,0.08)";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const src =
         typeof link.source === "string"
           ? link.source
           : (link.source as any)?.id;
+      // Task edges use orange
+      if (String(src).startsWith("task:")) return "rgba(249,115,22,0.4)";
+      if (!hoveredNode && !selectedId) return "rgba(255,255,255,0.08)";
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tgt =
         typeof link.target === "string"
@@ -896,53 +989,6 @@ function GraphCanvas({
     [hoveredNode, selectedId]
   );
 
-  // Handle double-click on module nodes via canvas dblclick event
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || !fgRef.current) return;
-
-    function handleDblClick(event: MouseEvent) {
-      const fg = fgRef.current;
-      if (!fg) return;
-      // Convert screen coords to graph coords
-      const rect = container!.getBoundingClientRect();
-      const graphCoords = fg.screen2GraphCoords(
-        event.clientX - rect.left,
-        event.clientY - rect.top
-      );
-      // Find closest node within threshold
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nodes = fg.graphData().nodes as any[];
-      let closest: { id: string; dist: number } | null = null;
-      for (const n of nodes) {
-        const dx = (n.x ?? 0) - graphCoords.x;
-        const dy = (n.y ?? 0) - graphCoords.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const radius = Math.sqrt(n.val ?? 8) * 2.8 + 5;
-        if (dist < radius && (!closest || dist < closest.dist)) {
-          closest = { id: n.id, dist };
-        }
-      }
-      if (!closest) return;
-
-      const entity = entityMap.get(closest.id);
-      if (!entity || entity.type !== "module") return;
-      // Check if this module has L3 children
-      const hasL3 = entities.some(
-        (e) => e.parentId === entity.id && L3_TYPES.includes(e.type as L3Type)
-      );
-      if (!hasL3) return;
-
-      setDblClickPopover({
-        moduleId: entity.id,
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
-      });
-    }
-
-    container.addEventListener("dblclick", handleDblClick);
-    return () => container.removeEventListener("dblclick", handleDblClick);
-  }, [entityMap, entities]);
 
   if (!ForceGraph) {
     return (
@@ -997,38 +1043,81 @@ function GraphCanvas({
         onNodeClick={(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           node: any
-        ) => onSelect(node.id as string)}
+        ) => {
+          if (node.type === "module") {
+            const isExpanded = (expandedModules[node.id as string] ?? []).length > 0;
+            if (isExpanded) {
+              onCollapseModule(node.id as string);
+              setClickPopover(null);
+            } else {
+              onExpandModule(node.id as string);
+              const fg = fgRef.current;
+              if (fg && fg.graph2ScreenCoords) {
+                const screen = fg.graph2ScreenCoords(node.x as number, node.y as number);
+                setClickPopover({ moduleId: node.id as string, x: screen.x, y: screen.y });
+              } else {
+                setClickPopover({ moduleId: node.id as string, x: 0, y: 0 });
+              }
+            }
+            onSelect(node.id as string);
+          } else {
+            onSelect(node.id as string);
+          }
+        }}
         onNodeHover={(
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           node: any
         ) => setHoveredNode(node ? (node.id as string) : null)}
-        cooldownTicks={120}
-        warmupTicks={60}
-        d3AlphaDecay={0.02}
-        d3VelocityDecay={0.3}
+        cooldownTicks={80}
+        warmupTicks={30}
+        d3AlphaDecay={0.035}
+        d3VelocityDecay={0.4}
+        linkCanvasObjectMode={(link: any) => {
+          const type = link.type as string;
+          if (type === "task" || type === "part_of") return "after";
+          return undefined;
+        }}
+        linkCanvasObject={(link: any, ctx: CanvasRenderingContext2D) => {
+          const type = link.type as string;
+          if (type !== "task" && type !== "part_of") return;
+          const srcId = typeof link.source === "string" ? link.source : (link.source as any)?.id;
+          const isTaskLink = type === "task" || String(srcId).startsWith("task:");
+          const label = isTaskLink ? "task" : "ref";
+          const sx = typeof link.source === "string" ? 0 : (link.source as any)?.x ?? 0;
+          const sy = typeof link.source === "string" ? 0 : (link.source as any)?.y ?? 0;
+          const tx = typeof link.target === "string" ? 0 : (link.target as any)?.x ?? 0;
+          const ty = typeof link.target === "string" ? 0 : (link.target as any)?.y ?? 0;
+          const mx = (sx + tx) / 2;
+          const my = (sy + ty) / 2;
+          ctx.font = "9px -apple-system, sans-serif";
+          ctx.fillStyle = isTaskLink ? "rgba(249,115,22,0.7)" : "rgba(255,255,255,0.3)";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(label, mx, my);
+        }}
         enableZoomInteraction={true}
         enablePanInteraction={true}
       />
 
-      {/* Double-click popover on canvas */}
-      {dblClickPopover && (() => {
-        const mod = entityMap.get(dblClickPopover.moduleId);
+      {/* Click popover on canvas (shown when module is expanded) */}
+      {clickPopover && (() => {
+        const mod = entityMap.get(clickPopover.moduleId);
         if (!mod) return null;
         return (
           <div
             className="absolute z-50"
             style={{
-              left: dblClickPopover.x,
-              top: dblClickPopover.y,
+              left: clickPopover.x,
+              top: clickPopover.y,
             }}
           >
             <TypeFilterPopover
-              moduleId={dblClickPopover.moduleId}
+              moduleId={clickPopover.moduleId}
               moduleName={mod.name}
-              expandedTypes={expandedModules[dblClickPopover.moduleId] ?? []}
-              availableTypes={availableTypesPerModule[dblClickPopover.moduleId] ?? { document: 0, goal: 0, role: 0, project: 0 }}
+              expandedTypes={expandedModules[clickPopover.moduleId] ?? []}
+              availableTypes={availableTypesPerModule[clickPopover.moduleId] ?? { document: 0, task: 0, goal: 0, role: 0, project: 0 }}
               onToggle={onToggleModuleType}
-              onClose={() => setDblClickPopover(null)}
+              onClose={() => setClickPopover(null)}
             />
           </div>
         );
@@ -1057,9 +1146,9 @@ function GraphCanvas({
         </div>
       </div>
 
-      {/* Hint for double-click */}
+      {/* Hint */}
       <div className="absolute bottom-3 left-3 text-[10px] text-[#FAFAFA]/25">
-        Double-click a module to expand children
+        Click a module to expand • click again to collapse
       </div>
     </div>
   );
@@ -1380,6 +1469,110 @@ function DetailSheet({
   );
 }
 
+// ─── Task Detail Panel ───
+
+function TaskDetailPanel({
+  task,
+  onClose,
+}: {
+  task: Task | null;
+  onClose: () => void;
+}) {
+  if (!task) return null;
+
+  const statusColor =
+    task.status === "done" ? "bg-emerald-500/15 text-emerald-300" :
+    task.status === "in_progress" ? "bg-blue-500/15 text-blue-300" :
+    task.status === "blocked" ? "bg-red-500/15 text-red-300" :
+    task.status === "review" ? "bg-violet-500/15 text-violet-300" :
+    "bg-[#FAFAFA]/8 text-[#FAFAFA]/55";
+
+  const priorityColor =
+    task.priority === "critical" ? "text-red-400" :
+    task.priority === "high" ? "text-orange-400" :
+    task.priority === "medium" ? "text-amber-400" :
+    "text-[#FAFAFA]/40";
+
+  return (
+    <div className="w-[350px] shrink-0 border-l border-[#1F1F23] bg-[#0C0C0E] h-full overflow-y-auto">
+      <div className="px-4 pt-4 pb-3 border-b border-[#1F1F23]">
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="flex items-center gap-2">
+            <span
+              className="w-2.5 h-2.5 rounded-full"
+              style={{ backgroundColor: TYPE_COLORS.task }}
+            />
+            <span className="text-xs text-[#FAFAFA]/55 uppercase tracking-wider">
+              Task
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-[#FAFAFA]/65 hover:text-[#FAFAFA]/90 text-xs cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+        <h3 className="text-base font-bold text-[#FAFAFA]/85 leading-snug">
+          {task.title}
+        </h3>
+        <div className="flex items-center gap-2 mt-2">
+          <span className={`text-xs px-2 py-0.5 rounded ${statusColor}`}>
+            {task.status.replace("_", " ")}
+          </span>
+          {task.priority && (
+            <span className={`text-xs ${priorityColor}`}>
+              {task.priority}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {task.description && (
+        <div className="px-4 py-3 border-b border-[#1F1F23]">
+          <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+            Description
+          </div>
+          <p className="text-xs text-[#FAFAFA]/65 leading-relaxed">
+            {task.description}
+          </p>
+        </div>
+      )}
+
+      {task.assignee && (
+        <div className="px-4 py-3 border-b border-[#1F1F23]">
+          <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+            Assignee
+          </div>
+          <span
+            className={`text-xs px-2 py-0.5 rounded ${
+              ROLE_COLORS[task.assignee] ?? "bg-[#FAFAFA]/8 text-[#FAFAFA]/55"
+            }`}
+          >
+            {ROLE_LABELS[task.assignee] ?? task.assignee}
+          </span>
+        </div>
+      )}
+
+      {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
+        <div className="px-4 py-3">
+          <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+            Acceptance Criteria
+          </div>
+          <ul className="space-y-1">
+            {task.acceptanceCriteria.map((ac, i) => (
+              <li key={i} className="flex items-start gap-1.5 text-xs text-[#FAFAFA]/60">
+                <span className="text-[#FAFAFA]/30 shrink-0 mt-0.5">·</span>
+                <span className="leading-snug">{ac}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Page ───
 
 function KnowledgeMapPage() {
@@ -1395,7 +1588,7 @@ function KnowledgeMapPage() {
   // Layered expand state: moduleId -> expanded L3 types
   const [expandedModules, setExpandedModules] = useState<ExpandedModules>({});
 
-  const handleToggleModuleType = useCallback((moduleId: string, type: L3Type) => {
+  const handleToggleModuleType = useCallback((moduleId: string, type: ExpandableType) => {
     setExpandedModules((prev) => {
       const current = prev[moduleId] ?? [];
       const next = current.includes(type)
@@ -1406,6 +1599,20 @@ function KnowledgeMapPage() {
         return rest;
       }
       return { ...prev, [moduleId]: next };
+    });
+  }, []);
+
+  const handleExpandModule = useCallback((moduleId: string) => {
+    setExpandedModules((prev) => ({
+      ...prev,
+      [moduleId]: DEFAULT_EXPAND_TYPES,
+    }));
+  }, []);
+
+  const handleCollapseModule = useCallback((moduleId: string) => {
+    setExpandedModules((prev) => {
+      const { [moduleId]: _, ...rest } = prev;
+      return rest;
     });
   }, []);
 
@@ -1440,7 +1647,8 @@ function KnowledgeMapPage() {
     [entities]
   );
 
-  const selectedEntity = selectedId ? entityMap.get(selectedId) ?? null : null;
+  const isTaskSelected = selectedId?.startsWith("task:") ?? false;
+  const selectedEntity = selectedId && !isTaskSelected ? entityMap.get(selectedId) ?? null : null;
 
   return (
     <div className="h-screen flex flex-col bg-[#09090B]">
@@ -1479,8 +1687,15 @@ function KnowledgeMapPage() {
             focusProduct={focusProduct}
             expandedModules={expandedModules}
             onToggleModuleType={handleToggleModuleType}
+            onExpandModule={handleExpandModule}
+            onCollapseModule={handleCollapseModule}
           />
-          {selectedEntity && (
+          {selectedId && isTaskSelected ? (
+            <TaskDetailPanel
+              task={tasks.find((t) => `task:${t.id}` === selectedId) ?? null}
+              onClose={() => setSelectedId(null)}
+            />
+          ) : selectedEntity ? (
             <DetailSheet
               entity={selectedEntity}
               entities={entities}
@@ -1490,7 +1705,7 @@ function KnowledgeMapPage() {
               onClose={() => setSelectedId(null)}
               onSelect={(e) => setSelectedId(e.id)}
             />
-          )}
+          ) : null}
         </div>
       )}
     </div>
