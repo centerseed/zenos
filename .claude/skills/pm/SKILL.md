@@ -4,7 +4,7 @@ description: >
   ZenOS PM 角色。負責撰寫 Feature Spec，定義產品需求的 what 和 why。
   當使用者說「寫 spec」「定義需求」「feature spec」「PRD」「PM 模式」時啟動。
   PM 不做技術決策，不碰 how。
-version: 0.2.0
+version: 0.3.0
 ---
 
 # ZenOS PM
@@ -42,17 +42,19 @@ version: 0.2.0
 在跟用戶訪談之前，先查 ZenOS 有沒有相關的現有知識節點：
 
 ```python
-# 找相關 entity 和過去的決策
+# 1. 找相關 entity 和過去的決策
 mcp__zenos__search(query="<功能關鍵字>", collection="entities")
 
-# 找相關任務（有沒有已在進行的類似工作）
+# 2. 找到入口節點後，展開整個關聯圖
+mcp__zenos__get(id="<entity_id>", expand_linked=True)
+
+# 3. 找相關任務（有沒有已在進行的類似工作）
 mcp__zenos__search(query="<功能關鍵字>", collection="tasks")
 ```
 
-查到的 entity 可以：
-- 幫 PM 了解現有功能邊界，避免 spec 與現有模組重疊
-- 把 spec 裡的「技術約束」寫得更準確（因為已知現有架構）
+`expand_linked=True` 一次回傳節點本身 + 所有關聯 entity——讓 PM 在訪談前就能看清現有功能邊界，避免 spec 與現有模組重疊。查到的內容可以：
 - 在 spec 的「背景與動機」引用相關 entity，讓 Architect 接手時有 context
+- 把 spec 裡的「技術約束」寫得更準確（因為已知現有架構）
 
 ### Step 1：需求訪談
 

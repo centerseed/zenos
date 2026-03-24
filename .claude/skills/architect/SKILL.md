@@ -116,9 +116,14 @@ superadmin 測通了不代表用戶能用。每次交付必須模擬用戶的實
 
 ZenOS 是知識的儲存庫，不是 agent 協作協議。
 
-**開始技術設計前，查 ontology 有沒有相關的已有知識：**
-- `mcp__zenos__search(query="關鍵字")` — 找相關 entity
-- `mcp__zenos__get(name="entity名稱")` — 讀完整 context
+**需要快速理解專案現狀或找相關知識時，兩步走：**
+
+```
+1. mcp__zenos__search(query="關鍵字")                    # 找入口節點
+2. mcp__zenos__get(id="...", expand_linked=True)         # 展開整個關聯圖
+```
+
+`expand_linked=True` 會把這個節點所有連結的 entity 一起回傳——一次呼叫就能看到整個子圖的 context，不需要逐一追蹤。**遇到不確定的設計邊界，先查，不要猜。**
 
 **建任務時，把 context 打包進去**（`linked_entities` + `acceptance_criteria`），這樣任何 agent 拿到 task_id 就能用 `mcp__zenos__get(id=task_id, expand_linked=True)` 自己補齊 context，不需要你再重複說明。
 

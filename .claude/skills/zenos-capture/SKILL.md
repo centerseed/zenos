@@ -8,7 +8,7 @@ description: >
   或說「把這個專案加入 ZenOS」「幫我建這個服務的 ontology」「把這個 repo 的文件掃進去」，
   或在討論完某個設計決策後想保存到知識層時，一定要使用這個 skill。
   引數範例：無引數、path/to/file.md、/Users/me/project/（目錄）
-version: 2.0.0
+version: 2.1.0
 ---
 
 # /zenos-capture — 知識捕獲 + 首次建構
@@ -83,37 +83,98 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 開始？（直接說「開始」或調整跳過清單）
 ```
 
-### C2. 第一階段：讀 P0，建骨架層
+### C2. 第一階段：全局讀取，形成全景理解
 
-逐一讀取所有 P0 文件，從中提取：
-- 產品名稱、模組名稱、角色
-- 技術架構（框架、資料庫、AI 服務）
-- 核心業務概念（如 ACWR、Training Plan、Rizo AI）
-- 服務之間的依賴關係
+讀取**所有** P0 文件，以及**所有** P1 文件，串接為一個全局 context。
 
-**模組粒度控制（重要）**：
-- 預估每個 module 下會有多少文件。如果 > 10 個，**必須拆分成更細的子 module**
-- 拆分依據：按業務領域（如 Training Plan / Workout Data / Readiness Metrics），不是按技術層（如 API / Domain / Core）
-- 例如：不要建一個「API Service」module 塞 98 個 docs，而是拆成「訓練計畫」「運動數據」「AI 教練」等業務 module
-- 目標：每個 module 下 3-10 個 document entries
+**重要**：這個階段不產出任何 entity。目的是先理解整間公司在做什麼——產品定位、客群、運作方式、核心概念、已知文件的整體輪廓。讀完才能做下一步的全局統合。
 
-**Module 層級設定（必做）**：
-- 每個 module entity 的 `parent_id` **必須**指向所屬的 product entity ID
-- 子 module 的 `parent_id` 指向父 module
-- 頂層 product 的 `parent_id` 為 null
-- **沒有 parent_id 的 module = Dashboard 上看不到，等於沒建**
+讀取過程中不需要呈現進度，只在全部讀完後進入 C3。
 
-**Relationship 建立（必做）**：
-- 用 `write(collection="relationships", data={...})` 連接 product → module（`contains`）
-- 用 `write(collection="relationships", data={...})` 連接 module → module（`depends_on`、`feeds_into`）
-- 骨架層沒有 relationship = 不完整，一定要建
+### C3. 第二階段：全局 L2 統合
 
-彙整後，**一次性**呈現骨架層 proposals（見下方確認 UI），等用戶確認後寫入 Firestore。
-確認後，**立即用 `write(collection="relationships", data={...})` 建立所有關係**，不要留到後面。
+這是核心步驟。你已經讀完所有核心文件，現在以全公司的視野統合理解，按以下 5 步思考，**最後一次性呈現 proposals，等用戶確認後才寫入**。
 
-### C3. 第二階段：P1 文件 — 讀 + 建 document entry
+**Step 1：全景理解**
 
-逐一讀取 P1 文件，為每份建立 document entry：
+用 3-5 句話描述：這間公司在做什麼、賣給誰、怎麼運作。這是後續所有判斷的基礎。
+
+**Step 2：共識辨識**
+
+從全景中抽取符合三問標準的 L2 概念：
+1. **是不是公司共識？** 公司裡任何人說出來都會點頭——不是某個角色的專屬知識
+2. **改變時有下游影響？** 這個概念如果改了，有其他概念必須跟著動
+3. **跨時間存活？** 不是一次性事件，是持續為真的事實
+
+**Step 3：獨立性切割**
+
+判斷概念邊界——「A 改了，B 不一定跟著改」→ 分成兩個 L2；「A 改了，B 一定跟著改」→ 同一個 L2。
+- 一個技術模組可以拆成多個 L2（按「可獨立改變」切）
+- 多份文件散落的同一個概念 → 統合成一個 L2（不是每份文件各建一個）
+
+**Step 4：跨角色語言**
+
+用任何角色都聽得懂的語言寫 summary：
+- 不是技術語言（不寫 API、LLM、schema 等工程詞彙）
+- 不是行銷語言（不過度包裝）
+- 是共識語言（事實陳述，任何人讀了都點頭）
+- `tags.why` 從公司或客戶角度寫，不從技術角度寫
+- `tags.who` 列出所有相關角色，不只是 owner
+
+**Step 5：影響路徑推斷**
+
+從全局理解推斷 impacts 關聯——需要同時理解 A 和 B 才能判斷：
+- 每個 L2 至少要有一條 relationship
+- `impacts` 是最核心的關係類型：「A 改了，B 必須跟著檢查」
+- description 格式：「A 改了{什麼}→ B 的{什麼}要跟著看」
+- 說不出具體場景的關係 = noise，不該建
+
+**C3 輸出格式（一次性呈現，等用戶確認後寫入）：**
+
+```
+── 全景理解 ──────────────────────────────────────
+{3-5 句公司全景描述}
+
+── L2 概念 Proposals（需要你確認）───────────────
+
+[1] 概念名稱
+  摘要：{2-3 句，任何人都聽得懂，不需要背景知識}
+  What: {這跟什麼有關——產品名、功能區塊}
+  Why:  {為什麼重要——從公司/客戶角度，不是技術角度}
+  How:  {現在怎麼運作——白話描述，不是技術實作}
+  Who:  {誰需要知道——列出所有相關角色}
+  來源文件：{從哪些文件統合出這個概念}
+
+[2] ...
+
+── 關聯 Proposals ──────────────────────────────
+[R1] 「概念A」→ impacts →「概念B」
+  說明：改定價時，onboarding 報價話術必須更新
+[R2] 「概念C」→ part_of →「概念D」
+  說明：{具體場景}
+...
+
+────────────────────────────────────────────────
+輸入要確認的概念編號（如「1 3」），或「全部」，或「略過」：
+確認關聯？（「全部」/選擇編號/「略過」）：
+```
+
+**確認後寫入規則：**
+
+L2 entity 寫入時：
+- `type = "module"`
+- `level = 2`（標記為 L2，用於和 L3 document entity 區分）
+- `parent_id` = product entity ID（**必填**，沒有 parent_id = Dashboard 上看不到）
+- `confirmed_by_user = true`（用戶確認的）
+- `sources` = 從哪些文件統合出這個概念（支援跨文件統合）
+
+Relationship 寫入時：
+- `type` 可以是 `impacts`、`depends_on`、`part_of`、`enables`
+- `description` 必須具體——不是「A 依賴 B」，是「A 改了{什麼}→ B 的{什麼}要跟著看」
+
+### C4. 第三階段：P1 文件 — 建 document entry
+
+為每份 P1 文件建立 document entry（C2 已讀過內容，直接寫入，不需要重讀）：
 
 ```
 進度：P1 規格文件
@@ -130,12 +191,12 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 - `tags.how`：文件類型（spec/frd/guide/architecture）
 - `tags.who`：目標讀者（list[str]，如 ["開發", "PM"]）
 - `summary`：2-3 句語意摘要——這份文件在知識體系中的定位，不是全文節錄
-- `linked_entity_ids`：關聯的 entity IDs（第一個映射為 parent_id，其餘自動建立 relationships）
+- `linked_entity_ids`：關聯的 entity IDs（**優先指向 C3 確認的 L2 entity**，第一個映射為 parent_id，其餘自動建立 relationships）
 - `confirmed_by_user = false`（全部先 draft）
 
-### C4. 第三階段：P2/P3 文件 — 追加到 entity.sources（不建獨立 entity）
+### C5. 第四階段：P2/P3 文件 — 追加到 entity.sources（不建獨立 entity）
 
-P2/P3 文件不值得成為獨立節點，用 `append_sources` 追加到所屬 entity：
+P2/P3 文件不值得成為獨立節點，用 `append_sources` 追加到所屬 entity（優先追加到最相關的 L2 entity）：
 
 ```
 write(collection="entities", id={parent_entity_id}, data={
@@ -153,28 +214,28 @@ write(collection="entities", id={parent_entity_id}, data={
   [2/{n}] ...
 ```
 
-### C5. 自動品質檢查與盲點分析（必做）
+### C6. 自動品質檢查與盲點分析（必做）
 
 建構完成後，**自動執行**以下兩個檢查，不需要用戶觸發：
 
-1. `analyze(check_type="quality")` — 9 項品質檢查，回報分數和未通過項目
+1. `analyze(check_type="quality")` — 12 項品質檢查（含 L2 summary 可讀性與 impacts 覆蓋率），回報分數和未通過項目
 2. `analyze(check_type="blindspot")` — 推斷知識盲點，寫入 blindspots
 
-如果品質分數 < 70 或有 failed 項目，**主動提出修正建議**（例如拆分過大的 module、補 relationship）。
+如果品質分數 < 70 或有 failed 項目，**主動提出修正建議**（例如補 impacts relationship、重寫技術語言過重的 summary、拆分過大的概念）。
 
-### C6. Summary
+### C7. Summary
 
 ```
 ✅ 首次建構完成：{目錄名稱}
 
-骨架層（entities）：
-  • 確認 {n} 個實體（你逐一確認的）
-  • Draft {n} 個實體（你略過的，待後續確認）
-  • Relationships：{n} 個（product→module、module→module）
+L2 概念層（entities）：
+  • 確認 {n} 個 L2 概念（你逐一確認的）
+  • Draft {n} 個 L2 概念（你略過的，待後續確認）
+  • Relationships：{n} 個（含 impacts / depends_on / part_of / enables）
 
 神經層（documents）：
-  • P1 精讀 entry：{n} 個
-  • P2/P3 快速 entry：{n} 個
+  • P1 精讀 entry：{n} 個（linked 到 L2 entity）
+  • P2/P3 追加 sources：{n} 個
 
 品質檢查：{分數}/100
   通過：{n} 項 | 未通過：{n} 項
@@ -312,7 +373,8 @@ write(collection="documents", data={
 
 ### Relationship 驗證
 - `source_entity_id` 和 `target_entity_id` 必須都是已存在的 entity
-- `type` 必須是：`depends_on` / `serves` / `owned_by` / `part_of` / `blocks` / `related_to`
+- `type` 必須是：`depends_on` / `serves` / `owned_by` / `part_of` / `blocks` / `related_to` / `impacts` / `enables`
+- L2 概念之間優先使用 `impacts`（A 改了，B 必須跟著檢查）和 `enables`（A 讓 B 成為可能）
 
 ### Blindspot 驗證
 - `severity` 必須是：`red` / `yellow` / `green`
