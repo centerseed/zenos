@@ -298,8 +298,9 @@ class TestGetTool:
         from zenos.interface.tools import get
 
         task = _make_task()
-        with patch("zenos.interface.tools.task_repo") as mock_tr:
-            mock_tr.get_by_id = AsyncMock(return_value=task)
+        enrichments = {"expanded_entities": []}
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.get_task_enriched = AsyncMock(return_value=(task, enrichments))
 
             result = await get(collection="tasks", id="task-1")
 
@@ -308,8 +309,8 @@ class TestGetTool:
     async def test_get_task_not_found(self):
         from zenos.interface.tools import get
 
-        with patch("zenos.interface.tools.task_repo") as mock_tr:
-            mock_tr.get_by_id = AsyncMock(return_value=None)
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.get_task_enriched = AsyncMock(return_value=None)
 
             result = await get(collection="tasks", id="nonexistent")
 

@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const API_URL = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, partner, loading, error, signOut, refetchPartner } = useAuth();

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timezone
 
@@ -125,9 +126,13 @@ async def _verify_firebase_token(request: Request) -> dict | None:
 
 
 def _get_db():
-    """Reuse the Firestore client from firestore_repo."""
-    from zenos.infrastructure.firestore_repo import get_db
-    return get_db()
+    """Get a Firestore async client directly (not via firestore_repo).
+
+    Admin API manages partners, not ontology entities, so it owns its own
+    client instance rather than sharing the infrastructure-layer repo client.
+    """
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "zenos-naruvia")
+    return gcloud_firestore.AsyncClient(project=project)
 
 
 async def _get_partner_by_email(email: str) -> tuple[str | None, dict | None]:
@@ -211,6 +216,18 @@ async def invite_partner(request: Request) -> Response:
     doc_ref = db.collection("partners").document()
     await doc_ref.set(partner_data)
 
+    logger.info(
+        "audit",
+        extra={
+            "action": "partner_invite",
+            "caller_email": caller.get("email", ""),
+            "target_email": email,
+            "target_partner_id": doc_ref.id,
+            "result": "success",
+            "detail": "status=invited",
+        },
+    )
+
     partner_data["id"] = doc_ref.id
     return _json_response(partner_data, status_code=201, request=request)
 
@@ -256,6 +273,19 @@ async def update_partner_role(request: Request) -> Response:
         "isAdmin": is_admin,
         "updatedAt": datetime.now(timezone.utc),
     })
+
+    target_email = doc.to_dict().get("email", "")
+    logger.info(
+        "audit",
+        extra={
+            "action": "partner_role_change",
+            "caller_email": caller.get("email", ""),
+            "target_email": target_email,
+            "target_partner_id": partner_id,
+            "result": "success",
+            "detail": f"is_admin={is_admin}",
+        },
+    )
 
     updated = doc.to_dict()
     updated["isAdmin"] = is_admin
@@ -314,6 +344,19 @@ async def update_partner_status(request: Request) -> Response:
         "updatedAt": datetime.now(timezone.utc),
     })
 
+    target_email = doc.to_dict().get("email", "")
+    logger.info(
+        "audit",
+        extra={
+            "action": "partner_status_change",
+            "caller_email": caller.get("email", ""),
+            "target_email": target_email,
+            "target_partner_id": partner_id,
+            "result": "success",
+            "detail": f"status={new_status}",
+        },
+    )
+
     updated = doc.to_dict()
     updated["status"] = new_status
     updated["id"] = partner_id
@@ -370,6 +413,19 @@ async def activate_partner(request: Request) -> Response:
     partner["apiKey"] = api_key
     partner["displayName"] = display_name
     partner["id"] = partner_id
+
+    logger.info(
+        "audit",
+        extra={
+            "action": "partner_activate",
+            "caller_email": email,
+            "target_email": email,
+            "target_partner_id": partner_id,
+            "result": "success",
+            "detail": "status=active",
+        },
+    )
+
     return _json_response(partner, request=request)
 
 

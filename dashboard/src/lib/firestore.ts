@@ -142,6 +142,7 @@ export function toTask(id: string, data: Record<string, unknown>): Task {
     description: (data.description as string) ?? "",
     status: data.status as Task["status"],
     priority: (data.priority as Task["priority"]) ?? "medium",
+    project: (data.project as string) ?? "",
     priorityReason: (data.priorityReason as string) ?? "",
     assignee: (data.assignee as string) ?? null,
     createdBy: (data.createdBy as string) ?? "",

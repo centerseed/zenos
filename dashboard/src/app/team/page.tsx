@@ -10,7 +10,7 @@ import { AppNav } from "@/components/AppNav";
 import { getAllPartners } from "@/lib/firestore";
 import type { Partner } from "@/types";
 
-const API_URL = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
 
 function TeamPage() {
   const { user, partner } = useAuth();
@@ -68,8 +68,8 @@ function TeamPage() {
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: "Unknown error" }));
-        throw new Error(body.detail || `Failed: ${res.status}`);
+        const body = await res.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(body.message || body.detail || `Failed: ${res.status}`);
       }
 
       // Send Firebase email link
@@ -111,8 +111,8 @@ function TeamPage() {
         body: JSON.stringify({ isAdmin }),
       });
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: "Unknown error" }));
-        throw new Error(body.detail || `Failed: ${res.status}`);
+        const body = await res.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(body.message || body.detail || `Failed: ${res.status}`);
       }
       await fetchPartners();
     } catch (err) {
@@ -142,8 +142,8 @@ function TeamPage() {
         }
       );
       if (!res.ok) {
-        const body = await res.json().catch(() => ({ detail: "Unknown error" }));
-        throw new Error(body.detail || `Failed: ${res.status}`);
+        const body = await res.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(body.message || body.detail || `Failed: ${res.status}`);
       }
       await fetchPartners();
     } catch (err) {

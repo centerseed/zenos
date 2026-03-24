@@ -768,10 +768,7 @@ async def confirm(
 # ===================================================================
 
 
-@mcp.tool(
-    tags={"write"},
-)
-async def task(
+async def _task_handler(
     action: str,
     title: str | None = None,
     created_by: str | None = None,
@@ -792,45 +789,10 @@ async def task(
     project: str | None = None,
     assignee_role_id: str | None = None,
 ) -> dict:
-    """管理知識驅動的行動項目（Action Layer）。
+    """Core task handler logic — extracted for testability.
 
-    任務是 ontology 的 output 路徑——從知識洞察產生的具體行動。
-    每個任務透過 linked_entities/linked_blindspot 連結回 ontology，
-    讓收到任務的人/agent 自動獲得相關 context。
-
-    使用時機：
-    - 建任務 → action="create"（必填：title, created_by）
-    - 改狀態 → action="update"（必填：id。改 status/assignee/priority 等）
-    - 列任務 → 不要用這個，用 search(collection="tasks") 更靈活
-
-    狀態流：backlog → todo → in_progress → review → done → archived
-            任何狀態可 → cancelled。blocked 是特殊狀態（需填 blocked_reason）。
-    注意：不能用 update 把 status 改成 done（必須走 confirm 驗收流程）。
-
-    不要用這個工具的情境：
-    - 查任務列表 → 用 search(collection="tasks")
-    - 驗收任務 → 用 confirm(collection="tasks")
-
-    Args:
-        action: "create" 或 "update"
-        title: 任務標題，動詞開頭（create 必填）
-        created_by: 建立者 UID（create 必填）
-        id: 任務 ID（update 必填）
-        description: 任務描述
-        assignee: 被指派者 UID
-        priority: critical/high/medium/low（不傳時 AI 自動推薦）
-        status: 目標狀態（update 用，需通過合法性驗證）
-        linked_entities: 關聯的 entity IDs
-        linked_protocol: 關聯的 Protocol ID
-        linked_blindspot: 觸發的 blindspot ID
-        due_date: 到期日 ISO-8601（如 "2026-03-29"）
-        blocked_by: 阻塞此任務的 task IDs
-        blocked_reason: blocked 狀態時必填
-        acceptance_criteria: 驗收條件列表
-        result: 完成產出描述（status=review 時填寫）
-        project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
-            未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
-        assignee_role_id: 指向 role entity 的 ID（可選），用於展開角色 context
+    Called by the ``task`` MCP tool wrapper. Tests import this function
+    directly to avoid calling a ``FunctionTool`` object.
     """
     try:
         # Resolve partner context once — used for auto-filling created_by and project
@@ -922,6 +884,93 @@ async def task(
             }
     except ValueError as e:
         return {"error": "INVALID_INPUT", "message": str(e)}
+
+
+@mcp.tool(
+    tags={"write"},
+)
+async def task(
+    action: str,
+    title: str | None = None,
+    created_by: str | None = None,
+    id: str | None = None,
+    description: str | None = None,
+    assignee: str | None = None,
+    priority: str | None = None,
+    status: str | None = None,
+    linked_entities: list[str] | None = None,
+    linked_protocol: str | None = None,
+    linked_blindspot: str | None = None,
+    source_type: str | None = None,
+    due_date: str | None = None,
+    blocked_by: list[str] | None = None,
+    blocked_reason: str | None = None,
+    acceptance_criteria: list[str] | None = None,
+    result: str | None = None,
+    project: str | None = None,
+    assignee_role_id: str | None = None,
+) -> dict:
+    """管理知識驅動的行動項目（Action Layer）。
+
+    任務是 ontology 的 output 路徑——從知識洞察產生的具體行動。
+    每個任務透過 linked_entities/linked_blindspot 連結回 ontology，
+    讓收到任務的人/agent 自動獲得相關 context。
+
+    使用時機：
+    - 建任務 → action="create"（必填：title, created_by）
+    - 改狀態 → action="update"（必填：id。改 status/assignee/priority 等）
+    - 列任務 → 不要用這個，用 search(collection="tasks") 更靈活
+
+    狀態流：backlog → todo → in_progress → review → done → archived
+            任何狀態可 → cancelled。blocked 是特殊狀態（需填 blocked_reason）。
+    注意：不能用 update 把 status 改成 done（必須走 confirm 驗收流程）。
+
+    不要用這個工具的情境：
+    - 查任務列表 → 用 search(collection="tasks")
+    - 驗收任務 → 用 confirm(collection="tasks")
+
+    Args:
+        action: "create" 或 "update"
+        title: 任務標題，動詞開頭（create 必填）
+        created_by: 建立者 UID（create 必填）
+        id: 任務 ID（update 必填）
+        description: 任務描述
+        assignee: 被指派者 UID
+        priority: critical/high/medium/low（不傳時 AI 自動推薦）
+        status: 目標狀態（update 用，需通過合法性驗證）
+        linked_entities: 關聯的 entity IDs
+        linked_protocol: 關聯的 Protocol ID
+        linked_blindspot: 觸發的 blindspot ID
+        due_date: 到期日 ISO-8601（如 "2026-03-29"）
+        blocked_by: 阻塞此任務的 task IDs
+        blocked_reason: blocked 狀態時必填
+        acceptance_criteria: 驗收條件列表
+        result: 完成產出描述（status=review 時填寫）
+        project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
+            未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
+        assignee_role_id: 指向 role entity 的 ID（可選），用於展開角色 context
+    """
+    return await _task_handler(
+        action=action,
+        title=title,
+        created_by=created_by,
+        id=id,
+        description=description,
+        assignee=assignee,
+        priority=priority,
+        status=status,
+        linked_entities=linked_entities,
+        linked_protocol=linked_protocol,
+        linked_blindspot=linked_blindspot,
+        source_type=source_type,
+        due_date=due_date,
+        blocked_by=blocked_by,
+        blocked_reason=blocked_reason,
+        acceptance_criteria=acceptance_criteria,
+        result=result,
+        project=project,
+        assignee_role_id=assignee_role_id,
+    )
 
 
 # ===================================================================

@@ -91,7 +91,7 @@ class TestTaskCreatedByAutoFill:
     """Tests for task tool auto-filling created_by from partner identity."""
 
     async def test_created_by_auto_filled_from_partner(self):
-        from zenos.interface.tools import task as task_tool, _current_partner
+        from zenos.interface.tools import _task_handler, _current_partner
         from zenos.application.task_service import TaskResult
 
         t = _make_task(created_by="Alice")
@@ -102,7 +102,7 @@ class TestTaskCreatedByAutoFill:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
 
-                result = await task_tool(
+                result = await _task_handler(
                     action="create",
                     title="Test task",
                     # created_by intentionally omitted
@@ -117,7 +117,7 @@ class TestTaskCreatedByAutoFill:
             _current_partner.reset(token)
 
     async def test_created_by_not_overridden_when_provided(self):
-        from zenos.interface.tools import task as task_tool, _current_partner
+        from zenos.interface.tools import _task_handler, _current_partner
         from zenos.application.task_service import TaskResult
 
         t = _make_task(created_by="Barry")
@@ -128,7 +128,7 @@ class TestTaskCreatedByAutoFill:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
 
-                result = await task_tool(
+                result = await _task_handler(
                     action="create",
                     title="Test task",
                     created_by="Barry",  # explicitly provided
@@ -141,12 +141,12 @@ class TestTaskCreatedByAutoFill:
             _current_partner.reset(token)
 
     async def test_created_by_error_when_no_partner_and_not_provided(self):
-        from zenos.interface.tools import task as task_tool, _current_partner
+        from zenos.interface.tools import _task_handler, _current_partner
 
         # Ensure ContextVar is None
         assert _current_partner.get() is None
 
-        result = await task_tool(
+        result = await _task_handler(
             action="create",
             title="Test task",
             # created_by intentionally omitted, no partner context
@@ -156,7 +156,7 @@ class TestTaskCreatedByAutoFill:
         assert "created_by" in result["message"]
 
     async def test_superadmin_auto_fill(self):
-        from zenos.interface.tools import task as task_tool, _current_partner
+        from zenos.interface.tools import _task_handler, _current_partner
         from zenos.application.task_service import TaskResult
 
         t = _make_task(created_by="superadmin")
@@ -167,7 +167,7 @@ class TestTaskCreatedByAutoFill:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
 
-                result = await task_tool(
+                result = await _task_handler(
                     action="create",
                     title="Admin task",
                 )

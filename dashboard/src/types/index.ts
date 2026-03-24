@@ -76,6 +76,7 @@ export interface Task {
   description: string;
   status: TaskStatus;
   priority: TaskPriority;
+  project: string;
   priorityReason: string;
   assignee: string | null;
   createdBy: string;
