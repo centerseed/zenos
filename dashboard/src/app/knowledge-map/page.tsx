@@ -52,6 +52,14 @@ function inferTasksForEntity(entity: Entity, tasks: Task[]): Task[] {
   });
 }
 
+/** Find tasks for a module: prefer linkedEntities, fall back to text matching */
+function findTasksForModule(module: Entity, tasks: Task[]): Task[] {
+  const linked = tasks.filter(
+    (t) => t.linkedEntities && t.linkedEntities.length > 0 && t.linkedEntities.includes(module.id)
+  );
+  return linked.length > 0 ? linked : inferTasksForEntity(module, tasks);
+}
+
 const TYPE_COLORS: Record<string, string> = {
   product: "#3B82F6",
   module: "#8B5CF6",
@@ -268,9 +276,7 @@ function Sidebar({
           counts[e.type as ExpandableType]++;
         }
       }
-      for (const t of tasks) {
-        if (t.linkedEntities.includes(m.id)) counts.task++;
-      }
+      counts.task = findTasksForModule(m, tasks).length;
       result[m.id] = counts;
     }
     return result;
@@ -603,9 +609,7 @@ function GraphCanvas({
             counts[child.type as ExpandableType]++;
           }
         }
-        for (const t of tasks) {
-          if (t.linkedEntities.includes(e.id)) counts.task++;
-        }
+        counts.task = findTasksForModule(e, tasks).length;
         result[e.id] = counts;
       }
     }
@@ -724,7 +728,8 @@ function GraphCanvas({
     for (const [moduleId, types] of Object.entries(expandedModules)) {
       if (!types.includes("task")) continue;
       if (!visibleIds.has(moduleId)) continue;
-      const moduleTasks = tasks.filter((t) => t.linkedEntities.includes(moduleId));
+      const moduleEntity = entityMap.get(moduleId);
+      const moduleTasks = moduleEntity ? findTasksForModule(moduleEntity, tasks) : [];
       for (const t of moduleTasks) {
         const nodeId = `task:${t.id}`;
         if (!taskNodeIds.has(nodeId)) {
@@ -1046,6 +1051,11 @@ function GraphCanvas({
         ) => {
           if (node.type === "module") {
             const isExpanded = (expandedModules[node.id as string] ?? []).length > 0;
+            // Pin module node position to prevent drift during simulation reheat
+            node.fx = node.x;
+            node.fy = node.y;
+            // Unpin after simulation settles
+            setTimeout(() => { node.fx = undefined; node.fy = undefined; }, 2000);
             if (isExpanded) {
               onCollapseModule(node.id as string);
               setClickPopover(null);
