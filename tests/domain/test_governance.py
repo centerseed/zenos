@@ -512,3 +512,170 @@ class TestRunQualityCheck:
         if total > 0:
             expected = int((len(report.passed) / total) * 100)
             assert report.score == expected
+
+
+# ──────────────────────────────────────────────
+# 5b. run_quality_check — L2 checks (items 10-12)
+# ──────────────────────────────────────────────
+
+class TestRunQualityCheckL2:
+    """Tests for the three L2-specific quality checks (10-12)."""
+
+    # --- Check 10: l2_summary_readability ---
+
+    def test_l2_summary_with_tech_term_fails(self):
+        """Module entity with technical term in summary should fail readability check."""
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary="We use an API to connect the system.",
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_summary_readability" in failed_names
+
+    def test_l2_summary_tech_term_case_insensitive(self):
+        """Technical term check is case-insensitive."""
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary="Our platform uses graphql for data queries.",
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_summary_readability" in failed_names
+
+    def test_l2_summary_tech_term_whole_word_only(self):
+        """Partial matches should not trigger (e.g. 'APIs' does not match 'API' whole word)."""
+        # "APIs" — the regex uses \b so "APIs" has word boundary after "s", not "I".
+        # However "API" inside "APIs" is at a word boundary on the left. This test
+        # documents that our check will indeed catch "APIs" because \bAPI\b won't match it.
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary="We build rapid prototypes.",  # "rapid" contains no tech terms
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_summary_readability" in passed_names
+
+    def test_l2_summary_clean_passes_readability(self):
+        """Module entity with plain-language summary passes readability check."""
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary="這個模組負責協調跨部門的知識共享流程。",
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_summary_readability" in passed_names
+
+    def test_non_module_entity_not_checked_for_readability(self):
+        """Product-type entity with technical terms should not affect l2_summary_readability."""
+        entity = _make_entity(
+            entity_type=EntityType.PRODUCT,
+            summary="We use Firestore and Docker for deployment.",
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_summary_readability" in passed_names
+
+    def test_l2_readability_detail_names_found_terms(self):
+        """Failed detail message should mention the found technical terms."""
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary="This uses REST and OAuth for authentication.",
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        check = next(i for i in report.failed if i.name == "l2_summary_readability")
+        assert "REST" in check.detail
+        assert "OAuth" in check.detail
+
+    # --- Check 11: l2_summary_conciseness ---
+
+    def test_l2_summary_over_5_sentences_is_warning(self):
+        """Module summary with >5 sentences generates a warning (not a failure)."""
+        long_summary = "第一句。第二句。第三句。第四句。第五句。第六句。"
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary=long_summary,
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        warning_names = [w.name for w in report.warnings]
+        failed_names = [f.name for f in report.failed]
+        assert "l2_summary_conciseness" in warning_names
+        assert "l2_summary_conciseness" not in failed_names
+
+    def test_l2_summary_exactly_5_sentences_passes(self):
+        """Module summary with exactly 5 sentences does not trigger warning."""
+        summary = "第一句。第二句。第三句。第四句。第五句。"
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary=summary,
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_summary_conciseness" not in warning_names
+
+    def test_l2_summary_conciseness_counts_all_punctuation(self):
+        """Sentence count includes periods, question marks, and exclamation marks."""
+        summary = "Really? Yes! Absolutely. Sure. Indeed?"  # 5 sentence endings
+        entity = _make_entity(
+            entity_type=EntityType.MODULE,
+            summary=summary,
+        )
+        report = run_quality_check([entity], [], [], [], [])
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_summary_conciseness" not in warning_names
+
+    def test_l2_conciseness_is_always_passed_item(self):
+        """l2_summary_conciseness must always appear in passed (warnings don't fail)."""
+        long_summary = "一。二。三。四。五。六。七。"
+        entity = _make_entity(entity_type=EntityType.MODULE, summary=long_summary)
+        report = run_quality_check([entity], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_summary_conciseness" in passed_names
+
+    # --- Check 12: l2_impacts_coverage ---
+
+    def test_majority_modules_without_rels_fails_coverage(self):
+        """When >50% of module entities have no relationships, coverage check fails."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        m3 = _make_entity(name="M3", entity_type=EntityType.MODULE, entity_id="m3")
+        # Only m1 has a relationship; m2 and m3 do not (2/3 = 66% > 50%)
+        rel = _make_rel(source_id="m1", target_id="m1")
+        report = run_quality_check([m1, m2, m3], [], [], [], [rel])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_impacts_coverage" in failed_names
+
+    def test_exactly_50_percent_without_rels_passes_coverage(self):
+        """Exactly 50% of modules without relationships passes the coverage check."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        # m1 has rel, m2 does not — 50% without = not > 50%, passes
+        rel = _make_rel(source_id="m1", target_id="m1")
+        report = run_quality_check([m1, m2], [], [], [], [rel])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_impacts_coverage" in passed_names
+
+    def test_all_modules_with_rels_passes_coverage(self):
+        """All module entities having relationships passes coverage check."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        rel = _make_rel(source_id="m1", target_id="m2")
+        report = run_quality_check([m1, m2], [], [], [], [rel])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_impacts_coverage" in passed_names
+
+    def test_no_modules_passes_coverage(self):
+        """When there are no module entities, coverage check passes trivially."""
+        entity = _make_entity(entity_type=EntityType.PRODUCT)
+        report = run_quality_check([entity], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_impacts_coverage" in passed_names
+
+    def test_l2_coverage_detail_format(self):
+        """Failed detail should mention n/total without relationships."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        m3 = _make_entity(name="M3", entity_type=EntityType.MODULE, entity_id="m3")
+        report = run_quality_check([m1, m2, m3], [], [], [], [])
+        check = next(i for i in report.failed if i.name == "l2_impacts_coverage")
+        assert "3/3" in check.detail

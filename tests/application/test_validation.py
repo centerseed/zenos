@@ -334,6 +334,97 @@ class TestUpsertProtocolValidation:
 
 
 # ---------------------------------------------------------------------------
+# New relationship types: impacts / enables
+# ---------------------------------------------------------------------------
+
+class TestNewRelationshipTypes:
+
+    def _make_service_with_entities(self) -> OntologyService:
+        repos = _mock_repos()
+        entity = Entity(
+            id="ent-1", name="A", type="product",
+            summary="X", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=entity)
+        return _make_service(repos)
+
+    async def test_impacts_relationship_is_accepted(self):
+        svc = self._make_service_with_entities()
+        result = await svc.add_relationship("ent-1", "ent-2", "impacts", "A changed → B must check")
+        assert result.type == "impacts"
+
+    async def test_enables_relationship_is_accepted(self):
+        svc = self._make_service_with_entities()
+        result = await svc.add_relationship("ent-1", "ent-2", "enables", "A makes B possible")
+        assert result.type == "enables"
+
+    async def test_unknown_rel_type_still_rejected(self):
+        svc = self._make_service_with_entities()
+        with pytest.raises(ValueError, match="Invalid relationship type"):
+            await svc.add_relationship("ent-1", "ent-2", "likes", "test")
+
+
+# ---------------------------------------------------------------------------
+# Auto-level logic in upsert_entity
+# ---------------------------------------------------------------------------
+
+class TestAutoLevel:
+
+    async def test_product_gets_level_1(self):
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_valid_entity_data(type="product"))
+        assert result.entity.level == 1
+
+    async def test_module_gets_level_2(self):
+        repos = _mock_repos()
+        parent = Entity(
+            id="parent-1", name="Product", type="product",
+            summary="P", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(
+            _valid_entity_data(type="module", parent_id="parent-1")
+        )
+        assert result.entity.level == 2
+
+    async def test_document_gets_level_3(self):
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(
+            _valid_entity_data(type="document", status="current")
+        )
+        assert result.entity.level == 3
+
+    async def test_goal_gets_level_3(self):
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_valid_entity_data(type="goal"))
+        assert result.entity.level == 3
+
+    async def test_role_gets_level_3(self):
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_valid_entity_data(type="role"))
+        assert result.entity.level == 3
+
+    async def test_project_gets_level_3(self):
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_valid_entity_data(type="project"))
+        assert result.entity.level == 3
+
+    async def test_caller_provided_level_is_respected(self):
+        """If caller explicitly passes level, it overrides the auto-computed value."""
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_valid_entity_data(type="product", level=99))
+        assert result.entity.level == 99
+
+
+# ---------------------------------------------------------------------------
 # upsert_document validation
 # ---------------------------------------------------------------------------
 
@@ -846,3 +937,105 @@ class TestAutoInferModuleParent:
 
         # Should fall back to first module under the product
         assert result.entity.parent_id == "mod-1"
+
+
+# ---------------------------------------------------------------------------
+# Cross-product auto-inferred related_to guard
+# ---------------------------------------------------------------------------
+
+class TestCrossProductRelatedToGuard:
+    """Verify that auto-inferred related_to across different products is silently skipped."""
+
+    def _make_entity(self, id: str, name: str, type: str, parent_id: str | None = None) -> Entity:
+        return Entity(
+            id=id,
+            name=name,
+            type=type,
+            summary=f"Test {name}",
+            tags=Tags(what=["test"], why="test", how="test", who=["test"]),
+            parent_id=parent_id,
+        )
+
+    async def test_cross_product_auto_inferred_skipped(self):
+        """Auto-inferred related_to across products should NOT be persisted."""
+        repos = _mock_repos()
+        # Product A, Module A under it
+        prod_a = self._make_entity("prod-a", "Product A", "product")
+        mod_a = self._make_entity("mod-a", "Module A", "module", parent_id="prod-a")
+        # Product B, Module B under it
+        prod_b = self._make_entity("prod-b", "Product B", "product")
+        mod_b = self._make_entity("mod-b", "Module B", "module", parent_id="prod-b")
+
+        entity_lookup = {
+            "mod-a": mod_a,
+            "mod-b": mod_b,
+            "prod-a": prod_a,
+            "prod-b": prod_b,
+        }
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=lambda eid: entity_lookup.get(eid))
+
+        svc = _make_service(repos)
+        result = await svc.add_relationship(
+            source_id="mod-a",
+            target_id="mod-b",
+            rel_type="related_to",
+            description="auto-inferred",
+        )
+
+        # Should return a relationship object but NOT persist it
+        assert result.source_entity_id == "mod-a"
+        assert result.target_id == "mod-b"
+        repos["relationship_repo"].add.assert_not_called()
+        repos["relationship_repo"].find_duplicate.assert_not_called()
+
+    async def test_same_product_auto_inferred_allowed(self):
+        """Auto-inferred related_to within the same product SHOULD be persisted."""
+        repos = _mock_repos()
+        prod_a = self._make_entity("prod-a", "Product A", "product")
+        mod_a1 = self._make_entity("mod-a1", "Module A1", "module", parent_id="prod-a")
+        mod_a2 = self._make_entity("mod-a2", "Module A2", "module", parent_id="prod-a")
+
+        entity_lookup = {
+            "mod-a1": mod_a1,
+            "mod-a2": mod_a2,
+            "prod-a": prod_a,
+        }
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=lambda eid: entity_lookup.get(eid))
+
+        svc = _make_service(repos)
+        await svc.add_relationship(
+            source_id="mod-a1",
+            target_id="mod-a2",
+            rel_type="related_to",
+            description="auto-inferred",
+        )
+
+        # Should be persisted
+        repos["relationship_repo"].add.assert_called_once()
+
+    async def test_manual_cross_product_allowed(self):
+        """Manually created related_to across products SHOULD be persisted."""
+        repos = _mock_repos()
+        prod_a = self._make_entity("prod-a", "Product A", "product")
+        mod_a = self._make_entity("mod-a", "Module A", "module", parent_id="prod-a")
+        prod_b = self._make_entity("prod-b", "Product B", "product")
+        mod_b = self._make_entity("mod-b", "Module B", "module", parent_id="prod-b")
+
+        entity_lookup = {
+            "mod-a": mod_a,
+            "mod-b": mod_b,
+            "prod-a": prod_a,
+            "prod-b": prod_b,
+        }
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=lambda eid: entity_lookup.get(eid))
+
+        svc = _make_service(repos)
+        await svc.add_relationship(
+            source_id="mod-a",
+            target_id="mod-b",
+            rel_type="related_to",
+            description="These modules are strategically related",
+        )
+
+        # Manually created should be persisted
+        repos["relationship_repo"].add.assert_called_once()

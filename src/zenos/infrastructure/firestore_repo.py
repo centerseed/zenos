@@ -141,6 +141,7 @@ def _entity_to_dict(entity: Entity) -> dict[str, Any]:
     raw: dict[str, Any] = {
         "name": entity.name,
         "type": entity.type,
+        "level": entity.level,
         "parent_id": entity.parent_id,
         "status": entity.status,
         "summary": entity.summary,
@@ -178,6 +179,7 @@ def _dict_to_entity(doc_id: str, data: dict[str, Any]) -> Entity:
         id=doc_id,
         name=d.get("name", ""),
         type=d.get("type", ""),
+        level=d.get("level"),
         parent_id=d.get("parent_id"),
         status=d.get("status", "active"),
         summary=d.get("summary", ""),

@@ -622,7 +622,7 @@ async def write(
     protocols: entity_id, entity_name, content({what, why, how, who})
     blindspots: description, severity(red/yellow/green), suggested_action
     relationships: source_entity_id, target_entity_id, type(depends_on/serves/
-                   owned_by/part_of/blocks/related_to), description
+                   owned_by/part_of/blocks/related_to/impacts/enables), description
 
     Args:
         collection: entities/documents/protocols/blindspots/relationships

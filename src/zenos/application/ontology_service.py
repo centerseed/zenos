@@ -173,6 +173,19 @@ class OntologyService:
 
         return parent_id  # give up, return original
 
+    async def _find_product_ancestor(self, entity: Entity) -> Entity | None:
+        """Walk the parentId chain upward to find the product ancestor."""
+        visited: set[str] = set()
+        current = entity
+        while current:
+            if current.type == EntityType.PRODUCT:
+                return current
+            if current.id in visited or not current.parent_id:
+                return None
+            visited.add(current.id or "")
+            current = await self._entities.get_by_id(current.parent_id)
+        return None
+
     @staticmethod
     def _find_similar_entities(name: str, candidates: list[Entity]) -> list[Entity]:
         """Find entities with names similar to `name`.
@@ -555,11 +568,23 @@ class OntologyService:
                     if s.get("uri") not in existing_uris:
                         sources.append(s)
 
+        # Auto-set level based on type; caller-provided level takes precedence.
+        _TYPE_TO_LEVEL: dict[str, int] = {
+            EntityType.PRODUCT: 1,
+            EntityType.MODULE: 2,
+            EntityType.DOCUMENT: 3,
+            EntityType.GOAL: 3,
+            EntityType.ROLE: 3,
+            EntityType.PROJECT: 3,
+        }
+        level = data.get("level") if data.get("level") is not None else _TYPE_TO_LEVEL.get(data["type"])
+
         entity = Entity(
             name=data["name"],
             type=data["type"],
             summary=data["summary"],
             tags=tags,
+            level=level,
             status=data.get("status", "active"),
             id=data.get("id"),
             parent_id=data.get("parent_id"),
@@ -669,6 +694,32 @@ class OntologyService:
                 f"Invalid relationship type '{rel_type}'. "
                 f"Must be one of: {', '.join(valid_rel_types)}"
             )
+
+        # --- Cross-product guard for auto-inferred related_to ---
+        if (
+            rel_type == RelationshipType.RELATED_TO
+            and description == "auto-inferred"
+        ):
+            source_product = await self._find_product_ancestor(source)
+            target_product = await self._find_product_ancestor(target)
+            if (
+                source_product is not None
+                and target_product is not None
+                and source_product.id != target_product.id
+            ):
+                logger.info(
+                    "Skipping cross-product auto-inferred related_to: "
+                    "%s (%s) -> %s (%s)",
+                    source.name, source_product.name,
+                    target.name, target_product.name,
+                )
+                # Return a synthetic relationship without persisting
+                return Relationship(
+                    source_entity_id=source_id,
+                    target_id=target_id,
+                    type=rel_type,
+                    description=description,
+                )
 
         # --- Dedup check ---
         existing = await self._relationships.find_duplicate(source_id, target_id, rel_type)

@@ -6,6 +6,7 @@ Zero external dependencies.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta
 
 from .models import (
@@ -613,6 +614,18 @@ def analyze_blindspots(
 # 5. Quality check (品質檢查)
 # ──────────────────────────────────────────────
 
+# Technical terms that should not appear in L2 (module) summaries.
+# L2 summaries represent company-consensus concepts, not technical implementation.
+_L2_TECH_TERMS: list[str] = [
+    "LLM", "API", "SDK", "Firestore", "Firebase", "schema", "prompt",
+    "endpoint", "backend", "frontend", "framework", "middleware",
+    "microservice", "REST", "GraphQL", "SQL", "NoSQL", "CRUD", "ORM",
+    "JWT", "OAuth", "webhook", "CI/CD", "Docker", "Kubernetes",
+]
+
+# Compiled regex for sentence-ending punctuation (Chinese + Latin).
+_SENTENCE_END_RE = re.compile(r"[。！？.!?]")
+
 def run_quality_check(
     entities: list[Entity],
     documents: list[Entity | Document],
@@ -620,9 +633,10 @@ def run_quality_check(
     blindspots: list[Blindspot],
     relationships: list[Relationship],
 ) -> QualityReport:
-    """Run the 9-item quality checklist from ontology-methodology.md.
+    """Run the 12-item quality checklist from ontology-methodology.md.
 
     Returns a QualityReport with score (0-100), passed, failed, and warnings.
+    Items 1-9 cover general ontology quality; items 10-12 cover L2 (module) quality.
     """
     items: list[QualityCheckItem] = []
     entity_map = {e.id: e for e in entities if e.id}
@@ -820,13 +834,88 @@ def run_quality_check(
         ),
     ))
 
-    # Compute overall score
+    # --- 10. L2 Summary readability (no technical jargon)? ---
+    # L2 (module) entities represent company-consensus concepts;
+    # their summaries must be readable by any role, not just engineers.
+    module_entities = [e for e in entities if e.type == EntityType.MODULE]
+    check10_ok = True
+    check10_detail_parts: list[str] = []
+    for mod in module_entities:
+        found_terms = [
+            term for term in _L2_TECH_TERMS
+            if re.search(r"\b" + re.escape(term) + r"\b", mod.summary, re.IGNORECASE)
+        ]
+        if found_terms:
+            check10_ok = False
+            check10_detail_parts.append(
+                f"L2 entity '{mod.name}' 的 summary 包含技術術語："
+                f"{', '.join(found_terms)}。"
+                f"L2 summary 應使用任何角色都聽得懂的語言。"
+            )
+    items.append(QualityCheckItem(
+        name="l2_summary_readability",
+        passed=check10_ok,
+        detail=(
+            " | ".join(check10_detail_parts)
+            if check10_detail_parts
+            else f"所有 {len(module_entities)} 個 L2 entity 的 summary 均無技術術語"
+        ),
+    ))
+
+    # --- 11. L2 Summary conciseness (≤ 5 sentences)? ---
+    # L2 summaries should be concise; more than 5 sentences is a warning.
+    check11_warning_parts: list[str] = []
+    for mod in module_entities:
+        sentence_count = len(_SENTENCE_END_RE.findall(mod.summary))
+        if sentence_count > 5:
+            check11_warning_parts.append(
+                f"'{mod.name}' ({sentence_count} 句)"
+            )
+    # This is always "passed" (warnings don't affect score)
+    items.append(QualityCheckItem(
+        name="l2_summary_conciseness",
+        passed=True,
+        detail=(
+            f"L2 summary 過長（>5句）：{', '.join(check11_warning_parts)}"
+            if check11_warning_parts
+            else f"所有 {len(module_entities)} 個 L2 entity 的 summary 均在 5 句以內"
+        ),
+    ))
+
+    # --- 12. L2 Impacts coverage (>50% modules have relationships)? ---
+    # The core value of L2 is the relationships between concepts.
+    # If more than half of module entities have no relationships, it's a red flag.
+    rel_entity_ids_all = set()
+    for r in relationships:
+        rel_entity_ids_all.add(r.source_entity_id)
+        rel_entity_ids_all.add(r.target_id)
+    modules_without_rels = [
+        e for e in module_entities
+        if e.id and e.id not in rel_entity_ids_all
+    ]
+    total_modules = len(module_entities)
+    n_without = len(modules_without_rels)
+    check12_ok = total_modules == 0 or (n_without / total_modules) <= 0.5
+    items.append(QualityCheckItem(
+        name="l2_impacts_coverage",
+        passed=check12_ok,
+        detail=(
+            f"{n_without}/{total_modules} 個 L2 entity 沒有任何 relationship。"
+            f"L2 的核心價值在於概念之間的關聯。"
+            if not check12_ok
+            else f"{n_without}/{total_modules} 個 L2 entity 沒有 relationship（在閾值 50% 以內）"
+        ),
+    ))
+
+    # Compute overall score (warnings don't affect score)
     passed = [i for i in items if i.passed]
     failed = [i for i in items if not i.passed]
-    # Warnings: check3 with suspicious all-confirmed
-    warning_items = []
+    # Warnings: check3 suspicious all-confirmed + check11 verbose L2 summaries
+    warning_items: list[QualityCheckItem] = []
     if check3_warning:
         warning_items.append(items[2])  # unconfirmed_fields_marked
+    if check11_warning_parts:
+        warning_items.append(items[10])  # l2_summary_conciseness
     score = int((len(passed) / len(items)) * 100) if items else 0
 
     return QualityReport(

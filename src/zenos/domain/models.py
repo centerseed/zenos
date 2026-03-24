@@ -39,6 +39,8 @@ class RelationshipType(str, Enum):
     PART_OF = "part_of"
     BLOCKS = "blocks"
     RELATED_TO = "related_to"
+    IMPACTS = "impacts"   # A 改了，B 必須跟著檢查
+    ENABLES = "enables"   # A 存在讓 B 成為可能
 
 
 class SourceType(str, Enum):
@@ -111,6 +113,7 @@ class Entity:
     type: str  # EntityType value
     summary: str
     tags: Tags
+    level: int | None = None  # 1=product, 2=consensus concept (module), 3=document/detail
     status: str = EntityStatus.ACTIVE  # EntityStatus value
     id: str | None = None
     parent_id: str | None = None
