@@ -421,7 +421,7 @@ async def search(
                 created_by=created_by,
                 status=status_list,
                 limit=limit,
-                project=project if col == "tasks" else None,
+                project=project,
             )
             results["tasks"] = [_serialize(t) for t in tasks]
 
@@ -967,7 +967,6 @@ async def analyze(
         }
 
     return results
-
 
 
 # ===================================================================

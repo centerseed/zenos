@@ -259,14 +259,7 @@ async def test_get_task_enriched_expands_blindspot():
 @pytest.mark.asyncio
 async def test_create_task_auto_context_summary():
     entity = _entity(id="ent-1", name="Paceriz", summary="A running coach for athletes")
-    entity_repo = _make_entity_repo(entity)
-    task_repo = _make_task_repo()
-    blindspot_repo = _make_blindspot_repo()
-    svc = TaskService(
-        task_repo=task_repo,
-        entity_repo=entity_repo,
-        blindspot_repo=blindspot_repo,
-    )
+    svc = _make_service(entity=entity)
 
     data = {
         "title": "Fix login",
@@ -286,14 +279,7 @@ async def test_create_task_auto_context_summary():
 @pytest.mark.asyncio
 async def test_create_task_manual_context_summary_preserved():
     entity = _entity(id="ent-1", name="Paceriz", summary="A running coach")
-    entity_repo = _make_entity_repo(entity)
-    task_repo = _make_task_repo()
-    blindspot_repo = _make_blindspot_repo()
-    svc = TaskService(
-        task_repo=task_repo,
-        entity_repo=entity_repo,
-        blindspot_repo=blindspot_repo,
-    )
+    svc = _make_service(entity=entity)
 
     data = {
         "title": "Fix login",
@@ -312,14 +298,7 @@ async def test_create_task_manual_context_summary_preserved():
 
 @pytest.mark.asyncio
 async def test_create_task_no_linked_no_context():
-    entity_repo = _make_entity_repo(None)
-    task_repo = _make_task_repo()
-    blindspot_repo = _make_blindspot_repo()
-    svc = TaskService(
-        task_repo=task_repo,
-        entity_repo=entity_repo,
-        blindspot_repo=blindspot_repo,
-    )
+    svc = _make_service(entity=None)
 
     data = {
         "title": "Fix login",
