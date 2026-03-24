@@ -66,6 +66,7 @@ _current_partner: ContextVar[dict | None] = ContextVar("current_partner", defaul
 # ──────────────────────────────────────────────
 
 ZENOS_API_KEY = os.environ.get("ZENOS_API_KEY", "")
+ZENOS_DEFAULT_PARTNER_ID = os.environ.get("ZENOS_DEFAULT_PARTNER_ID", "")
 
 
 class PartnerKeyValidator:
@@ -96,6 +97,7 @@ class PartnerKeyValidator:
             new_cache: dict[str, dict] = {}
             async for doc in docs:
                 data = doc.to_dict()
+                data["id"] = doc.id  # expose document ID for partner routing
                 api_key = data.get("apiKey", "")
                 if api_key:
                     new_cache[api_key] = data
@@ -138,21 +140,31 @@ class ApiKeyMiddleware:
 
         # 1. Superadmin key (env var)
         if key and key == ZENOS_API_KEY:
-            token = _current_partner.set({"displayName": "superadmin", "email": "admin"})
+            from zenos.infrastructure.context import current_partner_id
+            token = _current_partner.set({
+                "displayName": "superadmin",
+                "email": "admin",
+                "id": ZENOS_DEFAULT_PARTNER_ID,
+            })
+            token_pid = current_partner_id.set(ZENOS_DEFAULT_PARTNER_ID)
             try:
                 return await self.app(scope, receive, send)
             finally:
                 _current_partner.reset(token)
+                current_partner_id.reset(token_pid)
 
         # 2. Partner key (Firestore)
         if key:
             partner = await _partner_validator.validate(key)
             if partner is not None:
+                from zenos.infrastructure.context import current_partner_id
                 token = _current_partner.set(partner)
+                token_pid = current_partner_id.set(partner.get("id", ""))
                 try:
                     return await self.app(scope, receive, send)
                 finally:
                     _current_partner.reset(token)
+                    current_partner_id.reset(token_pid)
             logger.warning(
                 "Auth rejected: key=%.8s... path=%s cache_size=%d",
                 key, path, len(_partner_validator._cache),
@@ -290,6 +302,7 @@ async def search(
     created_by: str | None = None,
     confirmed_only: bool | None = None,
     limit: int = 50,
+    project: str | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -319,6 +332,7 @@ async def search(
         created_by: 按建立者過濾 tasks（Outbox 視角）
         confirmed_only: true=只看已確認 / false=只看未確認 / 不傳=全部
         limit: 回傳上限，預設 50
+        project: 按專案過濾 tasks（如 "zenos"、"paceriz"）
     """
     results: dict = {}
 
@@ -407,6 +421,7 @@ async def search(
                 created_by=created_by,
                 status=status_list,
                 limit=limit,
+                project=project if col == "tasks" else None,
             )
             results["tasks"] = [_serialize(t) for t in tasks]
 
@@ -498,10 +513,17 @@ async def get(
     elif collection == "tasks":
         if not id:
             return {"error": "INVALID_INPUT", "message": "Provide id for tasks"}
-        result = await task_repo.get_by_id(id)
-        if result is None:
+        enriched = await task_service.get_task_enriched(id)
+        if enriched is None:
             return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
-        return _serialize(result)
+        task_obj, enrichments = enriched
+        result = _serialize(task_obj)
+        result["linked_entities"] = enrichments["expanded_entities"]
+        if "assignee_role" in enrichments:
+            result["assignee_role"] = enrichments["assignee_role"]
+        if "blindspot_detail" in enrichments:
+            result["blindspot_detail"] = enrichments["blindspot_detail"]
+        return result
 
     else:
         return {
@@ -760,6 +782,8 @@ async def task(
     blocked_reason: str | None = None,
     acceptance_criteria: list[str] | None = None,
     result: str | None = None,
+    project: str | None = None,
+    assignee_role_id: str | None = None,
 ) -> dict:
     """管理知識驅動的行動項目（Action Layer）。
 
@@ -797,6 +821,8 @@ async def task(
         blocked_reason: blocked 狀態時必填
         acceptance_criteria: 驗收條件列表
         result: 完成產出描述（status=review 時填寫）
+        project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離
+        assignee_role_id: 指向 role entity 的 ID（可選），用於展開角色 context
     """
     try:
         if action == "create":
@@ -832,6 +858,8 @@ async def task(
                 "due_date": parsed_due,
                 "blocked_by": blocked_by or [],
                 "acceptance_criteria": acceptance_criteria or [],
+                "project": project or "",
+                "assignee_role_id": assignee_role_id,
             }
             task_result = await task_service.create_task(data)
             response = _serialize(task_result.task)

@@ -290,6 +290,7 @@ class Task:
     source_type: str = ""
     context_summary: str = ""
     due_date: datetime | None = None
+    assignee_role_id: str | None = None
     blocked_by: list[str] = field(default_factory=list)
     blocked_reason: str | None = None
     acceptance_criteria: list[str] = field(default_factory=list)
@@ -297,6 +298,7 @@ class Task:
     confirmed_by_creator: bool = False
     rejection_reason: str | None = None
     result: str | None = None
+    project: str = ""  # Partner-level project grouping (e.g. "zenos", "paceriz")
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None

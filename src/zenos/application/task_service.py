@@ -125,10 +125,14 @@ class TaskService:
         # Caller-provided priority overrides recommendation
         priority = data.get("priority") or rec_priority
 
-        # Context summary assembly
-        context_summary = await self._assemble_context(
-            linked_entities, linked_blindspot
-        )
+        # Context summary assembly — preserve manual value if provided
+        manual_context = data.get("context_summary", "")
+        if manual_context:
+            context_summary = manual_context
+        else:
+            context_summary = await self._assemble_context(
+                linked_entities, linked_blindspot
+            )
 
         task = Task(
             title=data["title"],
@@ -137,6 +141,7 @@ class TaskService:
             priority=priority,
             priority_reason=priority_reason,
             assignee=data.get("assignee"),
+            assignee_role_id=data.get("assignee_role_id"),
             created_by=data["created_by"],
             linked_entities=linked_entity_ids,
             linked_protocol=data.get("linked_protocol"),
@@ -146,6 +151,7 @@ class TaskService:
             due_date=due_date,
             blocked_by=blocked_by,
             acceptance_criteria=data.get("acceptance_criteria", []),
+            project=data.get("project", ""),
         )
 
         saved = await self._tasks.upsert(task)
@@ -269,9 +275,29 @@ class TaskService:
     # List
     # ──────────────────────────────────────────
 
-    async def list_tasks(self, **filters) -> list[Task]:
+    async def list_tasks(
+        self,
+        *,
+        assignee: str | None = None,
+        created_by: str | None = None,
+        status: list[str] | None = None,
+        priority: str | None = None,
+        linked_entity: str | None = None,
+        include_archived: bool = False,
+        limit: int = 50,
+        project: str | None = None,
+    ) -> list[Task]:
         """List tasks with filters. Delegates to repository."""
-        return await self._tasks.list_all(**filters)
+        return await self._tasks.list_all(
+            assignee=assignee,
+            created_by=created_by,
+            status=status,
+            priority=priority,
+            linked_entity=linked_entity,
+            include_archived=include_archived,
+            limit=limit,
+            project=project,
+        )
 
     async def list_pending_review(self) -> list[Task]:
         """List tasks awaiting creator confirmation."""
@@ -312,26 +338,70 @@ class TaskService:
         parts: list[str] = []
 
         if linked_entities:
-            entity_names = [
-                f"{e.name}（{e.status}）" for e in linked_entities[:3]
+            node_summaries = [
+                f"{e.name} — {e.summary[:60]}" for e in linked_entities[:3]
             ]
-            parts.append(f"相關實體：{'、'.join(entity_names)}")
+            parts.append(f"任務關聯節點：{'；'.join(node_summaries)}")
 
         if linked_blindspot:
             parts.append(
                 f"觸發盲點：{linked_blindspot.description[:50]}"
             )
 
-        # Enrich with related document entity names for richer context
-        if linked_entities:
-            doc_titles: list[str] = []
-            for entity in linked_entities:
-                if entity.id and len(doc_titles) < 3:
-                    children = await self._entities.list_by_parent(entity.id)
-                    for child in children:
-                        if child.type == EntityType.DOCUMENT and len(doc_titles) < 3:
-                            doc_titles.append(child.name)
-            if doc_titles:
-                parts.append(f"相關文件：{'、'.join(doc_titles)}")
-
         return "。".join(parts) if parts else ""
+
+    async def get_task_enriched(self, task_id: str) -> tuple[Task, dict] | None:
+        """Get task with linked_entities/assignee_role/blindspot expanded.
+
+        Returns (task, enrichments) where enrichments is a plain dict:
+          - expanded_entities: list of entity objects (id/name/summary/tags/status)
+          - assignee_role: entity object or None (only present if assignee_role_id set)
+          - blindspot_detail: blindspot detail dict (only present if linked_blindspot set)
+        """
+        task = await self._tasks.get_by_id(task_id)
+        if task is None:
+            return None
+
+        enrichments: dict = {}
+
+        # Expand linked_entities from IDs to objects
+        expanded: list[dict] = []
+        for eid in task.linked_entities:
+            entity = await self._entities.get_by_id(eid)
+            if entity:
+                tags = entity.tags
+                expanded.append({
+                    "id": entity.id,
+                    "name": entity.name,
+                    "summary": entity.summary,
+                    "tags": {
+                        "what": tags.what,
+                        "who": tags.who,
+                        "why": tags.why,
+                        "how": tags.how,
+                    },
+                    "status": entity.status,
+                })
+            else:
+                expanded.append({"id": eid, "not_found": True})
+        enrichments["expanded_entities"] = expanded
+
+        # Expand assignee_role (P1a)
+        if task.assignee_role_id:
+            role = await self._entities.get_by_id(task.assignee_role_id)
+            enrichments["assignee_role"] = (
+                {"id": role.id, "name": role.name, "summary": role.summary}
+                if role else None
+            )
+
+        # Expand blindspot_detail (P1b)
+        if task.linked_blindspot:
+            bs = await self._blindspots.get_by_id(task.linked_blindspot)
+            if bs:
+                enrichments["blindspot_detail"] = {
+                    "description": bs.description,
+                    "severity": bs.severity,
+                    "suggested_action": bs.suggested_action,
+                }
+
+        return task, enrichments
