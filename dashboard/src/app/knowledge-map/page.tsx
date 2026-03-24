@@ -36,7 +36,7 @@ function daysAgo(d: Date): number {
 function inferTasksForEntity(entity: Entity, tasks: Task[]): Task[] {
   const name = entity.name.toLowerCase();
   const whatTag = entity.tags.what;
-  const whatStr = Array.isArray(whatTag) ? whatTag.join(" ") : whatTag;
+  const whatStr = Array.isArray(whatTag) ? whatTag.join(" ") : (whatTag ?? "");
   const keywords = whatStr
     .toLowerCase()
     .split(/[,、，\s]+/)
@@ -1385,7 +1385,8 @@ function DetailSheet({
   );
 
   // Tags display helper
-  const formatTagValue = (val: string | string[]): string => {
+  const formatTagValue = (val: string | string[] | undefined): string => {
+    if (!val) return "—";
     if (Array.isArray(val)) return val.join(", ");
     return val;
   };
@@ -1758,10 +1759,7 @@ function KnowledgeMapPage() {
   }, []);
 
   const handleExpandModule = useCallback((moduleId: string) => {
-    setExpandedModules((prev) => ({
-      ...prev,
-      [moduleId]: DEFAULT_EXPAND_TYPES,
-    }));
+    setExpandedModules({ [moduleId]: DEFAULT_EXPAND_TYPES });
   }, []);
 
   const handleCollapseModule = useCallback((moduleId: string) => {
