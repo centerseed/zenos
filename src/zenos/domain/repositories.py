@@ -103,6 +103,7 @@ class TaskRepository(TypingProtocol):
         linked_entity: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        project: str | None = None,
     ) -> list[Task]: ...
 
     async def list_blocked_by(self, task_id: str) -> list[Task]:

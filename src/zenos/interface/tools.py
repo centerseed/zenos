@@ -332,7 +332,8 @@ async def search(
         created_by: 按建立者過濾 tasks（Outbox 視角）
         confirmed_only: true=只看已確認 / false=只看未確認 / 不傳=全部
         limit: 回傳上限，預設 50
-        project: 按專案過濾 tasks（如 "zenos"、"paceriz"）
+        project: 按專案過濾 tasks（如 "zenos"、"paceriz"）。
+            未傳時自動使用 partner 的 default_project，確保跨專案隔離。
     """
     results: dict = {}
 
@@ -343,7 +344,10 @@ async def search(
         results["count"] = len(results["results"])
 
         # Also search tasks by title/description keyword
-        all_tasks = await task_service.list_tasks(limit=200)
+        # Auto-fill project from partner context if caller omits it
+        _partner_ctx = _current_partner.get()
+        effective_project_kw = project or (_partner_ctx.get("default_project", "") if _partner_ctx else "")
+        all_tasks = await task_service.list_tasks(limit=200, project=effective_project_kw or None)
         query_lower = query.lower()
         matched_tasks = [
             t for t in all_tasks
@@ -416,12 +420,15 @@ async def search(
 
         elif col == "tasks":
             status_list = status.split(",") if status else None
+            # Auto-fill project from partner context if caller omits it
+            _partner = _current_partner.get()
+            effective_project = project or (_partner.get("default_project", "") if _partner else "")
             tasks = await task_service.list_tasks(
                 assignee=assignee,
                 created_by=created_by,
                 status=status_list,
                 limit=limit,
-                project=project,
+                project=effective_project or None,
             )
             results["tasks"] = [_serialize(t) for t in tasks]
 
@@ -821,20 +828,27 @@ async def task(
         blocked_reason: blocked 狀態時必填
         acceptance_criteria: 驗收條件列表
         result: 完成產出描述（status=review 時填寫）
-        project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離
+        project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
+            未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
         assignee_role_id: 指向 role entity 的 ID（可選），用於展開角色 context
     """
     try:
+        # Resolve partner context once — used for auto-filling created_by and project
+        partner = _current_partner.get()
+        partner_default_project = partner.get("default_project", "") if partner else ""
+
         if action == "create":
             if not title:
                 return {"error": "INVALID_INPUT", "message": "title is required for create"}
             # Auto-fill created_by from partner identity if not provided
             if not created_by:
-                partner = _current_partner.get()
                 if partner:
                     created_by = partner.get("displayName", "unknown")
             if not created_by:
                 return {"error": "INVALID_INPUT", "message": "created_by is required for create"}
+
+            # Auto-fill project from partner's default_project if caller omits it
+            effective_project = project or partner_default_project
 
             # Parse due_date string to datetime
             parsed_due = None
@@ -858,7 +872,7 @@ async def task(
                 "due_date": parsed_due,
                 "blocked_by": blocked_by or [],
                 "acceptance_criteria": acceptance_criteria or [],
-                "project": project or "",
+                "project": effective_project,
                 "assignee_role_id": assignee_role_id,
             }
             task_result = await task_service.create_task(data)

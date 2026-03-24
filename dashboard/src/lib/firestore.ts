@@ -1,5 +1,6 @@
 import {
   collection,
+  collectionGroup,
   query,
   where,
   getDocs,
@@ -8,6 +9,8 @@ import {
 } from "firebase/firestore";
 import { getDbInstance } from "./firebase";
 import type { Entity, Relationship, Blindspot, Task, Partner } from "@/types";
+
+const PARTNER_ID = process.env.NEXT_PUBLIC_PARTNER_ID ?? "";
 
 export function toEntity(id: string, data: Record<string, unknown>): Entity {
   // Normalize tags.what and tags.who to always be arrays
@@ -202,7 +205,10 @@ export async function getTasks(filters?: {
     constraints.push(where("createdBy", "==", filters.createdBy));
   }
 
-  const q = query(collection(getDbInstance(), "tasks"), ...constraints);
+  const q = query(
+    collection(getDbInstance(), PARTNER_ID ? `partners/${PARTNER_ID}/tasks` : "tasks"),
+    ...constraints
+  );
   const snapshot = await getDocs(q);
   return snapshot.docs.map((d) => toTask(d.id, d.data()));
 }
@@ -237,24 +243,25 @@ export async function getAllBlindspots(): Promise<Blindspot[]> {
   });
 }
 
-/** Fetch ALL relationships across all entities (parallel subcollection reads) */
+/** Fetch ALL relationships using collectionGroup query (single query, no N+1) */
 export async function getAllRelationships(): Promise<Relationship[]> {
-  // First get all entity IDs
-  const entities = await getAllEntities();
-  // Parallel fetch all subcollections
-  const allRels = await Promise.all(
-    entities.map((e) => getRelationships(e.id))
+  const snapshot = await getDocs(
+    collectionGroup(getDbInstance(), "relationships")
   );
-  // Flatten and deduplicate by id
   const seen = new Set<string>();
   const result: Relationship[] = [];
-  for (const rels of allRels) {
-    for (const r of rels) {
-      if (!seen.has(r.id)) {
-        seen.add(r.id);
-        result.push(r);
-      }
-    }
+  for (const d of snapshot.docs) {
+    if (seen.has(d.id)) continue;
+    seen.add(d.id);
+    const data = d.data();
+    result.push({
+      id: d.id,
+      sourceEntityId: data.sourceEntityId as string,
+      targetId: data.targetId as string,
+      type: data.type as Relationship["type"],
+      description: data.description as string,
+      confirmedByUser: (data.confirmedByUser as boolean) ?? false,
+    });
   }
   return result;
 }
@@ -262,7 +269,7 @@ export async function getAllRelationships(): Promise<Relationship[]> {
 /** Fetch tasks linked to an entity */
 export async function getTasksByEntity(entityId: string): Promise<Task[]> {
   const q = query(
-    collection(getDbInstance(), "tasks"),
+    collection(getDbInstance(), PARTNER_ID ? `partners/${PARTNER_ID}/tasks` : "tasks"),
     where("linkedEntities", "array-contains", entityId)
   );
   const snapshot = await getDocs(q);

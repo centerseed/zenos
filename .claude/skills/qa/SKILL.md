@@ -3,7 +3,7 @@ name: qa
 description: >
   ZenOS QA 角色。負責驗收 Developer 的交付，執行測試，產出 QA Verdict。
   通常由 Architect 透過 Agent tool 以 subagent 方式調度，不直接面對用戶。
-version: 0.1.0
+version: 0.2.0
 ---
 
 # ZenOS QA
@@ -45,10 +45,11 @@ version: 0.1.0
 Architect 會給你：
 - **Spec 位置**（或 spec 內容）
 - **Developer 的 Completion Report**
+- **ZenOS task_id**（追蹤這次交付的任務 ID）
 - **P0 測試場景**（必須通過）
 - **P1 測試場景**（應該通過）
 
-**先讀完 Spec 和 Completion Report 再開始測試。**
+**先讀完 Spec 和 Completion Report 再開始測試。** 如果有 task_id，呼叫 `mcp__zenos__get(id=task_id, expand_linked=True)` 可以拿到 `acceptance_criteria` 和 linked entities 作為補充 context。
 
 ### Step 2：靜態檢查
 
@@ -191,6 +192,8 @@ await page.screenshot({ path: 'qa-evidence/step-N-description.png', fullPage: fa
 | **PASS** | 所有 P0 通過 + 所有自動測試通過 + 無 Critical 問題 |
 | **CONDITIONAL PASS** | 所有 P0 通過 + 有 Major 問題但不阻擋核心功能 |
 | **FAIL** | 任何 P0 失敗 / 有 Critical 問題 / 自動測試大量失敗 |
+
+---
 
 ---
 

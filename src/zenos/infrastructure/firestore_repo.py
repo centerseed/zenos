@@ -21,6 +21,7 @@ from zenos.domain.models import (
     Tags,
     Task,
 )
+from zenos.infrastructure.context import current_partner_id
 
 # ---------------------------------------------------------------------------
 # Firestore client singleton
@@ -650,6 +651,7 @@ def _task_to_dict(task: Task) -> dict[str, Any]:
         "confirmed_by_creator": task.confirmed_by_creator,
         "rejection_reason": task.rejection_reason,
         "result": task.result,
+        "project": task.project,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
         "completed_at": task.completed_at,
@@ -681,6 +683,7 @@ def _dict_to_task(doc_id: str, data: dict[str, Any]) -> Task:
         confirmed_by_creator=d.get("confirmed_by_creator", False),
         rejection_reason=d.get("rejection_reason"),
         result=d.get("result"),
+        project=d.get("project", ""),
         created_at=_to_dt(d.get("created_at")) or _now(),
         updated_at=_to_dt(d.get("updated_at")) or _now(),
         completed_at=_to_dt(d.get("completed_at")),
@@ -692,10 +695,17 @@ class FirestoreTaskRepository:
 
     def __init__(self, db: AsyncClient | None = None) -> None:
         self._db = db or get_db()
-        self._col = self._db.collection("tasks")
+        # NOTE: _col is now a method, not a fixed attribute
+
+    def _get_col(self) -> Any:
+        """Return the correct tasks collection based on current partner context."""
+        partner_id = current_partner_id.get()
+        if partner_id:
+            return self._db.collection("partners").document(partner_id).collection("tasks")
+        return self._db.collection("tasks")  # fallback for local dev / no-auth
 
     async def get_by_id(self, task_id: str) -> Task | None:
-        snap = await self._col.document(task_id).get()
+        snap = await self._get_col().document(task_id).get()
         if not snap.exists:
             return None
         return _dict_to_task(snap.id, snap.to_dict())  # type: ignore[arg-type]
@@ -708,10 +718,10 @@ class FirestoreTaskRepository:
         if task.id is None:
             task.created_at = now
             data["createdAt"] = now
-            _, doc_ref = await self._col.add(data)
+            _, doc_ref = await self._get_col().add(data)
             task.id = doc_ref.id
         else:
-            await self._col.document(task.id).set(data, merge=True)
+            await self._get_col().document(task.id).set(data, merge=True)
 
         return task
 
@@ -725,8 +735,9 @@ class FirestoreTaskRepository:
         linked_entity: str | None = None,
         include_archived: bool = False,
         limit: int = 50,
+        project: str | None = None,
     ) -> list[Task]:
-        q: Any = self._col
+        q: Any = self._get_col()
 
         if assignee is not None:
             q = q.where("assignee", "==", assignee)
@@ -736,6 +747,8 @@ class FirestoreTaskRepository:
             q = q.where("priority", "==", priority)
         if linked_entity is not None:
             q = q.where("linkedEntities", "array_contains", linked_entity)
+        if project is not None:
+            q = q.where("project", "==", project)
 
         q = q.limit(limit)
         results: list[Task] = []
@@ -751,14 +764,14 @@ class FirestoreTaskRepository:
         return results
 
     async def list_blocked_by(self, task_id: str) -> list[Task]:
-        q = self._col.where("blockedBy", "array_contains", task_id)
+        q = self._get_col().where("blockedBy", "array_contains", task_id)
         results: list[Task] = []
         async for doc in q.stream():
             results.append(_dict_to_task(doc.id, doc.to_dict()))
         return results
 
     async def list_pending_review(self) -> list[Task]:
-        q = self._col.where("status", "==", "review").where(
+        q = self._get_col().where("status", "==", "review").where(
             "confirmedByCreator", "==", False
         )
         results: list[Task] = []
