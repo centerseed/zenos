@@ -134,11 +134,52 @@ function SourceIcon({ type }: { type: string }) {
 
 // ─── Type Filter Popover ───
 
+/** Compact task status counts for display */
+interface TaskStatusCounts {
+  done: number;
+  active: number;  // in_progress + review
+  pending: number; // backlog + todo
+  blocked: number;
+}
+
+function computeTaskStatusCounts(tasks: Task[]): TaskStatusCounts {
+  let done = 0, active = 0, pending = 0, blocked = 0;
+  for (const t of tasks) {
+    if (t.status === "done") done++;
+    else if (t.status === "in_progress" || t.status === "review") active++;
+    else if (t.status === "blocked") blocked++;
+    else if (t.status === "backlog" || t.status === "todo") pending++;
+  }
+  return { done, active, pending, blocked };
+}
+
+function TaskStatusBar({ counts }: { counts: TaskStatusCounts }) {
+  const total = counts.done + counts.active + counts.pending + counts.blocked;
+  if (total === 0) return null;
+  return (
+    <div className="flex items-center gap-1.5 ml-auto">
+      {counts.done > 0 && (
+        <span className="text-[10px] text-emerald-400" title="Done">{counts.done}&#10003;</span>
+      )}
+      {counts.active > 0 && (
+        <span className="text-[10px] text-blue-400" title="Active">{counts.active}&#9654;</span>
+      )}
+      {counts.blocked > 0 && (
+        <span className="text-[10px] text-red-400" title="Blocked">{counts.blocked}!</span>
+      )}
+      {counts.pending > 0 && (
+        <span className="text-[10px] text-[#FAFAFA]/35" title="Pending">{counts.pending}</span>
+      )}
+    </div>
+  );
+}
+
 function TypeFilterPopover({
   moduleId,
   moduleName,
   expandedTypes,
   availableTypes,
+  taskStatusCounts,
   onToggle,
   onClose,
   style,
@@ -147,6 +188,7 @@ function TypeFilterPopover({
   moduleName: string;
   expandedTypes: ExpandableType[];
   availableTypes: Record<ExpandableType, number>;
+  taskStatusCounts?: TaskStatusCounts;
   onToggle: (moduleId: string, type: ExpandableType) => void;
   onClose: () => void;
   style?: React.CSSProperties;
@@ -170,7 +212,7 @@ function TypeFilterPopover({
     <div
       ref={popoverRef}
       className="bg-[#111113] border border-[#2A2A2E] rounded-lg shadow-xl p-3 z-[100]"
-      style={{ minWidth: 180, ...style }}
+      style={{ minWidth: 200, ...style }}
     >
       <div className="text-xs text-[#FAFAFA]/50 mb-2 truncate">
         Expand: {moduleName}
@@ -180,25 +222,29 @@ function TypeFilterPopover({
         if (count === 0) return null;
         const checked = expandedTypes.includes(type);
         return (
-          <label
-            key={type}
-            className="flex items-center gap-2 py-1 cursor-pointer hover:bg-[#FAFAFA]/[0.03] rounded px-1"
-          >
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={() => onToggle(moduleId, type)}
-              className="w-3 h-3 rounded accent-purple-500"
-            />
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: TYPE_COLORS[type] ?? "#6366F1" }}
-            />
-            <span className="text-xs text-[#FAFAFA]/70 flex-1">
-              {TYPE_LABELS[type] ?? type}
-            </span>
-            <span className="text-xs text-[#FAFAFA]/40">{count}</span>
-          </label>
+          <div key={type}>
+            <label
+              className="flex items-center gap-2 py-1 cursor-pointer hover:bg-[#FAFAFA]/[0.03] rounded px-1"
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                onChange={() => onToggle(moduleId, type)}
+                className="w-3 h-3 rounded accent-purple-500"
+              />
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{ backgroundColor: TYPE_COLORS[type] ?? "#6366F1" }}
+              />
+              <span className="text-xs text-[#FAFAFA]/70">
+                {TYPE_LABELS[type] ?? type}
+              </span>
+              <span className="text-xs text-[#FAFAFA]/40">{count}</span>
+              {type === "task" && taskStatusCounts && (
+                <TaskStatusBar counts={taskStatusCounts} />
+              )}
+            </label>
+          </div>
         );
       })}
     </div>
@@ -281,6 +327,23 @@ function Sidebar({
     }
     return result;
   }, [modules, entities, tasks]);
+
+  // Tasks per module + status counts
+  const tasksPerModule = useMemo(() => {
+    const result: Record<string, Task[]> = {};
+    for (const m of modules) {
+      result[m.id] = findTasksForModule(m, tasks);
+    }
+    return result;
+  }, [modules, tasks]);
+
+  const taskStatusCountsPerModule = useMemo(() => {
+    const result: Record<string, TaskStatusCounts> = {};
+    for (const [moduleId, moduleTasks] of Object.entries(tasksPerModule)) {
+      result[moduleId] = computeTaskStatusCounts(moduleTasks);
+    }
+    return result;
+  }, [tasksPerModule]);
 
   // Count total L3 children per module
   const l3CountPerModule = useMemo(() => {
@@ -407,12 +470,13 @@ function Sidebar({
                           moduleName={m.name}
                           expandedTypes={expandedModules[m.id] ?? []}
                           availableTypes={availableTypesPerModule[m.id] ?? { document: 0, task: 0, goal: 0, role: 0, project: 0 }}
+                          taskStatusCounts={taskStatusCountsPerModule[m.id]}
                           onToggle={onToggleModuleType}
                           onClose={() => setPopoverModuleId(null)}
                         />
                       </div>
                     )}
-                    {/* Show expanded L3 children */}
+                    {/* Show expanded L3 children + tasks */}
                     {isExpanded && (
                       <div className="pl-9">
                         {entities
@@ -433,6 +497,34 @@ function Sidebar({
                               <span className="truncate">{e.name}</span>
                             </div>
                           ))}
+                        {/* Task items with status */}
+                        {expandedModules[m.id]?.includes("task") &&
+                          (tasksPerModule[m.id] ?? []).map((t) => {
+                            const statusIcon =
+                              t.status === "done" ? "\u2713" :
+                              t.status === "in_progress" ? "\u25B6" :
+                              t.status === "blocked" ? "!" :
+                              t.status === "review" ? "R" : "\u00B7";
+                            const statusColor =
+                              t.status === "done" ? "text-emerald-400" :
+                              t.status === "in_progress" ? "text-blue-400" :
+                              t.status === "blocked" ? "text-red-400" :
+                              t.status === "review" ? "text-amber-400" :
+                              "text-[#FAFAFA]/30";
+                            return (
+                              <div
+                                key={`task:${t.id}`}
+                                className="flex items-center gap-1.5 py-0.5 text-[10px] text-[#FAFAFA]/45"
+                              >
+                                <span
+                                  className="w-1 h-1 rounded-full shrink-0"
+                                  style={{ backgroundColor: TYPE_COLORS.task }}
+                                />
+                                <span className="truncate flex-1">{t.title}</span>
+                                <span className={`shrink-0 text-[9px] ${statusColor}`}>{statusIcon}</span>
+                              </div>
+                            );
+                          })}
                       </div>
                     )}
                   </div>
@@ -549,6 +641,10 @@ function GraphCanvas({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  /** Tracks whether we're in local-physics mode (expand/collapse freeze) */
+  const localPhysicsRef = useRef(false);
+  /** The module ID being expanded (used to unfreeze it after graphData updates) */
+  const expandingModuleIdRef = useRef<string | null>(null);
   const [dims, setDims] = useState({ width: 800, height: 600 });
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
@@ -579,9 +675,9 @@ function GraphCanvas({
 
   useEffect(() => {
     if (!fgRef.current) return;
-    fgRef.current.d3Force("charge")?.strength(-150).distanceMax(250);
-    fgRef.current.d3Force("link")?.distance(70);
-    fgRef.current.d3Force("center")?.strength(0.15);
+    fgRef.current.d3Force("charge")?.strength(-300).distanceMax(400);
+    fgRef.current.d3Force("link")?.distance(100);
+    fgRef.current.d3Force("center")?.strength(0.08);
   }, [ForceGraph]);
 
   const blindspotSet = useMemo(() => {
@@ -611,6 +707,18 @@ function GraphCanvas({
         }
         counts.task = findTasksForModule(e, tasks).length;
         result[e.id] = counts;
+      }
+    }
+    return result;
+  }, [entities, tasks]);
+
+  // Task status counts per module (for popover)
+  const taskStatusCountsPerModule = useMemo(() => {
+    const result: Record<string, TaskStatusCounts> = {};
+    for (const e of entities) {
+      if (e.type === "module") {
+        const moduleTasks = findTasksForModule(e, tasks);
+        result[e.id] = computeTaskStatusCounts(moduleTasks);
       }
     }
     return result;
@@ -755,7 +863,7 @@ function GraphCanvas({
     return { nodes, links };
   }, [entities, relationships, blindspotSet, tasks, focusProduct, expandedModules, entityMap]);
 
-  // Place newly expanded L3 nodes at their parent module's position
+  // Place newly expanded L3 nodes at their parent module's position + manage local physics freeze
   useEffect(() => {
     if (!fgRef.current) return;
     const fg = fgRef.current;
@@ -780,6 +888,16 @@ function GraphCanvas({
           fgNode.x = (parentNode.x ?? 0) + (Math.random() - 0.5) * 20;
           fgNode.y = (parentNode.y ?? 0) + (Math.random() - 0.5) * 20;
         }
+      }
+    }
+
+    // If expanding: unfreeze the parent L2 node so it can drift with its children
+    const expandingId = expandingModuleIdRef.current;
+    if (expandingId && localPhysicsRef.current) {
+      const parentFgNode = nodeMap.get(expandingId);
+      if (parentFgNode) {
+        parentFgNode.fx = undefined;
+        parentFgNode.fy = undefined;
       }
     }
   }, [graphData]);
@@ -1050,26 +1168,36 @@ function GraphCanvas({
           node: any
         ) => {
           if (node.type === "module") {
-            const isExpanded = (expandedModules[node.id as string] ?? []).length > 0;
-            // Pin module node position to prevent drift during simulation reheat
-            node.fx = node.x;
-            node.fy = node.y;
-            // Unpin after simulation settles
-            setTimeout(() => { node.fx = undefined; node.fy = undefined; }, 2000);
-            if (isExpanded) {
-              onCollapseModule(node.id as string);
-              setClickPopover(null);
-            } else {
-              onExpandModule(node.id as string);
-              const fg = fgRef.current;
-              if (fg && fg.graph2ScreenCoords) {
-                const screen = fg.graph2ScreenCoords(node.x as number, node.y as number);
-                setClickPopover({ moduleId: node.id as string, x: screen.x, y: screen.y });
-              } else {
-                setClickPopover({ moduleId: node.id as string, x: 0, y: 0 });
+            const moduleId = node.id as string;
+            const isExpanded = (expandedModules[moduleId] ?? []).length > 0;
+
+            // Freeze ALL current nodes to preserve global layout during simulation reheat
+            const fg = fgRef.current;
+            if (fg && typeof fg.graphData === "function") {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const currentNodes = (fg.graphData() as any)?.nodes ?? [];
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              for (const n of currentNodes) {
+                n.fx = n.x;
+                n.fy = n.y;
               }
             }
-            onSelect(node.id as string);
+            localPhysicsRef.current = true;
+            expandingModuleIdRef.current = isExpanded ? null : moduleId;
+
+            if (isExpanded) {
+              onCollapseModule(moduleId);
+              setClickPopover(null);
+            } else {
+              onExpandModule(moduleId);
+              if (fg && fg.graph2ScreenCoords) {
+                const screen = fg.graph2ScreenCoords(node.x as number, node.y as number);
+                setClickPopover({ moduleId, x: screen.x, y: screen.y });
+              } else {
+                setClickPopover({ moduleId, x: 0, y: 0 });
+              }
+            }
+            onSelect(moduleId);
           } else {
             onSelect(node.id as string);
           }
@@ -1078,6 +1206,23 @@ function GraphCanvas({
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           node: any
         ) => setHoveredNode(node ? (node.id as string) : null)}
+        onEngineStop={() => {
+          if (localPhysicsRef.current) {
+            // Simulation settled — unfreeze all nodes
+            const fg = fgRef.current;
+            if (fg && typeof fg.graphData === "function") {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const allNodes = (fg.graphData() as any)?.nodes ?? [];
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              for (const n of allNodes) {
+                n.fx = undefined;
+                n.fy = undefined;
+              }
+            }
+            localPhysicsRef.current = false;
+            expandingModuleIdRef.current = null;
+          }
+        }}
         cooldownTicks={80}
         warmupTicks={30}
         d3AlphaDecay={0.035}
@@ -1126,6 +1271,7 @@ function GraphCanvas({
               moduleName={mod.name}
               expandedTypes={expandedModules[clickPopover.moduleId] ?? []}
               availableTypes={availableTypesPerModule[clickPopover.moduleId] ?? { document: 0, task: 0, goal: 0, role: 0, project: 0 }}
+              taskStatusCounts={taskStatusCountsPerModule[clickPopover.moduleId]}
               onToggle={onToggleModuleType}
               onClose={() => setClickPopover(null)}
             />
@@ -1287,28 +1433,27 @@ function DetailSheet({
         <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
           Tags
         </div>
-        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs">
-          {(["what", "why", "how", "who"] as const).map((k) => (
-            <span
-              key={k}
-              className={`font-medium ${
-                k === "what"
-                  ? "text-blue-400/60"
-                  : k === "why"
-                    ? "text-emerald-400/60"
-                    : k === "how"
-                      ? "text-violet-400/60"
-                      : "text-amber-400/60"
-              }`}
-            >
-              {k.charAt(0).toUpperCase() + k.slice(1)}
-            </span>
-          ))}
-          {(["what", "why", "how", "who"] as const).map((k) => (
-            <span key={k + "v"} className="text-[#FAFAFA]/65">
-              {formatTagValue(entity.tags[k])}
-            </span>
-          ))}
+        <div className="space-y-1.5 text-xs">
+          {(["what", "why", "how", "who"] as const).map((k) => {
+            const colorClass =
+              k === "what"
+                ? "text-blue-400/60"
+                : k === "why"
+                  ? "text-emerald-400/60"
+                  : k === "how"
+                    ? "text-violet-400/60"
+                    : "text-amber-400/60";
+            return (
+              <div key={k}>
+                <span className={`font-medium ${colorClass}`}>
+                  {k.charAt(0).toUpperCase() + k.slice(1)}
+                </span>
+                <p className="text-[#FAFAFA]/65 mt-0.5 leading-relaxed">
+                  {formatTagValue(entity.tags[k])}
+                </p>
+              </div>
+            );
+          })}
         </div>
       </div>
 

@@ -1,7 +1,7 @@
 # Feature Spec: L2 節點展開 — Graph 內聯展開 References & Tasks
 
 ## 狀態
-Delivered — commit 9148344, 2026-03-24
+Under Review — 新增 P0 需求：展開不中斷全局佈局（2026-03-25）
 
 ## 背景與動機
 目前點 L2 Module 節點只開右側 DetailSheet（list 形式）。
@@ -16,6 +16,18 @@ Delivered — commit 9148344, 2026-03-24
 ## 需求
 
 ### P0（必須有）
+
+#### 展開時保留全局空間佈局（局部物理）
+
+**描述**：
+點擊 L2 節點展開子節點時，其他所有節點凍結在原位不移動。只有被點擊的 L2 節點及其新出現的子節點參與局部物理模擬（彼此之間有彈力）。L2 節點本身因子節點拉力可以稍微漂移，但其餘節點完全靜止。
+
+**Acceptance Criteria**：
+- Given 知識地圖已佈局穩定，When 點擊任一 L2 節點展開，Then 其他所有 L2/L1 節點原地不動
+- Given L2 已展開，展開的子節點從父節點位置冒出並在其周圍局部散開，不跳到畫面其他角落
+- Given 多次點擊展開不同 L2，Then 每次展開都不影響其他已穩定節點的位置
+
+---
 
 #### 單擊 L2 節點 → graph 就地展開 + checklist 浮出
 
@@ -107,3 +119,4 @@ Delivered — commit 9148344, 2026-03-24
 - Task 節點資料已在 page-level state（tasks array），不需新增 API call
 - Document/L3 節點 = entities where parentId = moduleId，已有資料
 - checklist popover 定位方式參考現有 double-click popover 實作
+- **局部物理約束**：展開時需對「非展開區域」的所有節點設定 `fx/fy` pin，待局部 simulation 穩定後再解除。只有被點擊的 L2 及其子節點維持自由物理狀態。
