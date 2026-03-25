@@ -45,6 +45,14 @@ def _make_row(**kwargs) -> MagicMock:
     return row
 
 
+class _FakeTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        pass
+
+
 def _make_pool(fetchrow=None, fetch=None, execute=None, executemany=None):
     """Build a mock asyncpg pool whose acquire() context manager returns a conn."""
     conn = AsyncMock()
@@ -52,6 +60,7 @@ def _make_pool(fetchrow=None, fetch=None, execute=None, executemany=None):
     conn.fetch = AsyncMock(return_value=fetch or [])
     conn.execute = AsyncMock(return_value=execute)
     conn.executemany = AsyncMock(return_value=None)
+    conn.transaction = MagicMock(return_value=_FakeTransaction())
 
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=_AsyncContextManager(conn))
@@ -832,3 +841,87 @@ class TestSqlPartnerKeyValidator:
         sql = conn.fetch.call_args[0][0]
         assert "active" in sql
         assert "partners" in sql
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Cross-tenant / Transaction tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestCrossTenantAndTransaction:
+
+    @pytest.fixture(autouse=True)
+    def patch_partner(self, monkeypatch):
+        _set_partner(monkeypatch)
+
+    def test_entity_upsert_cross_partner_blocked(self):
+        """Entity upsert SQL contains WHERE partner_id = EXCLUDED.partner_id guard."""
+        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.domain.models import Entity, Tags
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlEntityRepository(pool)
+        entity = Entity(
+            id="shared_id", name="Entity", type="module", summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
+
+        execute_sql = conn.execute.call_args[0][0]
+        assert "partner_id = EXCLUDED.partner_id" in execute_sql
+
+    def test_document_upsert_uses_transaction(self):
+        """Document upsert acquires a transaction wrapping main table + join sync."""
+        from zenos.infrastructure.sql_repo import SqlDocumentRepository
+        from zenos.domain.models import Document, DocumentTags, Source
+        import asyncio
+
+        pool, conn = _make_pool()
+        conn.transaction = MagicMock(return_value=_FakeTransaction())
+        repo = SqlDocumentRepository(pool)
+
+        doc = Document(
+            title="T", source=Source(type="github", uri="u", adapter="a"),
+            tags=DocumentTags(what=[], why="", how="", who=[]),
+            summary="s", linked_entity_ids=["e1"],
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(doc))
+
+        conn.transaction.assert_called_once()
+
+    def test_task_upsert_uses_transaction(self):
+        """Task upsert acquires a transaction wrapping main table + join syncs."""
+        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.domain.models import Task
+        import asyncio
+
+        pool, conn = _make_pool()
+        conn.transaction = MagicMock(return_value=_FakeTransaction())
+        repo = SqlTaskRepository(pool)
+
+        task = Task(
+            title="T", status="todo", priority="medium", created_by="Alice",
+            linked_entities=["e1"], blocked_by=["task2"],
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+        conn.transaction.assert_called_once()
+
+    def test_blindspot_add_uses_transaction(self):
+        """Blindspot add acquires a transaction wrapping main table + join sync."""
+        from zenos.infrastructure.sql_repo import SqlBlindspotRepository
+        from zenos.domain.models import Blindspot
+        import asyncio
+
+        pool, conn = _make_pool()
+        conn.transaction = MagicMock(return_value=_FakeTransaction())
+        repo = SqlBlindspotRepository(pool)
+
+        bs = Blindspot(
+            description="d", severity="red", related_entity_ids=["e1"],
+            suggested_action="Fix it",
+        )
+        asyncio.get_event_loop().run_until_complete(repo.add(bs))
+
+        conn.transaction.assert_called_once()
