@@ -10,6 +10,7 @@ import logging
 import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from collections import Counter
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,20 @@ class OntologyService:
     # ──────────────────────────────────────────
     # Internal helpers
     # ──────────────────────────────────────────
+
+    @staticmethod
+    def _is_concrete_impacts_description(description: str) -> bool:
+        """Validate impacts text follows concrete propagation format."""
+        desc = (description or "").strip()
+        if not desc:
+            return False
+        if "→" in desc:
+            left, right = desc.split("→", 1)
+            return bool(left.strip()) and bool(right.strip())
+        if "->" in desc:
+            left, right = desc.split("->", 1)
+            return bool(left.strip()) and bool(right.strip())
+        return False
 
     async def _infer_module_parent(self, entity_data: dict) -> str | None:
         """For L3 entities, if parent_id points to a Product or is null,
@@ -216,6 +231,75 @@ class OntologyService:
         return similar
 
     @staticmethod
+    def _tokenize_semantic_text(value: str) -> list[str]:
+        """Extract coarse semantic terms for deterministic panorama hints."""
+        stopwords = {
+            "the", "and", "for", "with", "from", "that", "this", "into", "your",
+            "zenos", "entity", "module", "product", "document", "docs", "spec",
+            "系統", "功能", "文件", "模組", "產品", "設計", "流程", "相關", "說明",
+            "以及", "用於", "如何", "公司", "概念", "機制", "資料", "處理", "管理",
+        }
+        tokens = re.findall(r"[A-Za-z0-9\u4e00-\u9fff][A-Za-z0-9\u4e00-\u9fff_\-]{1,}", value.lower())
+        return [token for token in tokens if token not in stopwords and len(token) >= 2]
+
+    @classmethod
+    def _build_global_infer_context(
+        cls,
+        all_entities: list[Entity],
+        *,
+        exclude_entity_id: str | None = None,
+    ) -> dict:
+        """Build deterministic panorama hints so inference starts global-first."""
+        scoped_entities = [e for e in all_entities if e.id != exclude_entity_id]
+        non_doc_entities = [e for e in scoped_entities if e.type != EntityType.DOCUMENT]
+        doc_entities = [e for e in scoped_entities if e.type == EntityType.DOCUMENT]
+
+        entity_counts = Counter(str(ent.type) for ent in non_doc_entities)
+        recurring_terms_counter: Counter[str] = Counter()
+        for ent in scoped_entities:
+            tags = ent.tags if isinstance(ent.tags, Tags) else None
+            text_parts = [ent.name or "", ent.summary or ""]
+            if tags:
+                what = tags.what if isinstance(tags.what, list) else [tags.what]
+                who = tags.who if isinstance(tags.who, list) else [tags.who]
+                text_parts.extend([*(w for w in what if w), *(w for w in who if w), tags.why or "", tags.how or ""])
+            terms = set(cls._tokenize_semantic_text(" ".join(text_parts)))
+            recurring_terms_counter.update(terms)
+
+        recurring_terms = [
+            term for term, count in recurring_terms_counter.most_common()
+            if count >= 2
+        ][:8]
+
+        def _line(ent: Entity) -> str:
+            return f"{ent.id}|{ent.name}|{ent.summary}"
+
+        active_products = [
+            _line(ent)
+            for ent in non_doc_entities
+            if ent.type == EntityType.PRODUCT
+        ][:4]
+        active_modules = [
+            _line(ent)
+            for ent in non_doc_entities
+            if ent.type == EntityType.MODULE
+        ][:6]
+        impact_target_hints = [
+            _line(ent)
+            for ent in non_doc_entities
+            if ent.type in {EntityType.MODULE, EntityType.PRODUCT}
+        ][:6]
+
+        return {
+            "entity_counts": dict(entity_counts),
+            "document_count": len(doc_entities),
+            "recurring_terms": recurring_terms,
+            "active_products": active_products,
+            "active_modules": active_modules,
+            "impact_target_hints": impact_target_hints,
+        }
+
+    @staticmethod
     def _entity_to_dict(entity: Entity) -> dict:
         """Convert an Entity to a plain dict for GovernanceAI consumption."""
         tags = entity.tags
@@ -230,8 +314,93 @@ class OntologyService:
             "type": entity.type,
             "parent_id": entity.parent_id,
             "summary": entity.summary,
+            "status": entity.status,
+            "level": entity.level,
             "tags": tags_dict,
         }
+
+    async def _load_relationship_snapshot(self, entities: list[Entity]) -> list[Relationship]:
+        """Load and deduplicate relationships for a context snapshot."""
+        rels: list[Relationship] = []
+        seen: set[str | None] = set()
+        for ent in entities:
+            if not ent.id:
+                continue
+            for rel in await self._relationships.list_by_entity(ent.id):
+                key = rel.id or f"{rel.source_entity_id}:{rel.type}:{rel.target_id}:{rel.description}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                rels.append(rel)
+        return rels
+
+    async def _build_infer_all_inputs(
+        self,
+        *,
+        all_entities: list[Entity],
+        exclude_entity_id: str | None = None,
+    ) -> tuple[list[dict], list[dict]]:
+        """Build richer, token-aware infer_all inputs.
+
+        Includes summary/tags plus compact doc and impacts hints so LLM can infer
+        concrete propagation paths without sending full documents.
+        """
+        entity_map = {e.id: e for e in all_entities if e.id}
+        doc_entities = [e for e in all_entities if e.type == EntityType.DOCUMENT and e.id]
+        non_doc_entities = [
+            e for e in all_entities
+            if e.type != EntityType.DOCUMENT and e.id and e.id != exclude_entity_id
+        ]
+        relationships = await self._load_relationship_snapshot(all_entities)
+
+        docs_by_parent: dict[str, list[Entity]] = {}
+        for doc in doc_entities:
+            if not doc.parent_id:
+                continue
+            docs_by_parent.setdefault(doc.parent_id, []).append(doc)
+
+        impacts_out: dict[str, list[str]] = {}
+        impacts_in: dict[str, list[str]] = {}
+        for rel in relationships:
+            if rel.type != RelationshipType.IMPACTS:
+                continue
+            if not self._is_concrete_impacts_description(rel.description):
+                continue
+            src_name = entity_map.get(rel.source_entity_id).name if entity_map.get(rel.source_entity_id) else rel.source_entity_id
+            tgt_name = entity_map.get(rel.target_id).name if entity_map.get(rel.target_id) else rel.target_id
+            impacts_out.setdefault(rel.source_entity_id, []).append(
+                f"{src_name} -> {tgt_name}: {rel.description}"
+            )
+            impacts_in.setdefault(rel.target_id, []).append(
+                f"{src_name} -> {tgt_name}: {rel.description}"
+            )
+
+        entity_dicts: list[dict] = []
+        for ent in non_doc_entities:
+            base = self._entity_to_dict(ent)
+            doc_hints = [
+                f"{d.name}: {d.summary}"
+                for d in docs_by_parent.get(ent.id or "", [])[:2]
+            ]
+            base["doc_hints"] = doc_hints
+            base["impacts_to"] = impacts_out.get(ent.id or "", [])[:2]
+            base["impacted_by"] = impacts_in.get(ent.id or "", [])[:2]
+            entity_dicts.append(base)
+
+        unlinked_docs = [
+            d for d in doc_entities
+            if exclude_entity_id is None or d.parent_id != exclude_entity_id
+        ]
+        unlinked_dicts = [
+            {
+                "id": d.id,
+                "title": d.name,
+                "summary": d.summary,
+                "source_uri": (d.sources[0].get("uri", "") if d.sources else ""),
+            }
+            for d in unlinked_docs
+        ]
+        return entity_dicts, unlinked_dicts
 
     # ──────────────────────────────────────────
     # Consumer-facing use cases (消費端)
@@ -356,13 +525,19 @@ class OntologyService:
         # --- GovernanceAI: auto-classify if caller omitted type ---
         warnings: list[str] = []
 
+        pre_save_inference = None
+
         if self._governance_ai and not data.get("type"):
             all_entities = await self._entities.list_all()
-            entity_dicts = [
-                self._entity_to_dict(e)
-                for e in all_entities
-                if e.type != EntityType.DOCUMENT
-            ]
+            entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
+                all_entities=all_entities,
+                exclude_entity_id=data.get("id"),
+            )
+            infer_entity_data = dict(data)
+            infer_entity_data["_global_context"] = self._build_global_infer_context(
+                all_entities,
+                exclude_entity_id=data.get("id"),
+            )
 
             # Step 1: Rule-based classification (no LLM)
             rule_type, rule_parent = self._governance_ai._rule_classify(
@@ -375,7 +550,9 @@ class OntologyService:
                 warnings.append(f"規則分類：type={rule_type}, parent={rule_parent}")
             else:
                 # Step 2: LLM classification via infer_all (classify-only, pre-save)
-                inference = self._governance_ai.infer_all(data, entity_dicts, [])
+                inference = self._governance_ai.infer_all(
+                    infer_entity_data, entity_dicts, unlinked_dicts
+                )
                 if inference:
                     if inference.duplicate_of:
                         warnings.append(
@@ -464,6 +641,42 @@ class OntologyService:
                     f"自動推斷 parent：{data.get('parent_id')} → {inferred_parent}（L3 entity 應掛在 Module 下）"
                 )
                 data["parent_id"] = inferred_parent
+
+        # 6c. L2 hard rule on write path: new module requires concrete impacts.
+        if self._governance_ai and entity_type == EntityType.MODULE and not data.get("id"):
+            all_entities = await self._entities.list_all()
+            entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
+                all_entities=all_entities,
+                exclude_entity_id=data.get("id"),
+            )
+            infer_entity_data = dict(data)
+            infer_entity_data["_global_context"] = self._build_global_infer_context(
+                all_entities,
+                exclude_entity_id=data.get("id"),
+            )
+            pre_save_inference = self._governance_ai.infer_all(
+                infer_entity_data, entity_dicts, unlinked_dicts
+            )
+            inferred_concrete_impacts = bool(
+                pre_save_inference
+                and any(
+                    rel.type == RelationshipType.IMPACTS
+                    and self._is_concrete_impacts_description(rel.description)
+                    for rel in pre_save_inference.rels
+                )
+            )
+            if not inferred_concrete_impacts and not data.get("force"):
+                insufficient_reasons = ""
+                if pre_save_inference and pre_save_inference.impacts_context_status == "insufficient":
+                    reasons = [r for r in pre_save_inference.impacts_context_gaps if r]
+                    if reasons:
+                        insufficient_reasons = f" Context gaps: {'; '.join(reasons[:3])}."
+                raise ValueError(
+                    "L2 hard rule failed: candidate module has no concrete impacts "
+                    "(A 改了什麼→B 的什麼要跟著看). "
+                    "Please 1) add concrete impacts, 2) downgrade to L3, or 3) re-scope granularity. "
+                    f"If this is an intentional manual override, set force=true.{insufficient_reasons}"
+                )
 
         # 7. duplicate name+type check (new entity only)
         if not data.get("id"):
@@ -617,24 +830,29 @@ class OntologyService:
         # --- GovernanceAI: unified inference (rels + doc links) ---
         if self._governance_ai and saved.id:
             all_entities = await self._entities.list_all()
-            # Keep infer_all context focused on non-document entities.
-            entity_dicts = [
-                self._entity_to_dict(e)
-                for e in all_entities
-                if e.id != saved.id and e.type != EntityType.DOCUMENT
-            ]
-
-            # Find unlinked document entities (no parent_id pointing to saved entity)
-            doc_entities = [
-                e for e in all_entities
-                if e.type == EntityType.DOCUMENT and e.id and e.parent_id != saved.id
-            ]
-            unlinked_dicts = [{"id": e.id, "title": e.name} for e in doc_entities]
-
-            inference = self._governance_ai.infer_all(
-                self._entity_to_dict(saved), entity_dicts, unlinked_dicts
+            entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
+                all_entities=all_entities,
+                exclude_entity_id=saved.id,
             )
+            doc_entities = [e for e in all_entities if e.type == EntityType.DOCUMENT and e.id]
+            infer_entity_data = self._entity_to_dict(saved)
+            infer_entity_data["_global_context"] = self._build_global_infer_context(
+                all_entities,
+                exclude_entity_id=saved.id,
+            )
+
+            inference = pre_save_inference if pre_save_inference and not unlinked_dicts else None
+            if inference is None:
+                inference = self._governance_ai.infer_all(
+                    infer_entity_data, entity_dicts, unlinked_dicts
+                )
             if inference:
+                if inference.impacts_context_status == "insufficient":
+                    gaps = "; ".join((inference.impacts_context_gaps or [])[:3])
+                    warnings.append(
+                        "GovernanceAI impacts 推斷資訊不足"
+                        + (f"：{gaps}" if gaps else "")
+                    )
                 # Handle duplicate (post-save detection)
                 if inference.duplicate_of:
                     warnings.append(
@@ -918,6 +1136,26 @@ class OntologyService:
                     f"Verify the entity ID."
                 )
 
+        # Idempotency / dedup guard: same semantic blindspot should not be
+        # re-created repeatedly (which also fan-outs duplicate tasks).
+        if not data.get("id"):
+            normalized_desc = " ".join(data["description"].strip().lower().split())
+            normalized_action = " ".join(data["suggested_action"].strip().lower().split())
+            normalized_related = sorted(
+                [str(eid).strip() for eid in data.get("related_entity_ids", []) if str(eid).strip()]
+            )
+            same_severity = await self._blindspots.list_all(severity=data["severity"])
+            for existing in same_severity:
+                if existing.status == "resolved":
+                    continue
+                if " ".join(existing.description.strip().lower().split()) != normalized_desc:
+                    continue
+                if " ".join(existing.suggested_action.strip().lower().split()) != normalized_action:
+                    continue
+                if sorted(existing.related_entity_ids) != normalized_related:
+                    continue
+                return existing
+
         blindspot = Blindspot(
             description=data["description"],
             severity=data["severity"],
@@ -965,12 +1203,14 @@ class OntologyService:
                 await self._documents.upsert(doc)
 
         elif collection == "protocols":
-            # Protocols are keyed by entity_id; item_id here is protocol id
-            # We need to look up by entity to find the protocol.
-            # Since ProtocolRepository has get_by_entity, we use item_id as entity_id.
-            protocol = await self._protocols.get_by_entity(item_id)
+            # Backward compatibility:
+            # - New behavior: item_id is protocol document ID
+            # - Legacy behavior: item_id is entity_id
+            protocol = await self._protocols.get_by_id(item_id)
             if protocol is None:
-                raise ValueError(f"Protocol for entity '{item_id}' not found")
+                protocol = await self._protocols.get_by_entity(item_id)
+            if protocol is None:
+                raise ValueError(f"Protocol '{item_id}' not found")
             protocol.confirmed_by_user = True
             protocol.updated_at = now
             await self._protocols.upsert(protocol)

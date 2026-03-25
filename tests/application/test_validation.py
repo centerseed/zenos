@@ -14,7 +14,7 @@ import pytest
 from zenos.application.ontology_service import OntologyService
 from zenos.application.task_service import TaskService
 from zenos.application.governance_ai import GovernanceInference, InferredRel
-from zenos.domain.models import Entity, Relationship, Tags
+from zenos.domain.models import Blindspot, Entity, Protocol, Relationship, Tags
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +148,68 @@ class TestUpsertEntityValidation:
         result = await svc.upsert_entity(
             _valid_entity_data(type="module", parent_id="parent-1")
         )
+        assert result.entity.type == "module"
+
+    async def test_new_l2_without_concrete_impacts_is_rejected(self):
+        repos = _mock_repos()
+        parent = Entity(
+            id="parent-1", name="Product", type="product",
+            summary="Parent", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[parent])
+
+        class _Gov:
+            def infer_all(self, entity_data, existing_entities, unlinked_docs):
+                return GovernanceInference(
+                    rels=[],
+                    impacts_context_status="insufficient",
+                    impacts_context_gaps=["缺少候選下游實體摘要"],
+                )
+
+        svc = OntologyService(
+            entity_repo=repos["entity_repo"],
+            relationship_repo=repos["relationship_repo"],
+            document_repo=repos["document_repo"],
+            protocol_repo=repos["protocol_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+            governance_ai=_Gov(),
+        )
+        with pytest.raises(ValueError, match="Context gaps: 缺少候選下游實體摘要"):
+            await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
+
+    async def test_new_l2_with_concrete_impacts_passes_hard_rule(self):
+        repos = _mock_repos()
+        parent = Entity(
+            id="parent-1", name="Product", type="product",
+            summary="Parent", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[parent])
+
+        class _Gov:
+            def infer_all(self, entity_data, existing_entities, unlinked_docs):
+                return GovernanceInference(
+                    rels=[
+                        InferredRel(
+                            target="parent-1",
+                            type="impacts",
+                            description="A 改了規則→B 的監控指標要跟著看",
+                        )
+                    ]
+                )
+
+        svc = OntologyService(
+            entity_repo=repos["entity_repo"],
+            relationship_repo=repos["relationship_repo"],
+            document_repo=repos["document_repo"],
+            protocol_repo=repos["protocol_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+            governance_ai=_Gov(),
+        )
+        result = await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
         assert result.entity.type == "module"
 
     async def test_nonexistent_parent_id(self):
@@ -288,6 +350,42 @@ class TestAddBlindspotValidation:
         })
         assert result.severity == "red"
 
+    async def test_duplicate_blindspot_returns_existing(self):
+        repos = _mock_repos()
+        existing = Blindspot(
+            id="bs-1",
+            description="Missing monitoring",
+            severity="red",
+            related_entity_ids=["ent-1"],
+            suggested_action="Add monitoring",
+            status="open",
+            confirmed_by_user=False,
+        )
+        repos["blindspot_repo"].list_all = AsyncMock(return_value=[existing])
+        repos["blindspot_repo"].add = AsyncMock(side_effect=lambda b: b)
+
+        # Make related entity valid for input validation
+        repos["entity_repo"].get_by_id = AsyncMock(
+            return_value=Entity(
+                id="ent-1",
+                name="Paceriz",
+                type="product",
+                summary="x",
+                tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
+        svc = _make_service(repos)
+
+        result = await svc.add_blindspot({
+            "description": "  Missing   monitoring  ",
+            "severity": "red",
+            "related_entity_ids": ["ent-1"],
+            "suggested_action": "Add monitoring",
+        })
+
+        assert result.id == "bs-1"
+        repos["blindspot_repo"].add.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # upsert_protocol validation
@@ -333,6 +431,53 @@ class TestUpsertProtocolValidation:
             "content": {"what": {}, "why": {}, "how": {}, "who": {}},
         })
         assert result.entity_name == "Paceriz"
+
+
+# ---------------------------------------------------------------------------
+# confirm() protocol id semantics
+# ---------------------------------------------------------------------------
+
+class TestConfirmProtocolSemantics:
+
+    async def test_confirm_protocol_by_protocol_id(self):
+        repos = _mock_repos()
+        protocol = Protocol(
+            id="proto-1",
+            entity_id="ent-1",
+            entity_name="Paceriz",
+            content={"what": {}, "why": {}, "how": {}, "who": {}},
+            confirmed_by_user=False,
+        )
+        repos["protocol_repo"].get_by_id = AsyncMock(return_value=protocol)
+        repos["protocol_repo"].get_by_entity = AsyncMock(return_value=None)
+        repos["protocol_repo"].upsert = AsyncMock(side_effect=lambda p: p)
+        svc = _make_service(repos)
+
+        result = await svc.confirm("protocols", "proto-1")
+
+        assert result["confirmed_by_user"] is True
+        repos["protocol_repo"].get_by_id.assert_called_once_with("proto-1")
+        repos["protocol_repo"].upsert.assert_called_once()
+
+    async def test_confirm_protocol_by_entity_id_fallback(self):
+        repos = _mock_repos()
+        protocol = Protocol(
+            id="proto-2",
+            entity_id="ent-2",
+            entity_name="ZenOS",
+            content={"what": {}, "why": {}, "how": {}, "who": {}},
+            confirmed_by_user=False,
+        )
+        repos["protocol_repo"].get_by_id = AsyncMock(return_value=None)
+        repos["protocol_repo"].get_by_entity = AsyncMock(return_value=protocol)
+        repos["protocol_repo"].upsert = AsyncMock(side_effect=lambda p: p)
+        svc = _make_service(repos)
+
+        result = await svc.confirm("protocols", "ent-2")
+
+        assert result["confirmed_by_user"] is True
+        repos["protocol_repo"].get_by_id.assert_called_once_with("ent-2")
+        repos["protocol_repo"].get_by_entity.assert_called_once_with("ent-2")
 
 
 # ---------------------------------------------------------------------------
@@ -1093,6 +1238,7 @@ class TestGovernanceAIPromptInputFiltering:
             type="document",
             summary="doc",
             tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+            sources=[{"uri": "docs/spec-a.md"}],
         )
         module = Entity(
             id="mod-1",
@@ -1121,9 +1267,12 @@ class TestGovernanceAIPromptInputFiltering:
             })
 
         assert len(gov.calls) == 1
-        _, existing_entities, _ = gov.calls[0]
+        _, existing_entities, unlinked_docs = gov.calls[0]
         assert {e["id"] for e in existing_entities} == {"mod-1"}
         assert all(e["type"] != "document" for e in existing_entities)
+        assert {d["id"] for d in unlinked_docs} == {"doc-1"}
+        assert unlinked_docs[0]["summary"] == "doc"
+        assert unlinked_docs[0]["source_uri"] == "docs/spec-a.md"
 
     async def test_infer_all_excludes_document_entities_from_entity_table(self):
         repos = _mock_repos()
@@ -1227,3 +1376,116 @@ class TestGovernanceAIPromptInputFiltering:
 
         added_rel = repos["relationship_repo"].add.call_args[0][0]
         assert added_rel.description == "A 改了定價規則→B 的銷售話術要跟著看"
+
+    async def test_l2_hard_gate_pre_save_infer_all_includes_doc_context(self):
+        repos = _mock_repos()
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        parent = Entity(
+            id="parent-1",
+            name="Product",
+            type="product",
+            summary="Parent",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        doc = Entity(
+            id="doc-1",
+            name="Spec A",
+            type="document",
+            summary="Document Summary",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+            sources=[{"uri": "docs/spec-a.md"}],
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[parent, doc])
+
+        class _GovCapture:
+            def __init__(self):
+                self.calls = []
+
+            def infer_all(self, entity_data, existing_entities, unlinked_docs):
+                self.calls.append((entity_data, existing_entities, unlinked_docs))
+                return GovernanceInference(
+                    rels=[
+                        InferredRel(
+                            target="parent-1",
+                            type="impacts",
+                            description="A 改了策略→B 的優先級要跟著看",
+                        )
+                    ]
+                )
+
+        gov = _GovCapture()
+        svc = OntologyService(
+            entity_repo=repos["entity_repo"],
+            relationship_repo=repos["relationship_repo"],
+            document_repo=repos["document_repo"],
+            protocol_repo=repos["protocol_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+            governance_ai=gov,
+        )
+
+        await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
+        assert len(gov.calls) >= 1
+        _, _, unlinked_docs = gov.calls[0]
+        assert {d["id"] for d in unlinked_docs} == {"doc-1"}
+        assert unlinked_docs[0]["summary"] == "Document Summary"
+        assert unlinked_docs[0]["source_uri"] == "docs/spec-a.md"
+
+    async def test_infer_all_payload_includes_global_context(self):
+        repos = _mock_repos()
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        saved = Entity(
+            id="ent-new",
+            name="計費模型",
+            type="module",
+            summary="定義方案與升降級規則",
+            parent_id="prod-1",
+            tags=Tags(what=["pricing"], why="revenue", how="rules", who=["pm"]),
+        )
+        product = Entity(
+            id="prod-1",
+            name="ZenOS",
+            type="product",
+            summary="AI context layer",
+            tags=Tags(what=["platform"], why="shared context", how="mcp", who=["pm"]),
+        )
+        doc = Entity(
+            id="doc-1",
+            name="pricing-rules.md",
+            type="document",
+            summary="方案切換與升降級條件",
+            tags=Tags(what=["pricing"], why="revenue", how="spec", who=["pm"]),
+            sources=[{"uri": "docs/pricing-rules.md"}],
+        )
+        repos["entity_repo"].list_all = AsyncMock(return_value=[saved, product, doc])
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=lambda eid: {"ent-new": saved, "prod-1": product, "doc-1": doc}.get(eid))
+
+        gov = _CaptureGovernanceAI()
+        svc = OntologyService(
+            entity_repo=repos["entity_repo"],
+            relationship_repo=repos["relationship_repo"],
+            document_repo=repos["document_repo"],
+            protocol_repo=repos["protocol_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+            governance_ai=gov,
+        )
+
+        await svc.upsert_entity(_valid_entity_data(
+            id="ent-new",
+            name="計費模型",
+            type="module",
+            parent_id="prod-1",
+            summary="定義方案與升降級規則",
+            tags={"what": ["pricing"], "why": "revenue", "how": "rules", "who": ["pm"]},
+        ))
+
+        assert len(gov.calls) == 1
+        entity_data, _, _ = gov.calls[0]
+        global_context = entity_data.get("_global_context")
+        assert isinstance(global_context, dict)
+        assert global_context["entity_counts"]["product"] == 1
+        assert global_context["document_count"] == 1
+        assert isinstance(global_context["recurring_terms"], list)
+        assert any("ZenOS" in line for line in global_context["active_products"])
+        assert any("ZenOS" in line for line in global_context["impact_target_hints"])

@@ -376,6 +376,20 @@ class TestGetTool:
 
             assert result["title"] == "API Spec"
 
+    async def test_get_protocol_by_id_prefers_protocol_doc_id(self):
+        from zenos.interface.tools import get
+
+        proto = _make_protocol(id="proto-1", entity_id="ent-1")
+        with patch("zenos.interface.tools.protocol_repo") as mock_pr:
+            mock_pr.get_by_id = AsyncMock(return_value=proto)
+            mock_pr.get_by_entity = AsyncMock(return_value=None)
+
+            result = await get(collection="protocols", id="proto-1")
+
+            assert result["id"] == "proto-1"
+            mock_pr.get_by_id.assert_called_once_with("proto-1")
+            mock_pr.get_by_entity.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Tool 3: read_source
@@ -586,6 +600,36 @@ class TestWriteTool:
 
         assert result["error"] == "INVALID_INPUT"
 
+    async def test_write_red_blindspot_skips_duplicate_open_task(self):
+        from zenos.interface.tools import write
+
+        blindspot = _make_blindspot(id="bs-1", severity="red")
+        existing_task = _make_task(
+            id="task-dup",
+            status="backlog",
+            linked_blindspot="bs-1",
+            source_type="blindspot",
+        )
+        with patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_os.add_blindspot = AsyncMock(return_value=blindspot)
+            mock_ts.list_tasks = AsyncMock(return_value=[existing_task])
+            mock_ts.create_task = AsyncMock()
+
+            result = await write(
+                collection="blindspots",
+                data={
+                    "description": "No monitoring",
+                    "severity": "red",
+                    "suggested_action": "Add monitoring",
+                    "related_entity_ids": [],
+                },
+            )
+
+            assert result["auto_task_skipped"] == "EXISTING_OPEN_TASK"
+            assert result["auto_created_task"]["id"] == "task-dup"
+            mock_ts.create_task.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Tool 5: confirm
@@ -749,11 +793,48 @@ class TestAnalyzeTool:
 
         with patch("zenos.interface.tools.governance_service") as mock_gs:
             mock_gs.run_quality_check = AsyncMock(return_value=report)
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
 
             result = await analyze(check_type="quality")
 
             assert "quality" in result
             assert result["quality"]["score"] == 85
+
+    async def test_analyze_quality_includes_l2_repair_suggestions(self):
+        from zenos.interface.tools import analyze
+
+        report = QualityReport(
+            score=80,
+            passed=[],
+            failed=[QualityCheckItem(name="l2_impacts_coverage", passed=False, detail="missing impacts")],
+            warnings=[],
+        )
+        module = _make_entity(id="mod-1", type="module", name="Governance", status="active")
+
+        with patch("zenos.interface.tools.governance_service") as mock_gs, \
+             patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_gs.run_quality_check = AsyncMock(return_value=report)
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[{
+                "entity_id": "mod-1",
+                "entity_name": "Governance",
+                "issues": ["缺少具體 impacts"],
+                "repair_actions": ["補 impacts"],
+                "suggested_summary": "Governance 是公司共識概念",
+                "candidate_impacts": [],
+                "source_documents": [],
+                "existing_impacts_count": 0,
+            }])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[module])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="quality")
+
+            assert result["quality"]["active_l2_missing_impacts"] == 1
+            assert len(result["quality"]["l2_impacts_repairs"]) == 1
+            assert result["quality"]["l2_backfill_count"] == 1
+            assert result["quality"]["l2_backfill_proposals"][0]["entity_id"] == "mod-1"
 
     async def test_analyze_staleness(self):
         from zenos.interface.tools import analyze
@@ -796,12 +877,46 @@ class TestAnalyzeTool:
             mock_gs.run_quality_check = AsyncMock(return_value=report)
             mock_gs.run_staleness_check = AsyncMock(return_value=[])
             mock_gs.run_blindspot_analysis = AsyncMock(return_value=[])
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
 
             result = await analyze(check_type="all")
 
             assert "quality" in result
             assert "staleness" in result
             assert "blindspots" in result
+
+    async def test_analyze_all_includes_kpis_when_data_available(self):
+        from zenos.interface.tools import analyze
+
+        report = QualityReport(score=90, passed=[], failed=[], warnings=[])
+        entities = [
+            _make_entity(id="ent-1", type="product", confirmed_by_user=False),
+            _make_entity(id="doc-1", type="document", confirmed_by_user=True),
+        ]
+        blindspots = [
+            _make_blindspot(id="bs-1", description="dup", suggested_action="fix"),
+            _make_blindspot(id="bs-2", description="dup", suggested_action="fix"),
+        ]
+        with patch("zenos.interface.tools.governance_service") as mock_gs, \
+             patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools.blindspot_repo") as mock_br:
+            mock_gs.run_quality_check = AsyncMock(return_value=report)
+            mock_gs.run_staleness_check = AsyncMock(return_value=[])
+            mock_gs.run_blindspot_analysis = AsyncMock(return_value=[])
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=entities)
+            mock_os._documents = AsyncMock()
+            mock_os._documents.list_all = AsyncMock(return_value=[])
+            mock_os._protocols = AsyncMock()
+            mock_os._protocols.get_by_entity = AsyncMock(return_value=None)
+            mock_br.list_all = AsyncMock(return_value=blindspots)
+
+            result = await analyze(check_type="all")
+
+            assert "kpis" in result
+            assert result["kpis"]["total_items"] >= 2
+            assert result["kpis"]["duplicate_blindspots"] == 1
 
     async def test_analyze_invalid_type(self):
         from zenos.interface.tools import analyze

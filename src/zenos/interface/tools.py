@@ -505,7 +505,11 @@ async def get(
         if name:
             result = await ontology_service.get_protocol(name)
         elif id:
-            result = await protocol_repo.get_by_entity(id)
+            # Backward compatibility: first treat id as protocol doc id,
+            # fallback to legacy behavior where id is entity_id.
+            result = await protocol_repo.get_by_id(id)
+            if result is None:
+                result = await protocol_repo.get_by_entity(id)
         else:
             result = None
         if result is None:
@@ -686,6 +690,36 @@ async def write(
 
             # Red blindspots auto-create a draft task for immediate attention
             if result.severity == "red":
+                # Idempotency: avoid creating duplicate open tasks for same blindspot.
+                _partner_ctx = _current_partner.get()
+                effective_project = (
+                    _partner_ctx.get("default_project", "") if _partner_ctx else ""
+                )
+                existing_tasks = await task_service.list_tasks(
+                    limit=200,
+                    project=effective_project or None,
+                )
+                duplicate_open = next(
+                    (
+                        t
+                        for t in existing_tasks
+                        if t.linked_blindspot == result.id
+                        and t.source_type == "blindspot"
+                        and t.status not in {"done", "archived", "cancelled"}
+                    ),
+                    None,
+                )
+                if duplicate_open is not None:
+                    response["auto_created_task"] = _serialize(duplicate_open)
+                    response["auto_task_skipped"] = "EXISTING_OPEN_TASK"
+                    _audit_log(
+                        event_type="ontology.blindspot.upsert",
+                        target={"collection": collection, "id": response.get("id")},
+                        changes={"input": data},
+                        governance={"auto_task": "skipped_existing_open"},
+                    )
+                    return response
+
                 # Infer assignee from related entities' who tag
                 assignee = None
                 for eid in (result.related_entity_ids or []):
@@ -1071,10 +1105,80 @@ async def analyze(
         check_type: "all" / "quality" / "staleness" / "blindspot"
     """
     results: dict = {}
+    l2_repairs: list[dict] = []
+
+    def _is_concrete_impacts_description(description: str) -> bool:
+        desc = (description or "").strip()
+        if not desc:
+            return False
+        if "→" in desc:
+            left, right = desc.split("→", 1)
+            return bool(left.strip()) and bool(right.strip())
+        if "->" in desc:
+            left, right = desc.split("->", 1)
+            return bool(left.strip()) and bool(right.strip())
+        return False
+
+    async def _infer_l2_repairs() -> list[dict]:
+        all_entities = await ontology_service._entities.list_all()
+        modules = [
+            e for e in all_entities
+            if e.type == "module" and e.status == "active" and e.id
+        ]
+        if not modules:
+            return []
+
+        impact_entity_ids: set[str] = set()
+        seen_rel_ids: set[str | None] = set()
+        for ent in all_entities:
+            if not ent.id:
+                continue
+            rels = await ontology_service._relationships.list_by_entity(ent.id)
+            for rel in rels:
+                if rel.id in seen_rel_ids:
+                    continue
+                seen_rel_ids.add(rel.id)
+                if rel.type != "impacts":
+                    continue
+                if not _is_concrete_impacts_description(rel.description):
+                    continue
+                impact_entity_ids.add(rel.source_entity_id)
+                impact_entity_ids.add(rel.target_id)
+
+        repairs = []
+        for mod in modules:
+            if mod.id in impact_entity_ids:
+                continue
+            repairs.append({
+                "entity_id": mod.id,
+                "entity_name": mod.name,
+                "severity": "red",
+                "defect": "active_l2_missing_concrete_impacts",
+                "repair_options": [
+                    "補 impacts（A 改了什麼→B 的什麼要跟著看）",
+                    "降級為 L3",
+                    "重新切粒度",
+                ],
+            })
+        return repairs
 
     if check_type in ("all", "quality"):
         report = await governance_service.run_quality_check()
         results["quality"] = _serialize(report)
+        try:
+            l2_repairs = await _infer_l2_repairs()
+            results["quality"]["active_l2_missing_impacts"] = len(l2_repairs)
+            if l2_repairs:
+                results["quality"]["l2_impacts_repairs"] = l2_repairs
+        except Exception:
+            # Repair suggestion is additive and should not break quality report.
+            pass
+        try:
+            backfill = await governance_service.infer_l2_backfill_proposals()
+            results["quality"]["l2_backfill_proposals"] = backfill
+            results["quality"]["l2_backfill_count"] = len(backfill)
+        except Exception:
+            pass
 
     if check_type in ("all", "staleness"):
         warnings = await governance_service.run_staleness_check()
@@ -1095,6 +1199,91 @@ async def analyze(
             "error": "INVALID_INPUT",
             "message": f"Unknown check_type '{check_type}'. Use: all, quality, staleness, blindspot",
         }
+
+    if check_type == "all":
+        try:
+            # Minimal governance KPI snapshot for ongoing quality tracking.
+            all_entities = await ontology_service._entities.list_all()
+            non_doc_entities = [e for e in all_entities if e.type != "document"]
+            doc_entities = [e for e in all_entities if e.type == "document"]
+            legacy_docs = await ontology_service._documents.list_all()
+            all_blindspots = await blindspot_repo.list_all()
+
+            protocols = []
+            for entity in non_doc_entities:
+                if entity.id:
+                    proto = await ontology_service._protocols.get_by_entity(entity.id)
+                    if proto:
+                        protocols.append(proto)
+
+            total_items = (
+                len(non_doc_entities)
+                + len(doc_entities)
+                + len(legacy_docs)
+                + len(protocols)
+                + len(all_blindspots)
+            )
+            unconfirmed_items = (
+                sum(1 for e in non_doc_entities if not e.confirmed_by_user)
+                + sum(1 for d in doc_entities if not d.confirmed_by_user)
+                + sum(1 for d in legacy_docs if not d.confirmed_by_user)
+                + sum(1 for p in protocols if not p.confirmed_by_user)
+                + sum(1 for b in all_blindspots if not b.confirmed_by_user)
+            )
+            unconfirmed_ratio = (unconfirmed_items / total_items) if total_items else 0.0
+
+            # Duplicate blindspots use semantic signature (description + severity + related + action).
+            signature_count: dict[tuple[str, str, tuple[str, ...], str], int] = {}
+            for bs in all_blindspots:
+                sig = (
+                    " ".join(bs.description.strip().lower().split()),
+                    bs.severity,
+                    tuple(sorted(bs.related_entity_ids)),
+                    " ".join(bs.suggested_action.strip().lower().split()),
+                )
+                signature_count[sig] = signature_count.get(sig, 0) + 1
+            duplicate_blindspots = sum(max(0, cnt - 1) for cnt in signature_count.values())
+            duplicate_blindspot_rate = (
+                duplicate_blindspots / len(all_blindspots) if all_blindspots else 0.0
+            )
+
+            # Approximate confirm latency from created_at -> updated_at on confirmed items.
+            latencies: list[float] = []
+            for item in [*non_doc_entities, *doc_entities, *legacy_docs, *protocols, *all_blindspots]:
+                if not getattr(item, "confirmed_by_user", False):
+                    continue
+                created_at = getattr(item, "created_at", None) or getattr(item, "generated_at", None)
+                updated_at = getattr(item, "updated_at", None)
+                if created_at and updated_at and updated_at >= created_at:
+                    latencies.append((updated_at - created_at).total_seconds() / 86400)
+            median_confirm_latency_days = 0.0
+            if latencies:
+                sorted_days = sorted(latencies)
+                mid = len(sorted_days) // 2
+                if len(sorted_days) % 2 == 1:
+                    median_confirm_latency_days = sorted_days[mid]
+                else:
+                    median_confirm_latency_days = (sorted_days[mid - 1] + sorted_days[mid]) / 2
+
+            results["kpis"] = {
+                "total_items": total_items,
+                "unconfirmed_items": unconfirmed_items,
+                "unconfirmed_ratio": round(unconfirmed_ratio, 4),
+                "blindspot_total": len(all_blindspots),
+                "duplicate_blindspots": duplicate_blindspots,
+                "duplicate_blindspot_rate": round(duplicate_blindspot_rate, 4),
+                "median_confirm_latency_days": round(median_confirm_latency_days, 2),
+                "active_l2_missing_impacts": len(l2_repairs),
+                "weekly_review_required": (
+                    results.get("quality", {}).get("score", 0) < 70
+                    or len(l2_repairs) > 0
+                ),
+            }
+            if l2_repairs:
+                results["governance_repairs"] = l2_repairs
+        except Exception:
+            # KPI should be additive; never break main governance checks.
+            pass
 
     return results
 
