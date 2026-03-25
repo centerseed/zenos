@@ -57,6 +57,8 @@ from import_firestore_to_sql import (  # noqa: E402
     VALID_TASK_PRIORITY,
     VALID_PARTNER_STATUS,
     VALID_SOURCE_TYPE,
+    _register_imported,
+    _imported_ids,
 )
 
 
@@ -361,6 +363,11 @@ class TestDeriveProjectIds:
 # ---------------------------------------------------------------------------
 
 class TestUpsertDocumentEntities:
+    def setup_method(self):
+        _imported_ids.clear()
+        _register_imported("entity", "e1")
+        _register_imported("entity", "e2")
+
     def test_expands_linked_entity_ids(self):
         conn = _make_conn()
         doc = _document("doc1", linked_ids=["e1", "e2"], partner_id="p1")
@@ -415,6 +422,11 @@ class TestUpsertDocumentEntities:
 # ---------------------------------------------------------------------------
 
 class TestUpsertBlindspotEntities:
+    def setup_method(self):
+        _imported_ids.clear()
+        _register_imported("entity", "e1")
+        _register_imported("entity", "e2")
+
     def test_expands_related_entity_ids(self):
         conn = _make_conn()
         bs = _blindspot("b1", related_ids=["e1", "e2"], partner_id="p1")
@@ -450,6 +462,11 @@ class TestUpsertBlindspotEntities:
 # ---------------------------------------------------------------------------
 
 class TestUpsertTaskEntities:
+    def setup_method(self):
+        _imported_ids.clear()
+        _register_imported("entity", "e1")
+        _register_imported("entity", "e2")
+
     def test_expands_linked_entities(self):
         conn = _make_conn()
         task = _task("t1", "p1", linked=["e1", "e2"])
@@ -481,6 +498,12 @@ class TestUpsertTaskEntities:
 
 
 class TestUpsertTaskBlockers:
+    def setup_method(self):
+        _imported_ids.clear()
+        _register_imported("task", "t1")
+        _register_imported("task", "t2")
+        _register_imported("task", "t3")
+
     def test_expands_blocked_by(self):
         conn = _make_conn()
         task = _task("t1", "p1", blocked_by=["t2", "t3"])

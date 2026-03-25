@@ -165,6 +165,33 @@ def _clean_str(val: Any, default: str = "") -> str:
     return str(val)
 
 
+# Track IDs that were successfully imported, for dangling FK checks.
+_imported_ids: dict[str, set[str]] = {}
+
+
+def _register_imported(collection: str, doc_id: str) -> None:
+    """Track an ID that was successfully written to SQL."""
+    _imported_ids.setdefault(collection, set()).add(doc_id)
+
+
+def _nullify_dangling_fk(
+    fk_value: str | None,
+    target_collection: str,
+    context_id: str,
+    report: ReconciliationReport,
+) -> str | None:
+    """Return fk_value if its target exists in _imported_ids, else None + warn."""
+    if fk_value is None:
+        return None
+    known = _imported_ids.get(target_collection, set())
+    if fk_value not in known:
+        report.warn(
+            f"{context_id}: linked {target_collection} '{fk_value}' not found in SQL — setting to NULL"
+        )
+        return None
+    return fk_value
+
+
 # ---------------------------------------------------------------------------
 # Partner-to-entity index builder
 # ---------------------------------------------------------------------------
@@ -394,6 +421,7 @@ async def _upsert_partners(
                 """,
                 *row,
             )
+        _register_imported("partner", doc_id)
         cnt.sql += 1
 
 
@@ -407,6 +435,7 @@ async def _upsert_entities(
 ) -> None:
     cnt = report.add("entities")
     cnt.firestore = len(entities_data)
+    deferred_refs: list[tuple[str, str, str | None, str | None]] = []
 
     for doc in entities_data:
         doc_id = doc["id"]
@@ -452,14 +481,16 @@ async def _upsert_entities(
         parent_id = _clean_str(_get(doc, "parentId", "parent_id")) or None
 
         now = datetime.now(timezone.utc)
+        # Phase 1: insert with parent_id and project_id set to NULL
+        # to avoid self-referencing FK violations on insert order.
         row = (
             doc_id,
             partner_id,
             _clean_str(_get(doc, "name"), doc_id),
             etype,
             level,
-            parent_id,
-            project_id,
+            None,  # parent_id — deferred to phase 2
+            None,  # project_id — deferred to phase 2
             estatus,
             _clean_str(_get(doc, "summary"), ""),
             tags_json,
@@ -487,8 +518,6 @@ async def _upsert_entities(
                     name = EXCLUDED.name,
                     type = EXCLUDED.type,
                     level = EXCLUDED.level,
-                    parent_id = EXCLUDED.parent_id,
-                    project_id = EXCLUDED.project_id,
                     status = EXCLUDED.status,
                     summary = EXCLUDED.summary,
                     tags_json = EXCLUDED.tags_json,
@@ -502,7 +531,25 @@ async def _upsert_entities(
                 """,
                 *row,
             )
+        deferred_refs.append((doc_id, partner_id, parent_id, project_id))
+        _register_imported("entity", doc_id)
         cnt.sql += 1
+
+    # Phase 2: backfill parent_id and project_id now that all entities exist.
+    if not dry_run:
+        for doc_id, partner_id, parent_id, project_id in deferred_refs:
+            if parent_id or project_id:
+                await conn.execute(
+                    f"""
+                    UPDATE {SCHEMA}.entities
+                    SET parent_id = $1, project_id = $2, updated_at = $3
+                    WHERE id = $4
+                    """,
+                    parent_id,
+                    project_id,
+                    datetime.now(timezone.utc),
+                    doc_id,
+                )
 
 
 async def _upsert_relationships(
@@ -677,10 +724,11 @@ async def _upsert_document_entities(
         for entity_id in linked_ids:
             if not entity_id:
                 continue
-            if entity_id not in entity_to_partner:
+            if entity_id not in _imported_ids.get("entity", set()):
                 report.warn(
-                    f"document {doc_id}: linked entity {entity_id} not found in partner index"
+                    f"document_entities: doc {doc_id} links entity '{entity_id}' not in SQL — skipping"
                 )
+                continue
             if not dry_run:
                 await conn.execute(
                     f"""
@@ -746,9 +794,8 @@ async def _upsert_protocols(
                      gaps_json, version, confirmed_by_user,
                      generated_at, updated_at)
                 VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10)
-                ON CONFLICT (id) DO UPDATE SET
-                    partner_id = EXCLUDED.partner_id,
-                    entity_id = EXCLUDED.entity_id,
+                ON CONFLICT ON CONSTRAINT uq_protocols_partner_entity DO UPDATE SET
+                    id = EXCLUDED.id,
                     entity_name = EXCLUDED.entity_name,
                     content_json = EXCLUDED.content_json,
                     gaps_json = EXCLUDED.gaps_json,
@@ -758,6 +805,7 @@ async def _upsert_protocols(
                 """,
                 *row,
             )
+        _register_imported("protocol", doc_id)
         cnt.sql += 1
 
 
@@ -821,6 +869,7 @@ async def _upsert_blindspots(
                 """,
                 *row,
             )
+        _register_imported("blindspot", doc_id)
         cnt.sql += 1
 
 
@@ -848,6 +897,9 @@ async def _upsert_blindspot_entities(
         related_ids = _get(doc, "relatedEntityIds", "related_entity_ids") or []
         for entity_id in related_ids:
             if not entity_id:
+                continue
+            if entity_id not in _imported_ids.get("entity", set()):
+                report.warn(f"blindspot_entities: blindspot {doc_id} links entity '{entity_id}' not in SQL — skipping")
                 continue
             if not dry_run:
                 await conn.execute(
@@ -890,6 +942,23 @@ async def _upsert_tasks(
         ac_json = _to_json(ac_raw)
 
         now = datetime.now(timezone.utc)
+
+        # Satisfy DB constraints: done→completed_at, review→result, blocked→blocked_reason
+        completed_at = _to_dt(_get(doc, "completedAt", "completed_at"))
+        if tstatus == "done" and completed_at is None:
+            completed_at = _to_dt(_get(doc, "updatedAt", "updated_at")) or now
+            report.warn(f"task {doc_id}: status=done but no completed_at — backfilled from updatedAt")
+
+        result_val = _clean_str(_get(doc, "result")) or None
+        if tstatus == "review" and result_val is None:
+            result_val = "(imported — no result recorded)"
+            report.warn(f"task {doc_id}: status=review but no result — backfilled placeholder")
+
+        blocked_reason = _clean_str(_get(doc, "blockedReason", "blocked_reason")) or None
+        if tstatus == "blocked" and not blocked_reason:
+            blocked_reason = "(imported — no reason recorded)"
+            report.warn(f"task {doc_id}: status=blocked but no blocked_reason — backfilled placeholder")
+
         row = (
             doc_id,
             partner_id,
@@ -899,24 +968,36 @@ async def _upsert_tasks(
             tpriority,
             _clean_str(_get(doc, "priorityReason", "priority_reason"), ""),
             _clean_str(_get(doc, "assignee")) or None,
-            _clean_str(_get(doc, "assigneeRoleId", "assignee_role_id")) or None,
+            _nullify_dangling_fk(
+                _clean_str(_get(doc, "assigneeRoleId", "assignee_role_id")) or None,
+                "entity", doc_id, report,
+            ),
             _clean_str(_get(doc, "createdBy", "created_by"), ""),
-            _clean_str(_get(doc, "linkedProtocol", "linked_protocol")) or None,
-            _clean_str(_get(doc, "linkedBlindspot", "linked_blindspot")) or None,
+            _nullify_dangling_fk(
+                _clean_str(_get(doc, "linkedProtocol", "linked_protocol")) or None,
+                "protocol", doc_id, report,
+            ),
+            _nullify_dangling_fk(
+                _clean_str(_get(doc, "linkedBlindspot", "linked_blindspot")) or None,
+                "blindspot", doc_id, report,
+            ),
             _clean_str(_get(doc, "sourceType", "source_type"), ""),
             _clean_str(_get(doc, "contextSummary", "context_summary"), ""),
             _to_dt(_get(doc, "dueDate", "due_date")),
-            _clean_str(_get(doc, "blockedReason", "blocked_reason")) or None,
+            blocked_reason,
             ac_json,
             _clean_str(_get(doc, "completedBy", "completed_by")) or None,
             bool(_get(doc, "confirmedByCreator", "confirmed_by_creator", default=False)),
             _clean_str(_get(doc, "rejectionReason", "rejection_reason")) or None,
-            _clean_str(_get(doc, "result")) or None,
+            result_val,
             _clean_str(_get(doc, "project"), ""),
-            _clean_str(_get(doc, "projectId", "project_id")) or None,
+            _nullify_dangling_fk(
+                _clean_str(_get(doc, "projectId", "project_id")) or None,
+                "entity", doc_id, report,
+            ),
             _to_dt(_get(doc, "createdAt", "created_at")) or now,
             _to_dt(_get(doc, "updatedAt", "updated_at")) or now,
-            _to_dt(_get(doc, "completedAt", "completed_at")),
+            completed_at,
         )
         if not dry_run:
             await conn.execute(
@@ -959,6 +1040,7 @@ async def _upsert_tasks(
                 """,
                 *row,
             )
+        _register_imported("task", doc_id)
         cnt.sql += 1
 
 
@@ -979,6 +1061,9 @@ async def _upsert_task_blockers(
         blockers = _get(doc, "blockedBy", "blocked_by") or []
         for blocker_id in blockers:
             if not blocker_id or blocker_id == doc_id:
+                continue
+            if blocker_id not in _imported_ids.get("task", set()):
+                report.warn(f"task_blockers: task {doc_id} blocked by '{blocker_id}' not in SQL — skipping")
                 continue
             if not dry_run:
                 await conn.execute(
@@ -1010,6 +1095,9 @@ async def _upsert_task_entities(
         linked = _get(doc, "linkedEntities", "linked_entities") or []
         for entity_id in linked:
             if not entity_id:
+                continue
+            if entity_id not in _imported_ids.get("entity", set()):
+                report.warn(f"task_entities: task {doc_id} links entity '{entity_id}' not in SQL — skipping")
                 continue
             if not dry_run:
                 await conn.execute(
@@ -1077,6 +1165,7 @@ async def run_import(dry_run: bool = False) -> ReconciliationReport:
     db = firestore.AsyncClient(project=project)
 
     report = ReconciliationReport()
+    _imported_ids.clear()
 
     # Step 1: read all data from Firestore
     print("Reading partners...")
@@ -1113,6 +1202,24 @@ async def run_import(dry_run: bool = False) -> ReconciliationReport:
 
     # Step 2: build derived indexes
     entity_to_partner = _build_entity_to_partner_index(partners_data)
+
+    # Fallback: if authorizedEntityIds didn't cover any real entities,
+    # assign all entities to the admin partner (single-tenant bootstrap).
+    real_entity_ids = {e["id"] for e in entities_data}
+    matched = real_entity_ids & set(entity_to_partner.keys())
+    if not matched:
+        admin_partners = [p for p in partners_data if p.get("isAdmin") or p.get("is_admin")]
+        if admin_partners:
+            admin_id = admin_partners[0]["id"]
+            report.warn(
+                f"authorizedEntityIds mapped 0 entities — "
+                f"falling back to admin partner '{admin_id}' for all {len(entities_data)} entities"
+            )
+            for e in entities_data:
+                entity_to_partner[e["id"]] = admin_id
+        else:
+            report.warn("authorizedEntityIds mapped 0 entities and no admin partner found")
+
     project_ids = _derive_project_ids(entities_data, report)
 
     if dry_run:
