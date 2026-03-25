@@ -46,13 +46,15 @@ from zenos.application.ontology_service import OntologyService
 from zenos.application.source_service import SourceService
 from zenos.application.task_service import TaskService
 from zenos.infrastructure.llm_client import create_llm_client
-from zenos.infrastructure.firestore_repo import (
-    FirestoreBlindspotRepository,
-    FirestoreDocumentRepository,  # kept for legacy backward compat
-    FirestoreEntityRepository,
-    FirestoreProtocolRepository,
-    FirestoreRelationshipRepository,
-    FirestoreTaskRepository,
+from zenos.infrastructure.sql_repo import (
+    SqlBlindspotRepository,
+    SqlDocumentRepository,
+    SqlEntityRepository,
+    SqlPartnerKeyValidator,
+    SqlProtocolRepository,
+    SqlRelationshipRepository,
+    SqlTaskRepository,
+    get_pool,
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
 
@@ -66,47 +68,8 @@ _current_partner: ContextVar[dict | None] = ContextVar("current_partner", defaul
 # API Key authentication middleware
 # ──────────────────────────────────────────────
 
-class PartnerKeyValidator:
-    """Validates API keys against Firestore partners collection.
-
-    Caches active partner keys in memory with a configurable TTL
-    to avoid a Firestore read on every request.
-    """
-
-    def __init__(self, ttl: int = 300):
-        self._cache: dict[str, dict] = {}
-        self._cache_ts: float = 0
-        self._ttl = ttl
-
-    async def validate(self, key: str) -> dict | None:
-        """Return partner data if *key* belongs to an active partner."""
-        now = time.time()
-        if now - self._cache_ts > self._ttl:
-            await self._refresh_cache()
-        return self._cache.get(key)
-
-    async def _refresh_cache(self) -> None:
-        from zenos.infrastructure.firestore_repo import get_db
-
-        try:
-            db = get_db()
-            docs = db.collection("partners").where("status", "==", "active").stream()
-            new_cache: dict[str, dict] = {}
-            async for doc in docs:
-                data = doc.to_dict()
-                data["id"] = doc.id  # expose document ID for partner routing
-                api_key = data.get("apiKey", "")
-                if api_key:
-                    new_cache[api_key] = data
-            self._cache = new_cache
-            self._cache_ts = time.time()
-            logger.info("Partner cache refreshed: %d active keys", len(new_cache))
-        except Exception:
-            logger.exception("Failed to refresh partner cache from Firestore")
-            # Don't update _cache_ts so next request retries
-            # But if cache is empty and keeps failing, we need a fallback
-            if not self._cache:
-                self._cache_ts = time.time()  # avoid hammering Firestore
+# PartnerKeyValidator is now provided by sql_repo.SqlPartnerKeyValidator
+PartnerKeyValidator = SqlPartnerKeyValidator
 
 
 _partner_validator = PartnerKeyValidator()
@@ -116,7 +79,7 @@ class ApiKeyMiddleware:
     """Pure ASGI middleware — compatible with SSE streaming.
 
     Authentication:
-    - Validate key against active partners in Firestore.
+    - Validate key against active partners in SQL (partners table).
     """
 
     def __init__(self, app):
@@ -129,7 +92,7 @@ class ApiKeyMiddleware:
         key = self._extract_key(scope)
         path = scope.get("path", "")
 
-        # Partner key (Firestore)
+        # Partner key (SQL)
         if key:
             partner = await _partner_validator.validate(key)
             if partner is not None:
@@ -179,12 +142,32 @@ mcp = FastMCP("ZenOS Ontology")
 # Dependency injection — repositories & services
 # ──────────────────────────────────────────────
 
-entity_repo = FirestoreEntityRepository()
-relationship_repo = FirestoreRelationshipRepository()
-document_repo = FirestoreDocumentRepository()
-protocol_repo = FirestoreProtocolRepository()
-blindspot_repo = FirestoreBlindspotRepository()
-task_repo = FirestoreTaskRepository()
+# Repositories are initialised lazily with the shared asyncpg pool.
+# We use a sentinel so module-level code stays sync; actual pool wiring
+# happens inside _ensure_repos(), called from each tool handler.
+_repos_ready: bool = False
+entity_repo: SqlEntityRepository | None = None
+relationship_repo: SqlRelationshipRepository | None = None
+document_repo: SqlDocumentRepository | None = None
+protocol_repo: SqlProtocolRepository | None = None
+blindspot_repo: SqlBlindspotRepository | None = None
+task_repo: SqlTaskRepository | None = None
+
+
+async def _ensure_repos() -> None:
+    """Lazily initialise all SQL repositories on first tool invocation."""
+    global _repos_ready, entity_repo, relationship_repo, document_repo
+    global protocol_repo, blindspot_repo, task_repo
+    if _repos_ready:
+        return
+    pool = await get_pool()
+    entity_repo = SqlEntityRepository(pool)
+    relationship_repo = SqlRelationshipRepository(pool)
+    document_repo = SqlDocumentRepository(pool)
+    protocol_repo = SqlProtocolRepository(pool)
+    blindspot_repo = SqlBlindspotRepository(pool)
+    task_repo = SqlTaskRepository(pool)
+    _repos_ready = True
 
 source_adapter = GitHubAdapter()
 
@@ -197,33 +180,43 @@ try:
 except Exception:
     logger.warning("GovernanceAI disabled: LLM client initialization failed", exc_info=True)
 
-ontology_service = OntologyService(
-    entity_repo=entity_repo,
-    relationship_repo=relationship_repo,
-    document_repo=document_repo,
-    protocol_repo=protocol_repo,
-    blindspot_repo=blindspot_repo,
-    governance_ai=_governance_ai,
-)
+# Services are wired lazily after _ensure_repos() runs.
+ontology_service: OntologyService | None = None
+governance_service: GovernanceService | None = None
+source_service: SourceService | None = None
+task_service: TaskService | None = None
 
-governance_service = GovernanceService(
-    entity_repo=entity_repo,
-    relationship_repo=relationship_repo,
-    protocol_repo=protocol_repo,
-    blindspot_repo=blindspot_repo,
-)
 
-source_service = SourceService(
-    entity_repo=entity_repo,
-    source_adapter=source_adapter,
-)
-
-task_service = TaskService(
-    task_repo=task_repo,
-    entity_repo=entity_repo,
-    blindspot_repo=blindspot_repo,
-    governance_ai=_governance_ai,
-)
+async def _ensure_services() -> None:
+    """Wire services once repos are ready."""
+    global ontology_service, governance_service, source_service, task_service
+    await _ensure_repos()
+    if ontology_service is not None:
+        return
+    ontology_service = OntologyService(
+        entity_repo=entity_repo,
+        relationship_repo=relationship_repo,
+        document_repo=document_repo,
+        protocol_repo=protocol_repo,
+        blindspot_repo=blindspot_repo,
+        governance_ai=_governance_ai,
+    )
+    governance_service = GovernanceService(
+        entity_repo=entity_repo,
+        relationship_repo=relationship_repo,
+        protocol_repo=protocol_repo,
+        blindspot_repo=blindspot_repo,
+    )
+    source_service = SourceService(
+        entity_repo=entity_repo,
+        source_adapter=source_adapter,
+    )
+    task_service = TaskService(
+        task_repo=task_repo,
+        entity_repo=entity_repo,
+        blindspot_repo=blindspot_repo,
+        governance_ai=_governance_ai,
+    )
 
 
 # ──────────────────────────────────────────────
@@ -338,6 +331,7 @@ async def search(
         project: 按專案過濾 tasks（如 "zenos"、"paceriz"）。
             未傳時自動使用 partner 的 default_project，確保跨專案隔離。
     """
+    await _ensure_services()
     results: dict = {}
 
     # Keyword search mode (cross-collection)
@@ -349,7 +343,7 @@ async def search(
         # Also search tasks by title/description keyword
         # Auto-fill project from partner context if caller omits it
         _partner_ctx = _current_partner.get()
-        effective_project_kw = project or (_partner_ctx.get("default_project", "") if _partner_ctx else "")
+        effective_project_kw = project or (_partner_ctx.get("defaultProject", "") if _partner_ctx else "")
         all_tasks = await task_service.list_tasks(limit=200, project=effective_project_kw or None)
         query_lower = query.lower()
         matched_tasks = [
@@ -435,7 +429,7 @@ async def search(
             status_list = status.split(",") if status else None
             # Auto-fill project from partner context if caller omits it
             _partner = _current_partner.get()
-            effective_project = project or (_partner.get("default_project", "") if _partner else "")
+            effective_project = project or (_partner.get("defaultProject", "") if _partner else "")
             tasks = await task_service.list_tasks(
                 assignee=assignee,
                 created_by=created_by,
@@ -482,6 +476,7 @@ async def get(
         name: 項目名稱（entities 和 protocols 支援按名稱查詢）
         id: 項目 ID（所有集合都支援）
     """
+    await _ensure_services()
     if not name and not id:
         return {"error": "INVALID_INPUT", "message": "Must provide either name or id"}
 
@@ -582,6 +577,7 @@ async def read_source(doc_id: str) -> dict:
     Args:
         doc_id: 文件的 ID（從 search 或 get 取得）
     """
+    await _ensure_services()
     try:
         content = await source_service.read_source(doc_id)
         return {"doc_id": doc_id, "content": content}
@@ -646,6 +642,7 @@ async def write(
         data: 集合對應的欄位（見上方說明）
         id: 更新時提供既有 ID，不提供則新增
     """
+    await _ensure_services()
     try:
         if id:
             data["id"] = id
@@ -693,7 +690,7 @@ async def write(
                 # Idempotency: avoid creating duplicate open tasks for same blindspot.
                 _partner_ctx = _current_partner.get()
                 effective_project = (
-                    _partner_ctx.get("default_project", "") if _partner_ctx else ""
+                    _partner_ctx.get("defaultProject", "") if _partner_ctx else ""
                 )
                 existing_tasks = await task_service.list_tasks(
                     limit=200,
@@ -813,6 +810,7 @@ async def confirm(
         mark_stale_entity_ids: 任務完成時，標記這些 entity 的相關文件為 stale（僅 tasks 集合生效）
         new_blindspot: 任務完成時發現的新盲點（{description, severity, related_entity_ids, suggested_action}）
     """
+    await _ensure_services()
     try:
         if collection == "tasks":
             result = await task_service.confirm_task(
@@ -885,10 +883,11 @@ async def _task_handler(
     Called by the ``task`` MCP tool wrapper. Tests import this function
     directly to avoid calling a ``FunctionTool`` object.
     """
+    await _ensure_services()
     try:
         # Resolve partner context once — used for auto-filling created_by and project
         partner = _current_partner.get()
-        partner_default_project = partner.get("default_project", "") if partner else ""
+        partner_default_project = partner.get("defaultProject", "") if partner else ""
 
         if action == "create":
             if not title:
@@ -1104,6 +1103,7 @@ async def analyze(
     Args:
         check_type: "all" / "quality" / "staleness" / "blindspot"
     """
+    await _ensure_services()
     results: dict = {}
     l2_repairs: list[dict] = []
 
