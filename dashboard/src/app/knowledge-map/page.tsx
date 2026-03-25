@@ -623,6 +623,8 @@ function GraphCanvas({
   onToggleModuleType,
   onExpandModule,
   onCollapseModule,
+  pinnedPositions,
+  setPinnedPositions,
 }: {
   entities: Entity[];
   relationships: Relationship[];
@@ -635,6 +637,8 @@ function GraphCanvas({
   onToggleModuleType: (moduleId: string, type: ExpandableType) => void;
   onExpandModule: (moduleId: string) => void;
   onCollapseModule: (moduleId: string) => void;
+  pinnedPositions: Map<string, { x: number; y: number }>;
+  setPinnedPositions: React.Dispatch<React.SetStateAction<Map<string, { x: number; y: number }>>>;
 }) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ForceGraph, setForceGraph] = useState<any>(null);
@@ -645,6 +649,15 @@ function GraphCanvas({
   const localPhysicsRef = useRef(false);
   /** The module ID being expanded (used to unfreeze it after graphData updates) */
   const expandingModuleIdRef = useRef<string | null>(null);
+  /** Snapshot of all node positions captured at the moment of click, for reliable re-pinning after graphData rebuild */
+  const frozenPositionsRef = useRef<Map<string, { x: number; y: number }>>(new Map());
+  /**
+   * Direct references to actual d3-force simulation node objects, updated every canvas frame via nodeCanvasObject.
+   * These are the REAL simulation objects — setting .fx/.fy on them pins nodes immediately.
+   * This is the correct way to access simulation nodes because fg.graphData() is NOT exposed by react-force-graph-2d.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const simNodeMapRef = useRef<Map<string, any>>(new Map());
   const [dims, setDims] = useState({ width: 800, height: 600 });
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
 
@@ -786,26 +799,31 @@ function GraphCanvas({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const nodes: any[] = entities
       .filter((e) => visibleIds.has(e.id))
-      .map((e) => ({
-        id: e.id,
-        name: e.name,
-        type: e.type,
-        parentId: e.parentId,
-        confirmed: e.confirmedByUser,
-        hasBlindspot: blindspotSet.has(e.id),
-        days: daysAgo(e.updatedAt),
-        taskCount: inferTasksForEntity(e, tasks).length,
-        val:
-          e.type === "product"
-            ? 20
-            : e.type === "module"
-              ? 8
-              : e.type === "document"
-                ? 6
-                : e.type === "goal"
-                  ? 10
-                  : 7,
-      }));
+      .map((e) => {
+        const pin = pinnedPositions.get(e.id);
+        return {
+          id: e.id,
+          name: e.name,
+          type: e.type,
+          parentId: e.parentId,
+          confirmed: e.confirmedByUser,
+          hasBlindspot: blindspotSet.has(e.id),
+          days: daysAgo(e.updatedAt),
+          taskCount: inferTasksForEntity(e, tasks).length,
+          val:
+            e.type === "product"
+              ? 20
+              : e.type === "module"
+                ? 8
+                : e.type === "document"
+                  ? 6
+                  : e.type === "goal"
+                    ? 10
+                    : 7,
+          // Bake pinned position directly into node data so d3-force never randomises it
+          ...(pin ? { x: pin.x, y: pin.y, fx: pin.x, fy: pin.y } : {}),
+        };
+      });
 
     const nodeIds = new Set(nodes.map((n) => n.id));
     const links: { source: string; target: string; type: string }[] =
@@ -842,6 +860,7 @@ function GraphCanvas({
         const nodeId = `task:${t.id}`;
         if (!taskNodeIds.has(nodeId)) {
           taskNodeIds.add(nodeId);
+          const parentPin = pinnedPositions.get(moduleId);
           nodes.push({
             id: nodeId,
             name: t.title,
@@ -854,6 +873,8 @@ function GraphCanvas({
             val: 5,
             taskStatus: t.status,
             taskPriority: t.priority,
+            // New child node: start near parent so it doesn't fly in from random origin
+            ...(parentPin ? { x: parentPin.x + (Math.random() - 0.5) * 40, y: parentPin.y + (Math.random() - 0.5) * 40 } : {}),
           });
           links.push({ source: nodeId, target: moduleId, type: "task" });
         }
@@ -861,44 +882,28 @@ function GraphCanvas({
     }
 
     return { nodes, links };
-  }, [entities, relationships, blindspotSet, tasks, focusProduct, expandedModules, entityMap]);
+  }, [entities, relationships, blindspotSet, tasks, focusProduct, expandedModules, entityMap, pinnedPositions]);
 
-  // Place newly expanded L3 nodes at their parent module's position + manage local physics freeze
+  // After graphData updates, re-apply frozen positions and place new child nodes near their parent.
+  // simNodeMapRef is used for existing nodes (direct sim objects).
+  // New child nodes (not yet in simNodeMapRef) are positioned via pinnedPositions baked into graphData.
   useEffect(() => {
-    if (!fgRef.current) return;
-    const fg = fgRef.current;
-    if (!fg.graphData || typeof fg.graphData !== "function") return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const currentData = fg.graphData() as any;
-    if (!currentData?.nodes) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const nodeMap = new Map<string, any>();
-    for (const n of graphData.nodes) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const fgNode = currentData.nodes.find((gn: any) => gn.id === n.id);
-      if (fgNode) nodeMap.set(n.id, fgNode);
-    }
+    const frozen = frozenPositionsRef.current;
+    if (!localPhysicsRef.current || frozen.size === 0) return;
 
-    for (const n of graphData.nodes) {
-      if (n.type !== "product" && n.type !== "module" && n.parentId) {
-        const fgNode = nodeMap.get(n.id);
-        const parentNode = nodeMap.get(n.parentId);
-        if (fgNode && parentNode && fgNode.x === undefined) {
-          // Place at parent position with slight random offset
-          fgNode.x = (parentNode.x ?? 0) + (Math.random() - 0.5) * 20;
-          fgNode.y = (parentNode.y ?? 0) + (Math.random() - 0.5) * 20;
-        }
+    // Re-pin all existing nodes that might have been re-created by force-graph's internal merge.
+    // simNodeMapRef may be stale here (updated on next canvas frame), so also re-apply via frozen map.
+    for (const [id, simNode] of simNodeMapRef.current.entries()) {
+      const pos = frozen.get(id);
+      if (pos) {
+        simNode.fx = pos.x;
+        simNode.fy = pos.y;
+        simNode.x = pos.x;
+        simNode.y = pos.y;
+        simNode.vx = 0;
+        simNode.vy = 0;
       }
-    }
-
-    // If expanding: unfreeze the parent L2 node so it can drift with its children
-    const expandingId = expandingModuleIdRef.current;
-    if (expandingId && localPhysicsRef.current) {
-      const parentFgNode = nodeMap.get(expandingId);
-      if (parentFgNode) {
-        parentFgNode.fx = undefined;
-        parentFgNode.fy = undefined;
-      }
+      // New child nodes (no frozen entry) remain free — they'll settle around parent via link force
     }
   }, [graphData]);
 
@@ -925,6 +930,11 @@ function GraphCanvas({
   const nodeCanvasObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+      // Capture the actual d3-force simulation node object every frame.
+      // node here IS the real simulation object (with .x, .y, .fx, .fy).
+      // We use this in onNodeClick to pin/unpin nodes directly without fg.graphData().
+      simNodeMapRef.current.set(node.id as string, node);
+
       const x = node.x as number;
       const y = node.y as number;
       const r = Math.sqrt(node.val as number) * 2.8;
@@ -1171,17 +1181,23 @@ function GraphCanvas({
             const moduleId = node.id as string;
             const isExpanded = (expandedModules[moduleId] ?? []).length > 0;
 
-            // Freeze ALL current nodes to preserve global layout during simulation reheat
             const fg = fgRef.current;
-            if (fg && typeof fg.graphData === "function") {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const currentNodes = (fg.graphData() as any)?.nodes ?? [];
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              for (const n of currentNodes) {
-                n.fx = n.x;
-                n.fy = n.y;
-              }
+
+            // Pin ALL current nodes directly on the d3-force simulation objects.
+            // simNodeMapRef contains the actual simulation node objects (updated every canvas frame).
+            // Setting .fx/.fy on them is the correct way — fg.graphData() does NOT exist on the ref.
+            const snapshot = new Map<string, { x: number; y: number }>();
+            for (const [id, simNode] of simNodeMapRef.current.entries()) {
+              const x = simNode.x as number ?? 0;
+              const y = simNode.y as number ?? 0;
+              simNode.fx = x;
+              simNode.fy = y;
+              simNode.vx = 0;
+              simNode.vy = 0;
+              snapshot.set(id, { x, y });
             }
+            setPinnedPositions(snapshot);
+            frozenPositionsRef.current = snapshot;
             localPhysicsRef.current = true;
             expandingModuleIdRef.current = isExpanded ? null : moduleId;
 
@@ -1208,23 +1224,20 @@ function GraphCanvas({
         ) => setHoveredNode(node ? (node.id as string) : null)}
         onEngineStop={() => {
           if (localPhysicsRef.current) {
-            // Simulation settled — unfreeze all nodes
-            const fg = fgRef.current;
-            if (fg && typeof fg.graphData === "function") {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const allNodes = (fg.graphData() as any)?.nodes ?? [];
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              for (const n of allNodes) {
-                n.fx = undefined;
-                n.fy = undefined;
-              }
+            // Simulation settled — unfreeze all nodes using simNodeMapRef (actual sim objects).
+            // fg.graphData() does not exist on the ref; simNodeMapRef is updated every canvas frame.
+            for (const simNode of simNodeMapRef.current.values()) {
+              simNode.fx = undefined;
+              simNode.fy = undefined;
             }
             localPhysicsRef.current = false;
             expandingModuleIdRef.current = null;
+            frozenPositionsRef.current = new Map();
+            setPinnedPositions(new Map());
           }
         }}
-        cooldownTicks={80}
-        warmupTicks={30}
+        cooldownTicks={120}
+        warmupTicks={0}
         d3AlphaDecay={0.035}
         d3VelocityDecay={0.4}
         linkCanvasObjectMode={(link: any) => {
@@ -1739,6 +1752,8 @@ function KnowledgeMapPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Positions snapshot set on expand/collapse click — baked into graphData nodes as fx/fy so d3-force never randomises them */
+  const [pinnedPositions, setPinnedPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [focusProduct, setFocusProduct] = useState<string | null>(null);
 
   // Layered expand state: moduleId -> expanded L3 types
@@ -1779,7 +1794,7 @@ function KnowledgeMapPage() {
             getAllEntities(),
             getAllBlindspots(),
             getAllRelationships(),
-            getTasks(),
+            getTasks(partner?.id ?? null),
           ]);
 
         setEntities(fetchedEntities);
@@ -1842,6 +1857,8 @@ function KnowledgeMapPage() {
             onToggleModuleType={handleToggleModuleType}
             onExpandModule={handleExpandModule}
             onCollapseModule={handleCollapseModule}
+            pinnedPositions={pinnedPositions}
+            setPinnedPositions={setPinnedPositions}
           />
           {selectedId && isTaskSelected ? (
             <TaskDetailPanel

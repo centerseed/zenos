@@ -10,7 +10,6 @@ import {
 import { getDbInstance } from "./firebase";
 import type { Entity, Relationship, Blindspot, Task, Partner } from "@/types";
 
-const PARTNER_ID = process.env.NEXT_PUBLIC_PARTNER_ID ?? "";
 
 export function toEntity(id: string, data: Record<string, unknown>): Entity {
   // Normalize tags.what and tags.who to always be arrays
@@ -181,11 +180,16 @@ export function toPartner(id: string, data: Record<string, unknown>): Partner {
 }
 
 /** Fetch tasks with optional filters */
-export async function getTasks(filters?: {
-  statuses?: string[];
-  assignee?: string;
-  createdBy?: string;
-}): Promise<Task[]> {
+export async function getTasks(
+  partnerId: string | null,
+  filters?: {
+    statuses?: string[];
+    assignee?: string;
+    createdBy?: string;
+  }
+): Promise<Task[]> {
+  if (!partnerId) return [];
+
   const constraints = [];
 
   if (filters?.statuses && filters.statuses.length > 0) {
@@ -207,7 +211,7 @@ export async function getTasks(filters?: {
   }
 
   const q = query(
-    collection(getDbInstance(), PARTNER_ID ? `partners/${PARTNER_ID}/tasks` : "tasks"),
+    collection(getDbInstance(), `partners/${partnerId}/tasks`),
     ...constraints
   );
   const snapshot = await getDocs(q);
@@ -268,9 +272,11 @@ export async function getAllRelationships(): Promise<Relationship[]> {
 }
 
 /** Fetch tasks linked to an entity */
-export async function getTasksByEntity(entityId: string): Promise<Task[]> {
+export async function getTasksByEntity(partnerId: string | null, entityId: string): Promise<Task[]> {
+  if (!partnerId) return [];
+
   const q = query(
-    collection(getDbInstance(), PARTNER_ID ? `partners/${PARTNER_ID}/tasks` : "tasks"),
+    collection(getDbInstance(), `partners/${partnerId}/tasks`),
     where("linkedEntities", "array-contains", entityId)
   );
   const snapshot = await getDocs(q);

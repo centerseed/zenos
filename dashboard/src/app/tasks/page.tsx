@@ -42,7 +42,7 @@ function TasksPage() {
     async function loadPulseData() {
       try {
         const [fetchedTasks, fetchedEntities, fetchedPartners] = await Promise.all([
-          getTasks(),
+          getTasks(partner?.id ?? null),
           getProjectEntities(),
           getAllPartners(),
         ]);
