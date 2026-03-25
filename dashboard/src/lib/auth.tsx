@@ -19,6 +19,7 @@ import {
   collection,
   query,
   where,
+  orderBy,
   getDocs,
 } from "firebase/firestore";
 import { getAuthInstance, getDbInstance } from "./firebase";
@@ -58,7 +59,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const q = query(
           collection(getDbInstance(), "partners"),
-          where("email", "==", user.email)
+          where("email", "==", user.email),
+          orderBy("createdAt", "asc")
         );
         const snapshot = await getDocs(q);
 
@@ -103,7 +105,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const q = query(
         collection(getDbInstance(), "partners"),
-        where("email", "==", currentUser.email)
+        where("email", "==", currentUser.email),
+        orderBy("createdAt", "asc")
       );
       const snapshot = await getDocs(q);
       if (snapshot.empty) return;
