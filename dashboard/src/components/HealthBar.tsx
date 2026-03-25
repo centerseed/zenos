@@ -41,10 +41,10 @@ export function HealthBar({ entities, blindspots }: HealthBarProps) {
         </div>
 
         {/* Separator */}
-        <div className="w-px h-5 bg-[#333]" />
+        <div className="w-px h-5 bg-border" />
 
         {/* Quick stats in plain language */}
-        <div className="flex items-center gap-4 text-xs text-[#A1A1AA]">
+        <div className="flex items-center gap-4 text-xs text-muted-foreground">
           <span>{activeProducts.length} 個產品進行中</span>
           <span>·</span>
           <span>{entities.length} 個知識節點</span>
@@ -60,7 +60,7 @@ export function HealthBar({ entities, blindspots }: HealthBarProps) {
       </div>
 
       {/* Last updated */}
-      <div className="text-xs text-[#71717A]">
+      <div className="text-xs text-muted-foreground">
         {entities.length > 0 && (
           <span>
             最後更新 {formatRelativeTime(

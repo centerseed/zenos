@@ -60,7 +60,7 @@ function SetupPage() {
               description={
                 <>
                   In your project directory, create or edit{" "}
-                  <code className="bg-[#1F1F23] px-1.5 py-0.5 rounded text-sm text-[#FAFAFA]">
+                  <code className="bg-secondary px-1.5 py-0.5 rounded text-sm text-foreground">
                     .claude/mcp.json
                   </code>
                 </>
@@ -97,7 +97,7 @@ function SetupPage() {
               description={
                 <>
                   Type{" "}
-                  <code className="bg-[#1F1F23] px-1.5 py-0.5 rounded text-sm text-[#FAFAFA]">
+                  <code className="bg-secondary px-1.5 py-0.5 rounded text-sm text-foreground">
                     list all products
                   </code>{" "}
                   in Claude Code. If you see your project, you&apos;re all set!
@@ -136,7 +136,7 @@ function Step({
       </div>
       <div>
         <h4 className="font-medium text-white">{title}</h4>
-        <p className="text-sm text-[#71717A] mt-1">{description}</p>
+        <p className="text-sm text-muted-foreground mt-1">{description}</p>
       </div>
     </li>
   );
@@ -159,9 +159,9 @@ function SkillInstallBlock() {
   };
 
   return (
-    <div className="bg-[#0A0A0C] rounded-lg border border-[#1F1F23] overflow-hidden">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-[#1F1F23]">
-        <span className="text-xs text-[#71717A]">Paste this into Claude Code</span>
+    <div className="bg-background rounded-lg border border-border overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border">
+        <span className="text-xs text-muted-foreground">Paste this into Claude Code</span>
         <button
           onClick={handleCopy}
           aria-label="Copy skill install prompt"
@@ -170,7 +170,7 @@ function SkillInstallBlock() {
           {copied ? "Copied!" : "Copy"}
         </button>
       </div>
-      <pre className="px-4 py-3 text-sm text-[#FAFAFA] whitespace-pre-wrap font-mono leading-relaxed">
+      <pre className="px-4 py-3 text-sm text-foreground whitespace-pre-wrap font-mono leading-relaxed">
         {SKILL_INSTALL_PROMPT}
       </pre>
     </div>

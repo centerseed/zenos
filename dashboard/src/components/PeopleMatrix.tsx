@@ -33,7 +33,7 @@ const STATUS_COLORS: Record<StatusRank, string> = {
   in_progress: "bg-yellow-900/50 text-yellow-400",
   review: "bg-purple-900/50 text-purple-400",
   todo: "bg-blue-900/50 text-blue-400",
-  backlog: "bg-[#1F1F23] text-[#71717A]",
+  backlog: "bg-secondary text-muted-foreground",
   done: "bg-green-900/50 text-green-400",
 };
 
@@ -63,9 +63,9 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
 
   if (assignees.length === 0) {
     return (
-      <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
+      <div className="bg-card rounded-lg border border-border p-6">
         <h3 className="text-sm font-semibold text-white mb-4">People x Projects</h3>
-        <p className="text-sm text-[#71717A] text-center py-4">No tasks assigned yet</p>
+        <p className="text-sm text-muted-foreground text-center py-4">No tasks assigned yet</p>
       </div>
     );
   }
@@ -77,24 +77,24 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
   }
 
   return (
-    <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
+    <div className="bg-card rounded-lg border border-border p-6">
       <h3 className="text-sm font-semibold text-white mb-4">People x Projects</h3>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr>
-              <th className="text-left text-xs font-medium text-[#71717A] pb-3 pr-4">
+              <th className="text-left text-xs font-medium text-muted-foreground pb-3 pr-4">
                 Person
               </th>
               {entities.map((e) => (
                 <th
                   key={e.id}
-                  className="text-left text-xs font-medium text-[#71717A] pb-3 px-3"
+                  className="text-left text-xs font-medium text-muted-foreground pb-3 px-3"
                 >
                   {e.name}
                 </th>
               ))}
-              <th className="text-right text-xs font-medium text-[#71717A] pb-3 pl-4">
+              <th className="text-right text-xs font-medium text-muted-foreground pb-3 pl-4">
                 Summary
               </th>
             </tr>
@@ -108,8 +108,8 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
               ).length;
 
               return (
-                <tr key={assignee} className="border-t border-[#1F1F23]">
-                  <td className="py-3 pr-4 text-sm font-medium text-[#FAFAFA] whitespace-nowrap">
+                <tr key={assignee} className="border-t border-border">
+                  <td className="py-3 pr-4 text-sm font-medium text-foreground whitespace-nowrap">
                     {displayName(assignee)}
                   </td>
                   {entities.map((entity) => {
@@ -126,7 +126,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                     if (cellTasks.length === 0) {
                       return (
                         <td key={entity.id} className="py-3 px-3">
-                          <span className="text-[#1F1F23]">-</span>
+                          <span className="text-secondary">-</span>
                         </td>
                       );
                     }
@@ -138,8 +138,8 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                       (t) => t.status === "done" || t.status === "cancelled" || t.status === "archived"
                     );
 
-                    let cellBg = "bg-[#111113]";
-                    let cellBorder = "border border-[#1F1F23]";
+                    let cellBg = "bg-card";
+                    let cellBorder = "border border-border";
                     if (isBlocked) {
                       cellBg = "bg-red-900/20";
                       cellBorder = "border border-red-800";
@@ -159,11 +159,11 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                             {Array.from({ length: Math.min(activeCount, 5) }).map((_, i) => (
                               <span
                                 key={i}
-                                className="inline-block w-2 h-2 rounded-full bg-[#71717A]"
+                                className="inline-block w-2 h-2 rounded-full bg-muted-foreground"
                               />
                             ))}
                             {activeCount > 5 && (
-                              <span className="text-xs text-[#71717A]">+{activeCount - 5}</span>
+                              <span className="text-xs text-muted-foreground">+{activeCount - 5}</span>
                             )}
                           </div>
                           {highestStatus && (
@@ -177,7 +177,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                       </td>
                     );
                   })}
-                  <td className="py-3 pl-4 text-right text-xs text-[#71717A] whitespace-nowrap">
+                  <td className="py-3 pl-4 text-right text-xs text-muted-foreground whitespace-nowrap">
                     done {doneCount} / left {remaining}
                   </td>
                 </tr>

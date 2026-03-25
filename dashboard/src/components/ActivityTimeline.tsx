@@ -60,9 +60,9 @@ export function ActivityTimeline({ tasks, partners, entities }: ActivityTimeline
 
   if (sorted.length === 0) {
     return (
-      <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
+      <div className="bg-card rounded-lg border border-border p-6">
         <h3 className="text-sm font-semibold text-white mb-4">Activity Timeline</h3>
-        <p className="text-sm text-[#71717A] text-center py-4">No recent activity</p>
+        <p className="text-sm text-muted-foreground text-center py-4">No recent activity</p>
       </div>
     );
   }
@@ -83,15 +83,15 @@ export function ActivityTimeline({ tasks, partners, entities }: ActivityTimeline
   }
 
   return (
-    <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
+    <div className="bg-card rounded-lg border border-border p-6">
       <h3 className="text-sm font-semibold text-white mb-4">Activity Timeline</h3>
       <div className="space-y-4">
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="text-xs font-semibold text-[#71717A] uppercase mb-2">
+            <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">
               {group.label}
             </div>
-            <div className="space-y-2 border-l-2 border-[#1F1F23] ml-2 pl-4">
+            <div className="space-y-2 border-l-2 border-border ml-2 pl-4">
               {group.items.map((task) => {
                 const assigneeName = task.assignee
                   ? partnerMap.get(task.assignee) ?? task.assignee
@@ -103,20 +103,20 @@ export function ActivityTimeline({ tasks, partners, entities }: ActivityTimeline
 
                 return (
                   <div key={task.id} className="flex items-start gap-2 text-sm">
-                    <span className="text-xs text-[#71717A] whitespace-nowrap mt-0.5">
+                    <span className="text-xs text-muted-foreground whitespace-nowrap mt-0.5">
                       {relativeTime(task.updatedAt)}
                     </span>
-                    <span className="font-medium text-[#FAFAFA]">
+                    <span className="font-medium text-foreground">
                       {assigneeName}
                     </span>
-                    <span className="text-[#71717A]">
+                    <span className="text-muted-foreground">
                       {getActionLabel(task)}
                     </span>
                     <span className="text-white font-medium truncate max-w-[200px]">
                       {task.title}
                     </span>
                     {entityName && (
-                      <span className="text-xs text-[#71717A]">
+                      <span className="text-xs text-muted-foreground">
                         → {entityName}
                       </span>
                     )}

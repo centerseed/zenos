@@ -49,22 +49,22 @@ export default function LoginPage() {
   }, [loading, user, partner, router]);
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#0A0A0B]">
+    <div className="min-h-screen flex items-center justify-center bg-background">
       <div className="text-center max-w-sm w-full p-8">
         <h1 className="text-3xl font-bold text-white mb-2">ZenOS</h1>
-        <p className="text-[#71717A] mb-8">
+        <p className="text-muted-foreground mb-8">
           Knowledge Ontology for your AI agents
         </p>
 
         {emailLinkLoading ? (
-          <div className="text-[#71717A] text-sm">正在完成登入...</div>
+          <div className="text-muted-foreground text-sm">正在完成登入...</div>
         ) : emailLinkError ? (
           <div className="space-y-4">
             <div className="text-red-400 text-sm">{emailLinkError}</div>
             <button
               onClick={signInWithGoogle}
               disabled={loading}
-              className="w-full bg-[#111113] border border-[#1F1F23] rounded-lg px-6 py-3 text-sm font-medium text-[#FAFAFA] hover:bg-[#1F1F23] hover:border-[#2A2A2E] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+              className="w-full bg-card border border-border rounded-lg px-6 py-3 text-sm font-medium text-foreground hover:bg-secondary hover:border-border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
             >
               <GoogleIcon />
               Sign in with Google
@@ -74,7 +74,7 @@ export default function LoginPage() {
           <button
             onClick={signInWithGoogle}
             disabled={loading}
-            className="w-full bg-[#111113] border border-[#1F1F23] rounded-lg px-6 py-3 text-sm font-medium text-[#FAFAFA] hover:bg-[#1F1F23] hover:border-[#2A2A2E] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+            className="w-full bg-card border border-border rounded-lg px-6 py-3 text-sm font-medium text-foreground hover:bg-secondary hover:border-border transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
           >
             <GoogleIcon />
             Sign in with Google

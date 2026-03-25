@@ -17,7 +17,7 @@ export function PromptSuggestions({ projectName }: PromptSuggestionsProps) {
 
   return (
     <div>
-      <h3 className="text-sm font-medium text-[#71717A] uppercase tracking-wide mb-3">
+      <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">
         Try these prompts
       </h3>
       <div className="grid gap-2">

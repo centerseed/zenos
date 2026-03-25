@@ -57,11 +57,11 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
     <div className="space-y-6">
       {/* API Key display */}
       <div>
-        <label className="block text-sm font-medium text-[#FAFAFA] mb-2">
+        <label className="block text-sm font-medium text-foreground mb-2">
           Your API Key
         </label>
         <div className="flex items-center gap-2">
-          <code className="flex-1 bg-[#1F1F23] px-4 py-2 rounded text-sm font-mono text-[#FAFAFA]">
+          <code className="flex-1 bg-secondary px-4 py-2 rounded text-sm font-mono text-foreground">
             {showKey ? apiKey : maskedKey}
           </code>
           <button
@@ -76,10 +76,10 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
 
       {/* Agent type tabs */}
       <div>
-        <label className="block text-sm font-medium text-[#FAFAFA] mb-2">
+        <label className="block text-sm font-medium text-foreground mb-2">
           Select your agent
         </label>
-        <div className="flex border-b border-[#1F1F23]">
+        <div className="flex border-b border-border">
           {agentTabs.map((tab) => (
             <button
               key={tab.id}
@@ -88,7 +88,7 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
               className={`px-4 py-2 text-sm cursor-pointer ${
                 activeTab === tab.id
                   ? "border-b-2 border-blue-500 text-blue-400 font-medium"
-                  : "text-[#71717A] hover:text-white"
+                  : "text-muted-foreground hover:text-white"
               }`}
             >
               {tab.label}
@@ -99,13 +99,13 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
 
       {/* Config block */}
       <div className="relative">
-        <pre className="bg-[#0A0A0B] text-[#FAFAFA] rounded-lg p-4 text-sm overflow-x-auto border border-[#1F1F23]">
+        <pre className="bg-background text-foreground rounded-lg p-4 text-sm overflow-x-auto border border-border">
           {config}
         </pre>
         <button
           onClick={handleCopy}
           aria-label="Copy MCP config"
-          className="absolute top-3 right-3 bg-[#1F1F23] hover:bg-[#2A2A2E] text-white text-xs px-3 py-1.5 rounded cursor-pointer transition-colors"
+          className="absolute top-3 right-3 bg-secondary hover:bg-muted text-white text-xs px-3 py-1.5 rounded cursor-pointer transition-colors"
         >
           {copied ? "Copied!" : "Copy"}
         </button>

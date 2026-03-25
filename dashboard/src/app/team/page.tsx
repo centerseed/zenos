@@ -167,7 +167,7 @@ function TeamPage() {
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-lg font-semibold text-white">Team</h2>
-            <p className="text-sm text-[#71717A] mt-1">
+            <p className="text-sm text-muted-foreground mt-1">
               {partners.length} members &middot; {activeCount} active
               {invitedCount > 0 && ` \u00B7 ${invitedCount} invited`}
             </p>
@@ -175,7 +175,7 @@ function TeamPage() {
         </div>
 
         {/* Invite Form */}
-        <div className="bg-[#111113] border border-[#1F1F23] rounded-lg p-6 mb-6">
+        <div className="bg-card border border-border rounded-lg p-6 mb-6">
           <h3 className="text-sm font-medium text-white mb-4">Invite new member</h3>
           <form onSubmit={handleInvite} className="flex items-center gap-3">
             <input
@@ -185,13 +185,13 @@ function TeamPage() {
               placeholder="email@example.com"
               aria-label="Invite member email"
               required
-              className="flex-1 bg-[#0A0A0B] border border-[#1F1F23] rounded-lg px-4 py-2 text-sm text-white placeholder-[#71717A] focus:outline-none focus:border-[#3B82F6] transition-colors"
+              className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm text-white placeholder-muted-foreground focus:outline-none focus:border-ring transition-colors"
             />
             <button
               type="submit"
               aria-label="Send invite"
               disabled={inviting || !inviteEmail.trim()}
-              className="bg-[#3B82F6] hover:bg-[#2563EB] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-primary hover:bg-primary/80 text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {inviting ? "Sending..." : "Invite"}
             </button>
@@ -211,27 +211,27 @@ function TeamPage() {
         {loading ? (
           <LoadingState label="Loading team members..." />
         ) : partners.length === 0 ? (
-          <div className="text-center py-12 bg-[#111113] rounded-lg border border-[#1F1F23]">
-            <p className="text-[#71717A]">No team members yet.</p>
+          <div className="text-center py-12 bg-card rounded-lg border border-border">
+            <p className="text-muted-foreground">No team members yet.</p>
           </div>
         ) : (
-          <div className="bg-[#111113] border border-[#1F1F23] rounded-lg overflow-hidden">
+          <div className="bg-card border border-border rounded-lg overflow-hidden">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-[#1F1F23]">
-                  <th className="text-left text-xs font-medium text-[#71717A] uppercase tracking-wider px-6 py-3">
+                <tr className="border-b border-border">
+                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
                     Email
                   </th>
-                  <th className="text-left text-xs font-medium text-[#71717A] uppercase tracking-wider px-6 py-3">
+                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
                     Name
                   </th>
-                  <th className="text-left text-xs font-medium text-[#71717A] uppercase tracking-wider px-6 py-3">
+                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
                     Role
                   </th>
-                  <th className="text-left text-xs font-medium text-[#71717A] uppercase tracking-wider px-6 py-3">
+                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
                     Status
                   </th>
-                  <th className="text-right text-xs font-medium text-[#71717A] uppercase tracking-wider px-6 py-3">
+                  <th className="text-right text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
                     Actions
                   </th>
                 </tr>
@@ -243,12 +243,12 @@ function TeamPage() {
                   return (
                     <tr
                       key={p.id}
-                      className={`border-b border-[#1F1F23] last:border-b-0 ${
+                      className={`border-b border-border last:border-b-0 ${
                         p.status === "invited" ? "opacity-60" : ""
                       }`}
                     >
                       <td className="px-6 py-4 text-sm text-white">{p.email}</td>
-                      <td className="px-6 py-4 text-sm text-[#A1A1AA]">
+                      <td className="px-6 py-4 text-sm text-muted-foreground">
                         {p.displayName || "--"}
                       </td>
                       <td className="px-6 py-4">
@@ -256,7 +256,7 @@ function TeamPage() {
                           className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
                             p.isAdmin
                               ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                              : "bg-[#1F1F23] text-[#A1A1AA] border border-[#2A2A2E]"
+                              : "bg-secondary text-muted-foreground border border-border"
                           }`}
                         >
                           {p.isAdmin ? "Admin" : "Member"}
@@ -267,7 +267,7 @@ function TeamPage() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         {isSelf ? (
-                          <span className="text-xs text-[#71717A]">You</span>
+                          <span className="text-xs text-muted-foreground">You</span>
                         ) : (
                           <div className="flex items-center justify-end gap-2">
                             {p.status !== "invited" && (
@@ -275,7 +275,7 @@ function TeamPage() {
                                 onClick={() => handleRoleChange(p, !p.isAdmin)}
                                 aria-label={p.isAdmin ? `Set ${p.email} as member` : `Set ${p.email} as admin`}
                                 disabled={isLoading}
-                                className="text-xs text-[#A1A1AA] hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                className="text-xs text-muted-foreground hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {p.isAdmin ? "Set Member" : "Set Admin"}
                               </button>

@@ -20,7 +20,7 @@ export function BlindspotPanel({ blindspots, entities }: BlindspotPanelProps) {
   );
 
   return (
-    <div className="bg-[#111113] rounded-lg border border-[#1F1F23]">
+    <div className="bg-card rounded-lg border border-border">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-3 cursor-pointer"
@@ -29,7 +29,7 @@ export function BlindspotPanel({ blindspots, entities }: BlindspotPanelProps) {
           Blindspots ({blindspots.length})
         </span>
         <svg
-          className={`w-4 h-4 text-[#71717A] transition-transform ${expanded ? "rotate-180" : ""}`}
+          className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -42,7 +42,7 @@ export function BlindspotPanel({ blindspots, entities }: BlindspotPanelProps) {
       {expanded && (
         <div className="px-4 pb-4 space-y-3">
           {sorted.length === 0 ? (
-            <p className="text-sm text-[#71717A]">No active blindspots</p>
+            <p className="text-sm text-muted-foreground">No active blindspots</p>
           ) : (
             sorted.map((bs) => {
               const isRed = bs.severity === "red";
@@ -66,14 +66,14 @@ export function BlindspotPanel({ blindspots, entities }: BlindspotPanelProps) {
                       {bs.severity}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm text-[#FAFAFA]/90">{bs.description}</p>
+                      <p className="text-sm text-foreground/90">{bs.description}</p>
                       {relatedNames.length > 0 && (
-                        <p className="text-xs text-[#FAFAFA]/50 mt-1">
+                        <p className="text-xs text-foreground/50 mt-1">
                           Related: {relatedNames.join(", ")}
                         </p>
                       )}
                       {bs.suggestedAction && (
-                        <p className="text-xs text-[#FAFAFA]/60 mt-1">
+                        <p className="text-xs text-foreground/60 mt-1">
                           Suggested: {bs.suggestedAction}
                         </p>
                       )}
