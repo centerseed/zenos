@@ -11,8 +11,8 @@ SERVICE_NAME="${SERVICE_NAME:-zenos-mcp}"
 REGION="${REGION:-asia-east1}"
 PROJECT_ID="${PROJECT_ID:-zenos-naruvia}"
 SOURCE_DIR="${SOURCE_DIR:-$ROOT_DIR}"
-MCP_TRANSPORT="${MCP_TRANSPORT:-sse}"
-PORT="${PORT:-8080}"
+MCP_TRANSPORT="${MCP_TRANSPORT:-dual}"
+ZENOS_API_KEY="${ZENOS_API_KEY:-}"
 ALLOW_UNAUTHENTICATED="${ALLOW_UNAUTHENTICATED:-true}"
 
 echo "=== ZenOS MCP Deploy ==="
@@ -37,6 +37,14 @@ echo "  source:  $SOURCE_DIR"
 echo "  account: $ACTIVE_ACCOUNT"
 echo ""
 
+if [[ "$MCP_TRANSPORT" == "dual" || "$MCP_TRANSPORT" == "sse" || "$MCP_TRANSPORT" == "http" || "$MCP_TRANSPORT" == "streamable-http" ]]; then
+  if [ -z "$ZENOS_API_KEY" ]; then
+    echo "ZENOS_API_KEY is required when MCP_TRANSPORT=$MCP_TRANSPORT."
+    echo "Example: ZENOS_API_KEY=your-key ./scripts/deploy_mcp.sh"
+    exit 1
+  fi
+fi
+
 cd "$ROOT_DIR"
 DEPLOY_CMD=(
   run deploy "$SERVICE_NAME"
@@ -44,7 +52,7 @@ DEPLOY_CMD=(
   --region="$REGION" \
   --platform=managed \
   --source="$SOURCE_DIR" \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,MCP_TRANSPORT=$MCP_TRANSPORT,PORT=$PORT"
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,MCP_TRANSPORT=$MCP_TRANSPORT,ZENOS_API_KEY=$ZENOS_API_KEY"
 )
 
 if [ "$ALLOW_UNAUTHENTICATED" = "true" ]; then
