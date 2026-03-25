@@ -39,11 +39,31 @@ _pool: asyncpg.Pool | None = None
 
 
 async def get_pool() -> asyncpg.Pool:
-    """Return a shared asyncpg connection pool, creating it on first call."""
+    """Return a shared asyncpg connection pool, creating it on first call.
+
+    Supports Cloud SQL socket URLs (``?host=/cloudsql/...``) by extracting
+    the Unix socket path from the query string and passing it to asyncpg
+    as the ``host`` parameter.
+    """
     global _pool  # noqa: PLW0603
     if _pool is None:
+        from urllib.parse import urlparse, parse_qs
+
         database_url = os.environ["DATABASE_URL"]
-        _pool = await asyncpg.create_pool(database_url, min_size=2, max_size=10)
+        parsed = urlparse(database_url)
+        socket_host = parse_qs(parsed.query).get("host", [None])[0]
+
+        if socket_host:
+            _pool = await asyncpg.create_pool(
+                user=parsed.username,
+                password=parsed.password,
+                database=parsed.path.lstrip("/"),
+                host=socket_host,
+                min_size=2,
+                max_size=10,
+            )
+        else:
+            _pool = await asyncpg.create_pool(database_url, min_size=2, max_size=10)
     return _pool
 
 
