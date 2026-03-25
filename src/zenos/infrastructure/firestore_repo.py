@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -34,7 +35,8 @@ def get_db() -> AsyncClient:
     """Return a cached AsyncClient instance."""
     global _db  # noqa: PLW0603
     if _db is None:
-        _db = firestore.AsyncClient(project="zenos-naruvia")
+        project = os.environ.get("GOOGLE_CLOUD_PROJECT", "zenos-naruvia")
+        _db = firestore.AsyncClient(project=project)
     return _db
 
 
