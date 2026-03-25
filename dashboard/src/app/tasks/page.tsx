@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
-import Link from "next/link";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
@@ -12,7 +11,7 @@ import { ProjectProgress } from "@/components/ProjectProgress";
 import { PeopleMatrix } from "@/components/PeopleMatrix";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { LoadingState } from "@/components/LoadingState";
-import { getTasks, getProjectEntities } from "@/lib/firestore";
+import { getTasks, getProjectEntities } from "@/lib/api";
 import type { Task, TaskStatus, TaskPriority, Entity, Partner } from "@/types";
 
 type TabKey = "all" | "inbox" | "outbox" | "review";
@@ -24,11 +23,30 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "outbox", label: "My Outbox" },
   { key: "review", label: "Review" },
 ];
-const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
+
+const API_URL =
+  process.env.NEXT_PUBLIC_MCP_API_URL ||
+  "https://zenos-mcp-165893875709.asia-east1.run.app";
+
+/** Build server-side filter params for a kanban tab. */
+function tabFilters(
+  tab: TabKey,
+  partnerId: string
+): Parameters<typeof getTasks>[1] {
+  switch (tab) {
+    case "inbox":
+      return { assignee: partnerId };
+    case "outbox":
+      return { createdBy: partnerId };
+    case "review":
+      return { statuses: ["review"] };
+    default:
+      return undefined;
+  }
+}
 
 function TasksPage() {
-  const { user, partner, signOut } = useAuth();
-  const taskScopePartnerId = partner?.sharedPartnerId ?? partner?.id ?? null;
+  const { user, partner } = useAuth();
   const [viewMode, setViewMode] = useState<ViewMode>("pulse");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -38,39 +56,42 @@ function TasksPage() {
   const [filterStatuses, setFilterStatuses] = useState<TaskStatus[]>([]);
   const [filterPriority, setFilterPriority] = useState<TaskPriority | null>(null);
 
-  // Load all data for Pulse view
+  // Initial load: all tasks + entities + partners list
   useEffect(() => {
-    const currentUser = user;
-    if (!partner || !currentUser) return;
+    if (!user || !partner) return;
 
-    async function loadPulseData(authUser: NonNullable<typeof user>) {
+    async function loadData() {
       try {
-        const token = await authUser.getIdToken();
+        const token = await user!.getIdToken();
+
         const fetchedPartnersPromise = fetch(`${API_URL}/api/partners`, {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          headers: { Authorization: `Bearer ${token}` },
         })
           .then(async (res) => {
             if (!res.ok) {
-              const body = await res.json().catch(() => ({ message: "Unknown error" }));
-              throw new Error(body.message || body.detail || `Failed: ${res.status}`);
+              const body = await res
+                .json()
+                .catch(() => ({ message: "Unknown error" }));
+              throw new Error(
+                body.message || body.detail || `Failed: ${res.status}`
+              );
             }
             return res.json() as Promise<{ partners?: Partner[] }>;
           })
           .then((body) => (Array.isArray(body.partners) ? body.partners : []));
 
-        const [fetchedTasks, fetchedEntities, fetchedPartners] = await Promise.all([
-          getTasks(taskScopePartnerId),
-          getProjectEntities(),
-          fetchedPartnersPromise,
-        ]);
+        const [fetchedTasks, fetchedEntities, fetchedPartners] =
+          await Promise.all([
+            getTasks(token),
+            getProjectEntities(token),
+            fetchedPartnersPromise,
+          ]);
+
         setTasks(fetchedTasks);
         setEntities(fetchedEntities);
         setPartners(fetchedPartners);
       } catch (err) {
-        console.error("Failed to load pulse data:", err);
+        console.error("Failed to load data:", err);
         setTasks([]);
         setEntities([]);
         setPartners([]);
@@ -78,28 +99,33 @@ function TasksPage() {
       setLoading(false);
     }
 
-    loadPulseData(currentUser);
-  }, [partner, taskScopePartnerId, user]);
+    loadData();
+  }, [user, partner]);
 
-  // Derive kanban tasks from already-loaded tasks (avoids duplicate Firestore fetch)
-  const kanbanTasks = useMemo(() => {
-    if (!partner) return tasks;
-    switch (activeTab) {
-      case "inbox":
-        return tasks.filter((t) => t.assignee === partner.id);
-      case "outbox":
-        return tasks.filter((t) => t.createdBy === partner.id);
-      case "review":
-        return tasks.filter(
-          (t) => t.status === "review" && t.createdBy === partner.id && !t.confirmedByCreator
-        );
-      default:
-        return tasks;
+  // Re-fetch tasks when kanban tab changes (server-side scoping)
+  useEffect(() => {
+    if (viewMode !== "kanban" || !user || !partner) return;
+
+    async function loadTabTasks() {
+      setLoading(true);
+      try {
+        const token = await user!.getIdToken();
+        const filters = tabFilters(activeTab, partner!.id);
+        const fetched = await getTasks(token, filters);
+        setTasks(fetched);
+      } catch (err) {
+        console.error("Failed to load tab tasks:", err);
+        setTasks([]);
+      }
+      setLoading(false);
     }
-  }, [tasks, partner, activeTab]);
 
-  const filteredKanbanTasks = useMemo(() => {
-    let result = kanbanTasks;
+    loadTabTasks();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, viewMode]);
+
+  const filteredTasks = useMemo(() => {
+    let result = tasks;
 
     if (filterStatuses.length > 0) {
       result = result.filter((t) => filterStatuses.includes(t.status));
@@ -110,7 +136,7 @@ function TasksPage() {
     }
 
     return result;
-  }, [kanbanTasks, filterStatuses, filterPriority]);
+  }, [tasks, filterStatuses, filterPriority]);
 
   return (
     <div className="min-h-screen">
@@ -196,14 +222,14 @@ function TasksPage() {
             {/* Board */}
             {loading ? (
               <LoadingState label="Loading tasks..." />
-            ) : filteredKanbanTasks.length === 0 ? (
+            ) : filteredTasks.length === 0 ? (
               <div className="text-center py-12 bg-card rounded-lg border border-border">
                 <p className="text-muted-foreground">
                   No tasks yet. Create tasks via MCP tools in Claude Code.
                 </p>
               </div>
             ) : (
-              <TaskBoard tasks={filteredKanbanTasks} />
+              <TaskBoard tasks={filteredTasks} />
             )}
           </>
         )}

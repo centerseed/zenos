@@ -1305,6 +1305,7 @@ if __name__ == "__main__":
         from starlette.applications import Starlette
         from starlette.routing import Mount, Route
         from zenos.interface.admin_api import admin_routes
+        from zenos.interface.dashboard_api import dashboard_routes
 
         if transport == "dual":
             stream_http_app = mcp.http_app(
@@ -1347,6 +1348,7 @@ if __name__ == "__main__":
         app = Starlette(
             routes=[
                 *[Route(r.path, r.endpoint, methods=r.methods) for r in admin_routes],
+                *[Route(r.path, r.endpoint, methods=r.methods) for r in dashboard_routes],
                 *mcp_routes,
             ],
             lifespan=lifespan_app.lifespan,

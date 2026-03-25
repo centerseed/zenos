@@ -15,33 +15,37 @@ import {
   getEntity,
   getChildEntities,
   getBlindspots,
-  countDocuments,
   getProjectEntities,
-} from "@/lib/firestore";
+} from "@/lib/api";
 import type { Entity, Blindspot } from "@/types";
 
 // ─── Project List (no ?id=) ───
 
 function ProjectList() {
-  const { partner } = useAuth();
+  const { user, partner } = useAuth();
   const [products, setProducts] = useState<Entity[]>([]);
   const [moduleCounts, setModuleCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!partner) return;
-    getProjectEntities().then(async (entities) => {
+    if (!user || !partner) return;
+
+    async function load() {
+      const token = await user!.getIdToken();
+      const entities = await getProjectEntities(token);
       setProducts(entities);
       const counts = await Promise.all(
         entities.map(async (entity) => {
-          const children = await getChildEntities(entity.id);
+          const children = await getChildEntities(token, entity.id);
           return [entity.id, children.filter((child) => child.type === "module").length] as const;
         })
       );
       setModuleCounts(Object.fromEntries(counts));
       setLoading(false);
-    });
-  }, [partner]);
+    }
+
+    load();
+  }, [user, partner]);
 
   if (loading) {
     return (
@@ -87,21 +91,21 @@ interface ProjectData {
 }
 
 function ProjectDetail({ projectId }: { projectId: string }) {
-  const { partner } = useAuth();
+  const { user, partner } = useAuth();
   const router = useRouter();
 
   const [data, setData] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!partner) return;
+    if (!user || !partner) return;
 
     async function load() {
-      const [project, children, blindspots, documentCount] = await Promise.all([
-        getEntity(projectId),
-        getChildEntities(projectId),
-        getBlindspots(projectId),
-        countDocuments(projectId),
+      const token = await user!.getIdToken();
+      const [project, children, blindspots] = await Promise.all([
+        getEntity(token, projectId),
+        getChildEntities(token, projectId),
+        getBlindspots(token, projectId),
       ]);
 
       if (!project) {
@@ -109,12 +113,13 @@ function ProjectDetail({ projectId }: { projectId: string }) {
         return;
       }
 
+      const documentCount = children.filter((c) => c.type === "document").length;
       setData({ project, children, blindspots, documentCount });
       setLoading(false);
     }
 
     load();
-  }, [partner, projectId, router]);
+  }, [user, partner, projectId, router]);
 
   if (loading || !data) {
     return (

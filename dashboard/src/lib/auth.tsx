@@ -15,13 +15,8 @@ import {
   GoogleAuthProvider,
   type User,
 } from "firebase/auth";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-} from "firebase/firestore";
-import { getAuthInstance, getDbInstance } from "./firebase";
+import { getAuthInstance } from "./firebase";
+import { getPartnerMe } from "./api";
 import type { Partner } from "@/types";
 
 interface AuthState {
@@ -39,17 +34,6 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-async function resolveSharedPartnerId(invitedBy: string | null): Promise<string | null> {
-  if (!invitedBy) return null;
-  const q = query(
-    collection(getDbInstance(), "partners"),
-    where("email", "==", invitedBy)
-  );
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return null;
-  return snapshot.docs[0].id;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -65,47 +49,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // Look up partner document by email
       try {
-        const q = query(
-          collection(getDbInstance(), "partners"),
-          where("email", "==", user.email)
-        );
-        const snapshot = await getDocs(q);
-
-        if (snapshot.empty) {
-          setState({
-            user,
-            partner: null,
-            loading: false,
-            error: "NO_PARTNER",
-          });
-          return;
-        }
-
-        const doc = snapshot.docs[0];
-        const data = doc.data();
-        const sharedPartnerId =
-          (data.sharedPartnerId as string | undefined) ??
-          await resolveSharedPartnerId((data.invitedBy as string | null) ?? null);
-        const partner: Partner = {
-          id: doc.id,
-          email: data.email,
-          displayName: data.displayName,
-          apiKey: data.apiKey,
-          authorizedEntityIds: data.authorizedEntityIds ?? [],
-          sharedPartnerId,
-          isAdmin: data.isAdmin ?? false,
-          status: data.status,
-          invitedBy: data.invitedBy ?? null,
-          createdAt: data.createdAt?.toDate() ?? new Date(),
-          updatedAt: data.updatedAt?.toDate() ?? new Date(),
-        };
-
+        const token = await user.getIdToken();
+        const partner = await getPartnerMe(token);
         setState({ user, partner, loading: false, error: null });
       } catch (err) {
         console.error("Failed to fetch partner:", err);
-        setState({ user, partner: null, loading: false, error: "FETCH_FAILED" });
+        // If 404 or no partner found, set NO_PARTNER; otherwise generic failure
+        const message = err instanceof Error ? err.message : "";
+        const error = message.includes("404") ? "NO_PARTNER" : "FETCH_FAILED";
+        setState({ user, partner: null, loading: false, error });
       }
     });
 
@@ -114,32 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refetchPartner = async () => {
     const currentUser = getAuthInstance().currentUser;
-    if (!currentUser?.email) return;
+    if (!currentUser) return;
     try {
-      const q = query(
-        collection(getDbInstance(), "partners"),
-        where("email", "==", currentUser.email)
-      );
-      const snapshot = await getDocs(q);
-      if (snapshot.empty) return;
-      const doc = snapshot.docs[0];
-      const data = doc.data();
-      const sharedPartnerId =
-        (data.sharedPartnerId as string | undefined) ??
-        await resolveSharedPartnerId((data.invitedBy as string | null) ?? null);
-      const partner: Partner = {
-        id: doc.id,
-        email: data.email,
-        displayName: data.displayName,
-        apiKey: data.apiKey,
-        authorizedEntityIds: data.authorizedEntityIds ?? [],
-        sharedPartnerId,
-        isAdmin: data.isAdmin ?? false,
-        status: data.status,
-        invitedBy: data.invitedBy ?? null,
-        createdAt: data.createdAt?.toDate() ?? new Date(),
-        updatedAt: data.updatedAt?.toDate() ?? new Date(),
-      };
+      const token = await currentUser.getIdToken();
+      const partner = await getPartnerMe(token);
       setState({ user: currentUser, partner, loading: false, error: null });
     } catch (err) {
       console.error("Failed to refetch partner:", err);

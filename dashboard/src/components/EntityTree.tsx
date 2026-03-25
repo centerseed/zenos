@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { Entity, Relationship } from "@/types";
-import { getRelationships } from "@/lib/firestore";
+import { getRelationships } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { LoadingState } from "@/components/LoadingState";
 
 interface EntityTreeProps {
@@ -26,14 +27,16 @@ const statusColors: Record<string, string> = {
 };
 
 function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Entity[] }) {
+  const { user } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [loadingRels, setLoadingRels] = useState(false);
 
   const handleToggle = async () => {
-    if (!expanded && relationships.length === 0) {
+    if (!expanded && relationships.length === 0 && user) {
       setLoadingRels(true);
-      const rels = await getRelationships(entity.id);
+      const token = await user.getIdToken();
+      const rels = await getRelationships(token, entity.id);
       setRelationships(rels);
       setLoadingRels(false);
     }

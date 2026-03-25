@@ -329,6 +329,34 @@ class TestSqlRelationshipRepository:
         exec_args = conn.execute.call_args[0]
         assert "tgt99" in exec_args
 
+    def test_list_all_scopes_by_partner_id(self):
+        """list_all queries relationships filtered by partner_id."""
+        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
+        import asyncio
+
+        row = _make_row(**self._rel_row("rel1"))
+        pool, conn = _make_pool(fetch=[row])
+        repo = SqlRelationshipRepository(pool)
+
+        results = asyncio.get_event_loop().run_until_complete(repo.list_all())
+
+        assert len(results) == 1
+        assert results[0].id == "rel1"
+        assert results[0].target_id == "tgt1"
+        sql = conn.fetch.call_args[0][0]
+        assert "partner_id" in sql
+        assert conn.fetch.call_args[0][1] == PARTNER_ID
+
+    def test_list_all_returns_empty_when_no_rows(self):
+        """list_all returns an empty list when no relationships exist."""
+        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
+        import asyncio
+
+        pool, _ = _make_pool(fetch=[])
+        repo = SqlRelationshipRepository(pool)
+        results = asyncio.get_event_loop().run_until_complete(repo.list_all())
+        assert results == []
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SqlDocumentRepository

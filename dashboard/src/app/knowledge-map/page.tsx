@@ -10,7 +10,7 @@ import {
   getAllBlindspots,
   getAllRelationships,
   getTasks,
-} from "@/lib/firestore";
+} from "@/lib/api";
 import type { Entity, Blindspot, Relationship, Task } from "@/types";
 import { DEFAULT_NODE_COLOR, NODE_TYPE_COLORS, NODE_TYPE_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -1762,8 +1762,7 @@ function TaskDetailPanel({
 // ─── Main Page ───
 
 function KnowledgeMapPage() {
-  const { partner } = useAuth();
-  const taskScopePartnerId = partner?.sharedPartnerId ?? partner?.id ?? null;
+  const { user, partner } = useAuth();
   const [entities, setEntities] = useState<Entity[]>([]);
   const [blindspots, setBlindspots] = useState<Blindspot[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
@@ -1804,16 +1803,21 @@ function KnowledgeMapPage() {
   }, []);
 
   useEffect(() => {
-    if (!partner) return;
+    if (!user || !partner) return;
 
     async function load() {
       try {
+        const token = await user!.getIdToken();
+        // Tasks are loaded as part of the initial graph data because they affect
+        // graph visuals: task nodes appear as expandable children of modules,
+        // task counts are shown on module nodes, and sidebar shows aggregate
+        // task status. Lazy loading would cause the graph to reflow on selection.
         const [fetchedEntities, fetchedBlindspots, fetchedRelationships, fetchedTasks] =
           await Promise.all([
-            getAllEntities(),
-            getAllBlindspots(),
-            getAllRelationships(),
-            getTasks(taskScopePartnerId),
+            getAllEntities(token),
+            getAllBlindspots(token),
+            getAllRelationships(token),
+            getTasks(token),
           ]);
 
         setEntities(fetchedEntities);
@@ -1827,7 +1831,7 @@ function KnowledgeMapPage() {
     }
 
     load();
-  }, [partner, taskScopePartnerId]);
+  }, [user, partner]);
 
   const entityMap = useMemo(
     () => new Map(entities.map((e) => [e.id, e])),

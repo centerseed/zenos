@@ -267,6 +267,15 @@ class SqlRelationshipRepository:
             )
         return [_row_to_relationship(r) for r in rows]
 
+    async def list_all(self) -> list[Relationship]:
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.relationships WHERE partner_id = $1",
+                pid,
+            )
+        return [_row_to_relationship(r) for r in rows]
+
     async def find_duplicate(
         self, source_entity_id: str, target_id: str, rel_type: str,
     ) -> Relationship | None:

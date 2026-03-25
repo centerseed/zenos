@@ -17,13 +17,11 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import uuid
 from datetime import datetime, timezone
 
 import firebase_admin  # type: ignore[import-untyped]
 from firebase_admin import auth as firebase_auth  # type: ignore[import-untyped]
-from google.cloud import firestore as gcloud_firestore  # type: ignore[import-untyped]
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
@@ -126,23 +124,34 @@ async def _verify_firebase_token(request: Request) -> dict | None:
         return None
 
 
-def _get_db():
-    """Get a Firestore async client directly (not via firestore_repo).
-
-    Admin API manages partners, not ontology entities, so it owns its own
-    client instance rather than sharing the infrastructure-layer repo client.
-    """
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT", "zenos-naruvia")
-    return gcloud_firestore.AsyncClient(project=project)
-
-
 async def _get_partner_by_email(email: str) -> tuple[str | None, dict | None]:
-    """Find a partner doc by email. Returns (doc_id, data) or (None, None)."""
-    db = _get_db()
-    docs = db.collection("partners").where("email", "==", email).limit(1).stream()
-    async for doc in docs:
-        return doc.id, doc.to_dict()
-    return None, None
+    """Find a partner by email in SQL. Returns (partner_id, data_dict) or (None, None)."""
+    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""SELECT id, email, display_name, api_key, authorized_entity_ids,
+                       status, is_admin, shared_partner_id, default_project, invited_by,
+                       created_at, updated_at
+                FROM {SCHEMA}.partners WHERE email = $1 LIMIT 1""",
+            email,
+        )
+    if not row:
+        return None, None
+    data = {
+        "email": row["email"],
+        "displayName": row["display_name"],
+        "apiKey": row["api_key"],
+        "authorizedEntityIds": list(row["authorized_entity_ids"] or []),
+        "status": row["status"],
+        "isAdmin": row["is_admin"],
+        "sharedPartnerId": row["shared_partner_id"],
+        "defaultProject": row["default_project"],
+        "invitedBy": row["invited_by"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+    return row["id"], data
 
 
 async def _get_caller_partner(decoded_token: dict) -> tuple[str | None, dict | None]:
@@ -204,15 +213,34 @@ async def list_partners(request: Request) -> Response:
     if not caller:
         return _error_response("FORBIDDEN", "Partner profile not found", 403, request=request)
 
-    db = _get_db()
+    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
     caller_tenant = _same_tenant_id(caller_id, caller)
-    docs = db.collection("partners").stream()
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            f"""SELECT id, email, display_name, api_key, authorized_entity_ids,
+                       status, is_admin, shared_partner_id, default_project, invited_by,
+                       created_at, updated_at
+                FROM {SCHEMA}.partners"""
+        )
     partners: list[dict] = []
-    async for doc in docs:
-        data = doc.to_dict()
-        if _same_tenant_id(doc.id, data) != caller_tenant:
+    for row in rows:
+        row_data = {
+            "sharedPartnerId": row["shared_partner_id"],
+            "isAdmin": row["is_admin"],
+        }
+        if _same_tenant_id(row["id"], row_data) != caller_tenant:
             continue
-        partners.append(_sanitize_partner_for_admin_view(doc.id, data))
+        partners.append(_sanitize_partner_for_admin_view(row["id"], {
+            "email": row["email"],
+            "displayName": row["display_name"],
+            "isAdmin": row["is_admin"],
+            "status": row["status"],
+            "invitedBy": row["invited_by"],
+            "createdAt": row["created_at"],
+            "updatedAt": row["updated_at"],
+            "sharedPartnerId": row["shared_partner_id"],
+        }))
 
     return _json_response({"partners": partners}, request=request)
 
@@ -254,25 +282,24 @@ async def invite_partner(request: Request) -> Response:
             request=request,
         )
 
-    db = _get_db()
+    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
     now = datetime.now(timezone.utc)
     shared_partner_id = caller.get("sharedPartnerId") or caller_id
-    partner_data = {
-        "email": email,
-        "displayName": email,  # will be updated on first login
-        "apiKey": "",  # generated on activation
-        # Keep invited members in the same data visibility/task scope as inviter.
-        "authorizedEntityIds": caller.get("authorizedEntityIds", []),
-        "sharedPartnerId": shared_partner_id,
-        "isAdmin": False,
-        "status": "invited",
-        "invitedBy": caller.get("email", ""),
-        "createdAt": now,
-        "updatedAt": now,
-    }
+    new_id = uuid.uuid4().hex
+    authorized_entity_ids = caller.get("authorizedEntityIds", [])
 
-    doc_ref = db.collection("partners").document()
-    await doc_ref.set(partner_data)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""INSERT INTO {SCHEMA}.partners (
+                    id, email, display_name, api_key, authorized_entity_ids,
+                    status, is_admin, shared_partner_id, invited_by,
+                    created_at, updated_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+            new_id, email, email, "", authorized_entity_ids,
+            "invited", False, shared_partner_id, caller.get("email", ""),
+            now, now,
+        )
 
     logger.info(
         "audit",
@@ -280,13 +307,25 @@ async def invite_partner(request: Request) -> Response:
             "action": "partner_invite",
             "caller_email": caller.get("email", ""),
             "target_email": email,
-            "target_partner_id": doc_ref.id,
+            "target_partner_id": new_id,
             "result": "success",
             "detail": "status=invited",
         },
     )
 
-    partner_data["id"] = doc_ref.id
+    partner_data = {
+        "id": new_id,
+        "email": email,
+        "displayName": email,
+        "apiKey": "",
+        "authorizedEntityIds": authorized_entity_ids,
+        "sharedPartnerId": shared_partner_id,
+        "isAdmin": False,
+        "status": "invited",
+        "invitedBy": caller.get("email", ""),
+        "createdAt": now,
+        "updatedAt": now,
+    }
     return _json_response(partner_data, status_code=201, request=request)
 
 
@@ -321,38 +360,52 @@ async def update_partner_role(request: Request) -> Response:
     if not isinstance(is_admin, bool):
         return _error_response("INVALID_INPUT", "isAdmin must be a boolean", 400, request=request)
 
-    db = _get_db()
-    doc_ref = db.collection("partners").document(partner_id)
-    doc = await doc_ref.get()
-    if not doc.exists:
+    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""SELECT id, email, display_name, is_admin, status, shared_partner_id,
+                       invited_by, created_at, updated_at
+                FROM {SCHEMA}.partners WHERE id = $1""",
+            partner_id,
+        )
+    if not row:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
-    target = doc.to_dict()
+    target = {"sharedPartnerId": row["shared_partner_id"], "isAdmin": row["is_admin"]}
 
     if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant role change is not allowed", 403, request=request)
 
-    await doc_ref.update({
-        "isAdmin": is_admin,
-        "updatedAt": datetime.now(timezone.utc),
-    })
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"UPDATE {SCHEMA}.partners SET is_admin = $1, updated_at = $2 WHERE id = $3",
+            is_admin, now, partner_id,
+        )
 
-    target_email = target.get("email", "")
     logger.info(
         "audit",
         extra={
             "action": "partner_role_change",
             "caller_email": caller.get("email", ""),
-            "target_email": target_email,
+            "target_email": row["email"],
             "target_partner_id": partner_id,
             "result": "success",
             "detail": f"is_admin={is_admin}",
         },
     )
 
-    updated = target
-    updated["isAdmin"] = is_admin
-    updated["id"] = partner_id
-    return _json_response(updated, request=request)
+    return _json_response({
+        "id": partner_id,
+        "email": row["email"],
+        "displayName": row["display_name"],
+        "isAdmin": is_admin,
+        "status": row["status"],
+        "invitedBy": row["invited_by"],
+        "createdAt": row["created_at"],
+        "updatedAt": now,
+        "sharedPartnerId": row["shared_partner_id"],
+    }, request=request)
 
 
 # ──────────────────────────────────────────────
@@ -395,38 +448,52 @@ async def update_partner_status(request: Request) -> Response:
             request=request,
         )
 
-    db = _get_db()
-    doc_ref = db.collection("partners").document(partner_id)
-    doc = await doc_ref.get()
-    if not doc.exists:
+    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""SELECT id, email, display_name, is_admin, status, shared_partner_id,
+                       invited_by, created_at, updated_at
+                FROM {SCHEMA}.partners WHERE id = $1""",
+            partner_id,
+        )
+    if not row:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
-    target = doc.to_dict()
+    target = {"sharedPartnerId": row["shared_partner_id"], "isAdmin": row["is_admin"]}
 
     if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant status change is not allowed", 403, request=request)
 
-    await doc_ref.update({
-        "status": new_status,
-        "updatedAt": datetime.now(timezone.utc),
-    })
+    now = datetime.now(timezone.utc)
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"UPDATE {SCHEMA}.partners SET status = $1, updated_at = $2 WHERE id = $3",
+            new_status, now, partner_id,
+        )
 
-    target_email = target.get("email", "")
     logger.info(
         "audit",
         extra={
             "action": "partner_status_change",
             "caller_email": caller.get("email", ""),
-            "target_email": target_email,
+            "target_email": row["email"],
             "target_partner_id": partner_id,
             "result": "success",
             "detail": f"status={new_status}",
         },
     )
 
-    updated = target
-    updated["status"] = new_status
-    updated["id"] = partner_id
-    return _json_response(updated, request=request)
+    return _json_response({
+        "id": partner_id,
+        "email": row["email"],
+        "displayName": row["display_name"],
+        "isAdmin": row["is_admin"],
+        "status": new_status,
+        "invitedBy": row["invited_by"],
+        "createdAt": row["created_at"],
+        "updatedAt": now,
+        "sharedPartnerId": row["shared_partner_id"],
+    }, request=request)
 
 
 # ──────────────────────────────────────────────
@@ -463,17 +530,19 @@ async def activate_partner(request: Request) -> Response:
             request=request,
         )
 
-    db = _get_db()
+    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
     api_key = str(uuid.uuid4())
     display_name = decoded.get("name") or decoded.get("email", "")
+    now = datetime.now(timezone.utc)
 
-    doc_ref = db.collection("partners").document(partner_id)
-    await doc_ref.update({
-        "status": "active",
-        "apiKey": api_key,
-        "displayName": display_name,
-        "updatedAt": datetime.now(timezone.utc),
-    })
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE {SCHEMA}.partners
+                SET status = 'active', api_key = $1, display_name = $2, updated_at = $3
+                WHERE id = $4""",
+            api_key, display_name, now, partner_id,
+        )
 
     partner["status"] = "active"
     partner["apiKey"] = api_key
