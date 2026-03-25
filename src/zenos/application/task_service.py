@@ -107,9 +107,15 @@ class TaskService:
             linked_blindspot = await self._blindspots.get_by_id(linked_blindspot_id)
 
         blocked_by = data.get("blocked_by", [])
+        blocked_reason = data.get("blocked_reason")
 
         # Auto-set to blocked if has blockers and not backlog
         if blocked_by and status != TaskStatus.BACKLOG:
+            if not blocked_reason:
+                raise ValueError(
+                    "blocked_reason is required when blocked_by is non-empty "
+                    "and initial status is not 'backlog'"
+                )
             status = TaskStatus.BLOCKED
 
         # Priority recommendation
@@ -150,6 +156,7 @@ class TaskService:
             context_summary=context_summary,
             due_date=due_date,
             blocked_by=blocked_by,
+            blocked_reason=blocked_reason,
             acceptance_criteria=data.get("acceptance_criteria", []),
             project=data.get("project", ""),
         )
@@ -183,6 +190,10 @@ class TaskService:
                 )
             if new_status == TaskStatus.BLOCKED and not updates.get("blocked_reason"):
                 raise ValueError("blocked_reason is required when status is 'blocked'")
+            if new_status == TaskStatus.REVIEW and not (
+                updates.get("result") or task.result
+            ):
+                raise ValueError("result is required when status is 'review'")
 
             task.status = new_status
 

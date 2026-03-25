@@ -14,7 +14,7 @@ import pytest
 from zenos.application.ontology_service import OntologyService
 from zenos.application.task_service import TaskService
 from zenos.application.governance_ai import GovernanceInference, InferredRel
-from zenos.domain.models import Blindspot, Entity, Protocol, Relationship, Tags
+from zenos.domain.models import Blindspot, Entity, Protocol, Relationship, Tags, Task
 
 
 # ---------------------------------------------------------------------------
@@ -691,6 +691,65 @@ class TestTaskPriorityValidation:
         })
         # Should not raise, priority comes from recommend_priority
         assert result.task.priority is not None
+
+
+class TestTaskSchemaAlignedValidation:
+
+    async def test_create_with_blocked_by_and_todo_requires_blocked_reason(self):
+        repos = _mock_repos()
+        task_repo = AsyncMock()
+        task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+        svc = TaskService(
+            task_repo=task_repo,
+            entity_repo=repos["entity_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+        )
+        with pytest.raises(ValueError, match="blocked_reason is required"):
+            await svc.create_task({
+                "title": "Wait on API contract",
+                "created_by": "architect",
+                "status": "todo",
+                "blocked_by": ["task-123"],
+            })
+
+    async def test_create_with_blocked_by_and_reason_persists_blocked_reason(self):
+        repos = _mock_repos()
+        task_repo = AsyncMock()
+        task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+        svc = TaskService(
+            task_repo=task_repo,
+            entity_repo=repos["entity_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+        )
+        result = await svc.create_task({
+            "title": "Wait on API contract",
+            "created_by": "architect",
+            "status": "todo",
+            "blocked_by": ["task-123"],
+            "blocked_reason": "Waiting for upstream API decision",
+        })
+        assert result.task.status == "blocked"
+        assert result.task.blocked_reason == "Waiting for upstream API decision"
+
+    async def test_update_to_review_requires_result(self):
+        repos = _mock_repos()
+        task_repo = AsyncMock()
+        task_repo.get_by_id = AsyncMock(return_value=Task(
+            id="task-1",
+            title="Ship docs",
+            status="in_progress",
+            priority="high",
+            created_by="architect",
+        ))
+        task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+        task_repo.list_blocked_by = AsyncMock(return_value=[])
+        svc = TaskService(
+            task_repo=task_repo,
+            entity_repo=repos["entity_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+        )
+        with pytest.raises(ValueError, match="result is required when status is 'review'"):
+            await svc.update_task("task-1", {"status": "review"})
 
 
 # ===========================================================================

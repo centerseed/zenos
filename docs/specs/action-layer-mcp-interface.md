@@ -146,7 +146,7 @@ Server-side 行為：
   1. 驗證 status 只能是 backlog 或 todo
   2. 驗證 linked_entities 中的 entity IDs 存在（不存在 → 警告但不阻止）
   3. 驗證 blocked_by 中的 task IDs 存在
-  4. 如果 blocked_by 非空且 status 不是 backlog → 自動設為 blocked
+  4. 如果 blocked_by 非空且 status 不是 backlog → 自動設為 blocked，且 blocked_reason 必填
   5. AI 優先度推薦（規則引擎）：
      a. 讀取 linked_entities 的 status 和 linked_blindspot 的 severity
      b. 套用推薦規則（見下方「優先度推薦規則」）
@@ -194,7 +194,7 @@ Server-side 行為：
   1. 讀取現有 task
   2. 狀態轉換合法性驗證（見下方「狀態轉換矩陣」）
   3. 如果新 status = "blocked" → blocked_reason 必填
-  4. 如果新 status = "review" → result 建議填寫（不強制）
+  4. 如果新 status = "review" → result 必填（SQL schema 強制）
   5. 如果新 status = "done" 或 "cancelled" → 執行級聯解阻塞：
      a. 查詢所有 blockedBy 包含此 task ID 的其他 tasks
      b. 對每個 blocked task：移除此 task ID from blockedBy
@@ -327,6 +327,10 @@ Server-side 行為：
 - `update_task` 不能將 status 設為 `done`（必須走 `confirm_task`）
 - `update_task` 可以設 `review`（執行者標記完成等驗收）
 - `create_task` 只能用 `backlog` 或 `todo` 起始
+- `status='review'` 時 `result` 必填
+- `status='blocked'` 時 `blocked_reason` 必填
+- 若 `blocked_by` 非空且 create 時不是 `backlog`，任務會進入 `blocked`，此時也必須提供 `blocked_reason`
+- `linked_protocol`、`linked_blindspot`、`assignee_role_id`、`linked_entities` 受資料庫外鍵約束，必須引用同租戶已存在的資料
 
 ---
 

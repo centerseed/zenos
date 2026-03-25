@@ -924,6 +924,7 @@ async def _task_handler(
                 "source_type": source_type or "",
                 "due_date": parsed_due,
                 "blocked_by": blocked_by or [],
+                "blocked_reason": blocked_reason,
                 "acceptance_criteria": acceptance_criteria or [],
                 "project": effective_project,
                 "assignee_role_id": assignee_role_id,
@@ -1025,6 +1026,11 @@ async def task(
     狀態流：backlog → todo → in_progress → review → done → archived
             任何狀態可 → cancelled。blocked 是特殊狀態（需填 blocked_reason）。
     注意：不能用 update 把 status 改成 done（必須走 confirm 驗收流程）。
+    補充限制：
+    - create 時初始 status 只能是 backlog 或 todo
+    - update 到 review 時，result 為必填（SQL schema 強制）
+    - create 時若 blocked_by 非空且 status 不是 backlog，會進入 blocked，且 blocked_reason 必填
+    - linked_protocol / linked_blindspot / assignee_role_id / linked_entities 會受資料庫外鍵限制，ID 必須存在於同租戶資料中
 
     不要用這個工具的情境：
     - 查任務列表 → 用 search(collection="tasks")
@@ -1038,15 +1044,15 @@ async def task(
         description: 任務描述
         assignee: 被指派者 UID
         priority: critical/high/medium/low（不傳時 AI 自動推薦）
-        status: 目標狀態（update 用，需通過合法性驗證）
+        status: create 時只能 backlog/todo；update 時需通過合法性驗證
         linked_entities: 關聯的 entity IDs
         linked_protocol: 關聯的 Protocol ID
         linked_blindspot: 觸發的 blindspot ID
         due_date: 到期日 ISO-8601（如 "2026-03-29"）
         blocked_by: 阻塞此任務的 task IDs
-        blocked_reason: blocked 狀態時必填
+        blocked_reason: status=blocked 時必填；create 若 blocked_by 讓任務進入 blocked 也必填
         acceptance_criteria: 驗收條件列表
-        result: 完成產出描述（status=review 時填寫）
+        result: 完成產出描述（status=review 時必填）
         project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
             未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
         assignee_role_id: 指向 role entity 的 ID（可選），用於展開角色 context
