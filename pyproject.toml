@@ -3,6 +3,7 @@ name = "zenos"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+    "asyncpg>=0.29",
     "fastmcp>=2.0",
     "firebase-admin>=6.0",
     "google-cloud-firestore>=2.19",
