@@ -22,7 +22,7 @@ const COLUMN_HEADER_COLORS: Record<string, string> = {
   in_progress: "bg-yellow-900/50 text-yellow-400",
   review: "bg-purple-900/50 text-purple-400",
   blocked: "bg-red-900/50 text-red-400",
-  backlog: "bg-[#1F1F23] text-[#71717A]",
+  backlog: "bg-secondary text-muted-foreground",
 };
 
 export function TaskBoard({ tasks }: TaskBoardProps) {
@@ -37,13 +37,13 @@ export function TaskBoard({ tasks }: TaskBoardProps) {
   }
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-4">
+    <div className="flex flex-col md:flex-row gap-4 md:overflow-x-auto pb-4">
       {COLUMN_ORDER.map((status) => {
         const columnTasks = grouped[status];
         return (
-          <div key={status} className="flex-shrink-0 w-72">
+          <div key={status} className="w-full md:flex-shrink-0 md:w-72">
             <div
-              className={`rounded-t-lg px-3 py-2 flex items-center justify-between ${COLUMN_HEADER_COLORS[status] ?? "bg-[#1F1F23] text-[#71717A]"}`}
+              className={`rounded-t-lg px-3 py-2 flex items-center justify-between ${COLUMN_HEADER_COLORS[status] ?? "bg-secondary text-muted-foreground"}`}
             >
               <span className="text-xs font-semibold uppercase">
                 {COLUMN_LABELS[status] ?? status}
@@ -52,9 +52,9 @@ export function TaskBoard({ tasks }: TaskBoardProps) {
                 {columnTasks.length}
               </span>
             </div>
-            <div className="bg-[#0A0A0B] rounded-b-lg p-2 space-y-2 min-h-[120px] border-x border-b border-[#1F1F23]">
+            <div className="bg-background rounded-b-lg p-2 space-y-2 min-h-[120px] border-x border-b border-border">
               {columnTasks.length === 0 ? (
-                <p className="text-xs text-[#71717A] text-center py-6">No tasks</p>
+                <p className="text-xs text-muted-foreground text-center py-6">No tasks</p>
               ) : (
                 columnTasks.map((task) => (
                   <TaskCard key={task.id} task={task} />

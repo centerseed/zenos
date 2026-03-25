@@ -11,6 +11,8 @@ import {
   getTasks,
 } from "@/lib/firestore";
 import type { Entity, Blindspot, Relationship, Task } from "@/types";
+import { DEFAULT_NODE_COLOR, NODE_TYPE_COLORS, NODE_TYPE_LABELS } from "@/lib/constants";
+import { cn } from "@/lib/utils";
 
 // ─── Types ───
 
@@ -60,26 +62,6 @@ function findTasksForModule(module: Entity, tasks: Task[]): Task[] {
   return linked.length > 0 ? linked : inferTasksForEntity(module, tasks);
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  product: "#3B82F6",
-  module: "#8B5CF6",
-  goal: "#10B981",
-  role: "#F59E0B",
-  document: "#06B6D4",
-  project: "#F43F5E",
-  task: "#F97316",
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  product: "Product",
-  module: "Module",
-  goal: "Goal",
-  role: "Role",
-  document: "Document",
-  project: "Project",
-  task: "Task",
-};
-
 const ROLE_COLORS: Record<string, string> = {
   architect: "bg-violet-500/20 text-violet-300",
   developer: "bg-blue-500/20 text-blue-300",
@@ -99,14 +81,14 @@ function SourceIcon({ type }: { type: string }) {
   const t = type.toLowerCase();
   if (t === "github" || t === "git") {
     return (
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[#FAFAFA]/40 shrink-0">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-foreground/40 shrink-0">
         <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
       </svg>
     );
   }
   if (t === "gdrive" || t === "google" || t === "google_drive") {
     return (
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[#FAFAFA]/40 shrink-0">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-foreground/40 shrink-0">
         <path d="M12 2L2 19.5h20L12 2z" />
         <path d="M2 19.5l5-8.5" />
         <path d="M22 19.5l-5-8.5" />
@@ -116,7 +98,7 @@ function SourceIcon({ type }: { type: string }) {
   }
   if (t === "notion") {
     return (
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[#FAFAFA]/40 shrink-0">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-foreground/40 shrink-0">
         <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
         <path d="M8 7h8M8 12h5M8 17h3" />
       </svg>
@@ -124,7 +106,7 @@ function SourceIcon({ type }: { type: string }) {
   }
   // Default: external link icon
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-[#FAFAFA]/40 shrink-0">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-foreground/40 shrink-0">
       <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
       <polyline points="15 3 21 3 21 9" />
       <line x1="10" y1="14" x2="21" y2="3" />
@@ -168,7 +150,7 @@ function TaskStatusBar({ counts }: { counts: TaskStatusCounts }) {
         <span className="text-[10px] text-red-400" title="Blocked">{counts.blocked}!</span>
       )}
       {counts.pending > 0 && (
-        <span className="text-[10px] text-[#FAFAFA]/35" title="Pending">{counts.pending}</span>
+        <span className="text-[10px] text-foreground/35" title="Pending">{counts.pending}</span>
       )}
     </div>
   );
@@ -211,10 +193,10 @@ function TypeFilterPopover({
   return (
     <div
       ref={popoverRef}
-      className="bg-[#111113] border border-[#2A2A2E] rounded-lg shadow-xl p-3 z-[100]"
+      className="bg-card border border-border rounded-lg shadow-xl p-3 z-[100]"
       style={{ minWidth: 200, ...style }}
     >
-      <div className="text-xs text-[#FAFAFA]/50 mb-2 truncate">
+      <div className="text-xs text-foreground/50 mb-2 truncate">
         Expand: {moduleName}
       </div>
       {displayOrder.map((type) => {
@@ -224,7 +206,7 @@ function TypeFilterPopover({
         return (
           <div key={type}>
             <label
-              className="flex items-center gap-2 py-1 cursor-pointer hover:bg-[#FAFAFA]/[0.03] rounded px-1"
+              className="flex items-center gap-2 py-1 cursor-pointer hover:bg-foreground/5 rounded px-1"
             >
               <input
                 type="checkbox"
@@ -234,12 +216,12 @@ function TypeFilterPopover({
               />
               <span
                 className="w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: TYPE_COLORS[type] ?? "#6366F1" }}
+                style={{ backgroundColor: NODE_TYPE_COLORS[type] ?? DEFAULT_NODE_COLOR }}
               />
-              <span className="text-xs text-[#FAFAFA]/70">
-                {TYPE_LABELS[type] ?? type}
+              <span className="text-xs text-foreground/70">
+                {NODE_TYPE_LABELS[type] ?? type}
               </span>
-              <span className="text-xs text-[#FAFAFA]/40">{count}</span>
+              <span className="text-xs text-foreground/40">{count}</span>
               {type === "task" && taskStatusCounts && (
                 <TaskStatusBar counts={taskStatusCounts} />
               )}
@@ -260,20 +242,20 @@ function EntityChip({
   entity: Entity;
   onClick: (e: Entity) => void;
 }) {
-  const color = TYPE_COLORS[entity.type] ?? "#6366F1";
+  const color = NODE_TYPE_COLORS[entity.type] ?? DEFAULT_NODE_COLOR;
   return (
     <button
       onClick={(ev) => {
         ev.stopPropagation();
         onClick(entity);
       }}
-      className="inline-flex items-center gap-1.5 rounded-md border border-[#FAFAFA]/8 bg-[#FAFAFA]/[0.03] hover:bg-[#FAFAFA]/[0.07] transition-colors cursor-pointer px-1.5 py-0.5 text-xs"
+      className="inline-flex items-center gap-1.5 rounded-md border border-border/40 bg-foreground/5 hover:bg-foreground/10 transition-colors cursor-pointer px-1.5 py-0.5 text-xs"
     >
       <span
         className="w-1.5 h-1.5 rounded-full shrink-0"
         style={{ backgroundColor: color }}
       />
-      <span className="text-[#FAFAFA]/70 truncate max-w-[140px]">
+      <span className="text-foreground/70 truncate max-w-[140px]">
         {entity.name}
       </span>
     </button>
@@ -291,6 +273,8 @@ function Sidebar({
   setFocusProduct,
   expandedModules,
   onToggleModuleType,
+  className,
+  onDismiss,
 }: {
   entities: Entity[];
   blindspots: Blindspot[];
@@ -300,6 +284,8 @@ function Sidebar({
   setFocusProduct: (id: string | null) => void;
   expandedModules: ExpandedModules;
   onToggleModuleType: (moduleId: string, type: ExpandableType) => void;
+  className?: string;
+  onDismiss?: () => void;
 }) {
   const products = entities.filter((e) => e.type === "product");
   const modules = entities.filter((e) => e.type === "module");
@@ -357,39 +343,49 @@ function Sidebar({
   }, [modules, entities]);
 
   return (
-    <div className="w-[230px] shrink-0 border-r border-[#1F1F23] bg-[#0C0C0E] flex flex-col h-full overflow-y-auto">
+    <div className={cn("w-[230px] shrink-0 border-r border-border bg-card flex flex-col h-full overflow-y-auto", className)}>
       {/* Company header */}
-      <div className="px-3 pt-4 pb-3 border-b border-[#1F1F23]">
-        <h2 className="text-sm font-bold text-[#FAFAFA]">Naruvia</h2>
+      <div className="px-3 pt-4 pb-3 border-b border-border">
+        {onDismiss && (
+          <div className="flex justify-end mb-2 md:hidden">
+            <button
+              onClick={onDismiss}
+              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+            >
+              Close
+            </button>
+          </div>
+        )}
+        <h2 className="text-sm font-bold text-foreground">Naruvia</h2>
         <div className="flex items-center gap-2 mt-2">
-          <div className="flex-1 h-1 rounded-full bg-[#FAFAFA]/5 overflow-hidden">
+          <div className="flex-1 h-1 rounded-full bg-foreground/5 overflow-hidden">
             <div
               className="h-full rounded-full bg-emerald-400/60"
               style={{ width: `${confirmedRate}%` }}
             />
           </div>
-          <span className="text-xs text-[#FAFAFA]/55">{confirmedRate}%</span>
+          <span className="text-xs text-foreground/55">{confirmedRate}%</span>
         </div>
-        <div className="text-xs text-[#FAFAFA]/65 mt-1">
+        <div className="text-xs text-foreground/65 mt-1">
           {entities.length} nodes · {docCount} docs ·{" "}
           {relationships.length} rels
         </div>
       </div>
 
       {/* Products & Modules tree */}
-      <div className="px-2 py-2 border-b border-[#1F1F23]">
-        <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest px-1 mb-1.5">
+      <div className="px-2 py-2 border-b border-border">
+        <div className="text-xs text-foreground/65 uppercase tracking-widest px-1 mb-1.5">
           Products
         </div>
         <button
           onClick={() => setFocusProduct(null)}
           className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors cursor-pointer mb-0.5 ${
             focusProduct === null
-              ? "bg-[#FAFAFA]/8 text-[#FAFAFA]/70"
-              : "text-[#FAFAFA]/65 hover:bg-[#FAFAFA]/[0.03]"
+              ? "bg-foreground/10 text-foreground/70"
+              : "text-foreground/65 hover:bg-foreground/5"
           }`}
         >
-          <span className="w-2 h-2 rounded-full bg-[#FAFAFA]/15" />
+          <span className="w-2 h-2 rounded-full bg-foreground/20" />
           <span className="flex-1 text-left">All</span>
         </button>
         {products.map((p) => {
@@ -408,15 +404,15 @@ function Sidebar({
                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors cursor-pointer ${
                   focusProduct === p.id
                     ? "bg-blue-500/15 text-blue-300"
-                    : "text-[#FAFAFA]/65 hover:bg-[#FAFAFA]/[0.03]"
+                    : "text-foreground/65 hover:bg-foreground/5"
                 }`}
               >
                 <span
                   className="w-2 h-2 rounded-full shrink-0"
-                  style={{ backgroundColor: TYPE_COLORS.product }}
+                  style={{ backgroundColor: NODE_TYPE_COLORS.product }}
                 />
                 <span className="flex-1 text-left truncate">{p.name}</span>
-                <span className="text-xs text-[#FAFAFA]/65">{moduleCount}</span>
+                <span className="text-xs text-foreground/65">{moduleCount}</span>
                 {pBs.length > 0 && (
                   <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
                 )}
@@ -435,7 +431,7 @@ function Sidebar({
                             e.stopPropagation();
                             setPopoverModuleId(popoverModuleId === m.id ? null : m.id);
                           }}
-                          className="w-4 h-4 flex items-center justify-center text-[#FAFAFA]/40 hover:text-[#FAFAFA]/70 cursor-pointer shrink-0"
+                          className="w-4 h-4 flex items-center justify-center text-foreground/40 hover:text-foreground/70 cursor-pointer shrink-0"
                           title="Expand L3 nodes"
                         >
                           <svg
@@ -451,14 +447,14 @@ function Sidebar({
                       ) : (
                         <span className="w-4 h-4 shrink-0" />
                       )}
-                      <div className="flex items-center gap-1.5 py-1 text-xs text-[#FAFAFA]/55 truncate flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 py-1 text-xs text-foreground/55 truncate flex-1 min-w-0">
                         <span
                           className="w-1.5 h-1.5 rounded-full shrink-0"
-                          style={{ backgroundColor: TYPE_COLORS.module }}
+                          style={{ backgroundColor: NODE_TYPE_COLORS.module }}
                         />
                         <span className="truncate">{m.name}</span>
                         {l3Count > 0 && (
-                          <span className="text-[#FAFAFA]/30 text-[10px]">{l3Count}</span>
+                          <span className="text-foreground/30 text-[10px]">{l3Count}</span>
                         )}
                       </div>
                     </div>
@@ -488,11 +484,11 @@ function Sidebar({
                           .map((e) => (
                             <div
                               key={e.id}
-                              className="flex items-center gap-1.5 py-0.5 text-[10px] text-[#FAFAFA]/45"
+                              className="flex items-center gap-1.5 py-0.5 text-[10px] text-foreground/45"
                             >
                               <span
                                 className="w-1 h-1 rounded-full shrink-0"
-                                style={{ backgroundColor: TYPE_COLORS[e.type] ?? "#6366F1" }}
+                                style={{ backgroundColor: NODE_TYPE_COLORS[e.type] ?? DEFAULT_NODE_COLOR }}
                               />
                               <span className="truncate">{e.name}</span>
                             </div>
@@ -510,15 +506,15 @@ function Sidebar({
                               t.status === "in_progress" ? "text-blue-400" :
                               t.status === "blocked" ? "text-red-400" :
                               t.status === "review" ? "text-amber-400" :
-                              "text-[#FAFAFA]/30";
+                              "text-foreground/30";
                             return (
                               <div
                                 key={`task:${t.id}`}
-                                className="flex items-center gap-1.5 py-0.5 text-[10px] text-[#FAFAFA]/45"
+                                className="flex items-center gap-1.5 py-0.5 text-[10px] text-foreground/45"
                               >
                                 <span
                                   className="w-1 h-1 rounded-full shrink-0"
-                                  style={{ backgroundColor: TYPE_COLORS.task }}
+                                  style={{ backgroundColor: NODE_TYPE_COLORS.task }}
                                 />
                                 <span className="truncate flex-1">{t.title}</span>
                                 <span className={`shrink-0 text-[9px] ${statusColor}`}>{statusIcon}</span>
@@ -536,8 +532,8 @@ function Sidebar({
       </div>
 
       {/* Blindspots */}
-      <div className="px-2 py-2 border-b border-[#1F1F23]">
-        <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest px-1 mb-1">
+      <div className="px-2 py-2 border-b border-border">
+        <div className="text-xs text-foreground/65 uppercase tracking-widest px-1 mb-1">
           Blindspots ({openBs.length})
         </div>
         <div className="space-y-1 max-h-[140px] overflow-y-auto">
@@ -557,13 +553,13 @@ function Sidebar({
                       : "bg-amber-400/40"
                   }`}
                 />
-                <span className="text-xs text-[#FAFAFA]/60 leading-snug line-clamp-2">
+                <span className="text-xs text-foreground/60 leading-snug line-clamp-2">
                   {bs.description}
                 </span>
               </div>
             ))}
           {openBs.length > 6 && (
-            <div className="text-xs text-[#FAFAFA]/50 px-1">
+            <div className="text-xs text-foreground/50 px-1">
               +{openBs.length - 6} more
             </div>
           )}
@@ -572,7 +568,7 @@ function Sidebar({
 
       {/* Tasks */}
       <div className="px-2 py-2 mt-auto">
-        <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest px-1 mb-1">
+        <div className="text-xs text-foreground/65 uppercase tracking-widest px-1 mb-1">
           Tasks ({tasks.length})
         </div>
         <div className="space-y-0.5 px-1">
@@ -594,13 +590,13 @@ function Sidebar({
               c: tasks.filter((t) =>
                 ["backlog", "todo"].includes(t.status)
               ).length,
-              color: "bg-[#FAFAFA]/12",
+              color: "bg-foreground/15",
             },
           ].map((s) => (
             <div key={s.l} className="flex items-center gap-1.5">
               <span className={`w-1.5 h-2.5 rounded-sm ${s.color}`} />
-              <span className="text-xs text-[#FAFAFA]/60 flex-1">{s.l}</span>
-              <span className="text-xs text-[#FAFAFA]/65">{s.c}</span>
+              <span className="text-xs text-foreground/60 flex-1">{s.l}</span>
+              <span className="text-xs text-foreground/65">{s.c}</span>
             </div>
           ))}
         </div>
@@ -941,7 +937,7 @@ function GraphCanvas({
       const isTaskNode = node.type === "task";
       const taskStatus = node.taskStatus as string | undefined;
       const isBlocked = isTaskNode && taskStatus === "blocked";
-      const color = isBlocked ? "#EF4444" : (TYPE_COLORS[node.type as string] ?? "#6366F1");
+      const color = isBlocked ? "#EF4444" : (NODE_TYPE_COLORS[node.type as string] ?? DEFAULT_NODE_COLOR);
       const isSelected = selectedId === node.id;
       const isHovered = hoveredNode === node.id;
       const isDimmed =
@@ -1127,9 +1123,9 @@ function GraphCanvas({
     return (
       <div
         ref={containerRef}
-        className="flex-1 flex items-center justify-center bg-[#09090B]"
+        className="flex-1 flex items-center justify-center bg-background"
       >
-        <span className="text-[#FAFAFA]/50 text-sm">Loading graph...</span>
+        <span className="text-foreground/50 text-sm">Loading graph...</span>
       </div>
     );
   }
@@ -1138,7 +1134,7 @@ function GraphCanvas({
   return (
     <div
       ref={containerRef}
-      className="flex-1 relative bg-[#09090B] overflow-hidden"
+      className="flex-1 relative bg-background overflow-hidden"
     >
       <FG
         ref={fgRef}
@@ -1293,30 +1289,30 @@ function GraphCanvas({
       })()}
 
       {/* Legend */}
-      <div className="absolute top-3 right-3 bg-[#111113]/90 border border-[#1F1F23] rounded-lg px-3 py-2 flex flex-col gap-1.5">
-        {Object.entries(TYPE_COLORS).map(([type, color]) => (
+      <div className="absolute top-3 right-3 bg-card/90 border border-border rounded-lg px-3 py-2 flex flex-col gap-1.5">
+        {Object.entries(NODE_TYPE_COLORS).map(([type, color]) => (
           <div key={type} className="flex items-center gap-2">
             <div
               className="w-2.5 h-2.5 rounded-full"
               style={{ backgroundColor: color }}
             />
-            <span className="text-[10px] text-[#A1A1AA]">
-              {TYPE_LABELS[type] ?? type}
+            <span className="text-[10px] text-muted-foreground">
+              {NODE_TYPE_LABELS[type] ?? type}
             </span>
           </div>
         ))}
-        <div className="flex items-center gap-2 mt-0.5 pt-1 border-t border-[#1F1F23]">
+        <div className="flex items-center gap-2 mt-0.5 pt-1 border-t border-border">
           <div className="w-2.5 h-2.5 rounded-full border border-red-500 bg-red-500/30" />
-          <span className="text-[10px] text-[#A1A1AA]">Has Blindspot</span>
+          <span className="text-[10px] text-muted-foreground">Has Blindspot</span>
         </div>
         <div className="flex items-center gap-2">
           <div className="w-2.5 h-2.5 rounded-full border border-dashed border-amber-400/50 bg-transparent" />
-          <span className="text-[10px] text-[#A1A1AA]">Draft</span>
+          <span className="text-[10px] text-muted-foreground">Draft</span>
         </div>
       </div>
 
       {/* Hint */}
-      <div className="absolute bottom-3 left-3 text-[10px] text-[#FAFAFA]/25">
+      <div className="absolute bottom-3 left-3 text-[10px] text-foreground/25">
         Click a module to expand • click again to collapse
       </div>
     </div>
@@ -1405,34 +1401,34 @@ function DetailSheet({
   };
 
   return (
-    <div className="w-[350px] shrink-0 border-l border-[#1F1F23] bg-[#0C0C0E] h-full overflow-y-auto">
-      <div className="px-4 pt-4 pb-3 border-b border-[#1F1F23]">
+    <div className="hidden lg:block w-[350px] shrink-0 border-l border-border bg-card h-full overflow-y-auto">
+      <div className="px-4 pt-4 pb-3 border-b border-border">
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-2">
             <span
               className="w-2.5 h-2.5 rounded-full"
               style={{
-                backgroundColor: TYPE_COLORS[entity.type] ?? "#6366F1",
+                backgroundColor: NODE_TYPE_COLORS[entity.type] ?? DEFAULT_NODE_COLOR,
               }}
             />
-            <span className="text-xs text-[#FAFAFA]/55 uppercase tracking-wider">
-              {TYPE_LABELS[entity.type] ?? entity.type}
+            <span className="text-xs text-foreground/55 uppercase tracking-wider">
+              {NODE_TYPE_LABELS[entity.type] ?? entity.type}
             </span>
           </div>
           <button
             onClick={onClose}
-            className="text-[#FAFAFA]/65 hover:text-[#FAFAFA]/90 text-xs cursor-pointer"
+            className="text-foreground/65 hover:text-foreground/90 text-xs cursor-pointer"
           >
             ✕
           </button>
         </div>
-        <h3 className="text-base font-bold text-[#FAFAFA]/85">
+        <h3 className="text-base font-bold text-foreground/85">
           {entity.name}
         </h3>
-        <p className="text-xs text-[#FAFAFA]/65 mt-1 leading-relaxed">
+        <p className="text-xs text-foreground/65 mt-1 leading-relaxed">
           {entity.summary}
         </p>
-        <div className="flex items-center gap-2 mt-2 text-xs text-[#FAFAFA]/50">
+        <div className="flex items-center gap-2 mt-2 text-xs text-foreground/50">
           {!entity.confirmedByUser && (
             <span className="text-orange-400/50 bg-orange-400/8 px-1 py-0.5 rounded">
               Draft
@@ -1443,8 +1439,8 @@ function DetailSheet({
       </div>
 
       {/* Tags */}
-      <div className="px-4 py-3 border-b border-[#1F1F23]">
-        <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+      <div className="px-4 py-3 border-b border-border">
+        <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
           Tags
         </div>
         <div className="space-y-1.5 text-xs">
@@ -1462,7 +1458,7 @@ function DetailSheet({
                 <span className={`font-medium ${colorClass}`}>
                   {k.charAt(0).toUpperCase() + k.slice(1)}
                 </span>
-                <p className="text-[#FAFAFA]/65 mt-0.5 leading-relaxed">
+                <p className="text-foreground/65 mt-0.5 leading-relaxed">
                   {formatTagValue(entity.tags[k])}
                 </p>
               </div>
@@ -1472,19 +1468,19 @@ function DetailSheet({
       </div>
 
       {/* Linked entities */}
-      <div className="px-4 py-3 border-b border-[#1F1F23]">
-        <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+      <div className="px-4 py-3 border-b border-border">
+        <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
           Relations
         </div>
         {parent && (
           <div className="mb-2">
-            <div className="text-xs text-[#FAFAFA]/65 mb-0.5">Parent</div>
+            <div className="text-xs text-foreground/65 mb-0.5">Parent</div>
             <EntityChip entity={parent} onClick={onSelect} />
           </div>
         )}
         {children.length > 0 && (
           <div className="mb-2">
-            <div className="text-xs text-[#FAFAFA]/65 mb-0.5">
+            <div className="text-xs text-foreground/65 mb-0.5">
               Children ({children.length})
             </div>
             <div className="flex flex-wrap gap-1">
@@ -1496,17 +1492,17 @@ function DetailSheet({
         )}
         {connectedEntities.length > 0 && (
           <div>
-            <div className="text-xs text-[#FAFAFA]/65 mb-0.5">
+            <div className="text-xs text-foreground/65 mb-0.5">
               Dependencies
             </div>
             <div className="space-y-1">
               {connectedEntities.map((c, i) => (
                 <div key={i} className="flex items-center gap-1.5">
-                  <span className="text-xs text-[#FAFAFA]/65 w-3">
+                  <span className="text-xs text-foreground/65 w-3">
                     {c.direction === "out" ? "\u2192" : "\u2190"}
                   </span>
                   <EntityChip entity={c.entity} onClick={onSelect} />
-                  <span className="text-xs text-[#FAFAFA]/10">
+                  <span className="text-xs text-foreground/10">
                     {c.type.replace("_", " ")}
                   </span>
                 </div>
@@ -1515,14 +1511,14 @@ function DetailSheet({
           </div>
         )}
         {!parent && children.length === 0 && connectedEntities.length === 0 && (
-          <div className="text-xs text-[#FAFAFA]/50">No relations</div>
+          <div className="text-xs text-foreground/50">No relations</div>
         )}
       </div>
 
       {/* Blindspots */}
       {relatedBs.length > 0 && (
-        <div className="px-4 py-3 border-b border-[#1F1F23]">
-          <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+        <div className="px-4 py-3 border-b border-border">
+          <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
             Blindspots ({relatedBs.length})
           </div>
           {relatedBs.map((bs) => (
@@ -1544,20 +1540,20 @@ function DetailSheet({
       )}
 
       {/* Documents & Sources */}
-      <div className="px-4 py-3 border-b border-[#1F1F23]">
-        <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+      <div className="px-4 py-3 border-b border-border">
+        <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
           Documents (
           {childDocs.length + (entity.sources?.length ?? 0)})
         </div>
         {childDocs.length === 0 && (!entity.sources || entity.sources.length === 0) ? (
-          <div className="text-xs text-[#FAFAFA]/50">No documents</div>
+          <div className="text-xs text-foreground/50">No documents</div>
         ) : (
           <>
             {childDocs.map((d) => (
               <button
                 key={d.id}
                 onClick={() => onSelect(d)}
-                className="flex items-center gap-1.5 py-0.5 text-xs w-full text-left hover:bg-[#FAFAFA]/[0.03] rounded px-1 cursor-pointer"
+                className="flex items-center gap-1.5 py-0.5 text-xs w-full text-left hover:bg-foreground/5 rounded px-1 cursor-pointer"
               >
                 <span className="text-cyan-400/60 shrink-0">
                   <svg
@@ -1572,7 +1568,7 @@ function DetailSheet({
                     <polyline points="14 2 14 8 20 8" />
                   </svg>
                 </span>
-                <span className="text-[#FAFAFA]/70 truncate">{d.name}</span>
+                <span className="text-foreground/70 truncate">{d.name}</span>
               </button>
             ))}
             {entity.sources?.map((src, i) => (
@@ -1581,13 +1577,13 @@ function DetailSheet({
                 href={src.uri}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center gap-1.5 py-0.5 text-xs hover:bg-[#FAFAFA]/[0.03] rounded px-1"
+                className="flex items-center gap-1.5 py-0.5 text-xs hover:bg-foreground/5 rounded px-1"
               >
                 <SourceIcon type={src.type} />
-                <span className="text-[#FAFAFA]/70 truncate flex-1">
+                <span className="text-foreground/70 truncate flex-1">
                   {src.label}
                 </span>
-                <span className="text-[#FAFAFA]/25 text-[10px] shrink-0">
+                <span className="text-foreground/25 text-[10px] shrink-0">
                   {src.type}
                 </span>
               </a>
@@ -1598,11 +1594,11 @@ function DetailSheet({
 
       {/* Tasks */}
       <div className="px-4 py-3">
-        <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+        <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
           Tasks ({relatedTasks.length})
         </div>
         {relatedTasks.length === 0 ? (
-          <div className="text-xs text-[#FAFAFA]/50">No linked tasks</div>
+          <div className="text-xs text-foreground/50">No linked tasks</div>
         ) : (
           relatedTasks.map((t) => (
             <div
@@ -1615,10 +1611,10 @@ function DetailSheet({
                     ? "bg-emerald-400"
                     : t.status === "in_progress" || t.status === "review"
                       ? "bg-blue-400"
-                      : "bg-[#FAFAFA]/12"
+                      : "bg-foreground/15"
                 }`}
               />
-              <span className="text-[#FAFAFA]/65 truncate flex-1">
+              <span className="text-foreground/65 truncate flex-1">
                 {t.title}
               </span>
               {t.assignee && (
@@ -1654,35 +1650,35 @@ function TaskDetailPanel({
     task.status === "in_progress" ? "bg-blue-500/15 text-blue-300" :
     task.status === "blocked" ? "bg-red-500/15 text-red-300" :
     task.status === "review" ? "bg-violet-500/15 text-violet-300" :
-    "bg-[#FAFAFA]/8 text-[#FAFAFA]/55";
+    "bg-foreground/10 text-foreground/55";
 
   const priorityColor =
     task.priority === "critical" ? "text-red-400" :
     task.priority === "high" ? "text-orange-400" :
     task.priority === "medium" ? "text-amber-400" :
-    "text-[#FAFAFA]/40";
+    "text-foreground/40";
 
   return (
-    <div className="w-[350px] shrink-0 border-l border-[#1F1F23] bg-[#0C0C0E] h-full overflow-y-auto">
-      <div className="px-4 pt-4 pb-3 border-b border-[#1F1F23]">
+    <div className="hidden lg:block w-[350px] shrink-0 border-l border-border bg-card h-full overflow-y-auto">
+      <div className="px-4 pt-4 pb-3 border-b border-border">
         <div className="flex items-center justify-between mb-1.5">
           <div className="flex items-center gap-2">
             <span
               className="w-2.5 h-2.5 rounded-full"
-              style={{ backgroundColor: TYPE_COLORS.task }}
+              style={{ backgroundColor: NODE_TYPE_COLORS.task }}
             />
-            <span className="text-xs text-[#FAFAFA]/55 uppercase tracking-wider">
+            <span className="text-xs text-foreground/55 uppercase tracking-wider">
               Task
             </span>
           </div>
           <button
             onClick={onClose}
-            className="text-[#FAFAFA]/65 hover:text-[#FAFAFA]/90 text-xs cursor-pointer"
+            className="text-foreground/65 hover:text-foreground/90 text-xs cursor-pointer"
           >
             ✕
           </button>
         </div>
-        <h3 className="text-base font-bold text-[#FAFAFA]/85 leading-snug">
+        <h3 className="text-base font-bold text-foreground/85 leading-snug">
           {task.title}
         </h3>
         <div className="flex items-center gap-2 mt-2">
@@ -1698,24 +1694,24 @@ function TaskDetailPanel({
       </div>
 
       {task.description && (
-        <div className="px-4 py-3 border-b border-[#1F1F23]">
-          <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+        <div className="px-4 py-3 border-b border-border">
+          <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
             Description
           </div>
-          <p className="text-xs text-[#FAFAFA]/65 leading-relaxed">
+          <p className="text-xs text-foreground/65 leading-relaxed">
             {task.description}
           </p>
         </div>
       )}
 
       {task.assignee && (
-        <div className="px-4 py-3 border-b border-[#1F1F23]">
-          <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+        <div className="px-4 py-3 border-b border-border">
+          <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
             Assignee
           </div>
           <span
             className={`text-xs px-2 py-0.5 rounded ${
-              ROLE_COLORS[task.assignee] ?? "bg-[#FAFAFA]/8 text-[#FAFAFA]/55"
+              ROLE_COLORS[task.assignee] ?? "bg-foreground/10 text-foreground/55"
             }`}
           >
             {ROLE_LABELS[task.assignee] ?? task.assignee}
@@ -1725,13 +1721,13 @@ function TaskDetailPanel({
 
       {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
         <div className="px-4 py-3">
-          <div className="text-xs text-[#FAFAFA]/65 uppercase tracking-widest mb-1.5">
+          <div className="text-xs text-foreground/65 uppercase tracking-widest mb-1.5">
             Acceptance Criteria
           </div>
           <ul className="space-y-1">
             {task.acceptanceCriteria.map((ac, i) => (
-              <li key={i} className="flex items-start gap-1.5 text-xs text-[#FAFAFA]/60">
-                <span className="text-[#FAFAFA]/30 shrink-0 mt-0.5">·</span>
+              <li key={i} className="flex items-start gap-1.5 text-xs text-foreground/60">
+                <span className="text-foreground/30 shrink-0 mt-0.5">·</span>
                 <span className="leading-snug">{ac}</span>
               </li>
             ))}
@@ -1746,12 +1742,14 @@ function TaskDetailPanel({
 
 function KnowledgeMapPage() {
   const { partner } = useAuth();
+  const taskScopePartnerId = partner?.sharedPartnerId ?? partner?.id ?? null;
   const [entities, setEntities] = useState<Entity[]>([]);
   const [blindspots, setBlindspots] = useState<Blindspot[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   /** Positions snapshot set on expand/collapse click — baked into graphData nodes as fx/fy so d3-force never randomises them */
   const [pinnedPositions, setPinnedPositions] = useState<Map<string, { x: number; y: number }>>(new Map());
   const [focusProduct, setFocusProduct] = useState<string | null>(null);
@@ -1794,7 +1792,7 @@ function KnowledgeMapPage() {
             getAllEntities(),
             getAllBlindspots(),
             getAllRelationships(),
-            getTasks(partner?.id ?? null),
+            getTasks(taskScopePartnerId),
           ]);
 
         setEntities(fetchedEntities);
@@ -1808,7 +1806,7 @@ function KnowledgeMapPage() {
     }
 
     load();
-  }, [partner]);
+  }, [partner, taskScopePartnerId]);
 
   const entityMap = useMemo(
     () => new Map(entities.map((e) => [e.id, e])),
@@ -1819,20 +1817,32 @@ function KnowledgeMapPage() {
   const selectedEntity = selectedId && !isTaskSelected ? entityMap.get(selectedId) ?? null : null;
 
   return (
-    <div className="h-screen flex flex-col bg-[#09090B]">
+    <div className="h-screen flex flex-col bg-background">
       <AppNav />
 
       {loading ? (
         <div className="flex-1 flex items-center justify-center">
-          <span className="text-[#FAFAFA]/40 text-sm">
+          <span className="text-muted-foreground text-sm">
             Loading knowledge map...
           </span>
         </div>
       ) : (
         <div
-          className="flex-1 flex overflow-hidden"
+          className="flex-1 flex overflow-hidden relative"
           style={{ height: "calc(100vh - 48px)" }}
         >
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="md:hidden absolute top-3 left-3 z-40 rounded border border-border bg-card/95 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            Menu
+          </button>
+          {sidebarOpen && (
+            <div
+              className="md:hidden absolute inset-0 z-40 bg-black/45"
+              onClick={() => setSidebarOpen(false)}
+            />
+          )}
           <Sidebar
             entities={entities}
             blindspots={blindspots}
@@ -1841,9 +1851,15 @@ function KnowledgeMapPage() {
             focusProduct={focusProduct}
             setFocusProduct={(id) => {
               setFocusProduct(id);
+              setSidebarOpen(false);
             }}
             expandedModules={expandedModules}
             onToggleModuleType={handleToggleModuleType}
+            className={cn(
+              "absolute inset-y-0 left-0 z-50 transition-transform md:relative md:translate-x-0",
+              sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+            )}
+            onDismiss={() => setSidebarOpen(false)}
           />
           <GraphCanvas
             entities={entities}

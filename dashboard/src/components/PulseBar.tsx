@@ -34,28 +34,28 @@ export function PulseBar({ tasks }: PulseBarProps) {
     {
       label: "Blocked",
       value: blocked,
-      color: blocked > 0 ? "text-red-400" : "text-[#71717A]",
-      bg: blocked > 0 ? "bg-red-900/30" : "bg-[#1F1F23]",
+      color: blocked > 0 ? "text-red-400" : "text-muted-foreground",
+      bg: blocked > 0 ? "bg-red-900/30" : "bg-secondary",
     },
     {
       label: "Overdue",
       value: overdue,
-      color: overdue > 0 ? "text-orange-400" : "text-[#71717A]",
-      bg: overdue > 0 ? "bg-orange-900/30" : "bg-[#1F1F23]",
+      color: overdue > 0 ? "text-orange-400" : "text-muted-foreground",
+      bg: overdue > 0 ? "bg-orange-900/30" : "bg-secondary",
     },
     { label: "Review", value: review, color: "text-purple-400", bg: "bg-purple-900/30" },
   ];
 
   return (
-    <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-4">
-      <div className="grid grid-cols-5 gap-4">
+    <div className="bg-card rounded-lg border border-border p-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 md:gap-4">
         {metrics.map((m) => (
           <div
             key={m.label}
             className={`rounded-lg p-4 text-center ${m.bg}`}
           >
             <div className={`text-2xl font-bold ${m.color}`}>{m.value}</div>
-            <div className="text-xs text-[#71717A] mt-1">{m.label}</div>
+            <div className="text-xs text-muted-foreground mt-1">{m.label}</div>
           </div>
         ))}
       </div>

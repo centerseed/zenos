@@ -10,6 +10,10 @@ import {
 } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import Link from "next/link";
+import {
+  NODE_TYPE_COLORS,
+  NODE_TYPE_LABELS,
+} from "@/lib/constants";
 
 interface NodeDetailSheetProps {
   entity: Entity | null;
@@ -18,14 +22,6 @@ interface NodeDetailSheetProps {
   entities: Entity[];
   onClose: () => void;
 }
-
-const TYPE_BADGE_COLORS: Record<string, string> = {
-  product: "bg-blue-500/20 text-blue-400",
-  module: "bg-purple-500/20 text-purple-400",
-  goal: "bg-emerald-500/20 text-emerald-400",
-  role: "bg-amber-500/20 text-amber-400",
-  project: "bg-indigo-500/20 text-indigo-400",
-};
 
 const STATUS_BADGE_COLORS: Record<string, string> = {
   active: "bg-green-500/20 text-green-400",
@@ -54,21 +50,20 @@ export default function NodeDetailSheet({
     <Sheet open={!!entity} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
-        className="bg-[#111113] border-[#222] text-[#FAFAFA] overflow-y-auto sm:max-w-md"
+        className="bg-card border-border text-foreground overflow-y-auto sm:max-w-md"
       >
         {entity && (
           <>
             <SheetHeader>
-              <SheetTitle className="text-2xl font-bold text-[#FAFAFA]">
+              <SheetTitle className="text-2xl font-bold text-foreground">
                 {entity.name}
               </SheetTitle>
               <SheetDescription className="flex gap-2 mt-1">
                 <Badge
-                  className={
-                    TYPE_BADGE_COLORS[entity.type] ?? "bg-indigo-500/20 text-indigo-400"
-                  }
+                  className="text-foreground"
+                  style={{ backgroundColor: `${NODE_TYPE_COLORS[entity.type] ?? "#6366F1"}33` }}
                 >
-                  {entity.type}
+                  {NODE_TYPE_LABELS[entity.type] ?? entity.type}
                 </Badge>
                 <Badge
                   className={
@@ -86,32 +81,32 @@ export default function NodeDetailSheet({
             <div className="flex flex-col gap-5 px-4 pb-6">
               {/* Summary */}
               <section>
-                <p className="text-sm text-[#FAFAFA]/70 leading-relaxed">
+                <p className="text-sm text-foreground/70 leading-relaxed">
                   {entity.summary}
                 </p>
               </section>
 
               {/* Four-dimensional tags */}
               <section>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-[#FAFAFA]/40 mb-2">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/40 mb-2">
                   Tags
                 </h3>
                 <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
                   <span className="text-blue-400 font-medium">What</span>
-                  <span className="text-[#FAFAFA]/80">{entity.tags.what}</span>
+                  <span className="text-foreground/80">{entity.tags.what}</span>
                   <span className="text-emerald-400 font-medium">Why</span>
-                  <span className="text-[#FAFAFA]/80">{entity.tags.why}</span>
+                  <span className="text-foreground/80">{entity.tags.why}</span>
                   <span className="text-purple-400 font-medium">How</span>
-                  <span className="text-[#FAFAFA]/80">{entity.tags.how}</span>
+                  <span className="text-foreground/80">{entity.tags.how}</span>
                   <span className="text-amber-400 font-medium">Who</span>
-                  <span className="text-[#FAFAFA]/80">{entity.tags.who}</span>
+                  <span className="text-foreground/80">{entity.tags.who}</span>
                 </div>
               </section>
 
               {/* Relationships */}
               {relevantRels.length > 0 && (
                 <section>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#FAFAFA]/40 mb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/40 mb-2">
                     Relationships
                   </h3>
                   <ul className="space-y-1.5">
@@ -124,12 +119,12 @@ export default function NodeDetailSheet({
                       return (
                         <li
                           key={rel.id}
-                          className="flex items-center gap-2 text-sm text-[#FAFAFA]/70"
+                          className="flex items-center gap-2 text-sm text-foreground/70"
                         >
-                          <span className="text-[#FAFAFA]/40 text-xs font-mono">
+                          <span className="text-foreground/40 text-xs font-mono">
                             {rel.type}
                           </span>
-                          <span className="text-[#FAFAFA]/90">
+                          <span className="text-foreground/90">
                             {targetEntity?.name ?? targetId}
                           </span>
                         </li>
@@ -142,7 +137,7 @@ export default function NodeDetailSheet({
               {/* Blindspots */}
               {blindspots.length > 0 && (
                 <section>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[#FAFAFA]/40 mb-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground/40 mb-2">
                     Blindspots
                   </h3>
                   <div className="space-y-2">

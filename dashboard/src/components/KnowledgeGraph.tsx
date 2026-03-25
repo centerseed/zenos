@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import type { Entity, Relationship, Blindspot } from "@/types";
+import {
+  DEFAULT_NODE_COLOR,
+  NODE_TYPE_COLORS,
+  NODE_TYPE_LABELS,
+} from "@/lib/constants";
 
 interface GraphNode {
   id: string;
@@ -26,28 +31,8 @@ interface KnowledgeGraphProps {
   onNodeClick: (entity: Entity) => void;
 }
 
-const TYPE_COLORS: Record<string, string> = {
-  product: "#3B82F6",
-  module: "#8B5CF6",
-  goal: "#10B981",
-  role: "#F59E0B",
-  document: "#06B6D4",
-  project: "#F43F5E",
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  product: "Product",
-  module: "Module",
-  goal: "Goal",
-  role: "Role",
-  document: "Document",
-  project: "Project",
-};
-
-const DEFAULT_COLOR = "#6366F1";
-
 function getTypeColor(type: string): string {
-  return TYPE_COLORS[type] ?? DEFAULT_COLOR;
+  return NODE_TYPE_COLORS[type] ?? DEFAULT_NODE_COLOR;
 }
 
 export default function KnowledgeGraph({
@@ -281,7 +266,7 @@ export default function KnowledgeGraph({
   // Tooltip: show full name + summary on hover
   const nodeLabel = useCallback(
     (node: GraphNode) => {
-      const typeLabel = TYPE_LABELS[node.type] ?? node.type;
+      const typeLabel = NODE_TYPE_LABELS[node.type] ?? node.type;
       return `<div style="background:#111113;border:1px solid #333;border-radius:8px;padding:8px 12px;max-width:280px;font-family:-apple-system,sans-serif;">
         <div style="font-weight:600;font-size:13px;color:#FAFAFA;margin-bottom:4px;">${node.name}</div>
         <div style="font-size:11px;color:#71717A;margin-bottom:4px;">${typeLabel} · ${node.status}</div>
@@ -298,7 +283,7 @@ export default function KnowledgeGraph({
         className="w-full h-full flex items-center justify-center"
         style={{ backgroundColor: "#0A0A0B" }}
       >
-        <span className="text-[#FAFAFA]/40 text-sm">Loading graph...</span>
+        <span className="text-foreground/40 text-sm">Loading graph...</span>
       </div>
     );
   }
@@ -306,10 +291,10 @@ export default function KnowledgeGraph({
   const FG = ForceGraph;
 
   // Legend items
-  const legendItems = Object.entries(TYPE_COLORS).map(([type, color]) => ({
+  const legendItems = Object.entries(NODE_TYPE_COLORS).map(([type, color]) => ({
     type,
     color,
-    label: TYPE_LABELS[type] ?? type,
+    label: NODE_TYPE_LABELS[type] ?? type,
   }));
 
   return (
@@ -353,19 +338,19 @@ export default function KnowledgeGraph({
       />
 
       {/* Legend */}
-      <div className="absolute top-3 right-3 bg-[#111113]/90 border border-[#1F1F23] rounded-lg px-3 py-2 flex flex-col gap-1.5">
+      <div className="absolute top-3 right-3 bg-card/90 border border-border rounded-lg px-3 py-2 flex flex-col gap-1.5">
         {legendItems.map((item) => (
           <div key={item.type} className="flex items-center gap-2">
             <div
               className="w-2.5 h-2.5 rounded-full"
               style={{ backgroundColor: item.color }}
             />
-            <span className="text-[10px] text-[#A1A1AA]">{item.label}</span>
+            <span className="text-[10px] text-muted-foreground">{item.label}</span>
           </div>
         ))}
-        <div className="flex items-center gap-2 mt-0.5 pt-1 border-t border-[#1F1F23]">
+        <div className="flex items-center gap-2 mt-0.5 pt-1 border-t border-border">
           <div className="w-2.5 h-2.5 rounded-full border border-red-500 bg-red-500/30" />
-          <span className="text-[10px] text-[#A1A1AA]">Has Blindspot</span>
+          <span className="text-[10px] text-muted-foreground">Has Blindspot</span>
         </div>
       </div>
     </div>

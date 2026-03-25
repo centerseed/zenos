@@ -26,6 +26,7 @@ const TABS: { key: TabKey; label: string }[] = [
 
 function TasksPage() {
   const { partner, signOut } = useAuth();
+  const taskScopePartnerId = partner?.sharedPartnerId ?? partner?.id ?? null;
   const [viewMode, setViewMode] = useState<ViewMode>("pulse");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
@@ -42,7 +43,7 @@ function TasksPage() {
     async function loadPulseData() {
       try {
         const [fetchedTasks, fetchedEntities, fetchedPartners] = await Promise.all([
-          getTasks(partner?.id ?? null),
+          getTasks(taskScopePartnerId),
           getProjectEntities(),
           getAllPartners(),
         ]);
@@ -59,7 +60,7 @@ function TasksPage() {
     }
 
     loadPulseData();
-  }, [partner]);
+  }, [partner, taskScopePartnerId]);
 
   // Derive kanban tasks from already-loaded tasks (avoids duplicate Firestore fetch)
   const kanbanTasks = useMemo(() => {
@@ -96,17 +97,17 @@ function TasksPage() {
     <div className="min-h-screen">
       <AppNav />
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* View Mode Toggle */}
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-lg font-semibold text-white">Tasks</h2>
-          <div className="flex items-center rounded-lg overflow-hidden border border-[#1F1F23]">
+        <div className="flex items-center justify-between mb-6 gap-3">
+          <h2 className="text-lg font-semibold text-foreground">Tasks</h2>
+          <div className="flex items-center rounded-lg overflow-hidden border border-border">
             <button
               onClick={() => setViewMode("pulse")}
               className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
                 viewMode === "pulse"
-                  ? "bg-white text-[#0A0A0B]"
-                  : "bg-[#111113] text-[#71717A] hover:bg-[#1F1F23]"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-secondary"
               }`}
             >
               Pulse
@@ -115,8 +116,8 @@ function TasksPage() {
               onClick={() => setViewMode("kanban")}
               className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
                 viewMode === "kanban"
-                  ? "bg-white text-[#0A0A0B]"
-                  : "bg-[#111113] text-[#71717A] hover:bg-[#1F1F23]"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-card text-muted-foreground hover:bg-secondary"
               }`}
             >
               Kanban
@@ -128,7 +129,7 @@ function TasksPage() {
         {viewMode === "pulse" && (
           <>
             {loading ? (
-              <div className="text-[#71717A] text-sm">Loading pulse data...</div>
+              <div className="text-muted-foreground text-sm">Loading pulse data...</div>
             ) : (
               <div className="space-y-6">
                 <PulseBar tasks={tasks} />
@@ -144,7 +145,7 @@ function TasksPage() {
         {viewMode === "kanban" && (
           <>
             {/* Tabs */}
-            <div className="flex items-center gap-1 mb-4 border-b border-[#1F1F23]">
+            <div className="flex items-center gap-1 mb-4 border-b border-border overflow-x-auto">
               {TABS.map((tab) => (
                 <button
                   key={tab.key}
@@ -152,7 +153,7 @@ function TasksPage() {
                   className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors ${
                     activeTab === tab.key
                       ? "border-blue-500 text-blue-400"
-                      : "border-transparent text-[#71717A] hover:text-white"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {tab.label}
@@ -172,10 +173,10 @@ function TasksPage() {
 
             {/* Board */}
             {loading ? (
-              <div className="text-[#71717A] text-sm">Loading tasks...</div>
+              <div className="text-muted-foreground text-sm">Loading tasks...</div>
             ) : filteredKanbanTasks.length === 0 ? (
-              <div className="text-center py-12 bg-[#111113] rounded-lg border border-[#1F1F23]">
-                <p className="text-[#71717A]">
+              <div className="text-center py-12 bg-card rounded-lg border border-border">
+                <p className="text-muted-foreground">
                   No tasks yet. Create tasks via MCP tools in Claude Code.
                 </p>
               </div>
