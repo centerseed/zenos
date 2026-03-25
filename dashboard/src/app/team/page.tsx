@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import { getAuthInstance } from "@/lib/firebase";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
+import { LoadingState } from "@/components/LoadingState";
 import { getAllPartners } from "@/lib/firestore";
 import type { Partner } from "@/types";
 
@@ -162,7 +163,7 @@ function TeamPage() {
     <div className="min-h-screen">
       <AppNav />
 
-      <main className="max-w-7xl mx-auto px-6 py-8">
+      <main id="main-content" className="max-w-7xl mx-auto px-6 py-8">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h2 className="text-lg font-semibold text-white">Team</h2>
@@ -182,11 +183,13 @@ function TeamPage() {
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
               placeholder="email@example.com"
+              aria-label="Invite member email"
               required
               className="flex-1 bg-[#0A0A0B] border border-[#1F1F23] rounded-lg px-4 py-2 text-sm text-white placeholder-[#71717A] focus:outline-none focus:border-[#3B82F6] transition-colors"
             />
             <button
               type="submit"
+              aria-label="Send invite"
               disabled={inviting || !inviteEmail.trim()}
               className="bg-[#3B82F6] hover:bg-[#2563EB] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -206,7 +209,7 @@ function TeamPage() {
 
         {/* Partner List */}
         {loading ? (
-          <div className="text-[#71717A] text-sm">Loading team members...</div>
+          <LoadingState label="Loading team members..." />
         ) : partners.length === 0 ? (
           <div className="text-center py-12 bg-[#111113] rounded-lg border border-[#1F1F23]">
             <p className="text-[#71717A]">No team members yet.</p>
@@ -270,6 +273,7 @@ function TeamPage() {
                             {p.status !== "invited" && (
                               <button
                                 onClick={() => handleRoleChange(p, !p.isAdmin)}
+                                aria-label={p.isAdmin ? `Set ${p.email} as member` : `Set ${p.email} as admin`}
                                 disabled={isLoading}
                                 className="text-xs text-[#A1A1AA] hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
@@ -279,6 +283,7 @@ function TeamPage() {
                             {p.status === "active" && (
                               <button
                                 onClick={() => handleStatusChange(p, "suspended")}
+                                aria-label={`Suspend ${p.email}`}
                                 disabled={isLoading}
                                 className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
@@ -288,6 +293,7 @@ function TeamPage() {
                             {p.status === "suspended" && (
                               <button
                                 onClick={() => handleStatusChange(p, "active")}
+                                aria-label={`Activate ${p.email}`}
                                 disabled={isLoading}
                                 className="text-xs text-green-400 hover:text-green-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >

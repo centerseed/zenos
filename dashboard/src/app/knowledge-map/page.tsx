@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
+import { LoadingState } from "@/components/LoadingState";
 import {
   getAllEntities,
   getAllBlindspots,
@@ -249,6 +250,7 @@ function EntityChip({
         ev.stopPropagation();
         onClick(entity);
       }}
+      aria-label={`Open ${entity.name}`}
       className="inline-flex items-center gap-1.5 rounded-md border border-border/40 bg-foreground/5 hover:bg-foreground/10 transition-colors cursor-pointer px-1.5 py-0.5 text-xs"
     >
       <span
@@ -350,6 +352,7 @@ function Sidebar({
           <div className="flex justify-end mb-2 md:hidden">
             <button
               onClick={onDismiss}
+              aria-label="Close sidebar"
               className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
             >
               Close
@@ -379,6 +382,7 @@ function Sidebar({
         </div>
         <button
           onClick={() => setFocusProduct(null)}
+          aria-label="Show all products"
           className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors cursor-pointer mb-0.5 ${
             focusProduct === null
               ? "bg-foreground/10 text-foreground/70"
@@ -401,6 +405,7 @@ function Sidebar({
                 onClick={() =>
                   setFocusProduct(focusProduct === p.id ? null : p.id)
                 }
+                aria-label={focusProduct === p.id ? `Clear focus from ${p.name}` : `Focus ${p.name}`}
                 className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors cursor-pointer ${
                   focusProduct === p.id
                     ? "bg-blue-500/15 text-blue-300"
@@ -414,7 +419,10 @@ function Sidebar({
                 <span className="flex-1 text-left truncate">{p.name}</span>
                 <span className="text-xs text-foreground/65">{moduleCount}</span>
                 {pBs.length > 0 && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                  <span className="inline-flex items-center gap-1 shrink-0">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                    <span className="sr-only">Has open blindspots</span>
+                  </span>
                 )}
               </button>
               {/* Module children */}
@@ -431,6 +439,7 @@ function Sidebar({
                             e.stopPropagation();
                             setPopoverModuleId(popoverModuleId === m.id ? null : m.id);
                           }}
+                          aria-label={`Toggle expansion options for ${m.name}`}
                           className="w-4 h-4 flex items-center justify-center text-foreground/40 hover:text-foreground/70 cursor-pointer shrink-0"
                           title="Expand L3 nodes"
                         >
@@ -553,6 +562,9 @@ function Sidebar({
                       : "bg-amber-400/40"
                   }`}
                 />
+                <span className="sr-only">
+                  {bs.severity === "red" ? "Critical blindspot" : "Warning blindspot"}
+                </span>
                 <span className="text-xs text-foreground/60 leading-snug line-clamp-2">
                   {bs.description}
                 </span>
@@ -595,6 +607,7 @@ function Sidebar({
           ].map((s) => (
             <div key={s.l} className="flex items-center gap-1.5">
               <span className={`w-1.5 h-2.5 rounded-sm ${s.color}`} />
+              <span className="sr-only">{s.l} tasks</span>
               <span className="text-xs text-foreground/60 flex-1">{s.l}</span>
               <span className="text-xs text-foreground/65">{s.c}</span>
             </div>
@@ -1118,16 +1131,15 @@ function GraphCanvas({
     [hoveredNode, selectedId]
   );
 
+  const graphA11ySummary = useMemo(() => {
+    const totalNodes = graphData.nodes.length;
+    const totalLinks = graphData.links.length;
+    const openBlindspots = blindspots.filter((b) => b.status === "open").length;
+    return `Knowledge graph with ${totalNodes} nodes, ${totalLinks} relationships, and ${openBlindspots} open blindspots.`;
+  }, [graphData.nodes.length, graphData.links.length, blindspots]);
 
   if (!ForceGraph) {
-    return (
-      <div
-        ref={containerRef}
-        className="flex-1 flex items-center justify-center bg-background"
-      >
-        <span className="text-foreground/50 text-sm">Loading graph...</span>
-      </div>
-    );
+    return <LoadingState variant="graph" label="Loading graph..." className="flex-1" />;
   }
 
   const FG = ForceGraph;
@@ -1135,7 +1147,13 @@ function GraphCanvas({
     <div
       ref={containerRef}
       className="flex-1 relative bg-background overflow-hidden"
+      role="img"
+      aria-label={graphA11ySummary}
+      aria-describedby="knowledge-graph-summary"
     >
+      <p id="knowledge-graph-summary" className="sr-only">
+        {graphA11ySummary}
+      </p>
       <FG
         ref={fgRef}
         graphData={graphData}
@@ -1415,10 +1433,11 @@ function DetailSheet({
               {NODE_TYPE_LABELS[entity.type] ?? entity.type}
             </span>
           </div>
-          <button
-            onClick={onClose}
-            className="text-foreground/65 hover:text-foreground/90 text-xs cursor-pointer"
-          >
+            <button
+              onClick={onClose}
+              aria-label="Close node details"
+              className="text-foreground/65 hover:text-foreground/90 text-xs cursor-pointer"
+            >
             ✕
           </button>
         </div>
@@ -1553,6 +1572,7 @@ function DetailSheet({
               <button
                 key={d.id}
                 onClick={() => onSelect(d)}
+                aria-label={`Open document ${d.name}`}
                 className="flex items-center gap-1.5 py-0.5 text-xs w-full text-left hover:bg-foreground/5 rounded px-1 cursor-pointer"
               >
                 <span className="text-cyan-400/60 shrink-0">
@@ -1673,6 +1693,7 @@ function TaskDetailPanel({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close task details"
             className="text-foreground/65 hover:text-foreground/90 text-xs cursor-pointer"
           >
             ✕
@@ -1821,18 +1842,16 @@ function KnowledgeMapPage() {
       <AppNav />
 
       {loading ? (
-        <div className="flex-1 flex items-center justify-center">
-          <span className="text-muted-foreground text-sm">
-            Loading knowledge map...
-          </span>
-        </div>
+        <LoadingState variant="page" label="Loading knowledge map..." />
       ) : (
         <div
+          id="main-content"
           className="flex-1 flex overflow-hidden relative"
           style={{ height: "calc(100vh - 48px)" }}
         >
           <button
             onClick={() => setSidebarOpen(true)}
+            aria-label="Open sidebar menu"
             className="md:hidden absolute top-3 left-3 z-40 rounded border border-border bg-card/95 px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
             Menu

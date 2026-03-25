@@ -16,23 +16,23 @@ function SetupPage() {
     <div className="min-h-screen">
       <AppNav />
 
-      <main className="max-w-3xl mx-auto px-6 py-8">
-        <h2 className="text-2xl font-bold text-white mb-2">
+      <main id="main-content" className="max-w-3xl mx-auto px-6 py-8">
+        <h2 className="text-2xl font-bold text-foreground mb-2">
           Set up your AI Agent
         </h2>
-        <p className="text-[#71717A] mb-8">
+        <p className="text-muted-foreground mb-8">
           Connect your Claude Code to ZenOS so your AI agent has full context
           about your projects.
         </p>
 
         {/* MCP Config */}
-        <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6 mb-8">
+        <div className="bg-card rounded-lg border border-border p-6 mb-8">
           <McpConfigBlock apiKey={partner.apiKey} />
         </div>
 
         {/* Steps */}
-        <div className="bg-[#111113] rounded-lg border border-[#1F1F23] p-6">
-          <h3 className="font-semibold text-white mb-4">
+        <div className="bg-card rounded-lg border border-border p-6">
+          <h3 className="font-semibold text-foreground mb-4">
             Setup steps
           </h3>
           <ol className="space-y-4">
@@ -164,6 +164,7 @@ function SkillInstallBlock() {
         <span className="text-xs text-[#71717A]">Paste this into Claude Code</span>
         <button
           onClick={handleCopy}
+          aria-label="Copy skill install prompt"
           className="text-xs text-blue-400 hover:text-blue-300 cursor-pointer"
         >
           {copied ? "Copied!" : "Copy"}

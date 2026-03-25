@@ -19,7 +19,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="zh-TW" className={cn("dark font-sans", geist.variable)}>
-      <body className="bg-[#0A0A0B] text-[#FAFAFA] antialiased">
+      <body className="bg-background text-foreground antialiased">
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] rounded bg-card px-3 py-2 text-sm text-foreground ring-1 ring-border"
+        >
+          Skip to content
+        </a>
         <AuthProvider>
           <TooltipProvider>{children}</TooltipProvider>
         </AuthProvider>

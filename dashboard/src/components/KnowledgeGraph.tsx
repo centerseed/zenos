@@ -7,6 +7,7 @@ import {
   NODE_TYPE_COLORS,
   NODE_TYPE_LABELS,
 } from "@/lib/constants";
+import { LoadingState } from "@/components/LoadingState";
 
 interface GraphNode {
   id: string;
@@ -276,16 +277,15 @@ export default function KnowledgeGraph({
     []
   );
 
+  const graphA11ySummary = useMemo(() => {
+    const totalNodes = graphData.nodes.length;
+    const totalLinks = graphData.links.length;
+    const blindspotCount = graphData.nodes.filter((node) => node.hasBlindspot).length;
+    return `Knowledge graph preview with ${totalNodes} nodes, ${totalLinks} links, and ${blindspotCount} nodes that have blindspots.`;
+  }, [graphData]);
+
   if (!mounted || !ForceGraph) {
-    return (
-      <div
-        ref={containerRef}
-        className="w-full h-full flex items-center justify-center"
-        style={{ backgroundColor: "#0A0A0B" }}
-      >
-        <span className="text-foreground/40 text-sm">Loading graph...</span>
-      </div>
-    );
+    return <LoadingState variant="graph" label="Loading graph..." />;
   }
 
   const FG = ForceGraph;
@@ -298,7 +298,16 @@ export default function KnowledgeGraph({
   }));
 
   return (
-    <div ref={containerRef} className="w-full h-full relative">
+    <div
+      ref={containerRef}
+      className="w-full h-full relative"
+      role="img"
+      aria-label={graphA11ySummary}
+      aria-describedby="knowledge-graph-preview-summary"
+    >
+      <p id="knowledge-graph-preview-summary" className="sr-only">
+        {graphA11ySummary}
+      </p>
       <FG
         ref={fgRef}
         graphData={graphData}

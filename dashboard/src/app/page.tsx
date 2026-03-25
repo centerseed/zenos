@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { LoadingState } from "@/components/LoadingState";
 
 export default function Page() {
   const router = useRouter();
@@ -11,7 +12,7 @@ export default function Page() {
 
   return (
     <div className="min-h-screen flex items-center justify-center">
-      <div className="text-[#71717A]">Loading...</div>
+      <LoadingState label="Redirecting..." />
     </div>
   );
 }

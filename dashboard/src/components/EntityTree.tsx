@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Entity, Relationship } from "@/types";
 import { getRelationships } from "@/lib/firestore";
+import { LoadingState } from "@/components/LoadingState";
 
 interface EntityTreeProps {
   entities: Entity[];
@@ -21,7 +22,7 @@ const statusColors: Record<string, string> = {
   active: "bg-green-900/50 text-green-400",
   paused: "bg-yellow-900/50 text-yellow-400",
   planned: "bg-blue-900/50 text-blue-400",
-  completed: "bg-[#1F1F23] text-[#71717A]",
+  completed: "bg-secondary text-muted-foreground",
 };
 
 function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Entity[] }) {
@@ -43,17 +44,18 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
     allEntities.find((e) => e.id === id)?.name ?? id;
 
   return (
-    <div className="border border-[#1F1F23] rounded-lg bg-[#111113]">
+    <div className="border border-border rounded-lg bg-card">
       <button
         onClick={handleToggle}
-        className="w-full text-left p-4 hover:bg-[#1F1F23] transition-colors cursor-pointer"
+        aria-label={`${expanded ? "Collapse" : "Expand"} ${entity.name}`}
+        className="w-full text-left p-4 hover:bg-secondary transition-colors cursor-pointer"
       >
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-2">
             <span>{typeIcons[entity.type] ?? "📄"}</span>
             <div>
-              <h4 className="font-medium text-white">{entity.name}</h4>
-              <p className="text-sm text-[#71717A] mt-1">{entity.summary}</p>
+              <h4 className="font-medium text-foreground">{entity.name}</h4>
+              <p className="text-sm text-muted-foreground mt-1">{entity.summary}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -62,7 +64,7 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
             >
               {entity.status}
             </span>
-            <span className="text-[#71717A] text-sm">
+            <span className="text-muted-foreground text-sm">
               {expanded ? "▲" : "▼"}
             </span>
           </div>
@@ -70,20 +72,21 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
       </button>
 
       {expanded && (
-        <div className="border-t border-[#1F1F23] p-4 bg-[#0A0A0B]">
+        <div className="border-t border-border p-4 bg-background">
           {loadingRels ? (
-            <p className="text-sm text-[#71717A]">Loading relationships...</p>
+            <LoadingState label="Loading relationships..." />
           ) : relationships.length === 0 ? (
-            <p className="text-sm text-[#71717A]">No relationships</p>
+            <p className="text-sm text-muted-foreground">No relationships</p>
           ) : (
             <ul className="space-y-2">
-              {relationships.map((rel) => (
-                <li key={rel.id} className="text-sm text-[#FAFAFA] flex items-center gap-2">
-                  <span className="text-[#71717A]">{rel.type.replace(/_/g, " ")}</span>
+              {relationships.map((rel, idx) => (
+                <li key={rel.id} className="text-sm text-foreground flex items-center gap-2">
+                  <span className="text-muted-foreground">{rel.type.replace(/_/g, " ")}</span>
                   <span className="font-medium">{getEntityName(rel.targetId)}</span>
                   {rel.description && (
-                    <span className="text-[#71717A]">— {rel.description}</span>
+                    <span className="text-muted-foreground">— {rel.description}</span>
                   )}
+                  <span className="sr-only">Relationship {idx + 1}</span>
                 </li>
               ))}
             </ul>
@@ -114,7 +117,7 @@ export function EntityTree({ entities, allEntities }: EntityTreeProps) {
         if (!items || items.length === 0) return null;
         return (
           <div key={type}>
-            <h3 className="text-sm font-medium text-[#71717A] uppercase tracking-wide mb-3">
+            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">
               {typeIcons[type]} {type}s ({items.length})
             </h3>
             <div className="space-y-2">

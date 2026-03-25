@@ -11,6 +11,7 @@ import { PulseBar } from "@/components/PulseBar";
 import { ProjectProgress } from "@/components/ProjectProgress";
 import { PeopleMatrix } from "@/components/PeopleMatrix";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { LoadingState } from "@/components/LoadingState";
 import { getTasks, getProjectEntities, getAllPartners } from "@/lib/firestore";
 import type { Task, TaskStatus, TaskPriority, Entity, Partner } from "@/types";
 
@@ -97,13 +98,14 @@ function TasksPage() {
     <div className="min-h-screen">
       <AppNav />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <main id="main-content" className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* View Mode Toggle */}
         <div className="flex items-center justify-between mb-6 gap-3">
           <h2 className="text-lg font-semibold text-foreground">Tasks</h2>
           <div className="flex items-center rounded-lg overflow-hidden border border-border">
             <button
               onClick={() => setViewMode("pulse")}
+              aria-label="Switch to pulse view"
               className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
                 viewMode === "pulse"
                   ? "bg-primary text-primary-foreground"
@@ -114,6 +116,7 @@ function TasksPage() {
             </button>
             <button
               onClick={() => setViewMode("kanban")}
+              aria-label="Switch to kanban view"
               className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
                 viewMode === "kanban"
                   ? "bg-primary text-primary-foreground"
@@ -129,7 +132,7 @@ function TasksPage() {
         {viewMode === "pulse" && (
           <>
             {loading ? (
-              <div className="text-muted-foreground text-sm">Loading pulse data...</div>
+              <LoadingState label="Loading pulse data..." />
             ) : (
               <div className="space-y-6">
                 <PulseBar tasks={tasks} />
@@ -150,6 +153,7 @@ function TasksPage() {
                 <button
                   key={tab.key}
                   onClick={() => setActiveTab(tab.key)}
+                  aria-label={`Filter tasks by ${tab.label}`}
                   className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors ${
                     activeTab === tab.key
                       ? "border-blue-500 text-blue-400"
@@ -173,7 +177,7 @@ function TasksPage() {
 
             {/* Board */}
             {loading ? (
-              <div className="text-muted-foreground text-sm">Loading tasks...</div>
+              <LoadingState label="Loading tasks..." />
             ) : filteredKanbanTasks.length === 0 ? (
               <div className="text-center py-12 bg-card rounded-lg border border-border">
                 <p className="text-muted-foreground">

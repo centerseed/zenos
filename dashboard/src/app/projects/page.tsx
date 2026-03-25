@@ -9,6 +9,8 @@ import { AppNav } from "@/components/AppNav";
 import { EntityTree } from "@/components/EntityTree";
 import { BlindspotAlert } from "@/components/BlindspotAlert";
 import { PromptSuggestions } from "@/components/PromptSuggestions";
+import { ProjectCard } from "@/components/ProjectCard";
+import { LoadingState } from "@/components/LoadingState";
 import {
   getEntity,
   getChildEntities,
@@ -23,12 +25,20 @@ import type { Entity, Blindspot } from "@/types";
 function ProjectList() {
   const { partner } = useAuth();
   const [products, setProducts] = useState<Entity[]>([]);
+  const [moduleCounts, setModuleCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!partner) return;
-    getProjectEntities().then((entities) => {
+    getProjectEntities().then(async (entities) => {
       setProducts(entities);
+      const counts = await Promise.all(
+        entities.map(async (entity) => {
+          const children = await getChildEntities(entity.id);
+          return [entity.id, children.filter((child) => child.type === "module").length] as const;
+        })
+      );
+      setModuleCounts(Object.fromEntries(counts));
       setLoading(false);
     });
   }, [partner]);
@@ -38,7 +48,7 @@ function ProjectList() {
       <div className="min-h-screen flex flex-col">
         <AppNav />
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-[#71717A]">Loading...</div>
+          <LoadingState label="Loading projects..." />
         </div>
       </div>
     );
@@ -47,32 +57,18 @@ function ProjectList() {
   return (
     <div className="min-h-screen flex flex-col">
       <AppNav />
-      <main className="max-w-5xl mx-auto px-6 py-8 w-full">
-        <h1 className="text-2xl font-bold text-white mb-6">Projects</h1>
+      <main id="main-content" className="max-w-5xl mx-auto px-6 py-8 w-full">
+        <h1 className="text-2xl font-bold text-foreground mb-6">Projects</h1>
         {products.length === 0 ? (
-          <p className="text-[#71717A] text-sm">No projects yet.</p>
+          <p className="text-muted-foreground text-sm">No projects yet.</p>
         ) : (
           <div className="grid gap-3">
             {products.map((p) => (
-              <Link
+              <ProjectCard
                 key={p.id}
-                href={`/projects?id=${p.id}`}
-                className="block border border-[#1F1F23] rounded-lg px-5 py-4 hover:bg-[#1F1F23]/50 transition-colors"
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-base font-semibold text-white">
-                      {p.name}
-                    </h2>
-                    <p className="text-sm text-[#71717A] mt-0.5 line-clamp-1">
-                      {p.summary}
-                    </p>
-                  </div>
-                  <span className="text-xs text-[#71717A] shrink-0 ml-4">
-                    {p.status}
-                  </span>
-                </div>
-              </Link>
+                entity={p}
+                moduleCount={moduleCounts[p.id] ?? 0}
+              />
             ))}
           </div>
         )}
@@ -125,7 +121,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
       <div className="min-h-screen flex flex-col">
         <AppNav />
         <div className="flex-1 flex items-center justify-center">
-          <div className="text-[#71717A]">Loading...</div>
+          <LoadingState label="Loading project details..." />
         </div>
       </div>
     );
@@ -138,7 +134,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   return (
     <div className="min-h-screen flex flex-col">
       <AppNav />
-      <main className="max-w-5xl mx-auto px-6 py-8 space-y-8 w-full">
+      <main id="main-content" className="max-w-5xl mx-auto px-6 py-8 space-y-8 w-full">
         {criticalBlindspots.length > 0 && (
           <div className="bg-red-900/30 border border-red-800 rounded-lg p-4">
             <p className="text-sm font-medium text-red-400">
@@ -148,11 +144,11 @@ function ProjectDetail({ projectId }: { projectId: string }) {
         )}
 
         <div>
-          <h2 className="text-2xl font-bold text-white mb-1">
+          <h2 className="text-2xl font-bold text-foreground mb-1">
             {project.name}
           </h2>
-          <p className="text-[#71717A] mb-4">{project.summary}</p>
-          <div className="flex gap-6 text-sm text-[#71717A]">
+          <p className="text-muted-foreground mb-4">{project.summary}</p>
+          <div className="flex gap-6 text-sm text-muted-foreground">
             <span>{children.filter((c) => c.type === "module").length} modules</span>
             <span>{documentCount} documents</span>
             <span>{blindspots.length} blindspots</span>
@@ -203,7 +199,7 @@ function ProjectPageInner() {
 export default function Page() {
   return (
     <AuthGuard>
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><div className="text-[#71717A]">Loading...</div></div>}>
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><LoadingState label="Loading projects..." /></div>}>
         <ProjectPageInner />
       </Suspense>
     </AuthGuard>

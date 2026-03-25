@@ -66,6 +66,7 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
           </code>
           <button
             onClick={() => setShowKey(!showKey)}
+            aria-label={showKey ? "Hide API key" : "Show API key"}
             className="text-sm text-blue-400 hover:underline cursor-pointer whitespace-nowrap"
           >
             {showKey ? "Hide" : "Show"}
@@ -83,6 +84,7 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
+              aria-label={`Select ${tab.label} config`}
               className={`px-4 py-2 text-sm cursor-pointer ${
                 activeTab === tab.id
                   ? "border-b-2 border-blue-500 text-blue-400 font-medium"
@@ -102,6 +104,7 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
         </pre>
         <button
           onClick={handleCopy}
+          aria-label="Copy MCP config"
           className="absolute top-3 right-3 bg-[#1F1F23] hover:bg-[#2A2A2E] text-white text-xs px-3 py-1.5 rounded cursor-pointer transition-colors"
         >
           {copied ? "Copied!" : "Copy"}

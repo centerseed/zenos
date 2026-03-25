@@ -3,6 +3,7 @@
 import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { LoadingState } from "@/components/LoadingState";
 
 const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
 
@@ -50,8 +51,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="text-[#71717A]">Loading...</div>
-          <div className="text-[#71717A]/50 text-xs mt-2">
+          <LoadingState label="Loading account..." />
+          <div className="text-muted-foreground/60 text-xs mt-2">
             auth: {user ? "有用戶" : "無用戶"} | partner: {partner ? "已載入" : "未載入"} | error: {error || "無"}
           </div>
         </div>
@@ -64,15 +65,16 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   // Show activating state for invited partners
   if (partner?.status === "invited" || activating) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0A0A0B]">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center max-w-md p-8">
           {activationError ? (
             <>
               <div className="text-4xl mb-4">&#x26A0;&#xFE0F;</div>
-              <h2 className="text-xl font-semibold text-white mb-2">啟用失敗</h2>
-              <p className="text-[#71717A] mb-4">{activationError}</p>
+              <h2 className="text-xl font-semibold text-foreground mb-2">啟用失敗</h2>
+              <p className="text-muted-foreground mb-4">{activationError}</p>
               <button
                 onClick={() => signOut()}
+                aria-label="Sign out and use another account"
                 className="text-sm text-blue-400 hover:underline cursor-pointer"
               >
                 使用其他帳號登入
@@ -80,7 +82,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
             </>
           ) : (
             <>
-              <div className="text-[#71717A]">正在啟用帳號...</div>
+              <LoadingState label="正在啟用帳號..." />
             </>
           )}
         </div>
@@ -91,18 +93,19 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   // Suspended partner
   if (partner?.status === "suspended") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0A0A0B]">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center max-w-md p-8">
           <div className="text-4xl mb-4">&#x1F6AB;</div>
-          <h2 className="text-xl font-semibold text-white mb-2">
+          <h2 className="text-xl font-semibold text-foreground mb-2">
             帳號已停用
           </h2>
-          <p className="text-[#71717A] mb-6">
+          <p className="text-muted-foreground mb-6">
             你的帳號已被管理員停用。如需恢復存取，請聯繫管理員。
           </p>
-          <p className="text-sm text-[#71717A] mb-4">{user.email}</p>
+          <p className="text-sm text-muted-foreground mb-4">{user.email}</p>
           <button
             onClick={() => signOut()}
+            aria-label="Sign out and use another account"
             className="text-sm text-blue-400 hover:underline cursor-pointer"
           >
             使用其他帳號登入
@@ -114,18 +117,19 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (error === "NO_PARTNER" || (!partner && !loading)) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0A0A0B]">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center max-w-md p-8">
           <div className="text-4xl mb-4">&#x1F512;</div>
-          <h2 className="text-xl font-semibold text-white mb-2">
+          <h2 className="text-xl font-semibold text-foreground mb-2">
             尚未開通權限
           </h2>
-          <p className="text-[#71717A] mb-6">
+          <p className="text-muted-foreground mb-6">
             你的帳號尚未被授權使用 ZenOS Dashboard。請聯繫管理員開通權限。
           </p>
-          <p className="text-sm text-[#71717A] mb-4">{user.email}</p>
+          <p className="text-sm text-muted-foreground mb-4">{user.email}</p>
           <button
             onClick={() => signOut()}
+            aria-label="Sign out and use another account"
             className="text-sm text-blue-400 hover:underline cursor-pointer"
           >
             使用其他帳號登入
@@ -137,13 +141,13 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (error === "FETCH_FAILED") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0A0A0B]">
+      <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center max-w-md p-8">
           <div className="text-4xl mb-4">&#x26A0;&#xFE0F;</div>
-          <h2 className="text-xl font-semibold text-white mb-2">
+          <h2 className="text-xl font-semibold text-foreground mb-2">
             載入失敗
           </h2>
-          <p className="text-[#71717A]">無法連線到 ZenOS，請稍後再試。</p>
+          <p className="text-muted-foreground">無法連線到 ZenOS，請稍後再試。</p>
         </div>
       </div>
     );
