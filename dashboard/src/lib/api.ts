@@ -12,7 +12,7 @@ const DATE_FIELDS = new Set([
   "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
 ]);
 
-/** Convert ISO date strings to Date objects in-place */
+/** Recursively convert ISO date strings to Date objects in-place */
 function hydrateDates<T>(obj: T): T {
   if (obj === null || obj === undefined) return obj;
   if (Array.isArray(obj)) {
@@ -23,6 +23,8 @@ function hydrateDates<T>(obj: T): T {
     for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
       if (DATE_FIELDS.has(key) && typeof val === "string") {
         (obj as Record<string, unknown>)[key] = new Date(val);
+      } else if (val !== null && typeof val === "object") {
+        hydrateDates(val);
       }
     }
   }
