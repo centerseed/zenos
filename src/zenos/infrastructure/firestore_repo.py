@@ -543,6 +543,12 @@ class FirestoreProtocolRepository:
         self._db = db or get_db()
         self._col = self._db.collection("protocols")
 
+    async def get_by_id(self, protocol_id: str) -> OntologyProtocol | None:
+        snap = await self._col.document(protocol_id).get()
+        if not snap.exists:
+            return None
+        return _dict_to_protocol(snap.id, snap.to_dict())  # type: ignore[arg-type]
+
     async def get_by_entity(self, entity_id: str) -> OntologyProtocol | None:
         query = self._col.where("entityId", "==", entity_id).limit(1)
         async for doc in query.stream():

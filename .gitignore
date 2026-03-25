@@ -9,6 +9,7 @@ dist/
 .env
 
 # Claude Code (contains tokens)
+.mcp.json
 .claude/mcp.json
 .claude/settings.local.json
 

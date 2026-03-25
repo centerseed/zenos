@@ -416,6 +416,13 @@ class TestAnalyzeBlindspots:
         priority_blind = [b for b in result if "priority" in b.description.lower() and "unclear" in b.description.lower()]
         assert len(priority_blind) == 0
 
+    def test_active_l2_missing_impacts_emits_repair_blindspot(self):
+        mod = _make_entity(name="Action Layer", entity_type=EntityType.MODULE, entity_id="m1")
+        result = analyze_blindspots([mod], [], [])
+        repair_blind = [b for b in result if "no concrete impacts path" in b.description.lower()]
+        assert len(repair_blind) >= 1
+        assert "降級為 L3" in repair_blind[0].suggested_action
+
 
 # ──────────────────────────────────────────────
 # 5. run_quality_check
@@ -645,11 +652,11 @@ class TestRunQualityCheckL2:
         failed_names = [f.name for f in report.failed]
         assert "l2_impacts_coverage" in failed_names
 
-    def test_exactly_50_percent_without_rels_passes_coverage(self):
-        """Exactly 50% of modules without concrete impacts passes the coverage check."""
+    def test_any_active_l2_missing_impacts_fails_coverage(self):
+        """Any active L2 without concrete impacts should fail hard-rule check."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
         m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
-        # m1 has impacts, m2 does not — 50% without = not > 50%, passes
+        # m1 has impacts, m2 does not — should fail under hard rule
         rel = Relationship(
             id="r1",
             source_entity_id="m1",
@@ -658,8 +665,8 @@ class TestRunQualityCheckL2:
             description="A 改了閾值→B 的計算邏輯要跟著看",
         )
         report = run_quality_check([m1, m2], [], [], [], [rel])
-        passed_names = [p.name for p in report.passed]
-        assert "l2_impacts_coverage" in passed_names
+        failed_names = [f.name for f in report.failed]
+        assert "l2_impacts_coverage" in failed_names
 
     def test_all_modules_with_rels_passes_coverage(self):
         """All module entities covered by concrete impacts passes coverage check."""
@@ -695,6 +702,21 @@ class TestRunQualityCheckL2:
         """When there are no module entities, coverage check passes trivially."""
         entity = _make_entity(entity_type=EntityType.PRODUCT)
         report = run_quality_check([entity], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_impacts_coverage" in passed_names
+
+    def test_inactive_l2_not_counted_in_hard_rule(self):
+        """Paused/completed L2 should not trigger active L2 impacts hard-rule failure."""
+        active = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1", status=EntityStatus.ACTIVE)
+        paused = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2", status=EntityStatus.PAUSED)
+        rel = Relationship(
+            id="r1",
+            source_entity_id="m1",
+            target_id="m1",
+            type=RelationshipType.IMPACTS,
+            description="A 改了策略→B 的執行規則要跟著看",
+        )
+        report = run_quality_check([active, paused], [], [], [], [rel])
         passed_names = [p.name for p in report.passed]
         assert "l2_impacts_coverage" in passed_names
 

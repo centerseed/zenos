@@ -607,6 +607,22 @@ def analyze_blindspots(
                 ),
             ))
 
+    # --- 8. Active L2 missing concrete impacts ---
+    # Hard governance defect: active L2 without impacts should enter repair flow.
+    missing_impacts_modules = _find_active_l2_without_concrete_impacts(entities, relationships)
+    for mod in missing_impacts_modules:
+        blindspots.append(Blindspot(
+            description=(
+                f"Active L2 '{mod.name}' has no concrete impacts path "
+                f"(A 改了什麼→B 的什麼要跟著看)."
+            ),
+            severity=Severity.RED,
+            related_entity_ids=[mod.id] if mod.id else [],
+            suggested_action=(
+                "補 impacts；若補不出則降級為 L3；或重新切粒度為可獨立改變的 L2"
+            ),
+        ))
+
     return blindspots
 
 
@@ -625,6 +641,41 @@ _L2_TECH_TERMS: list[str] = [
 
 # Compiled regex for sentence-ending punctuation (Chinese + Latin).
 _SENTENCE_END_RE = re.compile(r"[。！？.!?]")
+
+
+def _is_concrete_impacts_description(description: str) -> bool:
+    """Return True when impacts description encodes a concrete change path."""
+    desc = (description or "").strip()
+    if not desc:
+        return False
+    if "→" in desc:
+        left, right = desc.split("→", 1)
+        return bool(left.strip()) and bool(right.strip())
+    if "->" in desc:
+        left, right = desc.split("->", 1)
+        return bool(left.strip()) and bool(right.strip())
+    return False
+
+
+def _find_active_l2_without_concrete_impacts(
+    entities: list[Entity],
+    relationships: list[Relationship],
+) -> list[Entity]:
+    """Find active L2 entities that have no concrete impacts relationship."""
+    active_modules = [
+        e for e in entities
+        if e.type == EntityType.MODULE and e.status == EntityStatus.ACTIVE and e.id
+    ]
+    impact_entity_ids = set()
+    for rel in relationships:
+        if rel.type != RelationshipType.IMPACTS:
+            continue
+        if not _is_concrete_impacts_description(rel.description):
+            continue
+        impact_entity_ids.add(rel.source_entity_id)
+        impact_entity_ids.add(rel.target_id)
+
+    return [m for m in active_modules if m.id not in impact_entity_ids]
 
 def run_quality_check(
     entities: list[Entity],
@@ -882,34 +933,30 @@ def run_quality_check(
         ),
     ))
 
-    # --- 12. L2 Impacts coverage (>50% modules have concrete impacts)? ---
-    # The core value of L2 is concrete change-propagation paths (impacts).
-    # If more than half of modules have no concrete impacts, it's a red flag.
-    impact_entity_ids = set()
-    for r in relationships:
-        if r.type != RelationshipType.IMPACTS:
-            continue
-        desc = (r.description or "").strip()
-        has_path = ("→" in desc or "->" in desc)
-        if not has_path:
-            continue
-        impact_entity_ids.add(r.source_entity_id)
-        impact_entity_ids.add(r.target_id)
-    modules_without_rels = [
-        e for e in module_entities
-        if e.id and e.id not in impact_entity_ids
-    ]
-    total_modules = len(module_entities)
+    # --- 12. L2 impacts hard rule (every active L2 must have concrete impacts) ---
+    # L2 is only valid when it carries at least one concrete change-propagation path.
+    # Any active L2 without impacts is a governance defect.
+    modules_without_rels = _find_active_l2_without_concrete_impacts(entities, relationships)
+    total_active_modules = len(
+        [
+            e for e in entities
+            if e.type == EntityType.MODULE and e.status == EntityStatus.ACTIVE and e.id
+        ]
+    )
     n_without = len(modules_without_rels)
-    check12_ok = total_modules == 0 or (n_without / total_modules) <= 0.5
+    check12_ok = n_without == 0
+    missing_names = ", ".join(m.name for m in modules_without_rels[:8])
+    if n_without > 8:
+        missing_names += f" ... (+{n_without - 8})"
     items.append(QualityCheckItem(
         name="l2_impacts_coverage",
         passed=check12_ok,
         detail=(
-            f"{n_without}/{total_modules} 個 L2 entity 沒有具體 impacts 路徑。"
-            f"L2 的核心價值在於「A 改了什麼→B 要跟著看什麼」。"
+            f"{n_without}/{total_active_modules} 個 active L2 entity 缺少具體 impacts：{missing_names}。"
+            f"治理修補路徑：1) 補 impacts（A 改了什麼→B 的什麼要跟著看）"
+            f" 2) 降級為 L3 3) 重新切粒度。"
             if not check12_ok
-            else f"{n_without}/{total_modules} 個 L2 entity 沒有具體 impacts（在閾值 50% 以內）"
+            else f"所有 {total_active_modules} 個 active L2 entity 皆具備至少 1 條具體 impacts"
         ),
     ))
 

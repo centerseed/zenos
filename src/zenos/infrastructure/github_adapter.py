@@ -30,12 +30,7 @@ _SHORT_PATTERN = re.compile(
 
 
 def _get_token() -> str:
-    token = os.environ.get("GITHUB_TOKEN", "")
-    if not token:
-        raise EnvironmentError(
-            "GITHUB_TOKEN environment variable is required but not set."
-        )
-    return token
+    return os.environ.get("GITHUB_TOKEN", "")
 
 
 def _get_default_owner() -> str:
@@ -97,10 +92,11 @@ class GitHubAdapter:
     def __init__(self, token: str | None = None) -> None:
         self._token = token or _get_token()
         self._headers = {
-            "Authorization": f"Bearer {self._token}",
             "Accept": "application/vnd.github.v3+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+        if self._token:
+            self._headers["Authorization"] = f"Bearer {self._token}"
 
     async def read_content(self, uri: str) -> str:
         """Fetch the text content of a file from GitHub.

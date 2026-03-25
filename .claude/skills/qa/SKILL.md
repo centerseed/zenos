@@ -63,7 +63,42 @@ Architect 會給你：
 □ 新增的 Firestore 查詢是否都有 partner_id filter？
 □ UI 文案是否遵守命名規則？（不出現 entity/ontology）
 □ Type hints / TypeScript 類型是否完整？
+□ Spec 介面合約驗證（見下方）
+□ 測試品質判定（見下方）
 ```
+
+#### Spec 介面合約驗證（強制）
+
+如果 Architect 在技術設計或 Done Criteria 裡列了「Spec 介面合約清單」，QA 必須逐一驗證：
+
+1. **讀 Spec 原文**（不是只讀 Done Criteria）——確認 Spec 定義的介面參數/行為是否都在實作中被使用
+2. **用 Grep 搜尋實際 call site**——例如 Spec 定義了 `list_all(type_filter)`，搜尋所有 `list_all(` 呼叫，確認每個 call site 都傳了 `type_filter`（或有書面理由不傳）
+3. **沒用到的參數 = 發現 Critical 問題**——Spec 定義了但實作沒用的參數，不是 Minor，是 Critical
+
+> 📛 歷史教訓：2026-03-25。Spec 定義了 `type_filter` 參數，Firestore 實作也支援，但所有 governance 程式碼都用 `list_all()` 全撈再 Python filter。mock 測試全過，沒人發現。
+
+#### 測試品質判定（強制）
+
+跑完測試後，不是看「通過數」就結束。QA 必須打開測試原始碼，判定測試有沒有在驗真的東西：
+
+```
+□ 測試有沒有 mock 掉被測對象的核心依賴？
+    - 核心依賴 = 被測功能的輸入/輸出端（例如 LLM client、DB repo）
+    - 如果 mock 了核心依賴，測試只驗了「假設外部一切正常後的分支邏輯」
+    - 這種測試可以有，但不能作為「功能已驗證」的證據
+    - Verdict 裡必須標記：「⚠️ 此功能僅有 mock 測試，缺少整合測試」
+
+□ try/except 靜默吞錯的路徑有沒有被測試？
+    - 搜尋 `except` + `return None` / `return []` / `pass` 的模式
+    - 如果有，確認測試有覆蓋錯誤路徑，且驗證了錯誤時的行為是否符合預期
+    - 靜默失敗 + 沒有測試 = Critical 問題
+
+□ 測試的 assert 有沒有在驗有意義的東西？
+    - `assert result is not None` 不算驗證
+    - 必須驗證具體的欄位值、行為、副作用
+```
+
+**mock 測試全過 ≠ 功能驗證通過。** QA 在 Verdict 裡必須區分「有整合測試覆蓋的功能」和「只有 mock 測試的功能」。
 
 ### Step 3：跑測試
 

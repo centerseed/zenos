@@ -19,7 +19,6 @@ import {
   collection,
   query,
   where,
-  orderBy,
   getDocs,
 } from "firebase/firestore";
 import { getAuthInstance, getDbInstance } from "./firebase";
@@ -40,6 +39,17 @@ interface AuthContextValue extends AuthState {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+async function resolveSharedPartnerId(invitedBy: string | null): Promise<string | null> {
+  if (!invitedBy) return null;
+  const q = query(
+    collection(getDbInstance(), "partners"),
+    where("email", "==", invitedBy)
+  );
+  const snapshot = await getDocs(q);
+  if (snapshot.empty) return null;
+  return snapshot.docs[0].id;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -59,8 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         const q = query(
           collection(getDbInstance(), "partners"),
-          where("email", "==", user.email),
-          orderBy("createdAt", "asc")
+          where("email", "==", user.email)
         );
         const snapshot = await getDocs(q);
 
@@ -76,12 +85,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const doc = snapshot.docs[0];
         const data = doc.data();
+        const sharedPartnerId =
+          (data.sharedPartnerId as string | undefined) ??
+          await resolveSharedPartnerId((data.invitedBy as string | null) ?? null);
         const partner: Partner = {
           id: doc.id,
           email: data.email,
           displayName: data.displayName,
           apiKey: data.apiKey,
           authorizedEntityIds: data.authorizedEntityIds ?? [],
+          sharedPartnerId,
           isAdmin: data.isAdmin ?? false,
           status: data.status,
           invitedBy: data.invitedBy ?? null,
@@ -105,19 +118,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const q = query(
         collection(getDbInstance(), "partners"),
-        where("email", "==", currentUser.email),
-        orderBy("createdAt", "asc")
+        where("email", "==", currentUser.email)
       );
       const snapshot = await getDocs(q);
       if (snapshot.empty) return;
       const doc = snapshot.docs[0];
       const data = doc.data();
+      const sharedPartnerId =
+        (data.sharedPartnerId as string | undefined) ??
+        await resolveSharedPartnerId((data.invitedBy as string | null) ?? null);
       const partner: Partner = {
         id: doc.id,
         email: data.email,
         displayName: data.displayName,
         apiKey: data.apiKey,
         authorizedEntityIds: data.authorizedEntityIds ?? [],
+        sharedPartnerId,
         isAdmin: data.isAdmin ?? false,
         status: data.status,
         invitedBy: data.invitedBy ?? null,

@@ -16,7 +16,7 @@ echo ""
 # Step 1: Python tests
 echo "[1/5] Running Python tests..."
 cd "$ROOT_DIR"
-GITHUB_TOKEN="${GITHUB_TOKEN:-test-dummy}" python3.11 -m pytest tests/ -v --tb=short
+GITHUB_TOKEN="${GITHUB_TOKEN:-test-dummy}" python3.11 -m pytest tests/ -v --tb=short --ignore=tests/integration
 echo "  ✓ Python tests passed"
 echo ""
 

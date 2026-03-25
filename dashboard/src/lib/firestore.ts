@@ -171,6 +171,7 @@ export function toPartner(id: string, data: Record<string, unknown>): Partner {
     displayName: data.displayName as string,
     apiKey: data.apiKey as string,
     authorizedEntityIds: (data.authorizedEntityIds as string[]) ?? [],
+    sharedPartnerId: (data.sharedPartnerId as string) ?? null,
     isAdmin: (data.isAdmin as boolean) ?? false,
     status: (data.status as Partner["status"]) ?? "active",
     invitedBy: (data.invitedBy as string) ?? null,

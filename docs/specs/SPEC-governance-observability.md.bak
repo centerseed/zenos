@@ -1,0 +1,130 @@
+# Feature Spec: 治理可觀測性（Governance Observability）
+
+## 狀態
+Draft
+
+## 背景與動機
+
+ZenOS 的語意治理 pipeline 目前已全自動運行（routing → infer_all → 語言/impacts 治理），且所有治理事件都送入 Cloud Logging，包含：
+
+- **AUDIT_LOG**：每次 write/confirm/task 操作的結構化事件（event_type, partner_id, actor, target, changes）
+- **governance.infer_all / governance.infer_doc_entities / governance.infer_task_links**：每次 LLM 推理的輸入規模、model、推理結果
+- **usage_logs**（Firestore subcollection）：每次 LLM 調用的 token 用量
+
+雖然 `analyze` MCP tool 已提供即時健康快照（quality score、staleness、blindspot、KPI），但目前有以下缺口：
+
+1. **無歷史趨勢**：analyze 是每次請求的即時計算，無法看「品質是在變好還是變差」
+2. **LLM 推理品質不可見**：infer_all 的誤判率（duplicate_of 誤判、關係推斷錯誤）無法從現有工具中得知
+3. **治理活動分布不可見**：誰在用、哪個 entity 被頻繁修改、哪個 partner 治理活躍度低
+4. **Dashboard 沒有治理儀表板**：治理狀況只能透過 agent 呼叫 analyze，沒有人類可直接讀的視覺化介面
+
+這個功能的目的是：讓 ZenOS 的治理品質從「黑盒子」變成「可觀測、可追蹤、可改善」。
+
+---
+
+## 目標用戶
+
+### 用戶 A：ZenOS 系統管理員（超管）
+- 需要跨 partner 監控治理健康度
+- 關心：整體 LLM 推理品質、各 partner 治理活躍度、系統錯誤率
+
+### 用戶 B：合作夥伴（Partner）的知識負責人
+- 需要了解自家 ontology 的治理狀況
+- 關心：本月確認進度、待處理盲點、AI 推薦了什麼、哪些內容需要人工介入
+
+### 用戶 C：接入 ZenOS 的 AI Agent
+- 需要在 session 開始時快速掌握當前治理狀況
+- 關心：有哪些待確認項目、目前健康分數、最近有什麼異常
+- **備注**：Agent 分析改善方向的完整能力（查詢具體哪些 log 觸發了哪些問題）依賴治理 log 查詢介面（另立 Spec）。本 Spec 只提供 metrics 數據層，不提供 log 明細查詢。
+
+---
+
+## 需求
+
+### P0（必須有）
+
+#### 1. 治理趨勢快照（Governance Trend Snapshot）
+- **描述**：`analyze` tool 在執行 `check_type="all"` 時，額外回傳「與上次快照比較的差異」，讓 agent 可以判斷治理品質是在改善還是退化。差異維度至少包含：quality score 變化、unconfirmed_ratio 變化、active_l2_missing_impacts 變化。
+- **Acceptance Criteria**：
+  - Given 同一個 partner 已有歷史快照，When agent 呼叫 `analyze(check_type="all")`, Then 回傳結果包含 `trend` 欄位，內含 `quality_score_delta`（正數=改善，負數=退化）、`unconfirmed_ratio_delta`、`snapshot_compared_at`（前一次快照的時間）
+  - Given 沒有歷史快照（第一次執行），When agent 呼叫 `analyze(check_type="all")`, Then `trend` 欄位為 null，不報錯
+
+#### 2. 治理 KPI 快照持久化（手動觸發）
+- **描述**：當用戶（agent 或知識負責人）主動呼叫 `analyze(check_type="all", save_snapshot=true)` 時，將當次的 KPI 快照（quality_score、unconfirmed_ratio、duplicate_blindspot_rate、median_confirm_latency_days、active_l2_missing_impacts）存到 Firestore，以便後續計算趨勢和 Dashboard 呈現。不自動排程、不事件觸發——快照只在明確要求時產生。
+- **Acceptance Criteria**：
+  - Given agent 呼叫 `analyze(check_type="all", save_snapshot=true)`, When 執行完畢, Then 該次 KPI 快照（含 timestamp）被寫入 Firestore partner 範圍內
+  - Given agent 呼叫 `analyze(check_type="all")` 但未帶 `save_snapshot=true`（或 save_snapshot=false）, Then 不寫入快照，只回傳即時結果
+  - Given 快照寫入失敗（Firestore 暫時不可用）, Then analyze 主要結果仍正常回傳，不因快照失敗而中斷
+
+#### 3. LLM 推理品質摘要（Inference Quality Summary）
+- **描述**：`analyze` tool 增加 `check_type="inference"` 選項，回傳近期（預設 7 天）LLM 推理活動的品質摘要，包含：調用次數、錯誤次數、錯誤率、每次推理的平均候選實體數（反映推理複雜度）。**資料來源：Cloud Logging**（讀取 governance.infer_all 等治理事件 log）。
+- **Acceptance Criteria**：
+  - Given 有近 7 天的 Cloud Logging governance audit log，When agent 呼叫 `analyze(check_type="inference")`, Then 回傳包含 `infer_all_count`、`infer_all_error_count`、`infer_all_error_rate`（浮點 0–1）
+  - Given 沒有任何推理紀錄，When agent 呼叫 `analyze(check_type="inference")`, Then 回傳空摘要，不報錯
+  - 當 `check_type="all"` 時，推理品質摘要也一併包含在結果中
+
+### P1（應該有）
+
+#### 4. 治理活動摘要 MCP Tool 增強
+- **描述**：`analyze` tool 的 `check_type="all"` 結果增加「治理活動摘要」欄位，反映近 30 天的操作頻率，包含：entity 新增數、entity 更新數、confirm 操作次數、blindspot 新增數。讓 agent 可判斷「這個 partner 最近治理活躍嗎」。
+- **Acceptance Criteria**：
+  - Given 有近 30 天的 AUDIT_LOG 紀錄，When agent 呼叫 `analyze(check_type="all")`, Then 回傳 `activity` 欄位，包含 `entities_created`、`entities_updated`、`confirms_total`、`blindspots_created`
+  - Given audit log 來源不可用，Then `activity` 欄位為 null，主結果不受影響
+
+#### 5. Dashboard 治理健康度頁面
+- **描述**：Dashboard 新增「治理狀況」頁面（或在現有儀表板上增加一個區塊），呈現目前 partner 的治理健康度，包含：quality score 數字與趨勢方向（上升/下降/持平）、未確認項目數量、待修復的 L2 缺損數、近期盲點列表（紅色優先）。
+- **Acceptance Criteria**：
+  - Given 知識負責人登入 Dashboard, When 進入治理狀況頁面, Then 可看到 quality score（0–100）、未確認項目數、L2 缺損數，資料來源為最近一次 analyze 快照
+  - Given quality score 低於 70, Then 頁面有醒目標示（非 emoji，用顏色區分）
+  - Given 有歷史快照, Then 顯示趨勢方向（改善 / 退化 / 持平），不顯示具體數字差異
+  - Given 最近快照超過 24 小時, Then 顯示「資料可能過時，上次更新時間：{時間}」提示
+
+#### 6. 治理 KPI 歷史趨勢（Dashboard 圖表）
+- **描述**：在治理狀況頁面，新增 quality score 的歷史折線圖，x 軸為時間（最近 30 天），y 軸為 quality score（0–100）。讓知識負責人直觀看到治理品質的演進。
+- **Acceptance Criteria**：
+  - Given 有 3 筆以上歷史快照，When 知識負責人查看趨勢圖, Then 顯示折線圖，每個點代表一次快照
+  - Given 少於 3 筆快照，Then 不顯示圖表，顯示「快照數量不足，持續使用後將顯示趨勢」提示
+  - 圖表只顯示 quality score，不顯示其他 KPI（保持簡單）
+
+### P2（可以有）
+
+#### 7. 治理健康度警報
+- **描述**：當 `analyze` 執行後偵測到治理品質顯著退化（quality score 下降超過 10 分，或 active_l2_missing_impacts 新增超過 3 個），在回傳結果中加入 `alerts` 陣列，列出需要關注的警報項目。
+- **Acceptance Criteria**：
+  - Given quality score 與上次快照相比下降超過 10 分, When agent 呼叫 `analyze(check_type="all")`, Then 回傳結果包含 `alerts` 陣列，其中有 severity="high" 的警報項目
+  - Given 無顯著退化, Then `alerts` 為空陣列
+
+#### 8. 每個 entity 的治理歷程查詢
+- **描述**：`analyze` tool 增加 `check_type="entity_history"` + `entity_id` 參數，回傳該 entity 近 30 天的治理事件清單（被更新幾次、被推理幾次、confirm 了幾次）。
+- **Acceptance Criteria**：
+  - Given 提供 entity_id, When 呼叫 `analyze(check_type="entity_history", entity_id="xxx")`, Then 回傳該 entity 的治理事件時序列表（event_type、timestamp、summary）
+  - Given entity_id 不存在, Then 回傳 NOT_FOUND 錯誤
+
+---
+
+## 明確不包含
+
+- 不做跨 partner 的治理比較（每個 partner 只能看自己的資料）
+- 不做即時 streaming 推播（非即時更新，查詢時取最新快照）
+- 不重新設計 Cloud Logging 的 log 結構（只讀取、不修改現有 log schema）
+- 不提供原始 Cloud Logging 查詢介面給一般用戶（只提供摘要）
+- 不做 LLM 推理結果的人工標記系統（不做 feedback loop 的 labeling UI）
+- 治理 log 查詢介面（agent 查閱 log 明細以分析改善方向的能力）不在本 Spec 範圍，另立任務
+
+---
+
+## 技術約束（給 Architect 參考）
+
+- **資料來源**：趨勢和活動摘要的原始資料應來自 Cloud Logging 中的 AUDIT_LOG（前綴 `AUDIT_LOG`）或已存在的 Firestore `usage_logs` subcollection，不應新增 log sink
+- **快照儲存**：KPI 快照需要選擇 Firestore 的儲存路徑，必須是 partner-scoped（在 `partners/{partnerId}/` 下），不能是全域 collection
+- **Cloud Logging 查詢時機**：`analyze(check_type="inference")` 資料來源確認為 Cloud Logging（讀取 governance.infer_all 等治理事件 log），Architect 需確認 Cloud Run service account 是否已具備 Cloud Logging 讀取 IAM 權限（roles/logging.viewer 或同等）
+- **Dashboard 資料源**：Dashboard 治理頁面的資料應從 Firestore 的 KPI 快照讀取，不直接從 analyze 即時計算，避免頁面載入過慢
+- **analyze 不能因快照寫入而阻塞**：持久化快照必須是非同步、fire-and-forget，不能影響 analyze tool 的回傳速度
+
+---
+
+## 開放問題
+
+1. **Cloud Logging 查詢權限**：Cloud Run 的 service account 是否已有讀取 Cloud Logging 的 IAM 權限？如果沒有，讀取 audit log 歷史的路徑需要重新評估（改從 Firestore 的 usage_logs 做）。
+2. ~~**KPI 快照的觸發頻率**~~ 已確認：快照為手動觸發（`save_snapshot=true`），不排程。趨勢稀疏是可接受的初始狀態。
+3. **Dashboard 治理頁面的位置**：是作為獨立頁面（/governance），還是整合在現有的 /tasks 作戰室旁邊的分頁？待 UX 確認。

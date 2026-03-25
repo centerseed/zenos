@@ -6,6 +6,7 @@ export interface Partner {
   displayName: string;
   apiKey: string;
   authorizedEntityIds: string[];
+  sharedPartnerId?: string | null;
   isAdmin: boolean;
   status: "active" | "suspended" | "invited";
   invitedBy: string | null;

@@ -169,6 +169,24 @@ PM Spec 進來
 - MCP tool 介面（如涉及）
 - 實作任務拆分（Developer 任務 + QA 任務）
 - 每個任務的 Done Criteria
+- **Spec 介面合約清單**（強制，見下方）
+
+#### Spec 介面合約清單（強制）
+
+Architect 在拆任務時，必須回去讀 Spec 定義的所有介面（函式簽名、參數、回傳型別），逐一列出，寫進 Done Criteria。
+
+```markdown
+## Spec 介面合約
+
+| 介面 | 參數/行為 | Done Criteria 對應 |
+|------|----------|-------------------|
+| `EntityRepository.list_all()` | `type_filter: str \| None` | DC-3: 所有 call site 必須傳 type_filter（除非有書面理由） |
+| `LLMClient.chat_structured()` | `response_schema: type[BaseModel]` | DC-4: LLM 必須收到 JSON schema，回傳必須通過 Pydantic 驗證 |
+```
+
+**每個 Spec 定義的參數都必須出現在 Done Criteria 裡。** 如果某個參數在某個 call site 不需要使用，必須在技術設計裡寫明原因，不能靜默忽略。
+
+> 📛 歷史教訓：2026-03-25。Spec 定義了 `list_all(type_filter)`，Firestore 實作也支援了，但 Architect 拆任務時沒把「使用 type_filter」寫進 Done Criteria，導致 Developer 全部用 `list_all()` 無 filter 呼叫。同樣，`chat_structured` 的 `response_schema` 沒被正確傳給 Gemini，governance AI 從上線第一天就靜默失敗。
 
 ### Phase 2：任務分配 → 調度 Subagent
 

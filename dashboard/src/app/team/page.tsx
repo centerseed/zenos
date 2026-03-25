@@ -8,7 +8,6 @@ import { getAuthInstance } from "@/lib/firebase";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
 import { LoadingState } from "@/components/LoadingState";
-import { getAllPartners } from "@/lib/firestore";
 import type { Partner } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
@@ -34,15 +33,28 @@ function TeamPage() {
   }, [partner, router]);
 
   const fetchPartners = useCallback(async () => {
+    if (!user) return;
     try {
-      const data = await getAllPartners();
-      setPartners(data);
+      const token = await user.getIdToken();
+      const res = await fetch(`${API_URL}/api/partners`, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(body.message || body.detail || `Failed: ${res.status}`);
+      }
+      const body = await res.json();
+      const data = Array.isArray(body.partners) ? body.partners : [];
+      setPartners(data as Partner[]);
     } catch (err) {
       console.error("Failed to fetch partners:", err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
 
   useEffect(() => {
     if (partner?.isAdmin) {

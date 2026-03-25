@@ -1,15 +1,21 @@
 """Setup for interface tests.
 
-tools.py initializes repos at module level, which call get_db() → firestore.AsyncClient.
-In CI there are no GCP credentials, so we must mock get_db() before tools.py is imported.
-Also sets GITHUB_TOKEN for GitHubAdapter.
+Interface tests should mock Firestore DB creation, but the patch must stay scoped
+to interface tests only; otherwise integration tests will receive MagicMock
+instead of a real AsyncClient.
 """
 
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 os.environ.setdefault("GITHUB_TOKEN", "test-dummy-token")
 
-# Mock get_db before any firestore_repo class is instantiated
-_mock_db = MagicMock()
-patch("zenos.infrastructure.firestore_repo.get_db", return_value=_mock_db).start()
+
+@pytest.fixture(autouse=True)
+def _mock_firestore_get_db():
+    """Patch get_db() only while interface tests are running."""
+    mock_db = MagicMock()
+    with patch("zenos.infrastructure.firestore_repo.get_db", return_value=mock_db):
+        yield

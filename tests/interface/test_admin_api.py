@@ -226,7 +226,17 @@ class TestInvitePartner:
         mock_doc_ref.id = "partner-new"
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
-             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch(
+                 "zenos.interface.admin_api._get_caller_partner",
+                 return_value=(
+                     "p1",
+                     {
+                         "email": "admin@test.com",
+                         "isAdmin": True,
+                         "authorizedEntityIds": ["e-1", "e-2"],
+                     },
+                 ),
+             ), \
              patch("zenos.interface.admin_api._get_partner_by_email", return_value=(None, None)), \
              patch("zenos.interface.admin_api._get_db") as mock_get_db:
 
@@ -242,6 +252,8 @@ class TestInvitePartner:
             assert call_data["email"] == "new@test.com"
             assert call_data["status"] == "invited"
             assert call_data["apiKey"] == ""
+            assert call_data["authorizedEntityIds"] == ["e-1", "e-2"]
+            assert call_data["sharedPartnerId"] == "p1"
 
     async def test_invite_requires_admin(self):
         from zenos.interface.admin_api import invite_partner

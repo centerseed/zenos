@@ -2,11 +2,18 @@ rules_version = '2';
 
 service cloud.firestore {
   match /databases/{database}/documents {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
 
-    // ── Partners: authenticated users can read all (for People Matrix),
-    //    writes via Admin SDK only ──
+    function isOwnPartner(partnerDoc) {
+      return isAuthenticated() && request.auth.token.email == partnerDoc.data.email;
+    }
+
+    // ── Partners: self-read only, writes via Admin SDK only ──
     match /partners/{partnerId} {
-      allow read: if request.auth != null;
+      // Restrict partner reads to self only. Admin/team listing must use Admin API.
+      allow read: if isOwnPartner(resource);
       allow write: if false;
     }
 
@@ -51,7 +58,9 @@ service cloud.firestore {
 
     // ── Action Layer: partner-scoped tasks ──
     match /partners/{partnerId}/tasks/{taskId} {
-      allow read: if request.auth != null;
+      allow read: if isAuthenticated()
+        && request.auth.token.email
+           == get(/databases/$(database)/documents/partners/$(partnerId)).data.email;
       allow write: if false;
     }
   }

@@ -1,6 +1,7 @@
 """Admin REST API — Firebase ID token auth for Dashboard operations.
 
 Endpoints:
+  GET  /api/partners            — list partners in same tenant (sanitized)
   POST /api/partners/invite     — invite a new partner (admin only)
   PUT  /api/partners/{id}/role  — change partner isAdmin (admin only)
   PUT  /api/partners/{id}/status — change partner status (admin only)
@@ -162,6 +163,60 @@ def _handle_options(request: Request) -> Response:
     return Response(status_code=204, headers=_cors_headers(request))
 
 
+def _same_tenant_id(partner_id: str | None, partner: dict | None) -> str:
+    """Return a stable tenant key for partner-scoped authorization."""
+    if partner and partner.get("sharedPartnerId"):
+        return str(partner["sharedPartnerId"])
+    return partner_id or ""
+
+
+def _sanitize_partner_for_admin_view(partner_id: str, data: dict) -> dict:
+    """Remove sensitive fields before returning partner data to admin UI."""
+    sanitized = {
+        "id": partner_id,
+        "email": data.get("email", ""),
+        "displayName": data.get("displayName", ""),
+        "isAdmin": bool(data.get("isAdmin", False)),
+        "status": data.get("status", "active"),
+        "invitedBy": data.get("invitedBy"),
+        "createdAt": data.get("createdAt"),
+        "updatedAt": data.get("updatedAt"),
+        "sharedPartnerId": data.get("sharedPartnerId"),
+    }
+    return sanitized
+
+
+# ──────────────────────────────────────────────
+# Endpoint: GET /api/partners
+# ──────────────────────────────────────────────
+
+
+async def list_partners(request: Request) -> Response:
+    """List partners in caller's tenant scope (sensitive fields stripped)."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller:
+        return _error_response("FORBIDDEN", "Partner profile not found", 403, request=request)
+
+    db = _get_db()
+    caller_tenant = _same_tenant_id(caller_id, caller)
+    docs = db.collection("partners").stream()
+    partners: list[dict] = []
+    async for doc in docs:
+        data = doc.to_dict()
+        if _same_tenant_id(doc.id, data) != caller_tenant:
+            continue
+        partners.append(_sanitize_partner_for_admin_view(doc.id, data))
+
+    return _json_response({"partners": partners}, request=request)
+
+
 # ──────────────────────────────────────────────
 # Endpoint: POST /api/partners/invite
 # ──────────────────────────────────────────────
@@ -201,11 +256,14 @@ async def invite_partner(request: Request) -> Response:
 
     db = _get_db()
     now = datetime.now(timezone.utc)
+    shared_partner_id = caller.get("sharedPartnerId") or caller_id
     partner_data = {
         "email": email,
         "displayName": email,  # will be updated on first login
         "apiKey": "",  # generated on activation
-        "authorizedEntityIds": [],
+        # Keep invited members in the same data visibility/task scope as inviter.
+        "authorizedEntityIds": caller.get("authorizedEntityIds", []),
+        "sharedPartnerId": shared_partner_id,
         "isAdmin": False,
         "status": "invited",
         "invitedBy": caller.get("email", ""),
@@ -268,13 +326,17 @@ async def update_partner_role(request: Request) -> Response:
     doc = await doc_ref.get()
     if not doc.exists:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
+    target = doc.to_dict()
+
+    if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
+        return _error_response("FORBIDDEN", "Cross-tenant role change is not allowed", 403, request=request)
 
     await doc_ref.update({
         "isAdmin": is_admin,
         "updatedAt": datetime.now(timezone.utc),
     })
 
-    target_email = doc.to_dict().get("email", "")
+    target_email = target.get("email", "")
     logger.info(
         "audit",
         extra={
@@ -287,7 +349,7 @@ async def update_partner_role(request: Request) -> Response:
         },
     )
 
-    updated = doc.to_dict()
+    updated = target
     updated["isAdmin"] = is_admin
     updated["id"] = partner_id
     return _json_response(updated, request=request)
@@ -338,13 +400,17 @@ async def update_partner_status(request: Request) -> Response:
     doc = await doc_ref.get()
     if not doc.exists:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
+    target = doc.to_dict()
+
+    if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
+        return _error_response("FORBIDDEN", "Cross-tenant status change is not allowed", 403, request=request)
 
     await doc_ref.update({
         "status": new_status,
         "updatedAt": datetime.now(timezone.utc),
     })
 
-    target_email = doc.to_dict().get("email", "")
+    target_email = target.get("email", "")
     logger.info(
         "audit",
         extra={
@@ -357,7 +423,7 @@ async def update_partner_status(request: Request) -> Response:
         },
     )
 
-    updated = doc.to_dict()
+    updated = target
     updated["status"] = new_status
     updated["id"] = partner_id
     return _json_response(updated, request=request)
@@ -434,6 +500,7 @@ async def activate_partner(request: Request) -> Response:
 # ──────────────────────────────────────────────
 
 admin_routes = [
+    Route("/api/partners", list_partners, methods=["GET", "OPTIONS"]),
     Route("/api/partners/invite", invite_partner, methods=["POST", "OPTIONS"]),
     Route("/api/partners/{id}/role", update_partner_role, methods=["PUT", "OPTIONS"]),
     Route("/api/partners/{id}/status", update_partner_status, methods=["PUT", "OPTIONS"]),

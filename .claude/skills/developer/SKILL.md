@@ -37,13 +37,22 @@ interface → application → domain ← infrastructure
 
 違反依賴方向 = 架構腐敗。不確定歸屬 → 問 Architect。
 
-### 3. 測試必須寫
+### 3. 測試必須寫，而且必須驗真的東西
 
 > 每個新功能 / bug fix 必須有對應測試。沒有測試的 code 不算完成。
 
 - Backend: pytest，放 `tests/` 對應路徑
 - Frontend: vitest，放 `__tests__/` 或 `.test.ts`
 - 測試要能獨立跑（不依賴外部服務，用 mock/fixture）
+- **禁止 mock 掉被測對象的核心輸入/輸出端後宣稱功能已驗證**
+  - 核心依賴 = 被測功能實際要溝通的對象（LLM、DB、外部 API）
+  - Mock 測試可以驗分支邏輯，但必須在 Completion Report 裡標記「⚠️ 僅 mock 測試」
+  - 如果核心功能依賴外部服務（如 LLM 回傳格式），必須至少有一個整合測試或 dry-run 測試驗證真實回傳能通過 parse
+- **禁止用 try/except 靜默吞錯後不寫錯誤路徑的測試**
+  - 如果 code 裡有 `except: return None`，測試必須覆蓋錯誤情境，驗證 None 回傳後的行為是否正確
+  - 靜默失敗不被發現 = 最危險的 bug
+
+> 📛 歷史教訓：governance_ai.py 的 LLM 呼叫全包在 try/except 裡 return None。測試 mock 掉 LLM，永遠不會觸發真實的 parse 失敗。結果 governance AI 從上線第一天就靜默失敗，mock 測試 480 行全過，給了虛假的信心。
 
 ### 4. 不直接改 spec
 

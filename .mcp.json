@@ -2,7 +2,7 @@
   "mcpServers": {
     "zenos": {
       "type": "http",
-      "url": "https://zenos-mcp-165893875709.asia-east1.run.app/mcp?api_key=MCP_API_KEY_REDACTED"
+      "url": "https://zenos-mcp-165893875709.asia-east1.run.app/mcp?api_key=bd48388e-a7b0-403c-b825-a64c13f6fc70"
     },
     "zentropy": {
       "type": "streamable-http",

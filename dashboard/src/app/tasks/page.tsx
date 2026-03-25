@@ -12,7 +12,7 @@ import { ProjectProgress } from "@/components/ProjectProgress";
 import { PeopleMatrix } from "@/components/PeopleMatrix";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { LoadingState } from "@/components/LoadingState";
-import { getTasks, getProjectEntities, getAllPartners } from "@/lib/firestore";
+import { getTasks, getProjectEntities } from "@/lib/firestore";
 import type { Task, TaskStatus, TaskPriority, Entity, Partner } from "@/types";
 
 type TabKey = "all" | "inbox" | "outbox" | "review";
@@ -24,9 +24,10 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "outbox", label: "My Outbox" },
   { key: "review", label: "Review" },
 ];
+const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
 
 function TasksPage() {
-  const { partner, signOut } = useAuth();
+  const { user, partner, signOut } = useAuth();
   const taskScopePartnerId = partner?.sharedPartnerId ?? partner?.id ?? null;
   const [viewMode, setViewMode] = useState<ViewMode>("pulse");
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -39,14 +40,31 @@ function TasksPage() {
 
   // Load all data for Pulse view
   useEffect(() => {
-    if (!partner) return;
+    const currentUser = user;
+    if (!partner || !currentUser) return;
 
-    async function loadPulseData() {
+    async function loadPulseData(authUser: NonNullable<typeof user>) {
       try {
+        const token = await authUser.getIdToken();
+        const fetchedPartnersPromise = fetch(`${API_URL}/api/partners`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        })
+          .then(async (res) => {
+            if (!res.ok) {
+              const body = await res.json().catch(() => ({ message: "Unknown error" }));
+              throw new Error(body.message || body.detail || `Failed: ${res.status}`);
+            }
+            return res.json() as Promise<{ partners?: Partner[] }>;
+          })
+          .then((body) => (Array.isArray(body.partners) ? body.partners : []));
+
         const [fetchedTasks, fetchedEntities, fetchedPartners] = await Promise.all([
           getTasks(taskScopePartnerId),
           getProjectEntities(),
-          getAllPartners(),
+          fetchedPartnersPromise,
         ]);
         setTasks(fetchedTasks);
         setEntities(fetchedEntities);
@@ -60,8 +78,8 @@ function TasksPage() {
       setLoading(false);
     }
 
-    loadPulseData();
-  }, [partner, taskScopePartnerId]);
+    loadPulseData(currentUser);
+  }, [partner, taskScopePartnerId, user]);
 
   // Derive kanban tasks from already-loaded tasks (avoids duplicate Firestore fetch)
   const kanbanTasks = useMemo(() => {
