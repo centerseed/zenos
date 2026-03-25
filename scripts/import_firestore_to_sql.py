@@ -795,13 +795,22 @@ async def _upsert_protocols(
 
     for doc in protocols_data:
         doc_id = doc["id"]
-        entity_id = _clean_str(_get(doc, "entityId", "entity_id"))
+        entity_id = _clean_str(_get(doc, "entityId", "entity_id")) or None
+
+        # Validate entity_id exists and is in SQL before inserting
+        if not entity_id:
+            report.warn(f"protocol {doc_id}: empty entity_id — skipping")
+            continue
 
         partner_id = _clean_str(_get(doc, "partnerId", "partner_id")) or None
-        if not partner_id and entity_id:
+        if not partner_id:
             partner_id = entity_to_partner.get(entity_id)
         if not partner_id:
             report.warn(f"protocol {doc_id}: no partner_id — skipping")
+            continue
+
+        if (partner_id, entity_id) not in _imported_scoped.get("entity", set()):
+            report.warn(f"protocol {doc_id}: entity_id '{entity_id}' not in SQL for partner — skipping")
             continue
 
         content_raw = _get(doc, "content")
@@ -1174,7 +1183,9 @@ async def _upsert_usage_logs(
     cnt.firestore = len(usage_logs_data)
 
     for doc in usage_logs_data:
-        partner_id = _clean_str(_get(doc, "partnerId", "partner_id"))
+        partner_id = _clean_str(
+            doc.get("_partner_id") or _get(doc, "partnerId", "partner_id")
+        )
         if not partner_id:
             report.warn(f"usage_log {doc.get('id', '?')}: no partner_id — skipping")
             continue
