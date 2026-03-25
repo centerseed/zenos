@@ -49,7 +49,7 @@ def print_next_steps(project: str, partner_id: str | None = None) -> None:
     print(f"  firebase use {project}")
     print("  firebase deploy --only hosting")
     print("  firebase deploy --only firestore:rules")
-    print("  gcloud run deploy zenos-mcp --region=asia-east1 --source=src")
+    print("  ./scripts/deploy_mcp.sh")
     if partner_id:
         print(f"\nCreated partner id: {partner_id}")
 

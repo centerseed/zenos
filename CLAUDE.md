@@ -52,4 +52,5 @@ cd dashboard && npx vitest run
 # Deploy
 cd dashboard && npm run build && firebase deploy --only hosting
 firebase deploy --only firestore:rules
+./scripts/deploy_mcp.sh
 ```

@@ -10,7 +10,7 @@ on:
       - "dashboard/**"
       - "firestore.rules"
       - "firestore.indexes.json"
-      # MCP Server deploy (Cloud Run) is manual for now —
+      # MCP Server deploy (Cloud Run) is manual via ./scripts/deploy_mcp.sh —
       # uncomment when GCP service account is configured:
       # - "src/**"
       # - "Dockerfile"
