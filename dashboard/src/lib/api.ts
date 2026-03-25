@@ -8,12 +8,34 @@ const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
   "https://zenos-mcp-165893875709.asia-east1.run.app";
 
+const DATE_FIELDS = new Set([
+  "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
+]);
+
+/** Convert ISO date strings to Date objects in-place */
+function hydrateDates<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    obj.forEach(hydrateDates);
+    return obj;
+  }
+  if (typeof obj === "object") {
+    for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
+      if (DATE_FIELDS.has(key) && typeof val === "string") {
+        (obj as Record<string, unknown>)[key] = new Date(val);
+      }
+    }
+  }
+  return obj;
+}
+
 async function apiFetch<T>(path: string, token: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  return hydrateDates(data) as T;
 }
 
 /** Fetch all product entities */
