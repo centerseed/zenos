@@ -166,12 +166,17 @@ def _clean_str(val: Any, default: str = "") -> str:
 
 
 # Track IDs that were successfully imported, for dangling FK checks.
+# Structure: {collection: {(partner_id, id)}} for partner-scoped checks,
+# plus a flat set {collection_flat: {id}} for quick id-only lookups.
 _imported_ids: dict[str, set[str]] = {}
+_imported_scoped: dict[str, set[tuple[str, str]]] = {}
 
 
-def _register_imported(collection: str, doc_id: str) -> None:
+def _register_imported(collection: str, doc_id: str, partner_id: str | None = None) -> None:
     """Track an ID that was successfully written to SQL."""
     _imported_ids.setdefault(collection, set()).add(doc_id)
+    if partner_id:
+        _imported_scoped.setdefault(collection, set()).add((partner_id, doc_id))
 
 
 def _nullify_dangling_fk(
@@ -179,10 +184,25 @@ def _nullify_dangling_fk(
     target_collection: str,
     context_id: str,
     report: ReconciliationReport,
+    partner_id: str | None = None,
 ) -> str | None:
-    """Return fk_value if its target exists in _imported_ids, else None + warn."""
+    """Return fk_value if its target exists in _imported_ids, else None + warn.
+
+    If partner_id is provided, checks the composite (partner_id, id) for
+    multi-tenant FK safety. Falls back to id-only check otherwise.
+    """
     if fk_value is None:
         return None
+    if partner_id:
+        scoped = _imported_scoped.get(target_collection, set())
+        if (partner_id, fk_value) not in scoped:
+            report.warn(
+                f"{context_id}: linked {target_collection} '{fk_value}' "
+                f"not found for partner '{partner_id}' in SQL — setting to NULL"
+            )
+            return None
+        return fk_value
+    # Fallback: id-only check (no partner scope)
     known = _imported_ids.get(target_collection, set())
     if fk_value not in known:
         report.warn(
@@ -350,17 +370,37 @@ async def _read_tasks(
     return result
 
 
-async def _read_usage_logs(db: firestore.AsyncClient) -> list[dict[str, Any]]:
-    """Read usage_logs if the collection exists; return empty list otherwise."""
+async def _read_usage_logs(
+    db: firestore.AsyncClient, partners_data: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Read usage_logs from partner subcollections (partners/{pid}/usage_logs).
+
+    Falls back to root collection if no partner subcollection data found.
+    """
     result = []
-    try:
-        docs = await db.collection("usage_logs").get()
-        for doc in docs:
-            data = doc.to_dict() or {}
-            data["id"] = doc.id
-            result.append(data)
-    except Exception as e:
-        logger.warning("_read_usage_logs: failed to read usage_logs collection: %s", e)
+    # Primary path: partner subcollections (matches governance_ai.py write path)
+    for partner_doc in partners_data:
+        pid = partner_doc["id"]
+        try:
+            docs = await db.collection("partners").document(pid).collection("usage_logs").get()
+            for doc in docs:
+                data = doc.to_dict() or {}
+                data["id"] = doc.id
+                data["_partner_id"] = pid
+                result.append(data)
+        except Exception as e:
+            logger.warning("_read_usage_logs: failed for partner %s: %s", pid, e)
+
+    # Fallback: root collection (legacy path)
+    if not result:
+        try:
+            docs = await db.collection("usage_logs").get()
+            for doc in docs:
+                data = doc.to_dict() or {}
+                data["id"] = doc.id
+                result.append(data)
+        except Exception as e:
+            logger.warning("_read_usage_logs: failed to read root usage_logs: %s", e)
     return result
 
 
@@ -532,7 +572,7 @@ async def _upsert_entities(
                 *row,
             )
         deferred_refs.append((doc_id, partner_id, parent_id, project_id))
-        _register_imported("entity", doc_id)
+        _register_imported("entity", doc_id, partner_id)
         cnt.sql += 1
 
     # Phase 2: backfill parent_id and project_id now that all entities exist.
@@ -724,9 +764,9 @@ async def _upsert_document_entities(
         for entity_id in linked_ids:
             if not entity_id:
                 continue
-            if entity_id not in _imported_ids.get("entity", set()):
+            if (partner_id, entity_id) not in _imported_scoped.get("entity", set()):
                 report.warn(
-                    f"document_entities: doc {doc_id} links entity '{entity_id}' not in SQL — skipping"
+                    f"document_entities: doc {doc_id} links entity '{entity_id}' not in SQL for partner — skipping"
                 )
                 continue
             if not dry_run:
@@ -751,6 +791,7 @@ async def _upsert_protocols(
 ) -> None:
     cnt = report.add("protocols")
     cnt.firestore = len(protocols_data)
+    seen_pe: dict[tuple[str, str], str] = {}  # (partner_id, entity_id) → first protocol id
 
     for doc in protocols_data:
         doc_id = doc["id"]
@@ -786,6 +827,16 @@ async def _upsert_protocols(
             _to_dt(_get(doc, "generatedAt", "generated_at")) or now,
             _to_dt(_get(doc, "updatedAt", "updated_at")) or now,
         )
+        # Dedup: if (partner_id, entity_id) already seen, skip this protocol
+        pe_key = (partner_id, entity_id)
+        if pe_key in seen_pe:
+            report.warn(
+                f"protocol {doc_id}: duplicate (partner_id, entity_id)={pe_key} "
+                f"— keeping first protocol '{seen_pe[pe_key]}', skipping this one"
+            )
+            continue
+        seen_pe[pe_key] = doc_id
+
         if not dry_run:
             await conn.execute(
                 f"""
@@ -794,8 +845,9 @@ async def _upsert_protocols(
                      gaps_json, version, confirmed_by_user,
                      generated_at, updated_at)
                 VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8,$9,$10)
-                ON CONFLICT ON CONSTRAINT uq_protocols_partner_entity DO UPDATE SET
-                    id = EXCLUDED.id,
+                ON CONFLICT (id) DO UPDATE SET
+                    partner_id = EXCLUDED.partner_id,
+                    entity_id = EXCLUDED.entity_id,
                     entity_name = EXCLUDED.entity_name,
                     content_json = EXCLUDED.content_json,
                     gaps_json = EXCLUDED.gaps_json,
@@ -805,7 +857,7 @@ async def _upsert_protocols(
                 """,
                 *row,
             )
-        _register_imported("protocol", doc_id)
+        _register_imported("protocol", doc_id, partner_id)
         cnt.sql += 1
 
 
@@ -869,7 +921,7 @@ async def _upsert_blindspots(
                 """,
                 *row,
             )
-        _register_imported("blindspot", doc_id)
+        _register_imported("blindspot", doc_id, partner_id)
         cnt.sql += 1
 
 
@@ -898,8 +950,8 @@ async def _upsert_blindspot_entities(
         for entity_id in related_ids:
             if not entity_id:
                 continue
-            if entity_id not in _imported_ids.get("entity", set()):
-                report.warn(f"blindspot_entities: blindspot {doc_id} links entity '{entity_id}' not in SQL — skipping")
+            if (partner_id, entity_id) not in _imported_scoped.get("entity", set()):
+                report.warn(f"blindspot_entities: blindspot {doc_id} links entity '{entity_id}' not in SQL for partner — skipping")
                 continue
             if not dry_run:
                 await conn.execute(
@@ -970,16 +1022,16 @@ async def _upsert_tasks(
             _clean_str(_get(doc, "assignee")) or None,
             _nullify_dangling_fk(
                 _clean_str(_get(doc, "assigneeRoleId", "assignee_role_id")) or None,
-                "entity", doc_id, report,
+                "entity", doc_id, report, partner_id=partner_id,
             ),
             _clean_str(_get(doc, "createdBy", "created_by"), ""),
             _nullify_dangling_fk(
                 _clean_str(_get(doc, "linkedProtocol", "linked_protocol")) or None,
-                "protocol", doc_id, report,
+                "protocol", doc_id, report, partner_id=partner_id,
             ),
             _nullify_dangling_fk(
                 _clean_str(_get(doc, "linkedBlindspot", "linked_blindspot")) or None,
-                "blindspot", doc_id, report,
+                "blindspot", doc_id, report, partner_id=partner_id,
             ),
             _clean_str(_get(doc, "sourceType", "source_type"), ""),
             _clean_str(_get(doc, "contextSummary", "context_summary"), ""),
@@ -993,7 +1045,7 @@ async def _upsert_tasks(
             _clean_str(_get(doc, "project"), ""),
             _nullify_dangling_fk(
                 _clean_str(_get(doc, "projectId", "project_id")) or None,
-                "entity", doc_id, report,
+                "entity", doc_id, report, partner_id=partner_id,
             ),
             _to_dt(_get(doc, "createdAt", "created_at")) or now,
             _to_dt(_get(doc, "updatedAt", "updated_at")) or now,
@@ -1040,7 +1092,7 @@ async def _upsert_tasks(
                 """,
                 *row,
             )
-        _register_imported("task", doc_id)
+        _register_imported("task", doc_id, partner_id)
         cnt.sql += 1
 
 
@@ -1062,8 +1114,8 @@ async def _upsert_task_blockers(
         for blocker_id in blockers:
             if not blocker_id or blocker_id == doc_id:
                 continue
-            if blocker_id not in _imported_ids.get("task", set()):
-                report.warn(f"task_blockers: task {doc_id} blocked by '{blocker_id}' not in SQL — skipping")
+            if (partner_id, blocker_id) not in _imported_scoped.get("task", set()):
+                report.warn(f"task_blockers: task {doc_id} blocked by '{blocker_id}' not in SQL for partner — skipping")
                 continue
             if not dry_run:
                 await conn.execute(
@@ -1096,8 +1148,8 @@ async def _upsert_task_entities(
         for entity_id in linked:
             if not entity_id:
                 continue
-            if entity_id not in _imported_ids.get("entity", set()):
-                report.warn(f"task_entities: task {doc_id} links entity '{entity_id}' not in SQL — skipping")
+            if (partner_id, entity_id) not in _imported_scoped.get("entity", set()):
+                report.warn(f"task_entities: task {doc_id} links entity '{entity_id}' not in SQL for partner — skipping")
                 continue
             if not dry_run:
                 await conn.execute(
@@ -1166,6 +1218,7 @@ async def run_import(dry_run: bool = False) -> ReconciliationReport:
 
     report = ReconciliationReport()
     _imported_ids.clear()
+    _imported_scoped.clear()
 
     # Step 1: read all data from Firestore
     print("Reading partners...")
@@ -1197,7 +1250,7 @@ async def run_import(dry_run: bool = False) -> ReconciliationReport:
     print(f"  {len(tasks_data)} tasks")
 
     print("Reading usage_logs...")
-    usage_logs_data = await _read_usage_logs(db)
+    usage_logs_data = await _read_usage_logs(db, partners_data)
     print(f"  {len(usage_logs_data)} usage_logs")
 
     # Step 2: build derived indexes

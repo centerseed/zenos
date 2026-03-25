@@ -59,6 +59,7 @@ from import_firestore_to_sql import (  # noqa: E402
     VALID_SOURCE_TYPE,
     _register_imported,
     _imported_ids,
+    _imported_scoped,
 )
 
 
@@ -365,8 +366,9 @@ class TestDeriveProjectIds:
 class TestUpsertDocumentEntities:
     def setup_method(self):
         _imported_ids.clear()
-        _register_imported("entity", "e1")
-        _register_imported("entity", "e2")
+        _imported_scoped.clear()
+        _register_imported("entity", "e1", "p1")
+        _register_imported("entity", "e2", "p1")
 
     def test_expands_linked_entity_ids(self):
         conn = _make_conn()
@@ -424,8 +426,9 @@ class TestUpsertDocumentEntities:
 class TestUpsertBlindspotEntities:
     def setup_method(self):
         _imported_ids.clear()
-        _register_imported("entity", "e1")
-        _register_imported("entity", "e2")
+        _imported_scoped.clear()
+        _register_imported("entity", "e1", "p1")
+        _register_imported("entity", "e2", "p1")
 
     def test_expands_related_entity_ids(self):
         conn = _make_conn()
@@ -464,8 +467,9 @@ class TestUpsertBlindspotEntities:
 class TestUpsertTaskEntities:
     def setup_method(self):
         _imported_ids.clear()
-        _register_imported("entity", "e1")
-        _register_imported("entity", "e2")
+        _imported_scoped.clear()
+        _register_imported("entity", "e1", "p1")
+        _register_imported("entity", "e2", "p1")
 
     def test_expands_linked_entities(self):
         conn = _make_conn()
@@ -500,9 +504,10 @@ class TestUpsertTaskEntities:
 class TestUpsertTaskBlockers:
     def setup_method(self):
         _imported_ids.clear()
-        _register_imported("task", "t1")
-        _register_imported("task", "t2")
-        _register_imported("task", "t3")
+        _imported_scoped.clear()
+        _register_imported("task", "t1", "p1")
+        _register_imported("task", "t2", "p1")
+        _register_imported("task", "t3", "p1")
 
     def test_expands_blocked_by(self):
         conn = _make_conn()
@@ -756,6 +761,9 @@ class TestRunImportDryRun:
 class TestReadUsageLogs:
     """Verify _read_usage_logs returns empty list and logs a warning on error."""
 
+    def _make_partners(self):
+        return [{"id": "p1"}]
+
     def test_returns_empty_list_on_firestore_error(self):
         """Simulated Firestore failure should return [] without raising."""
         from import_firestore_to_sql import _read_usage_logs
@@ -764,28 +772,45 @@ class TestReadUsageLogs:
             raise RuntimeError("Firestore unavailable")
 
         mock_db = MagicMock()
-        mock_collection = MagicMock()
-        mock_collection.get = _fail_get
-        mock_db.collection = MagicMock(return_value=mock_collection)
+        mock_doc = MagicMock()
+        mock_subcol = MagicMock()
+        mock_subcol.get = _fail_get
+        mock_doc.collection = MagicMock(return_value=mock_subcol)
+        mock_col = MagicMock()
+        mock_col.document = MagicMock(return_value=mock_doc)
+        # Root collection also fails
+        mock_root = MagicMock()
+        mock_root.get = _fail_get
+        mock_db.collection = MagicMock(side_effect=lambda name: mock_col if name == "partners" else mock_root)
 
-        result = asyncio.get_event_loop().run_until_complete(_read_usage_logs(mock_db))
+        result = asyncio.get_event_loop().run_until_complete(
+            _read_usage_logs(mock_db, self._make_partners())
+        )
         assert result == []
 
     def test_logs_warning_on_firestore_error(self):
         """Warning must be emitted (not silently swallowed) when Firestore fails."""
-        import logging
         from import_firestore_to_sql import _read_usage_logs
 
         async def _fail_get():
             raise RuntimeError("connection refused")
 
         mock_db = MagicMock()
-        mock_collection = MagicMock()
-        mock_collection.get = _fail_get
-        mock_db.collection = MagicMock(return_value=mock_collection)
+        mock_doc = MagicMock()
+        mock_subcol = MagicMock()
+        mock_subcol.get = _fail_get
+        mock_doc.collection = MagicMock(return_value=mock_subcol)
+        mock_col = MagicMock()
+        mock_col.document = MagicMock(return_value=mock_doc)
+        mock_db.collection = MagicMock(return_value=mock_col)
 
         with patch("import_firestore_to_sql.logger") as mock_logger:
-            asyncio.get_event_loop().run_until_complete(_read_usage_logs(mock_db))
-            mock_logger.warning.assert_called_once()
-            warning_args = mock_logger.warning.call_args[0]
-            assert "usage_logs" in warning_args[0]
+            asyncio.get_event_loop().run_until_complete(
+                _read_usage_logs(mock_db, self._make_partners())
+            )
+            assert mock_logger.warning.call_count >= 1
+            # At least one warning should mention usage_logs
+            any_usage_log_warning = any(
+                "usage_logs" in str(call) for call in mock_logger.warning.call_args_list
+            )
+            assert any_usage_log_warning
