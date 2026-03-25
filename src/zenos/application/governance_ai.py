@@ -10,12 +10,15 @@ All LLM calls are wrapped in try/except so failures never block writes.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
+from zenos.infrastructure.context import current_partner_id
+from zenos.infrastructure.firestore_repo import get_db
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +69,40 @@ class GovernanceAI:
 
     def __init__(self, llm_client: Any) -> None:
         self._llm = llm_client
+
+    async def _write_usage_log(self, payload: dict[str, Any]) -> None:
+        """Persist LLM usage metadata to partner-scoped Firestore."""
+        partner_id = current_partner_id.get()
+        if not partner_id:
+            return
+        try:
+            db = get_db()
+            await db.collection("partners").document(partner_id).collection("usage_logs").add(payload)
+        except Exception:
+            logger.warning("GovernanceAI usage logging failed", exc_info=True)
+
+    def _schedule_usage_log(self, feature: str) -> None:
+        """Schedule usage logging without blocking the caller path."""
+        if hasattr(self._llm, "consume_last_usage"):
+            usage = self._llm.consume_last_usage()
+        else:
+            usage = getattr(self._llm, "last_usage", None)
+        if not usage:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        payload = {
+            "timestamp": datetime.utcnow(),
+            "feature": feature,
+            "model": str(usage.get("model", getattr(self._llm, "model", ""))),
+            "tokens_in": int(usage.get("tokens_in", 0)),
+            "tokens_out": int(usage.get("tokens_out", 0)),
+            "partner_id": current_partner_id.get(),
+        }
+        loop.create_task(self._write_usage_log(payload))
 
     # ──────────────────────────────────────────
     # A. _rule_classify (pure rules, no LLM)
@@ -167,6 +204,7 @@ class GovernanceAI:
                 response_schema=GovernanceInference,
                 temperature=0.1,
             )
+            self._schedule_usage_log("governance.infer_all")
             _audit_governance(
                 "governance.infer_all",
                 {
@@ -233,6 +271,7 @@ class GovernanceAI:
                 response_schema=TaskLinkInference,
                 temperature=0.1,
             )
+            self._schedule_usage_log("governance.infer_doc_entities")
             _audit_governance(
                 "governance.infer_doc_entities",
                 {
@@ -298,6 +337,7 @@ class GovernanceAI:
                 response_schema=TaskLinkInference,
                 temperature=0.1,
             )
+            self._schedule_usage_log("governance.infer_task_links")
             _audit_governance(
                 "governance.infer_task_links",
                 {

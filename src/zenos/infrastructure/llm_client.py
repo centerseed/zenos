@@ -26,6 +26,27 @@ class LLMClient:
         self.model = model
         self.api_key = api_key
         self.default_temperature = default_temperature
+        self.last_usage: dict[str, int | str] | None = None
+
+    @staticmethod
+    def _extract_usage(response: Any) -> dict[str, int]:
+        """Extract prompt/completion token usage from a LiteLLM response."""
+        usage = getattr(response, "usage", None)
+        if usage is None:
+            return {"tokens_in": 0, "tokens_out": 0}
+        if isinstance(usage, dict):
+            prompt = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+            completion = usage.get("completion_tokens", usage.get("output_tokens", 0))
+        else:
+            prompt = getattr(usage, "prompt_tokens", getattr(usage, "input_tokens", 0))
+            completion = getattr(usage, "completion_tokens", getattr(usage, "output_tokens", 0))
+        return {"tokens_in": int(prompt or 0), "tokens_out": int(completion or 0)}
+
+    def consume_last_usage(self) -> dict[str, int | str] | None:
+        """Return and clear the latest usage metadata."""
+        usage = self.last_usage
+        self.last_usage = None
+        return usage
 
     def chat_structured(
         self,
@@ -45,7 +66,14 @@ class LLMClient:
         if self.api_key:
             params["api_key"] = self.api_key
 
+        self.last_usage = None
         response = litellm.completion(**params)
+        usage = self._extract_usage(response)
+        self.last_usage = {
+            "model": self.model,
+            "tokens_in": usage["tokens_in"],
+            "tokens_out": usage["tokens_out"],
+        }
         if not response.choices:
             raise ValueError("LLM returned empty choices list")
         content = response.choices[0].message.content

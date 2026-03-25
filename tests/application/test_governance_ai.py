@@ -6,6 +6,7 @@ to verify OntologyService and TaskService integration.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -229,6 +230,30 @@ class TestInferTaskLinks:
         result = ai.infer_task_links("X", "Y", [])
         assert result == []
         llm.chat_structured.assert_not_called()
+
+
+class TestUsageLogging:
+
+    @pytest.mark.asyncio
+    async def test_infer_all_schedules_usage_log_when_usage_present(self):
+        llm = MagicMock()
+        llm.chat_structured.return_value = GovernanceInference(type="product")
+        llm.consume_last_usage.return_value = {
+            "model": "gemini/test",
+            "tokens_in": 11,
+            "tokens_out": 4,
+        }
+
+        ai = GovernanceAI(llm)
+        ai._write_usage_log = AsyncMock()
+
+        ai.infer_all(
+            {"name": "Paceriz", "summary": "A running coach app"},
+            [{"id": "ent-1", "name": "Paceriz", "type": "product"}],
+            [],
+        )
+        await asyncio.sleep(0)
+        ai._write_usage_log.assert_called_once()
 
 
 # ===========================================================================
