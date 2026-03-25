@@ -60,7 +60,7 @@ Architect 會給你：
 □ 每個 Done Criteria 都標了 ✅？（有 ❌ 的直接標記）
 □ 變更清單的檔案是否都存在？
 □ DDD 依賴方向是否正確？（domain/ 沒有 import infrastructure/ 或 interface/）
-□ 新增的 Firestore 查詢是否都有 partner_id filter？
+□ 新增的 SQL 查詢是否都有 partner_id filter？
 □ UI 文案是否遵守命名規則？（不出現 entity/ontology）
 □ Type hints / TypeScript 類型是否完整？
 □ Spec 介面合約驗證（見下方）
@@ -75,7 +75,7 @@ Architect 會給你：
 2. **用 Grep 搜尋實際 call site**——例如 Spec 定義了 `list_all(type_filter)`，搜尋所有 `list_all(` 呼叫，確認每個 call site 都傳了 `type_filter`（或有書面理由不傳）
 3. **沒用到的參數 = 發現 Critical 問題**——Spec 定義了但實作沒用的參數，不是 Minor，是 Critical
 
-> 📛 歷史教訓：2026-03-25。Spec 定義了 `type_filter` 參數，Firestore 實作也支援，但所有 governance 程式碼都用 `list_all()` 全撈再 Python filter。mock 測試全過，沒人發現。
+> 📛 歷史教訓：2026-03-25。Spec 定義了 `type_filter` 參數，SQL 實作也支援，但所有 governance 程式碼都用 `list_all()` 全撈再 Python filter。mock 測試全過，沒人發現。
 
 #### 測試品質判定（強制）
 
@@ -253,7 +253,7 @@ Verdict 為 FAIL 時，在 Verdict 末尾附上：
 
 - Backend: Python 3.12, `src/zenos/`（DDD 四層）
 - Frontend: Next.js 15 + TypeScript + Tailwind, `dashboard/`
-- DB: Firestore（`partners/{partnerId}/entities`, `partners/{partnerId}/tasks`）
+- DB: PostgreSQL（Cloud SQL，schema `zenos`，asyncpg）
 - Test: pytest（backend）, vitest（frontend）
 - Deploy: Firebase Hosting + Cloud Run
 
@@ -263,5 +263,6 @@ Verdict 為 FAIL 時，在 Verdict 末尾附上：
 cd src && python -m pytest tests/ -x -v            # backend 測試（verbose）
 cd dashboard && npx vitest run                      # frontend 測試
 cd dashboard && npm run build                       # build 檢查
-firebase deploy --only hosting,firestore:rules      # 部署（如需驗證）
+firebase deploy --only hosting                      # 部署 Dashboard
+./scripts/deploy_mcp.sh                             # 部署 MCP Server
 ```

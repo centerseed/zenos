@@ -324,7 +324,7 @@ write(collection="documents", data={
 [2] 新增實體：ACWR Safety Module（類型：module）
 
 [3] 新增關係
-  Paceriz → depends_on → Firebase/Firestore
+  Paceriz → depends_on → PostgreSQL
   說明：主要資料層
 
 ────────────────────────────────────────────────

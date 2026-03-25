@@ -97,11 +97,12 @@ Architect 會給你：
 - Logging：關鍵操作要有 log，但不 log PII
 - 命名：Python 用 snake_case，TypeScript 用 camelCase，class 用 PascalCase
 
-**Firestore 操作注意：**
+**SQL 操作注意：**
 
-- 所有查詢必須有 `partner_id` filter（多租戶隔離）
+- 所有查詢必須有 `partner_id` filter（多租戶隔離，透過 `current_partner_id` ContextVar）
 - 寫入前檢查 entity 存在（parent_id、linked_entity_ids）
-- 批次操作用 batch write 或 transaction
+- 多語句寫入（主表 + join table）必須包在 `async with conn.transaction():`
+- `ON CONFLICT (id) DO UPDATE` 必須加 `WHERE <table>.partner_id = EXCLUDED.partner_id`
 
 **Frontend 注意：**
 
@@ -182,7 +183,7 @@ vitest: X passed, Y failed
 - Backend: Python 3.12, `src/zenos/`（DDD 四層）
 - MCP Server: `src/zenos/interface/tools.py`
 - Frontend: Next.js 15 + TypeScript + Tailwind, `dashboard/`
-- DB: Firestore（`partners/{partnerId}/entities`, `partners/{partnerId}/tasks`）
+- DB: PostgreSQL（Cloud SQL，schema `zenos`，asyncpg）
 - Test: pytest（backend）, vitest（frontend）
 
 ## 常用指令

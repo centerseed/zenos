@@ -5,7 +5,7 @@
 
 ## 階段
 
-Phase 0 概念驗證 → 已進入開發。Backend: Python + Firestore + MCP。Frontend: Next.js dashboard。
+Phase 0 概念驗證 → 已進入開發。Backend: Python + PostgreSQL + MCP。Frontend: Next.js dashboard。
 
 ## 讀文件順序（新 session 必讀）
 
@@ -20,7 +20,7 @@ Phase 0 概念驗證 → 已進入開發。Backend: Python + Firestore + MCP。F
 - Backend: Python 3.12, `src/zenos/`（DDD 四層：domain → application → infrastructure → interface）
 - MCP Server: `src/zenos/interface/tools.py`（對外 MCP tools）
 - Frontend: Next.js 15 + TypeScript + Tailwind, `dashboard/`
-- DB: Firestore（`partners/{partnerId}/entities`, `partners/{partnerId}/tasks`）
+- DB: PostgreSQL（Cloud SQL `zentropy-4f7a5:asia-east1:zentropy-db`，schema `zenos`，12 tables）
 - Deploy: Firebase Hosting（zenos-naruvia.web.app）+ Cloud Run
 - Test: `pytest`（backend）, `vitest`（frontend）
 
@@ -29,7 +29,7 @@ Phase 0 概念驗證 → 已進入開發。Backend: Python + Firestore + MCP。F
 - 任務管理一律用 ZenOS MCP task tools（`mcp__zenos__task`），不用其他工具
 - MCP 交付必須用 partner key 做端到端連線驗證
 - 部署後必須實際驗證服務可用，不能只看 deploy 成功
-- 部署 Dashboard 時必須同時部署 Firestore rules
+- 部署 Dashboard 時只需部署 hosting（Firestore rules 已不再使用）
 - 毀滅性操作（purge_all）絕不暴露為 MCP tool，只能用 admin script
 - 智慧邏輯放在 ZenOS server 端，不散到 caller skill
 - UI 不出現 entity/ontology 字眼。Product→專案、Module→模組、Knowledge Graph→知識地圖、Entity→「節點」
@@ -51,6 +51,5 @@ cd dashboard && npx vitest run
 
 # Deploy
 cd dashboard && npm run build && firebase deploy --only hosting
-firebase deploy --only firestore:rules
 ./scripts/deploy_mcp.sh
 ```
