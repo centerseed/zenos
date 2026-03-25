@@ -21,8 +21,8 @@ function SetupPage() {
           Set up your AI Agent
         </h2>
         <p className="text-muted-foreground mb-8">
-          Connect your Claude Code to ZenOS so your AI agent has full context
-          about your projects.
+          Connect your AI agent to ZenOS so it has full context about your
+          projects.
         </p>
 
         {/* MCP Config */}
@@ -69,7 +69,7 @@ function SetupPage() {
             <Step
               number={3}
               title="Paste the config"
-              description="Copy the config JSON above and paste it into your mcp.json file."
+              description="Copy the config JSON above and paste it into your mcp.json file. Use the Gemini tab if your client expects an SSE endpoint."
             />
             <Step
               number={4}

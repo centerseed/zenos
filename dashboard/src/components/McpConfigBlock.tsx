@@ -6,14 +6,16 @@ interface McpConfigBlockProps {
   apiKey: string;
 }
 
-const MCP_SERVER_URL = "https://zenos-mcp-165893875709.asia-east1.run.app/mcp";
+const MCP_SERVER_URL = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const STREAMABLE_HTTP_URL = `${MCP_SERVER_URL}/mcp`;
+const SSE_URL = `${MCP_SERVER_URL}/sse`;
 
-type AgentType = "claude-code" | "claude-ai" | "other";
+type AgentType = "claude-code" | "claude-ai" | "gemini";
 
 const agentTabs: { id: AgentType; label: string }[] = [
   { id: "claude-code", label: "Claude Code" },
   { id: "claude-ai", label: "Claude.ai" },
-  { id: "other", label: "Other" },
+  { id: "gemini", label: "Gemini" },
 ];
 
 function getConfig(agentType: AgentType, apiKey: string): string {
@@ -23,7 +25,7 @@ function getConfig(agentType: AgentType, apiKey: string): string {
         mcpServers: {
           zenos: {
             type: "http",
-            url: `${MCP_SERVER_URL}?api_key=${apiKey}`,
+            url: `${STREAMABLE_HTTP_URL}?api_key=${apiKey}`,
           },
         },
       },
@@ -33,10 +35,10 @@ function getConfig(agentType: AgentType, apiKey: string): string {
   }
 
   if (agentType === "claude-ai") {
-    return `MCP Server URL: ${MCP_SERVER_URL}?api_key=${apiKey}\n\nClaude.ai currently has limited MCP support.\nPlease use Claude Code for the best experience.`;
+    return `MCP Server URL: ${STREAMABLE_HTTP_URL}?api_key=${apiKey}\n\nClaude.ai currently has limited MCP support.\nPlease use Claude Code for the best experience.`;
   }
 
-  return `MCP Server URL: ${MCP_SERVER_URL}\nAPI Key: ${apiKey}\n\nUse these values to configure your MCP-compatible agent.`;
+  return `MCP Server URL: ${SSE_URL}?api_key=${apiKey}\n\nUse this SSE endpoint for Gemini or any client that requires GET-based MCP streaming.`;
 }
 
 export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {

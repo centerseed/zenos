@@ -1043,14 +1043,18 @@ if __name__ == "__main__":
     )
 
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
-    if transport in ("sse", "http"):
+    if transport in ("sse", "http", "streamable-http"):
         port = int(os.environ.get("PORT", "8080"))
 
         from starlette.applications import Starlette
         from starlette.routing import Mount, Route
         from zenos.interface.admin_api import admin_routes
 
-        http_app = mcp.http_app(transport="streamable-http", stateless_http=True)
+        if transport == "sse":
+            http_app = mcp.http_app(transport="sse")
+        else:
+            http_app = mcp.http_app(transport="streamable-http", stateless_http=True)
+
         mcp_app = ApiKeyMiddleware(http_app)
 
         app = Starlette(
