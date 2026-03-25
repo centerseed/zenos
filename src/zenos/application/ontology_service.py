@@ -717,10 +717,10 @@ class OntologyService:
                 if not data.get("force"):
                     raise ValueError("\n".join(lines))
 
-        # --- Confirmed entity protection: merge-only update ---
+        # --- Confirmed entity protection: merge-only update (unless force=true) ---
         if data.get("id"):
             existing = await self._entities.get_by_id(data["id"])
-            if existing and existing.confirmed_by_user:
+            if existing and existing.confirmed_by_user and not data.get("force"):
                 for field_name in ("summary", "status", "parent_id", "level"):
                     existing_val = getattr(existing, field_name, None)
                     new_val = data.get(field_name)
@@ -743,7 +743,7 @@ class OntologyService:
                         if s.get("uri") not in existing_uris:
                             existing.sources.append(s)
                 warnings.append(
-                    f"Entity '{existing.name}' 已確認，僅更新空欄位"
+                    f"Entity '{existing.name}' 已確認，僅更新空欄位（加 force=true 可覆寫）"
                 )
                 existing.updated_at = datetime.utcnow()
                 saved = await self._entities.upsert(existing)

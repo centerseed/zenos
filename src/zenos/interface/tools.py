@@ -630,6 +630,7 @@ async def write(
               選填：owner（負責人名稱，如 "Barry"）
               選填：sources([{uri, label, type}]) 或 append_sources（追加不覆蓋）
               選填：visibility（"public" | "restricted"，預設 public）
+              選填：force（true 時可覆寫已確認 entity 的非空欄位）
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary
     protocols: entity_id, entity_name, content({what, why, how, who})
