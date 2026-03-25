@@ -1089,7 +1089,7 @@ class SqlPartnerKeyValidator:
                         "status": row["status"],
                         "isAdmin": row["is_admin"],
                         "sharedPartnerId": row["shared_partner_id"],
-                        "defaultProject": row["default_project"],
+                        "defaultProject": row["default_project"] or "",
                     }
             self._cache = new_cache
             self._cache_ts = time.time()
