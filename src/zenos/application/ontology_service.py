@@ -358,7 +358,11 @@ class OntologyService:
 
         if self._governance_ai and not data.get("type"):
             all_entities = await self._entities.list_all()
-            entity_dicts = [self._entity_to_dict(e) for e in all_entities]
+            entity_dicts = [
+                self._entity_to_dict(e)
+                for e in all_entities
+                if e.type != EntityType.DOCUMENT
+            ]
 
             # Step 1: Rule-based classification (no LLM)
             rule_type, rule_parent = self._governance_ai._rule_classify(
@@ -392,6 +396,8 @@ class OntologyService:
                     if inference.parent_id and not data.get("parent_id"):
                         data["parent_id"] = inference.parent_id
                         warnings.append(f"GovernanceAI 推薦 parent_id='{inference.parent_id}'")
+                else:
+                    warnings.append("GovernanceAI 推斷失敗，已退回規則/手動路徑")
 
         # 2. type enum
         entity_type = data.get("type", "")
@@ -502,7 +508,7 @@ class OntologyService:
         if data.get("id"):
             existing = await self._entities.get_by_id(data["id"])
             if existing and existing.confirmed_by_user:
-                for field_name in ("summary", "status", "parent_id"):
+                for field_name in ("summary", "status", "parent_id", "level"):
                     existing_val = getattr(existing, field_name, None)
                     new_val = data.get(field_name)
                     if new_val and not existing_val:
@@ -611,7 +617,12 @@ class OntologyService:
         # --- GovernanceAI: unified inference (rels + doc links) ---
         if self._governance_ai and saved.id:
             all_entities = await self._entities.list_all()
-            entity_dicts = [self._entity_to_dict(e) for e in all_entities if e.id != saved.id]
+            # Keep infer_all context focused on non-document entities.
+            entity_dicts = [
+                self._entity_to_dict(e)
+                for e in all_entities
+                if e.id != saved.id and e.type != EntityType.DOCUMENT
+            ]
 
             # Find unlinked document entities (no parent_id pointing to saved entity)
             doc_entities = [
@@ -633,11 +644,12 @@ class OntologyService:
                 # Auto relationships
                 for rel in inference.rels:
                     try:
+                        rel_desc = (rel.description or "").strip()
                         await self.add_relationship(
                             source_id=saved.id,
                             target_id=rel.target,
                             rel_type=rel.type,
-                            description="auto-inferred",
+                            description=rel_desc or "auto-inferred",
                         )
                         warnings.append(
                             f"GovernanceAI 自動建立關係：{saved.name} → {rel.target} ({rel.type})"
@@ -661,6 +673,8 @@ class OntologyService:
                             )
                         except Exception as exc:
                             logger.warning("GovernanceAI auto-doc-link failed: %s", exc)
+            else:
+                warnings.append("GovernanceAI 關聯推斷失敗，未自動建立關係")
 
         return UpsertEntityResult(
             entity=saved,
@@ -698,7 +712,7 @@ class OntologyService:
         # --- Cross-product guard for auto-inferred related_to ---
         if (
             rel_type == RelationshipType.RELATED_TO
-            and description == "auto-inferred"
+            and description.startswith("auto-inferred")
         ):
             source_product = await self._find_product_ancestor(source)
             target_product = await self._find_product_ancestor(target)
@@ -746,14 +760,24 @@ class OntologyService:
         """
         # --- Validation ---
         source_data = data.get("source", {})
+        source_uri = ""
         if isinstance(source_data, dict):
             source_type = source_data.get("type", "")
+            source_uri = str(source_data.get("uri", "")).strip()
             valid_source_types = [s.value for s in SourceType]
             if source_type and source_type not in valid_source_types:
                 raise ValueError(
                     f"Invalid source type '{source_type}'. "
                     f"Must be one of: {', '.join(valid_source_types)}"
                 )
+
+        # Server-side idempotency: dedup by source URI for document entities.
+        if source_uri and not data.get("id"):
+            all_doc_entities = await self._entities.list_all(type_filter=EntityType.DOCUMENT)
+            for d in all_doc_entities:
+                if any(str(s.get("uri", "")).strip() == source_uri for s in (d.sources or [])):
+                    data["id"] = d.id
+                    break
 
         linked_entity_ids = data.get("linked_entity_ids", [])
         for eid in linked_entity_ids:

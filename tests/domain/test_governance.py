@@ -646,23 +646,50 @@ class TestRunQualityCheckL2:
         assert "l2_impacts_coverage" in failed_names
 
     def test_exactly_50_percent_without_rels_passes_coverage(self):
-        """Exactly 50% of modules without relationships passes the coverage check."""
+        """Exactly 50% of modules without concrete impacts passes the coverage check."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
         m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
-        # m1 has rel, m2 does not — 50% without = not > 50%, passes
-        rel = _make_rel(source_id="m1", target_id="m1")
+        # m1 has impacts, m2 does not — 50% without = not > 50%, passes
+        rel = Relationship(
+            id="r1",
+            source_entity_id="m1",
+            target_id="m1",
+            type=RelationshipType.IMPACTS,
+            description="A 改了閾值→B 的計算邏輯要跟著看",
+        )
         report = run_quality_check([m1, m2], [], [], [], [rel])
         passed_names = [p.name for p in report.passed]
         assert "l2_impacts_coverage" in passed_names
 
     def test_all_modules_with_rels_passes_coverage(self):
-        """All module entities having relationships passes coverage check."""
+        """All module entities covered by concrete impacts passes coverage check."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
         m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
-        rel = _make_rel(source_id="m1", target_id="m2")
+        rel = Relationship(
+            id="r1",
+            source_entity_id="m1",
+            target_id="m2",
+            type=RelationshipType.IMPACTS,
+            description="A 改了策略→B 的執行規則要跟著看",
+        )
         report = run_quality_check([m1, m2], [], [], [], [rel])
         passed_names = [p.name for p in report.passed]
         assert "l2_impacts_coverage" in passed_names
+
+    def test_impacts_without_change_path_not_counted(self):
+        """Impacts without 'A changed -> B checks' style detail should not count."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        rel = Relationship(
+            id="r1",
+            source_entity_id="m1",
+            target_id="m2",
+            type=RelationshipType.IMPACTS,
+            description="A impacts B",
+        )
+        report = run_quality_check([m1, m2], [], [], [], [rel])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_impacts_coverage" in failed_names
 
     def test_no_modules_passes_coverage(self):
         """When there are no module entities, coverage check passes trivially."""

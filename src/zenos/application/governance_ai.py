@@ -44,7 +44,8 @@ def _audit_governance(event_type: str, payload: dict[str, Any]) -> None:
 
 class InferredRel(BaseModel):
     target: str  # entity ID
-    type: str  # depends_on | related_to | part_of | serves
+    type: str  # depends_on | related_to | part_of | serves | impacts | enables
+    description: str = ""  # for impacts, must describe change propagation path
 
 
 class GovernanceInference(BaseModel):
@@ -182,14 +183,19 @@ class GovernanceAI:
             {
                 "role": "system",
                 "content": (
-                    "你是 ontology 治理 AI。判斷新實體的關聯和文件連結。回傳 JSON：\n"
+                    "你是 ontology 治理 AI。判斷新實體的關聯和文件連結。"
+                    "優先輸出 impacts 關聯，且 impacts 的 description 必須具體。回傳 JSON：\n"
                     "- type: null（caller 已指定時）或 \"product\"/\"module\"\n"
                     "- parent_id: module 的 parent product ID\n"
                     "- duplicate_of: 完全相同概念的 entity ID。嚴格標準：只有名稱不同但描述同一件事才算重複。"
                     "不同平台的實作（如 Android X 和 iOS X）絕對不是重複，它們是 related_to 關係。\n"
-                    "- rels: [{\"target\":\"id\",\"type\":\"depends_on|related_to|part_of\"}]\n"
+                    "- rels: [{\"target\":\"id\",\"type\":\"impacts|depends_on|related_to|part_of|serves|enables\","
+                    "\"description\":\"A 改了什麼→B 的什麼要跟著看\"}]\n"
                     "- doc_links: [\"doc-id\"]\n"
-                    "不確定就不填。duplicate_of 寧可漏判也不要誤判。"
+                    "規則：\n"
+                    "1) 不確定就不填。duplicate_of 寧可漏判也不要誤判。\n"
+                    "2) 若 type=impacts，description 必須包含「→」或「->」，且左右都要有具體內容。\n"
+                    "3) 若不是 impacts，也要提供簡短 description。"
                 ),
             },
             {

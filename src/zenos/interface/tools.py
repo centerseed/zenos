@@ -66,10 +66,6 @@ _current_partner: ContextVar[dict | None] = ContextVar("current_partner", defaul
 # API Key authentication middleware
 # ──────────────────────────────────────────────
 
-ZENOS_API_KEY = os.environ.get("ZENOS_API_KEY", "")
-ZENOS_DEFAULT_PARTNER_ID = os.environ.get("ZENOS_DEFAULT_PARTNER_ID", "")
-
-
 class PartnerKeyValidator:
     """Validates API keys against Firestore partners collection.
 
@@ -119,9 +115,8 @@ _partner_validator = PartnerKeyValidator()
 class ApiKeyMiddleware:
     """Pure ASGI middleware — compatible with SSE streaming.
 
-    Authentication order:
-    1. Check against ZENOS_API_KEY (superadmin, backward-compatible).
-    2. Check against Firestore partners collection (multi-key).
+    Authentication:
+    - Validate key against active partners in Firestore.
     """
 
     def __init__(self, app):
@@ -134,22 +129,7 @@ class ApiKeyMiddleware:
         key = self._extract_key(scope)
         path = scope.get("path", "")
 
-        # 1. Superadmin key (env var)
-        if key and key == ZENOS_API_KEY:
-            from zenos.infrastructure.context import current_partner_id
-            token = _current_partner.set({
-                "displayName": "superadmin",
-                "email": "admin",
-                "id": ZENOS_DEFAULT_PARTNER_ID,
-            })
-            token_pid = current_partner_id.set(ZENOS_DEFAULT_PARTNER_ID)
-            try:
-                return await self.app(scope, receive, send)
-            finally:
-                _current_partner.reset(token)
-                current_partner_id.reset(token_pid)
-
-        # 2. Partner key (Firestore)
+        # Partner key (Firestore)
         if key:
             partner = await _partner_validator.validate(key)
             if partner is not None:
@@ -405,6 +385,16 @@ async def search(
         elif col == "documents":
             # Query document entities (type="document") from entities collection
             doc_entities = await ontology_service._entities.list_all(type_filter="document")
+            if query.strip():
+                q = query.lower().strip()
+                filtered = []
+                for d in doc_entities:
+                    source_uris = " ".join(str(s.get("uri", "")) for s in (d.sources or []))
+                    source_labels = " ".join(str(s.get("label", "")) for s in (d.sources or []))
+                    haystack = f"{d.name} {d.summary} {source_uris} {source_labels}".lower()
+                    if q in haystack:
+                        filtered.append(d)
+                doc_entities = filtered
             if entity_name:
                 entity = await ontology_service._entities.get_by_name(entity_name)
                 if entity and entity.id:
@@ -1121,10 +1111,6 @@ if __name__ == "__main__":
 
     transport = os.environ.get("MCP_TRANSPORT", "dual")
     if transport in ("dual", "sse", "http", "streamable-http"):
-        if not ZENOS_API_KEY:
-            raise RuntimeError(
-                "ZENOS_API_KEY must be set when MCP_TRANSPORT is dual/sse/http/streamable-http"
-            )
         port = int(os.environ.get("PORT", "8080"))
 
         from starlette.applications import Starlette

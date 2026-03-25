@@ -7,6 +7,7 @@ a build-system, so pip cannot install it).
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 
@@ -56,11 +57,22 @@ class LLMClient:
         **kwargs: Any,
     ) -> BaseModel:
         """Call LLM with JSON output mode and parse into a Pydantic model."""
+        schema = response_schema.model_json_schema()
+        response_format: Any = response_schema
+        if "gemini" in self.model.lower():
+            # Gemini via LiteLLM may degrade class-based response_format into bare
+            # json_object. Explicit schema improves structured-output reliability.
+            response_format = {
+                "type": "json_object",
+                "schema": schema,
+            }
+
         params: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature if temperature is not None else self.default_temperature,
-            "response_format": {"type": "json_object"},
+            "response_format": response_format,
+            "guided_json": schema,
             **kwargs,
         }
         if self.api_key:
@@ -77,7 +89,31 @@ class LLMClient:
         if not response.choices:
             raise ValueError("LLM returned empty choices list")
         content = response.choices[0].message.content
-        return response_schema.model_validate_json(content)
+        return self._parse_structured_content(content, response_schema)
+
+    @staticmethod
+    def _parse_structured_content(content: Any, response_schema: type[BaseModel]) -> BaseModel:
+        """Parse LLM content robustly into the target schema."""
+        if isinstance(content, dict):
+            return response_schema.model_validate(content)
+        if isinstance(content, list):
+            return response_schema.model_validate(content)
+        if not isinstance(content, str):
+            raise ValueError(f"Unsupported structured content type: {type(content)!r}")
+
+        try:
+            return response_schema.model_validate_json(content)
+        except Exception:
+            cleaned = content.strip()
+            if cleaned.startswith("```"):
+                lines = cleaned.splitlines()
+                if lines and lines[0].startswith("```"):
+                    lines = lines[1:]
+                if lines and lines[-1].strip().startswith("```"):
+                    lines = lines[:-1]
+                cleaned = "\n".join(lines).strip()
+            parsed = json.loads(cleaned)
+            return response_schema.model_validate(parsed)
 
 
 def create_llm_client() -> LLMClient:

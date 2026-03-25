@@ -13,6 +13,7 @@ import pytest
 
 from zenos.application.ontology_service import OntologyService
 from zenos.application.task_service import TaskService
+from zenos.application.governance_ai import GovernanceInference, InferredRel
 from zenos.domain.models import Entity, Relationship, Tags
 
 
@@ -25,6 +26,7 @@ def _mock_repos() -> dict:
     entity_repo = AsyncMock()
     entity_repo.get_by_id = AsyncMock(return_value=None)
     entity_repo.get_by_name = AsyncMock(return_value=None)
+    entity_repo.list_all = AsyncMock(return_value=[])
     entity_repo.upsert = AsyncMock(side_effect=lambda e: e)
 
     relationship_repo = AsyncMock()
@@ -462,6 +464,32 @@ class TestUpsertDocumentValidation:
         # upsert_document now returns Entity(type="document")
         assert result.name == "API Spec"
         assert result.type == "document"
+
+    async def test_source_uri_is_idempotent_and_reuses_existing_document_entity(self):
+        repos = _mock_repos()
+        existing_doc = Entity(
+            id="doc-existing",
+            name="Old Title",
+            type="document",
+            summary="old",
+            tags=Tags(what=["x"], why="y", how="z", who=["a"]),
+            sources=[{"uri": "https://github.com/acme/repo/blob/main/docs/spec.md", "label": "spec.md", "type": "github"}],
+        )
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing_doc])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "title": "API Spec Updated",
+            "source": {
+                "type": "github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "adapter": "github",
+            },
+            "tags": {"what": ["api"], "why": "ref", "how": "REST", "who": ["dev"]},
+            "summary": "updated summary",
+        })
+
+        assert result.id == "doc-existing"
 
 
 # ---------------------------------------------------------------------------
@@ -1039,3 +1067,163 @@ class TestCrossProductRelatedToGuard:
 
         # Manually created should be persisted
         repos["relationship_repo"].add.assert_called_once()
+
+
+class _CaptureGovernanceAI:
+    """Test double for capturing infer_all inputs."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[dict, list[dict], list[dict]]] = []
+
+    def _rule_classify(self, name: str, existing_entities: list[dict]):
+        return (None, None)
+
+    def infer_all(self, entity_data: dict, existing_entities: list[dict], unlinked_docs: list[dict]):
+        self.calls.append((entity_data, existing_entities, unlinked_docs))
+        return None
+
+
+class TestGovernanceAIPromptInputFiltering:
+    async def test_pre_save_infer_all_excludes_document_entities(self):
+        repos = _mock_repos()
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        doc = Entity(
+            id="doc-1",
+            name="Spec A",
+            type="document",
+            summary="doc",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module A",
+            type="module",
+            summary="module",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        repos["entity_repo"].list_all = AsyncMock(return_value=[doc, module])
+
+        gov = _CaptureGovernanceAI()
+        svc = OntologyService(
+            entity_repo=repos["entity_repo"],
+            relationship_repo=repos["relationship_repo"],
+            document_repo=repos["document_repo"],
+            protocol_repo=repos["protocol_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+            governance_ai=gov,
+        )
+
+        with pytest.raises(ValueError, match="Invalid entity type"):
+            await svc.upsert_entity({
+                "name": "New Without Type",
+                "summary": "needs classify",
+                "tags": {"what": ["x"], "why": "x", "how": "x", "who": ["x"]},
+            })
+
+        assert len(gov.calls) == 1
+        _, existing_entities, _ = gov.calls[0]
+        assert {e["id"] for e in existing_entities} == {"mod-1"}
+        assert all(e["type"] != "document" for e in existing_entities)
+
+    async def test_infer_all_excludes_document_entities_from_entity_table(self):
+        repos = _mock_repos()
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+
+        saved = Entity(
+            id="ent-new",
+            name="New Product",
+            type="product",
+            summary="new",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module A",
+            type="module",
+            summary="module",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        doc = Entity(
+            id="doc-1",
+            name="Spec A",
+            type="document",
+            summary="doc",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        repos["entity_repo"].list_all = AsyncMock(return_value=[saved, module, doc])
+
+        gov = _CaptureGovernanceAI()
+        svc = OntologyService(
+            entity_repo=repos["entity_repo"],
+            relationship_repo=repos["relationship_repo"],
+            document_repo=repos["document_repo"],
+            protocol_repo=repos["protocol_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+            governance_ai=gov,
+        )
+
+        await svc.upsert_entity(_valid_entity_data(
+            id="ent-new",
+            name="New Product",
+            type="product",
+            summary="new",
+        ))
+
+        assert len(gov.calls) == 1
+        _, existing_entities, unlinked_docs = gov.calls[0]
+        assert {e["id"] for e in existing_entities} == {"mod-1"}
+        assert all(e["type"] != "document" for e in existing_entities)
+        assert {d["id"] for d in unlinked_docs} == {"doc-1"}
+
+    async def test_auto_inferred_relationship_uses_model_description(self):
+        repos = _mock_repos()
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        repos["entity_repo"].find_duplicate = AsyncMock(return_value=None)
+
+        saved = Entity(
+            id="ent-new",
+            name="New Product",
+            type="product",
+            summary="new",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        target = Entity(
+            id="mod-1",
+            name="Module A",
+            type="module",
+            summary="module",
+            tags=Tags(what=["x"], why="x", how="x", who=["x"]),
+        )
+        repos["entity_repo"].list_all = AsyncMock(return_value=[saved, target])
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=lambda eid: {"ent-new": saved, "mod-1": target}.get(eid))
+
+        class _Gov:
+            def infer_all(self, entity_data, existing_entities, unlinked_docs):
+                return GovernanceInference(
+                    rels=[
+                        InferredRel(
+                            target="mod-1",
+                            type="impacts",
+                            description="A 改了定價規則→B 的銷售話術要跟著看",
+                        )
+                    ]
+                )
+
+        svc = OntologyService(
+            entity_repo=repos["entity_repo"],
+            relationship_repo=repos["relationship_repo"],
+            document_repo=repos["document_repo"],
+            protocol_repo=repos["protocol_repo"],
+            blindspot_repo=repos["blindspot_repo"],
+            governance_ai=_Gov(),
+        )
+
+        await svc.upsert_entity(_valid_entity_data(
+            id="ent-new",
+            name="New Product",
+            type="product",
+            summary="new",
+        ))
+
+        added_rel = repos["relationship_repo"].add.call_args[0][0]
+        assert added_rel.description == "A 改了定價規則→B 的銷售話術要跟著看"

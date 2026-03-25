@@ -882,16 +882,22 @@ def run_quality_check(
         ),
     ))
 
-    # --- 12. L2 Impacts coverage (>50% modules have relationships)? ---
-    # The core value of L2 is the relationships between concepts.
-    # If more than half of module entities have no relationships, it's a red flag.
-    rel_entity_ids_all = set()
+    # --- 12. L2 Impacts coverage (>50% modules have concrete impacts)? ---
+    # The core value of L2 is concrete change-propagation paths (impacts).
+    # If more than half of modules have no concrete impacts, it's a red flag.
+    impact_entity_ids = set()
     for r in relationships:
-        rel_entity_ids_all.add(r.source_entity_id)
-        rel_entity_ids_all.add(r.target_id)
+        if r.type != RelationshipType.IMPACTS:
+            continue
+        desc = (r.description or "").strip()
+        has_path = ("→" in desc or "->" in desc)
+        if not has_path:
+            continue
+        impact_entity_ids.add(r.source_entity_id)
+        impact_entity_ids.add(r.target_id)
     modules_without_rels = [
         e for e in module_entities
-        if e.id and e.id not in rel_entity_ids_all
+        if e.id and e.id not in impact_entity_ids
     ]
     total_modules = len(module_entities)
     n_without = len(modules_without_rels)
@@ -900,10 +906,10 @@ def run_quality_check(
         name="l2_impacts_coverage",
         passed=check12_ok,
         detail=(
-            f"{n_without}/{total_modules} 個 L2 entity 沒有任何 relationship。"
-            f"L2 的核心價值在於概念之間的關聯。"
+            f"{n_without}/{total_modules} 個 L2 entity 沒有具體 impacts 路徑。"
+            f"L2 的核心價值在於「A 改了什麼→B 要跟著看什麼」。"
             if not check12_ok
-            else f"{n_without}/{total_modules} 個 L2 entity 沒有 relationship（在閾值 50% 以內）"
+            else f"{n_without}/{total_modules} 個 L2 entity 沒有具體 impacts（在閾值 50% 以內）"
         ),
     ))
 

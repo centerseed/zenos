@@ -231,6 +231,36 @@ class TestSearchTool:
 
             assert len(result["entities"]) == 3
 
+    async def test_documents_collection_query_filters_by_source_uri(self):
+        from zenos.interface.tools import search
+
+        doc_hit = _make_entity(
+            id="doc-1",
+            name="Spec A",
+            type="document",
+            summary="spec",
+            sources=[{"uri": "https://github.com/acme/repo/blob/main/docs/spec-a.md", "label": "spec-a.md", "type": "github"}],
+        )
+        doc_miss = _make_entity(
+            id="doc-2",
+            name="Spec B",
+            type="document",
+            summary="spec",
+            sources=[{"uri": "https://github.com/acme/repo/blob/main/docs/spec-b.md", "label": "spec-b.md", "type": "github"}],
+        )
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc_hit, doc_miss])
+            mock_os._entities.get_by_name = AsyncMock(return_value=None)
+
+            result = await search(
+                collection="documents",
+                query="spec-a.md",
+            )
+
+            assert "documents" in result
+            assert [d["id"] for d in result["documents"]] == ["doc-1"]
+
 
 # ---------------------------------------------------------------------------
 # Tool 2: get
