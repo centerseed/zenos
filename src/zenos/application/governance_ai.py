@@ -19,7 +19,7 @@ from typing import Any
 
 from pydantic import BaseModel
 from zenos.infrastructure.context import current_partner_id
-from zenos.infrastructure.firestore_repo import get_db
+from zenos.infrastructure.sql_repo import SCHEMA, get_pool
 
 logger = logging.getLogger(__name__)
 
@@ -193,13 +193,21 @@ class GovernanceAI:
         return "\n".join(lines)
 
     async def _write_usage_log(self, payload: dict[str, Any]) -> None:
-        """Persist LLM usage metadata to partner-scoped Firestore."""
+        """Persist LLM usage metadata to SQL usage_logs."""
         partner_id = current_partner_id.get()
         if not partner_id:
             return
         try:
-            db = get_db()
-            await db.collection("partners").document(partner_id).collection("usage_logs").add(payload)
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    f"""INSERT INTO {SCHEMA}.usage_logs (partner_id, model, tokens_in, tokens_out)
+                        VALUES ($1, $2, $3, $4)""",
+                    partner_id,
+                    str(payload.get("model", "")),
+                    int(payload.get("tokens_in", 0)),
+                    int(payload.get("tokens_out", 0)),
+                )
         except Exception:
             logger.warning("GovernanceAI usage logging failed", exc_info=True)
 
