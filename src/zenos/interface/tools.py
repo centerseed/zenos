@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 import os
 import time
+import json
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime
@@ -281,6 +282,30 @@ def _convert_datetimes(data: dict) -> dict:
         else:
             out[key] = value
     return out
+
+
+def _audit_log(
+    event_type: str,
+    target: dict,
+    changes: dict | None = None,
+    governance: dict | None = None,
+) -> None:
+    """Emit structured governance audit logs to stdout/Cloud Logging."""
+    partner = _current_partner.get() or {}
+    payload = {
+        "event_type": event_type,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "partner_id": partner.get("id", ""),
+        "actor": {
+            "id": partner.get("id", ""),
+            "name": partner.get("displayName", "system"),
+            "email": partner.get("email", ""),
+        },
+        "target": target,
+        "changes": changes or {},
+        "governance": governance or {},
+    }
+    logger.info("AUDIT_LOG %s", json.dumps(payload, ensure_ascii=False, default=str))
 
 
 # ===================================================================
@@ -638,16 +663,34 @@ async def write(
             response = _serialize(result)
             if result.warnings:
                 response["warnings"] = result.warnings
+            _audit_log(
+                event_type="ontology.entity.upsert",
+                target={"collection": collection, "id": response.get("entity", {}).get("id")},
+                changes={"input": data},
+                governance={"warnings": result.warnings or []},
+            )
             return response
 
         elif collection == "documents":
             # Backward compat: collection="documents" now creates entity(type="document")
             result = await ontology_service.upsert_document(data)
-            return _serialize(result)
+            response = _serialize(result)
+            _audit_log(
+                event_type="ontology.document.upsert",
+                target={"collection": collection, "id": response.get("id")},
+                changes={"input": data},
+            )
+            return response
 
         elif collection == "protocols":
             result = await ontology_service.upsert_protocol(data)
-            return _serialize(result)
+            response = _serialize(result)
+            _audit_log(
+                event_type="ontology.protocol.upsert",
+                target={"collection": collection, "id": response.get("id")},
+                changes={"input": data},
+            )
+            return response
 
         elif collection == "blindspots":
             result = await ontology_service.add_blindspot(data)
@@ -675,6 +718,11 @@ async def write(
                 auto_task_result = await task_service.create_task(auto_task_data)
                 response["auto_created_task"] = _serialize(auto_task_result.task)
 
+            _audit_log(
+                event_type="ontology.blindspot.upsert",
+                target={"collection": collection, "id": response.get("id")},
+                changes={"input": data},
+            )
             return response
 
         elif collection == "relationships":
@@ -684,7 +732,13 @@ async def write(
                 rel_type=data["type"],
                 description=data["description"],
             )
-            return _serialize(result)
+            response = _serialize(result)
+            _audit_log(
+                event_type="ontology.relationship.upsert",
+                target={"collection": collection, "id": response.get("id")},
+                changes={"input": data},
+            )
+            return response
 
         else:
             return {
@@ -752,9 +806,24 @@ async def confirm(
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}
                     for c in result.cascade_updates
                 ]
+            _audit_log(
+                event_type="task.confirm",
+                target={"collection": collection, "id": id},
+                changes={
+                    "accepted": accepted,
+                    "rejection_reason": rejection_reason,
+                    "mark_stale_entity_ids": mark_stale_entity_ids or [],
+                    "new_blindspot": new_blindspot or {},
+                },
+            )
             return response
         else:
             result = await ontology_service.confirm(collection, id)
+            _audit_log(
+                event_type="ontology.confirm",
+                target={"collection": collection, "id": id},
+                changes={"accepted": accepted},
+            )
             return result
     except ValueError as e:
         error_msg = str(e)
@@ -839,6 +908,11 @@ async def _task_handler(
             }
             task_result = await task_service.create_task(data)
             response = _serialize(task_result.task)
+            _audit_log(
+                event_type="task.create",
+                target={"collection": "tasks", "id": response.get("id")},
+                changes={"input": data},
+            )
             return response
 
         elif action == "update":
@@ -875,6 +949,11 @@ async def _task_handler(
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}
                     for c in task_result.cascade_updates
                 ]
+            _audit_log(
+                event_type="task.update",
+                target={"collection": "tasks", "id": id},
+                changes={"updates": updates},
+            )
             return response
 
         else:

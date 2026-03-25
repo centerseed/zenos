@@ -12,11 +12,26 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
+
+
+def _audit_governance(event_type: str, payload: dict[str, Any]) -> None:
+    """Emit structured governance inference audit logs."""
+    body = {
+        "event_type": event_type,
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "partner_id": "",
+        "actor": {"id": "", "name": "governance_ai", "email": ""},
+        "target": {"component": "GovernanceAI"},
+        "changes": {},
+        "governance": payload,
+    }
+    logger.info("AUDIT_LOG %s", json.dumps(body, ensure_ascii=False, default=str))
 
 
 # ──────────────────────────────────────────────
@@ -147,12 +162,30 @@ class GovernanceAI:
         ]
 
         try:
-            return self._llm.chat_structured(
+            result = self._llm.chat_structured(
                 messages=messages,
                 response_schema=GovernanceInference,
                 temperature=0.1,
             )
+            _audit_governance(
+                "governance.infer_all",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "entity_name": entity_name,
+                    "candidate_entities_count": len(existing_entities),
+                    "unlinked_docs_count": len(unlinked_docs),
+                    "result": result.model_dump() if hasattr(result, "model_dump") else {},
+                },
+            )
+            return result
         except Exception:
+            _audit_governance(
+                "governance.infer_all.error",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "entity_name": entity_name,
+                },
+            )
             logger.warning("GovernanceAI.infer_all failed", exc_info=True)
             return None
 
@@ -200,8 +233,24 @@ class GovernanceAI:
                 response_schema=TaskLinkInference,
                 temperature=0.1,
             )
+            _audit_governance(
+                "governance.infer_doc_entities",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "doc_title": doc_title,
+                    "candidate_entities_count": len(existing_entities),
+                    "result_entity_ids": result.entity_ids,
+                },
+            )
             return result.entity_ids
         except Exception:
+            _audit_governance(
+                "governance.infer_doc_entities.error",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "doc_title": doc_title,
+                },
+            )
             logger.warning("GovernanceAI.infer_doc_entities failed", exc_info=True)
             return []
 
@@ -249,7 +298,23 @@ class GovernanceAI:
                 response_schema=TaskLinkInference,
                 temperature=0.1,
             )
+            _audit_governance(
+                "governance.infer_task_links",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "task_title": title,
+                    "candidate_entities_count": len(existing_entities),
+                    "result_entity_ids": result.entity_ids,
+                },
+            )
             return result.entity_ids
         except Exception:
+            _audit_governance(
+                "governance.infer_task_links.error",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "task_title": title,
+                },
+            )
             logger.warning("GovernanceAI.infer_task_links failed", exc_info=True)
             return []
