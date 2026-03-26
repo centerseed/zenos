@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-005-dashboard-graph-library
+status: Approved
+ontology_entity: dashboard-v1
+created: 2026-03-23
+updated: 2026-03-26
+---
+
 # ADR-005：Dashboard 全景圖 Graph Library 選型
 
 **狀態**：Accepted

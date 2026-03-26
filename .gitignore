@@ -18,7 +18,11 @@ dist/
 
 # Firebase
 firebase-debug.log
+.firebase/hosting.*.cache
 
 # ZenOS sync state
 .zenos-sync-state.json
 *.swp
+
+# Frontend build cache
+dashboard/tsconfig.tsbuildinfo

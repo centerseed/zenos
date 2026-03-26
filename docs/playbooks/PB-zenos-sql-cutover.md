@@ -1,3 +1,12 @@
+---
+type: PB
+id: PB-zenos-sql-cutover
+status: Draft
+ontology_entity: sql-cutover
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS SQL Cutover Runbook
 
 Last updated: 2026-03-25

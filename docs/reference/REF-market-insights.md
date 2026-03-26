@@ -1,3 +1,12 @@
+---
+type: REF
+id: REF-market-insights
+status: Draft
+ontology_entity: market-insights
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS 市場洞察
 
 > 最後更新：2026-03-22

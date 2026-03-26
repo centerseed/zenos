@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-004-ontology-output-path
+status: Draft
+ontology_entity: action-layer
+created: 2026-03-22
+updated: 2026-03-26
+---
+
 # ADR-004：Ontology Output 路徑——從知識到行動
 
 **日期**：2026-03-22

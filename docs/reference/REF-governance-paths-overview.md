@@ -1,3 +1,12 @@
+---
+type: REF
+id: REF-governance-paths-overview
+status: Draft
+ontology_entity: governance-paths
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS 治理路徑總覽
 
 ## 目的
@@ -193,6 +202,28 @@ LLM 成本：
 高頻跑 `analyze()`，低頻做 `confirm()` 與精準修補。
 
 這樣能把重路徑留在「真正需要建立或重構知識」的時候，而不是每次更新都付出同樣成本。
+
+---
+
+## L2 / L3 / Action 單一權威治理表
+
+為避免同一規則在多份 spec 重複演化，治理內容採「單一權威文件 + 引用」：
+
+| 主題 | 權威文件 | 允許寫入的規則類型 | 禁止重寫位置 |
+|------|----------|--------------------|--------------|
+| L2 entity 升降級與 impacts gate | `docs/specs/SPEC-l2-entity-redefinition.md` | 三問、impacts、L2 路由邊界 | Action Layer spec、文件治理 spec |
+| L3 文件生命週期治理 | `docs/specs/SPEC-doc-governance.md` | frontmatter、rename/reclassify/archive/supersede、sync contract | L2 spec、Action Layer spec |
+| Action Layer / L3 Task 治理 | `docs/specs/SPEC-task-governance.md` | 建票品質、粒度、linked_entities、duplicate/supersede、驗收與反饋 | L2 spec、文件治理 spec |
+
+衝突解決順序：
+1. 先判斷內容屬於 L2、L3 文件、或 Task 執行。
+2. 僅套用該層權威文件的硬規則。
+3. 其他文件只能引用，不得複寫或擴充同層硬規則。
+
+治理稽核最低要求（spec review 必檢）：
+- 任何新增條文若涉及他層硬規則，必須改成 cross-reference。
+- 任一規則只能有一個 canonical wording；其他文件只能保留邊界說明。
+- 若發現重複規則，以權威文件為準，重複段落應在同次變更移除。
 
 ---
 

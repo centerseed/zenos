@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-005-mcp-tool-consolidation
+status: Approved
+ontology_entity: mcp-tooling
+created: 2026-03-22
+updated: 2026-03-26
+---
+
 # ADR-005：MCP Tool 合併 — 17 → 7
 
 **狀態**：Accepted

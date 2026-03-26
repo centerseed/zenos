@@ -1,3 +1,12 @@
+---
+type: TD
+id: TD-action-layer-mcp-interface
+status: Draft
+ontology_entity: action-layer
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # Action Layer — MCP 介面技術規格
 
 > 日期：2026-03-22

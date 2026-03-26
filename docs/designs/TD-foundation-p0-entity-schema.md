@@ -1,3 +1,12 @@
+---
+type: TD
+id: TD-foundation-p0-entity-schema
+status: Draft
+ontology_entity: entity-schema
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # 基礎層 P0 — Architect 任務規格
 
 **日期**：2026-03-23

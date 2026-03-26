@@ -1,3 +1,12 @@
+---
+type: TD
+id: TD-dashboard-v1-implementation
+status: Draft
+ontology_entity: dashboard-v1
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # Dashboard v1 — Architect 交接文件
 
 **日期**：2026-03-23

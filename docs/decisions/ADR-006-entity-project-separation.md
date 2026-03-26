@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-006-entity-project-separation
+status: Approved
+ontology_entity: entity-model
+created: 2026-03-23
+updated: 2026-03-26
+---
+
 # ADR-006：Entity 與 Project 分離
 
 **日期**：2026-03-23

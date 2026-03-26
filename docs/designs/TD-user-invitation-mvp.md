@@ -1,3 +1,12 @@
+---
+type: TD
+id: TD-user-invitation-mvp
+status: Draft
+ontology_entity: user-invitation
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # 用戶邀請與權限管理 MVP — 技術設計
 
 > Architect handoff for `docs/archive/specs/deferred-2026-03/SPEC-user-invitation-mvp.md`

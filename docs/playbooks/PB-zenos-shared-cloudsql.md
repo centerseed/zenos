@@ -1,3 +1,12 @@
+---
+type: PB
+id: PB-zenos-shared-cloudsql
+status: Draft
+ontology_entity: cloudsql-operations
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS Shared Cloud SQL Deployment Playbook
 
 Last updated: 2026-03-25 (JST)

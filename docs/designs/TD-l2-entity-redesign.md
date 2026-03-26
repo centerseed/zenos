@@ -1,3 +1,12 @@
+---
+type: TD
+id: TD-l2-entity-redesign
+status: Draft
+ontology_entity: l2-entity
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # PM → Architect 交接：L2 Entity 演算法重新設計
 
 **日期：** 2026-03-24

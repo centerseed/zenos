@@ -5,6 +5,7 @@
 ## Active (2026-03-26)
 
 - `SPEC-doc-governance.md`
+- `SPEC-task-governance.md`
 - `SPEC-l2-entity-redefinition.md`
 - `SPEC-partner-context-fix.md`
 - `SPEC-agent-integration-contract.md`

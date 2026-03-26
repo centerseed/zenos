@@ -1,3 +1,12 @@
+---
+type: REF
+id: REF-ontology-current-state
+status: Draft
+ontology_entity: ontology-current-state
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS Ontology — 當前狀態
 
 > 版本：v0.7 | 更新：2026-03-21 | 方法：手動建構（未來自動化）

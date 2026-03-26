@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-003-governance-trigger-architecture
+status: Approved
+ontology_entity: governance-engine
+created: 2026-03-22
+updated: 2026-03-26
+---
+
 # ADR-003：Ontology 治理觸發架構
 
 **日期**：2026-03-22

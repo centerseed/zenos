@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-001-marketing-automation-architecture
+status: Approved
+ontology_entity: marketing-automation
+created: 2026-03-21
+updated: 2026-03-26
+---
+
 # ADR-001：行銷自動化技術架構
 
 **狀態**：Accepted

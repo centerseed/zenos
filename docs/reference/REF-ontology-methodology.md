@@ -1,3 +1,12 @@
+---
+type: REF
+id: REF-ontology-methodology
+status: Draft
+ontology_entity: ontology-methodology
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS Ontology 治理方法論
 
 > 版本：v1.0 | 日期：2026-03-21

@@ -1,3 +1,12 @@
+---
+type: REF
+id: REF-enterprise-governance
+status: Draft
+ontology_entity: enterprise-governance
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # 企業導入治理：部門架構與責任歸屬
 
 > 這份文件記錄的是 ZenOS 實際導入企業時會碰到的治理問題——特別是「這份文件誰負責？」這類傳統管理問題。

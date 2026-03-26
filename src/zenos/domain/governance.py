@@ -1,4 +1,4 @@
-"""Governance rules — encodes ontology-methodology.md business logic.
+"""Governance rules — encodes REF-ontology-methodology.md business logic.
 
 All functions are pure: they take domain objects in, return result objects out.
 Zero external dependencies.
@@ -42,7 +42,7 @@ def check_split_criteria(
     """Decide whether an entity deserves its own module ontology.
 
     An entity should be split out when it meets >= 2 of 5 criteria
-    defined in ontology-methodology.md:
+    defined in REF-ontology-methodology.md:
       1. 3+ documents reference it
       2. Has independent dependency chains (input/output relationships)
       3. Has different audience groups (Who tags differ from other docs)
@@ -128,7 +128,7 @@ def check_split_criteria(
 def apply_tag_confidence(tags: Tags | DocumentTags) -> TagConfidence:
     """Classify tag dimensions by AI confidence level.
 
-    From ontology-methodology.md:
+    From REF-ontology-methodology.md:
       - What / Who: AI can auto-confirm (factual dimensions)
       - Why / How: Must remain draft until human confirms (intent dimensions)
     """
@@ -182,7 +182,7 @@ def detect_staleness(
 ) -> list[StalenessWarning]:
     """Detect staleness using cross-entity activity anomalies.
 
-    Implements 4 patterns from ontology-methodology.md:
+    Implements 4 patterns from REF-ontology-methodology.md:
       1. Feature updated but docs lagging
       2. Goal completed but not closed
       3. Dependency updated but dependant silent
@@ -355,7 +355,7 @@ def analyze_blindspots(
 ) -> list[Blindspot]:
     """Infer blind spots by cross-referencing ontology layers.
 
-    Implements 7 patterns from ontology-methodology.md:
+    Implements 7 patterns from REF-ontology-methodology.md:
       1. Document placed in wrong location (What tag mismatches source path)
       2. Core feature lacks documentation (< 2 docs)
       3. Confirmed problem without schedule
@@ -684,7 +684,7 @@ def run_quality_check(
     blindspots: list[Blindspot],
     relationships: list[Relationship],
 ) -> QualityReport:
-    """Run the 12-item quality checklist from ontology-methodology.md.
+    """Run the 12-item quality checklist from REF-ontology-methodology.md.
 
     Returns a QualityReport with score (0-100), passed, failed, and warnings.
     Items 1-9 cover general ontology quality; items 10-12 cover L2 (module) quality.

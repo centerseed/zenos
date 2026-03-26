@@ -1,3 +1,12 @@
+---
+type: SC
+id: SC-line-marketing
+status: Draft
+ontology_entity: line-marketing-scenario
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS LINE Agent — 行銷場景
 
 > 主體：一間台灣中小企業（以「豐禾數位」為例，10-30 人規模的 B2B 軟體服務公司）

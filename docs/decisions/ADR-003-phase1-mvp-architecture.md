@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-003-phase1-mvp-architecture
+status: Under Review
+ontology_entity: phase1-ontology-mvp
+created: 2026-03-21
+updated: 2026-03-26
+---
+
 # ADR-003：Phase 1 Ontology MVP 技術架構
 
 **狀態**：Proposed

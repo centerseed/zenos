@@ -1,3 +1,12 @@
+---
+type: REF
+id: REF-marketing-one-pager
+status: Draft
+ontology_entity: marketing-one-pager
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS — 行銷一頁文件
 
 > 目標受眾：台灣中小企業老闆與主管（10-100 人規模）

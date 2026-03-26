@@ -1,7 +1,7 @@
 """One-off script: fix Ontology Engine entity sources + deduplicate relationships.
 
 Problem 1: Entity usxpqKXCmxgPNOYzvb9I has 8 sources, 7 are Paceriz docs that
-           don't belong. Keep only the ontology-methodology.md source.
+           don't belong. Keep only the REF-ontology-methodology.md source.
 
 Problem 2: Duplicate relationships exist (same source_entity_id + target_id + type).
            Keep the earliest one, delete the rest.
@@ -18,7 +18,7 @@ from google.cloud.firestore import AsyncClient
 ENTITY_ID = "usxpqKXCmxgPNOYzvb9I"
 CORRECT_SOURCES = [
     {
-        "uri": "https://github.com/centerseed/zenos/blob/main/docs/ontology-methodology.md",
+        "uri": "https://github.com/centerseed/zenos/blob/main/docs/reference/REF-ontology-methodology.md",
         "label": "Ontology 方法論",
         "type": "github",
     }

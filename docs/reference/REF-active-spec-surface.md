@@ -35,6 +35,7 @@ ZenOS 現階段不應讓 `docs/specs/` 同時承載：
 以下是目前仍屬 active decision surface 的核心規格：
 
 - `docs/specs/SPEC-doc-governance.md`
+- `docs/specs/SPEC-task-governance.md`
 - `docs/specs/SPEC-l2-entity-redefinition.md`
 - `docs/specs/SPEC-partner-context-fix.md`
 - `docs/specs/SPEC-agent-integration-contract.md`

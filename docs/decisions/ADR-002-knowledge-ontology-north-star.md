@@ -1,3 +1,12 @@
+---
+type: ADR
+id: ADR-002-knowledge-ontology-north-star
+status: Approved
+ontology_entity: knowledge-ontology
+created: 2026-03-21
+updated: 2026-03-26
+---
+
 # ADR-002：Knowledge Ontology for SMB — 思考收斂紀錄
 
 > 日期：2026-03-21

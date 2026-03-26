@@ -48,8 +48,8 @@ mcp__zenos__search(query="<功能關鍵字>", collection="entities")
 # 2. 找到入口節點後，展開整個關聯圖
 mcp__zenos__get(id="<entity_id>", expand_linked=True)
 
-# 3. 找相關任務（有沒有已在進行的類似工作）
-mcp__zenos__search(query="<功能關鍵字>", collection="tasks")
+# 3. 找相關任務（有沒有已在進行的類似工作，排除 cancelled/done）
+mcp__zenos__search(query="<功能關鍵字>", collection="tasks", status="backlog,todo,in_progress,review,blocked")
 ```
 
 `expand_linked=True` 一次回傳節點本身 + 所有關聯 entity——讓 PM 在訪談前就能看清現有功能邊界，避免 spec 與現有模組重疊。查到的內容可以：
@@ -72,13 +72,27 @@ mcp__zenos__search(query="<功能關鍵字>", collection="tasks")
 
 ### Step 2：撰寫 Feature Spec
 
-使用以下模板，存到 `docs/specs/SPEC-{feature-name}.md`：
+存到 `docs/specs/SPEC-{feature-slug}.md`，slug 全小寫連字號，例：`SPEC-user-invitation`。
+
+**每份 SPEC 必須以 frontmatter 開頭（ZenOS 文件治理規則）：**
+
+```yaml
+---
+type: SPEC
+id: SPEC-{feature-slug}
+status: Draft
+ontology_entity: {ZenOS entity slug | TBD}
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+---
+```
+
+`ontology_entity` 填入與此功能最相關的 ZenOS L2 entity slug。不確定時暫填 `TBD`，補齊後回填。
+
+**SPEC 正文模板：**
 
 ```markdown
 # Feature Spec: {功能名稱}
-
-## 狀態
-Draft / Under Review / Approved
 
 ## 背景與動機
 為什麼要做這個功能？解決什麼問題？
@@ -110,7 +124,6 @@ Draft / Under Review / Approved
 
 ## 明確不包含
 - {不做的事情 1}
-- {不做的事情 2}
 
 ## 技術約束（給 Architect 參考）
 - {約束 1}：{原因}
@@ -118,6 +131,16 @@ Draft / Under Review / Approved
 ## 開放問題
 - {待釐清的問題}
 ```
+
+**判斷開新文件 vs 更新既有文件：**
+
+| 情境 | 做什麼 |
+|------|--------|
+| 全新功能或議題 | 開新 `SPEC-` |
+| 狀態變更、錯字修正、補充澄清 | 直接更新既有 SPEC |
+| 補寫驗收結果、交叉參照 | 直接更新既有 SPEC |
+| 已 Approved SPEC 出現實質方向改變 | 開新 `SPEC-{slug}-amendment.md`，舊 SPEC 標 `Superseded` |
+| ADR 決策內容 | **絕不修改正文**，如有新決策開新 ADR |
 
 ### Step 3：逐章確認
 
@@ -134,12 +157,31 @@ Draft / Under Review / Approved
 
 每章確認通過後，再進入下一章。全部確認完後，把狀態改為 `Under Review`。
 
-### Step 4：交付給 Architect
+### Step 4：同步 Ontology
+
+SPEC 文件寫好後，呼叫 ZenOS MCP 把 SPEC 本身的 metadata 寫入 ontology：
+
+```python
+mcp__zenos__write(
+    type="document",
+    name="SPEC-{feature-slug}",
+    summary="{一句話描述此 SPEC 的目標}",
+    status="draft",
+    tags={"what": ["spec", "{feature-slug}"], "why": "{解決什麼問題}"},
+    parent_id="{ontology_entity 對應的 L2 entity id（若已知）}",
+    sources=[{"uri": "docs/specs/SPEC-{feature-slug}.md", "label": "Feature Spec", "type": "url"}]
+)
+```
+
+若 `ontology_entity` 暫填 `TBD`，此步驟也要執行，`parent_id` 留空，後續補齊。
+
+### Step 5：交付給 Architect
 
 ```
 ✅ Feature Spec 完成
 
-文件位置：docs/specs/SPEC-{feature-name}.md
+文件位置：docs/specs/SPEC-{feature-slug}.md
+Ontology 同步：✅（entity id: {id}）
 狀態：Under Review
 
 P0 需求：{n} 項
@@ -148,6 +190,8 @@ P2 需求：{n} 項
 開放問題：{n} 項
 
 下一步：Architect 接手做技術設計
+
+> PM 不建 task。若 spec 撰寫過程中發現需要追蹤的行動項目，記錄在「開放問題」section，由 Architect 判斷是否開 task。
 ```
 
 ---

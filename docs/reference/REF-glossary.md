@@ -1,13 +1,23 @@
+---
+type: REF
+id: REF-glossary
+status: Draft
+ontology_entity: glossary
+created: 2026-03-26
+updated: 2026-03-26
+---
+
 # ZenOS 核心概念速查
 
 | 概念 | 一句話 | 在 spec 的哪裡 |
 |------|--------|---------------|
 | 語意代理 | Entity = 知識的代理人，承載 context 讓 AI 不用讀原始文件就能判斷相關性 | Part 4「Ontology 的形式與治理架構」 |
-| Entity 分層 | 三層：product（基礎）→ module（知識聚合）→ document/goal/role/project（應用層）。全部在 entities/ collection | Part 7.2「Entity 分層模型」 |
+| Entity 分層 | 三層：product（基礎）→ L2 治理概念（module + governance concepts）→ document/goal/role/project（應用層）。全部在 entities/ collection | Part 7.2「Entity 分層模型」 |
 | Entity 邊界 | 三個判斷：跨時間存活？有四維可描述？能當錨點？→ 是 entity。否則是 task 或 entity.sources | Part 7.2「Entity 的邊界定義」 |
 | Entity.sources | entity 身上掛的文件參考連結 [{uri, label, type}]。低價值文件不建 entity，掛 sources 就好 | Part 7.2 |
 | Task ≠ Entity | Task 有自己的 collection 和生命週期（backlog→done），透過 linkedEntities 連到 ontology，是消費者不是節點 | Part 7.2 |
-| 骨架層 | Layer 1（product）+ Layer 2（module）+ goal/role/project，從對話建立，低頻變動 | Part 4「雙層治理架構」 |
+| 骨架層 | Layer 1（product）+ Layer 2（L2 治理概念）+ goal/role/project，從對話建立，低頻變動 | Part 4「雙層治理架構」 |
+| 分層路由規則 | 新輸入先判斷本質：治理原則進 L2、正式文件進 L3、可驗收工作進 Task、低價值材料掛 sources | docs/specs/SPEC-l2-entity-redefinition.md |
 | 神經層 | Layer 3 的 document entity + entity.sources，CRUD 自動觸發（Adapter），高頻變動 | Part 4「雙層治理架構」 |
 | 雙層互動 | 神經層異常反推骨架層更新（新實體、休眠實體、突發關聯） | Part 4「雙層治理架構」 |
 | 四維標籤 | 所有知識用 What/Why/How/Who 四個維度標注，是 AI 自動治理的依循 | Part 0 |
@@ -25,7 +35,7 @@
 | Who 三層模型 | 職能角色（ontology）→ 員工（公司層）→ agents（個人層）。ZenOS 管前兩層，第三層員工自理 | Part 0 + docs/reference/REF-enterprise-governance.md |
 | Pull Model | Agent 自宣告身份，透過 MCP query 帶 role filter 拉 context。ZenOS 不維護 agent registry | docs/reference/REF-enterprise-governance.md |
 | Action Layer | Ontology 的 output 路徑——任務管理。Ontology Context + 行動屬性。UI 和 MCP 對稱 | Part 7.1 |
-| Entity ≠ Project | Entity(project) 是短期工作容器，Entity(product/module) 是長期知識。知識不跟著專案死 | Part 7.2 + ADR-006 |
+| Entity ≠ Project | Entity(project) 是短期工作容器，Entity(product/L2 governance concept) 是長期知識。知識不跟著專案死 | Part 7.2 + ADR-006 |
 | Dashboard 用語 | UI 不出現 entity/ontology。Product→專案、Module→模組、Knowledge Graph→知識地圖、Entity→「節點」 | Part 7.3 |
 | 權限模型 | 三層：來源層→ Ontology 層（entity.visibility + role）→ 消費層。Phase 0: admin/member/agent | Part 7.6 |
 

@@ -13,7 +13,7 @@ Phase 0 概念驗證 → 已進入開發。Backend: Python + PostgreSQL + MCP。
 2. `docs/spec.md` Part 4–5（Ontology 技術路線 + 漸進式信任）
 3. `docs/spec.md` Part 7（服務架構 + Dashboard）
 
-概念速查與關鍵發現見 `docs/glossary.md`。
+概念速查與關鍵發現見 `docs/reference/REF-glossary.md`。
 
 ## 技術棧
 

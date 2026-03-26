@@ -100,6 +100,7 @@ updated: 2026-03-26
 - `docs/scenarios/SC-line-marketing.md`
 
 #### REF
+- `docs/reference/REF-active-spec-surface.md`
 - `docs/reference/REF-zenos-document-classification.md`
 - `docs/reference/REF-glossary.md`
 - `docs/reference/REF-market-insights.md`
@@ -107,6 +108,7 @@ updated: 2026-03-26
 - `docs/reference/REF-marketing-one-pager.md`
 - `docs/reference/REF-ontology-methodology.md`
 - `docs/reference/REF-ontology-current-state.md`
+- `docs/reference/REF-governance-paths-overview.md`
 
 ### B. Legacy working docs
 
@@ -128,11 +130,10 @@ updated: 2026-03-26
 #### Working coordination / Q&A
 - `docs/archive/specs/tasks-2026-03/PM-answers-zenos-sync-skill.md`
 - `docs/archive/specs/tasks-2026-03/PM-questions-zenos-sync-skill.md`
-- `docs/reference/REF-governance-paths-overview.md`
 
 建議：
 - 若結論已被正式文件吸收，直接 archive 或刪除
-- 若仍有參考價值，可整理為 `REF-*.md`
+- 若仍有參考價值，整理為正式治理類型文件（`REF/ADR/PB`）
 
 ### C. Archive
 
@@ -197,12 +198,8 @@ updated: 2026-03-26
 - 不納入正式 Markdown 文件治理
 
 #### Backup / noise
-- `docs/specs/SPEC-governance-observability.md.bak`
-- `docs/specs/SPEC-zenos-sql-cutover.md.bak-review`
-- `docs/ontology-instances/paceriz-v0-single-file.md.bak`
 
-建議：
-- 刪除，不進 archive
+目前 `docs/` 下未發現 `.bak` / `.bak-review` 類檔案。
 
 ---
 
@@ -214,12 +211,12 @@ updated: 2026-03-26
 - `TD`: 5 份
 - `PB`: 2 份
 - `SC`: 1 份
-- `REF`: 7 份含本文件
+- `REF`: 9 份含本文件
 - `Canonical exception`: 1 份
 
 ### 需要後續整理的重點
 - ADR 編號仍有重複：`ADR-003`、`ADR-005`
-- 多數正式文件仍未補齊治理 frontmatter
+- 正式治理文件 frontmatter 已補齊，後續需在內容變更時維持 `updated` 與 `status`
 - `docs/archive/specs/tasks-2026-03/` 僅保留追溯，不再視為 active spec surface
 - 本次文件分類調整尚未同步回 ontology 的 L2 / L3 entity
 - `docs/specs/` 仍需持續壓縮，避免 supporting spec 再膨脹回主規格面
@@ -229,12 +226,11 @@ updated: 2026-03-26
 ## 下一步建議
 
 1. 先處理低風險整理：
-   - 刪除 `.bak` 類檔案
    - 修正 ADR 重複編號
 
 2. 再處理正式文件 metadata：
-   - 補齊正式文件 frontmatter
-   - 為 canonical / superseded / archived 文件補 metadata
+   - 維持前言欄位一致性（`status`, `updated`, `ontology_entity`）
+   - 為 canonical / superseded / archived 文件補齊追溯欄位（含 `superseded_by`）
 
 3. 最後處理 working docs 分流：
    - phase/task implementation plans
