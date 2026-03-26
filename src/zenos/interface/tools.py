@@ -898,8 +898,6 @@ async def _task_handler(
     Called by the ``task`` MCP tool wrapper. Tests import this function
     directly to avoid calling a ``FunctionTool`` object.
     """
-    if task_service is None:
-        await _ensure_services()
     try:
         # Resolve partner context once — used for auto-filling created_by and project
         partner = _current_partner.get()
@@ -944,6 +942,8 @@ async def _task_handler(
                 "project": effective_project,
                 "assignee_role_id": assignee_role_id,
             }
+            if task_service is None:
+                await _ensure_services()
             task_result = await task_service.create_task(data)
             response = _serialize(task_result.task)
             _audit_log(
@@ -980,6 +980,8 @@ async def _task_handler(
                 except (ValueError, TypeError):
                     return {"error": "INVALID_INPUT", "message": f"Invalid due_date: {due_date}"}
 
+            if task_service is None:
+                await _ensure_services()
             task_result = await task_service.update_task(id, updates)
             response = _serialize(task_result.task)
             if task_result.cascade_updates:

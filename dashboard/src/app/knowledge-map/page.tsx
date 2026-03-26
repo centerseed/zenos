@@ -55,6 +55,30 @@ function inferTasksForEntity(entity: Entity, tasks: Task[]): Task[] {
   });
 }
 
+function stableHash(input: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function orbitPosition(
+  parent: { x: number; y: number },
+  key: string,
+  baseRadius: number
+): { x: number; y: number } {
+  const seed = stableHash(key);
+  const angle = ((seed % 360) * Math.PI) / 180;
+  const radiusJitter = (seed % 17) - 8; // -8..+8
+  const radius = Math.max(24, baseRadius + radiusJitter);
+  return {
+    x: parent.x + Math.cos(angle) * radius,
+    y: parent.y + Math.sin(angle) * radius,
+  };
+}
+
 /** Find tasks for a module: prefer linkedEntities, fall back to text matching */
 function findTasksForModule(module: Entity, tasks: Task[]): Task[] {
   const linked = tasks.filter(
@@ -810,6 +834,20 @@ function GraphCanvas({
       .filter((e) => visibleIds.has(e.id))
       .map((e) => {
         const pin = pinnedPositions.get(e.id);
+        const parentPin = e.parentId ? pinnedPositions.get(e.parentId) : undefined;
+        const isL3 = e.type !== "product" && e.type !== "module";
+        const baseRadius =
+          e.type === "document"
+            ? 92
+            : e.type === "goal"
+              ? 108
+              : e.type === "role"
+                ? 124
+                : 116;
+        const seededPos =
+          !pin && isL3 && parentPin
+            ? orbitPosition(parentPin, e.id, baseRadius)
+            : null;
         return {
           id: e.id,
           name: e.name,
@@ -831,30 +869,30 @@ function GraphCanvas({
                     : 7,
           // Bake pinned position directly into node data so d3-force never randomises it
           ...(pin ? { x: pin.x, y: pin.y, fx: pin.x, fy: pin.y } : {}),
+          ...(seededPos ? { x: seededPos.x, y: seededPos.y, fx: seededPos.x, fy: seededPos.y } : {}),
         };
       });
 
     const nodeIds = new Set(nodes.map((n) => n.id));
-    const links: { source: string; target: string; type: string }[] =
-      relationships
-        .filter(
-          (r) => nodeIds.has(r.sourceEntityId) && nodeIds.has(r.targetId)
-        )
-        .map((r) => ({
-          source: r.sourceEntityId,
-          target: r.targetId,
-          type: r.type,
-        }));
+    const links: { source: string; target: string; type: string }[] = [];
+    const linkKeys = new Set<string>();
+    const addLink = (source: string, target: string, type: string) => {
+      const key = `${source}->${target}:${type}`;
+      if (linkKeys.has(key)) return;
+      linkKeys.add(key);
+      links.push({ source, target, type });
+    };
+
+    for (const r of relationships) {
+      if (nodeIds.has(r.sourceEntityId) && nodeIds.has(r.targetId)) {
+        addLink(r.sourceEntityId, r.targetId, r.type);
+      }
+    }
 
     // Add part_of links from parentId
     for (const e of entities) {
       if (e.parentId && nodeIds.has(e.id) && nodeIds.has(e.parentId)) {
-        const exists = links.some(
-          (l) => l.source === e.id && l.target === e.parentId
-        );
-        if (!exists) {
-          links.push({ source: e.id, target: e.parentId, type: "part_of" });
-        }
+        addLink(e.id, e.parentId, "part_of");
       }
     }
 
@@ -869,7 +907,12 @@ function GraphCanvas({
         const nodeId = `task:${t.id}`;
         if (!taskNodeIds.has(nodeId)) {
           taskNodeIds.add(nodeId);
+          const nodePin = pinnedPositions.get(nodeId);
           const parentPin = pinnedPositions.get(moduleId);
+          const taskSeededPos =
+            !nodePin && parentPin
+              ? orbitPosition(parentPin, nodeId, 72)
+              : null;
           nodes.push({
             id: nodeId,
             name: t.title,
@@ -882,10 +925,15 @@ function GraphCanvas({
             val: 5,
             taskStatus: t.status,
             taskPriority: t.priority,
-            // New child node: start near parent so it doesn't fly in from random origin
-            ...(parentPin ? { x: parentPin.x + (Math.random() - 0.5) * 40, y: parentPin.y + (Math.random() - 0.5) * 40 } : {}),
+            ...(nodePin ? { x: nodePin.x, y: nodePin.y, fx: nodePin.x, fy: nodePin.y } : {}),
+            ...(taskSeededPos ? { x: taskSeededPos.x, y: taskSeededPos.y, fx: taskSeededPos.x, fy: taskSeededPos.y } : {}),
           });
-          links.push({ source: nodeId, target: moduleId, type: "task" });
+          addLink(nodeId, moduleId, "task");
+          for (const linkedId of t.linkedEntities ?? []) {
+            if (linkedId !== moduleId && nodeIds.has(linkedId)) {
+              addLink(nodeId, linkedId, "task");
+            }
+          }
         }
       }
     }
@@ -1238,16 +1286,22 @@ function GraphCanvas({
         ) => setHoveredNode(node ? (node.id as string) : null)}
         onEngineStop={() => {
           if (localPhysicsRef.current) {
-            // Simulation settled — unfreeze all nodes using simNodeMapRef (actual sim objects).
-            // fg.graphData() does not exist on the ref; simNodeMapRef is updated every canvas frame.
-            for (const simNode of simNodeMapRef.current.values()) {
-              simNode.fx = undefined;
-              simNode.fy = undefined;
+            // Keep the settled layout pinned to prevent the whole graph from drifting
+            // a second later after expand/collapse updates.
+            const settled = new Map<string, { x: number; y: number }>();
+            for (const [id, simNode] of simNodeMapRef.current.entries()) {
+              const x = Number(simNode.x ?? 0);
+              const y = Number(simNode.y ?? 0);
+              simNode.fx = x;
+              simNode.fy = y;
+              simNode.vx = 0;
+              simNode.vy = 0;
+              settled.set(id, { x, y });
             }
+            setPinnedPositions(settled);
             localPhysicsRef.current = false;
             expandingModuleIdRef.current = null;
-            frozenPositionsRef.current = new Map();
-            setPinnedPositions(new Map());
+            frozenPositionsRef.current = settled;
           }
         }}
         cooldownTicks={120}
