@@ -1263,9 +1263,14 @@ class OntologyService:
         else:
             tags = tags_data
 
+        doc_title = str(data.get("title", existing.name if existing else "")).strip()
+        # Document titles sometimes carry file hints like "(CLAUDE.md)".
+        # Keep title semantics but normalize the entity name to satisfy global naming rules.
+        doc_entity_name = re.sub(r"\s*\([^)]+\)$", "", doc_title).strip() or doc_title
+
         entity_payload = {
             "id": data.get("id"),
-            "name": data.get("title", existing.name if existing else ""),
+            "name": doc_entity_name,
             "type": EntityType.DOCUMENT,
             "summary": data.get("summary", existing.summary if existing else ""),
             "tags": tags,
