@@ -335,6 +335,18 @@ class SqlRelationshipRepository:
             )
         return rel
 
+    async def remove(self, source_entity_id: str, target_id: str, rel_type: str) -> int:
+        """Delete a relationship edge by source/target/type. Returns rowcount."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""DELETE FROM {SCHEMA}.relationships
+                    WHERE source_entity_id = $1 AND target_entity_id = $2
+                    AND type = $3 AND partner_id = $4""",
+                source_entity_id, target_id, rel_type, pid,
+            )
+        return int(result.split()[-1])
+
 
 # ===================================================================
 # Document Repository

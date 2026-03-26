@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from collections import Counter
@@ -61,6 +62,19 @@ class UpsertEntityResult:
     tag_confidence: TagConfidence
     split_recommendation: SplitRecommendation | None
     warnings: list[str] | None = None
+
+
+@dataclass
+class DocumentSyncResult:
+    """Result of a document-governance sync operation."""
+    operation: str
+    dry_run: bool
+    document_id: str
+    before: dict
+    after: dict
+    relationship_changes: dict
+    warnings: list[str] | None = None
+    document: Entity | None = None
 
 
 # ──────────────────────────────────────────────
@@ -318,6 +332,119 @@ class OntologyService:
             "level": entity.level,
             "tags": tags_dict,
         }
+
+    @staticmethod
+    def _normalize_linked_entity_ids(raw: object) -> list[str]:
+        """Normalize linked_entity_ids into canonical list[str]."""
+        if raw is None:
+            return []
+
+        if isinstance(raw, list):
+            normalized: list[str] = []
+            for item in raw:
+                if item is None:
+                    continue
+                if not isinstance(item, (str, int)):
+                    raise ValueError("linked_entity_ids must be list[str] or JSON array string")
+                value = str(item).strip()
+                if value:
+                    normalized.append(value)
+            return list(dict.fromkeys(normalized))
+
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                return []
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("linked_entity_ids JSON string is invalid") from exc
+                if not isinstance(parsed, list):
+                    raise ValueError("linked_entity_ids JSON string must decode to list[str]")
+                return OntologyService._normalize_linked_entity_ids(parsed)
+            return [text]
+
+        raise ValueError("linked_entity_ids must be list[str] or JSON array string")
+
+    async def _load_document_linkage_state(self, doc_id: str) -> tuple[str | None, list[str]]:
+        """Return (primary_parent_id, related_entity_ids) from relationships."""
+        rels = await self._relationships.list_by_entity(doc_id)
+        outgoing = [r for r in rels if r.source_entity_id == doc_id]
+        parent_rel = next(
+            (
+                r for r in outgoing
+                if r.type == RelationshipType.PART_OF
+                and r.description == "document primary linkage"
+            ),
+            None,
+        )
+        related_ids = [
+            r.target_id
+            for r in outgoing
+            if r.type == RelationshipType.RELATED_TO
+            and r.description == "document linked to entity"
+        ]
+        return (parent_rel.target_id if parent_rel else None, list(dict.fromkeys(related_ids)))
+
+    async def _remove_relationship(self, source_id: str, target_id: str, rel_type: str) -> bool:
+        """Best-effort relationship removal for repos that implement deletion."""
+        remover = getattr(self._relationships, "remove", None)
+        if remover is None:
+            return False
+        removed = await remover(source_id, target_id, rel_type)
+        return bool(removed)
+
+    async def _sync_document_linkage_relationships(
+        self,
+        *,
+        doc_id: str,
+        parent_id: str | None,
+        related_ids: list[str],
+        remove_stale: bool = True,
+    ) -> dict:
+        """Keep materialized linkage relationships consistent with parent_id."""
+        before_parent, before_related = await self._load_document_linkage_state(doc_id)
+        desired_related = list(dict.fromkeys([eid for eid in related_ids if eid and eid != parent_id]))
+        changes = {
+            "added": [],
+            "removed": [],
+        }
+
+        if parent_id:
+            existing = await self._relationships.find_duplicate(doc_id, parent_id, RelationshipType.PART_OF)
+            if existing is None:
+                await self.add_relationship(
+                    source_id=doc_id,
+                    target_id=parent_id,
+                    rel_type=RelationshipType.PART_OF,
+                    description="document primary linkage",
+                )
+                changes["added"].append({"target_id": parent_id, "type": RelationshipType.PART_OF})
+
+        for rid in desired_related:
+            existing = await self._relationships.find_duplicate(doc_id, rid, RelationshipType.RELATED_TO)
+            if existing is None:
+                await self.add_relationship(
+                    source_id=doc_id,
+                    target_id=rid,
+                    rel_type=RelationshipType.RELATED_TO,
+                    description="document linked to entity",
+                )
+                changes["added"].append({"target_id": rid, "type": RelationshipType.RELATED_TO})
+
+        if remove_stale:
+            if before_parent and before_parent != parent_id:
+                removed = await self._remove_relationship(doc_id, before_parent, RelationshipType.PART_OF)
+                if removed:
+                    changes["removed"].append({"target_id": before_parent, "type": RelationshipType.PART_OF})
+            stale_related = [rid for rid in before_related if rid not in desired_related]
+            for rid in stale_related:
+                removed = await self._remove_relationship(doc_id, rid, RelationshipType.RELATED_TO)
+                if removed:
+                    changes["removed"].append({"target_id": rid, "type": RelationshipType.RELATED_TO})
+
+        return changes
 
     async def _load_relationship_snapshot(self, entities: list[Entity]) -> list[Relationship]:
         """Load and deduplicate relationships for a context snapshot."""
@@ -631,7 +758,7 @@ class OntologyService:
 
         # 3. status enum — document type allows document-specific statuses
         status = merged_data.get("status", "active")
-        _DOCUMENT_STATUSES = {"current", "stale", "draft", "conflict"}
+        _DOCUMENT_STATUSES = {"current", "stale", "draft", "conflict", "archived"}
         _BASE_STATUSES = {"active", "paused", "completed", "planned"}
         if entity_type == EntityType.DOCUMENT:
             valid_statuses = sorted(_BASE_STATUSES | _DOCUMENT_STATUSES)
@@ -1040,6 +1167,22 @@ class OntologyService:
           - linked_entity_ids[0] → parent_id (primary), rest → relationships
           - tags (DocumentTags format) → Tags (unified list format)
         """
+        # --- Existing document lookup ---
+        existing: Entity | None = None
+        if data.get("id"):
+            existing = await self._entities.get_by_id(data["id"])
+            if existing is None:
+                all_doc_entities = await self._entities.list_all(type_filter=EntityType.DOCUMENT)
+                existing = next((e for e in all_doc_entities if e.id == data["id"]), None)
+            if existing is None:
+                raise ValueError(
+                    f"Document entity '{data['id']}' not found. Use create without id."
+                )
+            if existing.type != EntityType.DOCUMENT:
+                raise ValueError(
+                    f"Entity '{data['id']}' is type='{existing.type}', not document."
+                )
+
         # --- Validation ---
         source_data = data.get("source", {})
         source_uri = ""
@@ -1059,9 +1202,11 @@ class OntologyService:
             for d in all_doc_entities:
                 if any(str(s.get("uri", "")).strip() == source_uri for s in (d.sources or [])):
                     data["id"] = d.id
+                    existing = d
                     break
 
-        linked_entity_ids = data.get("linked_entity_ids", [])
+        linked_entity_ids_raw = data.get("linked_entity_ids")
+        linked_entity_ids = self._normalize_linked_entity_ids(linked_entity_ids_raw)
         for eid in linked_entity_ids:
             entity = await self._entities.get_by_id(eid)
             if entity is None:
@@ -1084,59 +1229,203 @@ class OntologyService:
                 valid_ids = {e.id for e in all_entities}
                 linked_entity_ids = [eid for eid in inferred if eid in valid_ids]
 
-        # Map fields to entity format
-        parent_id = linked_entity_ids[0] if linked_entity_ids else data.get("parent_id")
+        # Map fields to entity format (merge semantics for sparse updates)
+        parent_id = (
+            linked_entity_ids[0]
+            if linked_entity_ids
+            else data.get("parent_id", existing.parent_id if existing else None)
+        )
         related_ids = linked_entity_ids[1:] if len(linked_entity_ids) > 1 else []
 
         # Build sources list from legacy source field
-        sources: list[dict] = []
+        existing_source = (existing.sources[0] if existing and existing.sources else {})
+        sources: list[dict] = list(existing.sources) if existing else []
         if source_data and isinstance(source_data, dict):
-            sources = [{
-                "uri": source_data.get("uri", ""),
-                "label": source_data.get("adapter", ""),
-                "type": source_data.get("type", ""),
-            }]
+            merged_source = {
+                "uri": source_data.get("uri", existing_source.get("uri", "")),
+                "label": source_data.get("adapter", existing_source.get("label", "")),
+                "type": source_data.get("type", existing_source.get("type", "")),
+            }
+            sources = [merged_source]
 
         # Build unified Tags from legacy DocumentTags format
-        tags_data = data.get("tags", {})
+        tags_data = data.get("tags")
+        existing_tags = existing.tags if existing else Tags(what=[], why="", how="", who=[])
         if isinstance(tags_data, dict):
             tags = Tags(
-                what=tags_data.get("what", []),
-                why=tags_data.get("why", ""),
-                how=tags_data.get("how", ""),
-                who=tags_data.get("who", []),
+                what=tags_data.get("what", existing_tags.what),
+                why=tags_data.get("why", existing_tags.why),
+                how=tags_data.get("how", existing_tags.how),
+                who=tags_data.get("who", existing_tags.who),
             )
+        elif tags_data is None and existing:
+            tags = existing.tags
         else:
             tags = tags_data
 
-        entity = Entity(
-            name=data["title"],
-            type=EntityType.DOCUMENT,
-            summary=data["summary"],
-            tags=tags,
-            status=data.get("status", "current"),
-            id=data.get("id"),
-            parent_id=parent_id,
-            sources=sources,
-            confirmed_by_user=data.get("confirmed_by_user", False),
-        )
-        entity.updated_at = datetime.now(timezone.utc)
-        saved = await self._entities.upsert(entity)
+        entity_payload = {
+            "id": data.get("id"),
+            "name": data.get("title", existing.name if existing else ""),
+            "type": EntityType.DOCUMENT,
+            "summary": data.get("summary", existing.summary if existing else ""),
+            "tags": tags,
+            "status": data.get("status", existing.status if existing else "current"),
+            "parent_id": parent_id,
+            "sources": sources,
+        }
+        # Document lifecycle updates are governance operations that should remain
+        # merge-safe but not be blocked by confirmed-entity protection.
+        entity_payload["force"] = data.get("force", True)
+        for optional_key in ("details", "owner", "visibility", "last_reviewed_at"):
+            if optional_key in data:
+                entity_payload[optional_key] = data[optional_key]
+        if "confirmed_by_user" in data:
+            entity_payload["confirmed_by_user"] = data["confirmed_by_user"]
 
-        # Create relationships for additional linked entities
-        if saved.id and related_ids:
-            for rel_eid in related_ids:
-                try:
-                    await self.add_relationship(
-                        source_id=saved.id,
-                        target_id=rel_eid,
-                        rel_type=RelationshipType.RELATED_TO,
-                        description="document linked to entity",
-                    )
-                except Exception as exc:
-                    logger.warning("Auto-relationship for document entity failed: %s", exc)
+        result = await self.upsert_entity(entity_payload)
+        saved = result.entity
 
+        # Keep materialized linkage relationships consistent with parent_id as canonical.
+        if saved.id:
+            if not linked_entity_ids and existing:
+                _, existing_related_ids = await self._load_document_linkage_state(saved.id)
+                related_ids = existing_related_ids
+            await self._sync_document_linkage_relationships(
+                doc_id=saved.id,
+                parent_id=saved.parent_id,
+                related_ids=related_ids,
+                remove_stale=True,
+            )
         return saved
+
+    async def sync_document_governance(self, data: dict) -> DocumentSyncResult:
+        """Perform governance-safe batch sync for document lifecycle operations."""
+        operation = str(data.get("sync_mode", "")).strip().lower()
+        if operation not in {"rename", "reclassify", "archive", "supersede", "sync_repair"}:
+            raise ValueError(
+                "sync_mode must be one of: rename, reclassify, archive, supersede, sync_repair"
+            )
+        doc_id = str(data.get("id", "")).strip()
+        if not doc_id:
+            raise ValueError("sync document requires id")
+        dry_run = bool(data.get("dry_run", False))
+
+        existing = await self._entities.get_by_id(doc_id)
+        if existing is None or existing.type != EntityType.DOCUMENT:
+            raise ValueError(f"Document entity '{doc_id}' not found")
+
+        current_parent_rel, current_related_rel = await self._load_document_linkage_state(doc_id)
+        existing_source_uri = existing.sources[0].get("uri", "") if existing.sources else ""
+        before = {
+            "name": existing.name,
+            "status": existing.status,
+            "parent_id": existing.parent_id,
+            "source_uri": existing_source_uri,
+            "relationship_parent_id": current_parent_rel,
+            "relationship_related_ids": current_related_rel,
+        }
+
+        update_payload: dict = {"id": doc_id}
+        if "title" in data:
+            update_payload["title"] = data["title"]
+        if "summary" in data:
+            update_payload["summary"] = data["summary"]
+        if "source" in data:
+            update_payload["source"] = data["source"]
+        if "linked_entity_ids" in data:
+            update_payload["linked_entity_ids"] = data["linked_entity_ids"]
+        if "parent_id" in data:
+            update_payload["parent_id"] = data["parent_id"]
+        if "status" in data:
+            update_payload["status"] = data["status"]
+
+        if operation == "archive":
+            update_payload.setdefault("status", "archived")
+        if operation == "supersede":
+            successor_id = str(data.get("superseded_by_id", "")).strip()
+            if not successor_id:
+                raise ValueError("supersede requires superseded_by_id")
+            successor = await self._entities.get_by_id(successor_id)
+            if successor is None or successor.type != EntityType.DOCUMENT:
+                raise ValueError("superseded_by_id must point to an existing document entity")
+            update_payload.setdefault("status", "stale")
+            existing_details = dict(existing.details or {})
+            existing_details["superseded_by"] = successor_id
+            update_payload["details"] = existing_details
+
+        linked_ids = self._normalize_linked_entity_ids(update_payload.get("linked_entity_ids"))
+        if linked_ids:
+            target_parent = linked_ids[0]
+            target_related = linked_ids[1:]
+        else:
+            target_parent = update_payload.get("parent_id", existing.parent_id)
+            target_related = current_related_rel
+
+        target_status = update_payload.get("status", existing.status)
+        target_name = update_payload.get("title", existing.name)
+        target_source_uri = existing_source_uri
+        if isinstance(update_payload.get("source"), dict):
+            target_source_uri = str(
+                update_payload["source"].get("uri", existing_source_uri)
+            ).strip()
+
+        after = {
+            "name": target_name,
+            "status": target_status,
+            "parent_id": target_parent,
+            "source_uri": target_source_uri,
+            "relationship_parent_id": target_parent,
+            "relationship_related_ids": target_related,
+        }
+        rel_changes = {
+            "add": [],
+            "remove": [],
+        }
+        if current_parent_rel != target_parent:
+            if target_parent:
+                rel_changes["add"].append({"target_id": target_parent, "type": RelationshipType.PART_OF})
+            if current_parent_rel:
+                rel_changes["remove"].append({"target_id": current_parent_rel, "type": RelationshipType.PART_OF})
+        rel_changes["add"].extend(
+            {"target_id": rid, "type": RelationshipType.RELATED_TO}
+            for rid in target_related
+            if rid not in current_related_rel
+        )
+        rel_changes["remove"].extend(
+            {"target_id": rid, "type": RelationshipType.RELATED_TO}
+            for rid in current_related_rel
+            if rid not in target_related
+        )
+
+        if dry_run:
+            return DocumentSyncResult(
+                operation=operation,
+                dry_run=True,
+                document_id=doc_id,
+                before=before,
+                after=after,
+                relationship_changes=rel_changes,
+                warnings=None,
+                document=None,
+            )
+
+        saved = existing if operation == "sync_repair" else await self.upsert_document(update_payload)
+        linkage_changes = await self._sync_document_linkage_relationships(
+            doc_id=doc_id,
+            parent_id=target_parent,
+            related_ids=target_related,
+            remove_stale=True,
+        )
+        return DocumentSyncResult(
+            operation=operation,
+            dry_run=False,
+            document_id=doc_id,
+            before=before,
+            after=after,
+            relationship_changes=linkage_changes,
+            warnings=None,
+            document=saved,
+        )
 
     async def upsert_protocol(self, data: dict) -> Protocol:
         """Create or update a context protocol."""

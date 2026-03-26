@@ -634,7 +634,10 @@ async def write(
               選填：visibility（"public" | "restricted"，預設 public）
               選填：force（true 時可覆寫已確認 entity 的非空欄位）
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
-               summary
+               summary。更新語意為 merge update（未提供欄位不清空）。
+               linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
+               可用 sync_mode(rename/reclassify/archive/supersede/sync_repair)
+               + dry_run=true 做文件治理批次同步預覽。
     protocols: entity_id, entity_name, content({what, why, how, who})
     blindspots: description, severity(red/yellow/green), suggested_action
     relationships: source_entity_id, target_entity_id, type(depends_on/serves/
@@ -665,6 +668,15 @@ async def write(
 
         elif collection == "documents":
             # Backward compat: collection="documents" now creates entity(type="document")
+            if data.get("sync_mode"):
+                result = await ontology_service.sync_document_governance(data)
+                response = _serialize(result)
+                _audit_log(
+                    event_type="ontology.document.sync",
+                    target={"collection": collection, "id": response.get("document_id")},
+                    changes={"input": data},
+                )
+                return response
             result = await ontology_service.upsert_document(data)
             response = _serialize(result)
             _audit_log(

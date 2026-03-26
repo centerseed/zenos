@@ -475,6 +475,19 @@ class FirestoreRelationshipRepository:
 
         return rel
 
+    async def remove(self, source_entity_id: str, target_id: str, rel_type: str) -> int:
+        """Delete a relationship edge by source/target/type. Returns deleted count."""
+        col = self._col(source_entity_id)
+        query = (
+            col.where("targetId", "==", target_id)
+               .where("type", "==", rel_type)
+        )
+        deleted = 0
+        async for doc in query.stream():
+            await col.document(doc.id).delete()
+            deleted += 1
+        return deleted
+
 
 class FirestoreDocumentRepository:
     """Firestore-backed DocumentRepository."""

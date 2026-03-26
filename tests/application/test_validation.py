@@ -622,6 +622,7 @@ class TestUpsertDocumentValidation:
             sources=[{"uri": "https://github.com/acme/repo/blob/main/docs/spec.md", "label": "spec.md", "type": "github"}],
         )
         repos["entity_repo"].list_all = AsyncMock(return_value=[existing_doc])
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing_doc)
         svc = _make_service(repos)
 
         result = await svc.upsert_document({
@@ -636,6 +637,360 @@ class TestUpsertDocumentValidation:
         })
 
         assert result.id == "doc-existing"
+
+    async def test_sparse_update_preserves_existing_fields(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-1",
+            confirmed_by_user=True,
+            owner="Barry",
+            visibility="restricted",
+            details={"k": "v"},
+            sources=[{"uri": "/old.md", "label": "old", "type": "github"}],
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-1": existing, "mod-1": module}.get(eid)
+        )
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "id": "doc-1",
+            "summary": "new summary only",
+        })
+
+        assert result.parent_id == "mod-1"
+        assert result.confirmed_by_user is True
+        assert result.owner == "Barry"
+        assert result.visibility == "restricted"
+        assert result.details == {"k": "v"}
+        assert result.summary == "new summary only"
+
+    async def test_source_uri_only_update_keeps_parent_and_metadata(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-1",
+            confirmed_by_user=True,
+            owner="Barry",
+            visibility="restricted",
+            details={"k": "v"},
+            sources=[{"uri": "/old.md", "label": "old", "type": "github"}],
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-1": existing, "mod-1": module}.get(eid)
+        )
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "id": "doc-1",
+            "source": {"uri": "/new.md"},
+        })
+
+        assert result.parent_id == "mod-1"
+        assert result.confirmed_by_user is True
+        assert result.owner == "Barry"
+        assert result.visibility == "restricted"
+        assert result.details == {"k": "v"}
+        assert result.sources[0]["uri"] == "/new.md"
+
+    async def test_linked_entity_ids_accepts_single_string(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-old",
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-1": existing, "mod-1": module}.get(eid)
+        )
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "id": "doc-1",
+            "linked_entity_ids": "mod-1",
+        })
+        assert result.parent_id == "mod-1"
+
+    async def test_linked_entity_ids_accepts_json_array_string(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-old",
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        related = Entity(
+            id="goal-1",
+            name="Goal",
+            type="goal",
+            summary="g",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="mod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {
+                "doc-1": existing,
+                "mod-1": module,
+                "goal-1": related,
+            }.get(eid)
+        )
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "id": "doc-1",
+            "linked_entity_ids": "[\"mod-1\", \"goal-1\"]",
+        })
+        assert result.parent_id == "mod-1"
+
+    async def test_linked_entity_ids_invalid_json_string_rejected(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-old",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-1": existing}.get(eid)
+        )
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError, match="linked_entity_ids JSON string is invalid"):
+            await svc.upsert_document({
+                "id": "doc-1",
+                "linked_entity_ids": "[bad json",
+            })
+
+    async def test_linked_entity_ids_list_updates_primary_parent(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-old",
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        related = Entity(
+            id="goal-1",
+            name="Goal",
+            type="goal",
+            summary="g",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="mod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {
+                "doc-1": existing,
+                "mod-1": module,
+                "goal-1": related,
+            }.get(eid)
+        )
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "id": "doc-1",
+            "linked_entity_ids": ["mod-1", "goal-1"],
+        })
+        assert result.parent_id == "mod-1"
+
+
+class TestDocumentSyncGovernance:
+
+    async def test_sync_dry_run_preview(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-1",
+            sources=[{"uri": "/old.md", "label": "old", "type": "github"}],
+        )
+        module1 = Entity(
+            id="mod-1",
+            name="Module 1",
+            type="module",
+            summary="m1",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        module2 = Entity(
+            id="mod-2",
+            name="Module 2",
+            type="module",
+            summary="m2",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {
+                "doc-1": existing,
+                "mod-1": module1,
+                "mod-2": module2,
+            }.get(eid)
+        )
+        repos["relationship_repo"].list_by_entity = AsyncMock(
+            return_value=[Relationship(
+                source_entity_id="doc-1",
+                target_id="mod-1",
+                type="part_of",
+                description="document primary linkage",
+            )]
+        )
+        svc = _make_service(repos)
+
+        preview = await svc.sync_document_governance({
+            "sync_mode": "reclassify",
+            "id": "doc-1",
+            "linked_entity_ids": ["mod-2"],
+            "dry_run": True,
+        })
+        assert preview.dry_run is True
+        assert preview.before["parent_id"] == "mod-1"
+        assert preview.after["parent_id"] == "mod-2"
+
+    async def test_sync_repair_executes_relationship_cleanup(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-2",
+            sources=[{"uri": "/old.md", "label": "old", "type": "github"}],
+        )
+        module2 = Entity(
+            id="mod-2",
+            name="Module 2",
+            type="module",
+            summary="m2",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {
+                "doc-1": existing,
+                "mod-2": module2,
+            }.get(eid)
+        )
+        repos["relationship_repo"].list_by_entity = AsyncMock(
+            return_value=[Relationship(
+                source_entity_id="doc-1",
+                target_id="mod-1",
+                type="part_of",
+                description="document primary linkage",
+            )]
+        )
+        repos["relationship_repo"].remove = AsyncMock(return_value=1)
+        svc = _make_service(repos)
+
+        result = await svc.sync_document_governance({
+            "sync_mode": "sync_repair",
+            "id": "doc-1",
+            "dry_run": False,
+        })
+        assert result.dry_run is False
+        assert any(c["type"] == "part_of" for c in result.relationship_changes["removed"])
+
+    async def test_archive_sync_sets_archived_status_in_preview(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-1",
+            sources=[{"uri": "/old.md", "label": "old", "type": "github"}],
+        )
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-1": existing, "mod-1": module}.get(eid)
+        )
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        preview = await svc.sync_document_governance({
+            "sync_mode": "archive",
+            "id": "doc-1",
+            "dry_run": True,
+        })
+        assert preview.after["status"] == "archived"
 
 
 # ---------------------------------------------------------------------------

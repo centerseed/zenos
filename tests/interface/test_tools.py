@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from zenos.application.ontology_service import (
+    DocumentSyncResult,
     EntityWithRelationships,
     UpsertEntityResult,
 )
@@ -38,6 +39,16 @@ from zenos.domain.models import (
 # ---------------------------------------------------------------------------
 # Fixtures: reusable domain objects
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _mock_tool_bootstrap():
+    """Avoid bootstrapping real SQL repos in interface unit tests."""
+    with patch("zenos.interface.tools._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.tools.ontology_service", new=AsyncMock()), \
+         patch("zenos.interface.tools.task_service", new=AsyncMock()), \
+         patch("zenos.interface.tools.entity_repo", new=AsyncMock()):
+        yield
 
 def _make_entity(**overrides) -> Entity:
     defaults = dict(
@@ -563,6 +574,36 @@ class TestWriteTool:
             result = await write(collection="entities", data={})
 
             assert result["error"] == "INVALID_INPUT"
+
+    async def test_write_documents_sync_mode_routes_to_sync_api(self):
+        from zenos.interface.tools import write
+
+        doc_entity = _make_entity(id="doc-1", type="document", name="Spec", status="current")
+        sync_result = DocumentSyncResult(
+            operation="rename",
+            dry_run=True,
+            document_id="doc-1",
+            before={"name": "Spec v1"},
+            after={"name": "Spec v2"},
+            relationship_changes={"add": [], "remove": []},
+            document=doc_entity,
+        )
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.sync_document_governance = AsyncMock(return_value=sync_result)
+
+            result = await write(
+                collection="documents",
+                data={
+                    "sync_mode": "rename",
+                    "id": "doc-1",
+                    "title": "Spec v2",
+                    "dry_run": True,
+                },
+            )
+
+            assert result["operation"] == "rename"
+            assert result["dry_run"] is True
+            assert result["document_id"] == "doc-1"
 
     async def test_write_relationship_success(self):
         from zenos.interface.tools import write
