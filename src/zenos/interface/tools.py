@@ -191,32 +191,34 @@ async def _ensure_services() -> None:
     """Wire services once repos are ready."""
     global ontology_service, governance_service, source_service, task_service
     await _ensure_repos()
-    if ontology_service is not None:
-        return
-    ontology_service = OntologyService(
-        entity_repo=entity_repo,
-        relationship_repo=relationship_repo,
-        document_repo=document_repo,
-        protocol_repo=protocol_repo,
-        blindspot_repo=blindspot_repo,
-        governance_ai=_governance_ai,
-    )
-    governance_service = GovernanceService(
-        entity_repo=entity_repo,
-        relationship_repo=relationship_repo,
-        protocol_repo=protocol_repo,
-        blindspot_repo=blindspot_repo,
-    )
-    source_service = SourceService(
-        entity_repo=entity_repo,
-        source_adapter=source_adapter,
-    )
-    task_service = TaskService(
-        task_repo=task_repo,
-        entity_repo=entity_repo,
-        blindspot_repo=blindspot_repo,
-        governance_ai=_governance_ai,
-    )
+    if ontology_service is None:
+        ontology_service = OntologyService(
+            entity_repo=entity_repo,
+            relationship_repo=relationship_repo,
+            document_repo=document_repo,
+            protocol_repo=protocol_repo,
+            blindspot_repo=blindspot_repo,
+            governance_ai=_governance_ai,
+        )
+    if governance_service is None:
+        governance_service = GovernanceService(
+            entity_repo=entity_repo,
+            relationship_repo=relationship_repo,
+            protocol_repo=protocol_repo,
+            blindspot_repo=blindspot_repo,
+        )
+    if source_service is None:
+        source_service = SourceService(
+            entity_repo=entity_repo,
+            source_adapter=source_adapter,
+        )
+    if task_service is None:
+        task_service = TaskService(
+            task_repo=task_repo,
+            entity_repo=entity_repo,
+            blindspot_repo=blindspot_repo,
+            governance_ai=_governance_ai,
+        )
 
 
 # ──────────────────────────────────────────────
@@ -884,7 +886,8 @@ async def _task_handler(
     Called by the ``task`` MCP tool wrapper. Tests import this function
     directly to avoid calling a ``FunctionTool`` object.
     """
-    await _ensure_services()
+    if task_service is None:
+        await _ensure_services()
     try:
         # Resolve partner context once — used for auto-filling created_by and project
         partner = _current_partner.get()

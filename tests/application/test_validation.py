@@ -237,6 +237,7 @@ class TestUpsertEntityValidation:
             id="ent-1", name="Paceriz", type="product",
             summary="Old", tags=Tags(what="x", why="x", how="x", who="x"),
         )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
         repos["entity_repo"].get_by_name = AsyncMock(return_value=existing)
         svc = _make_service(repos)
         # Should not raise because id is provided
@@ -971,6 +972,86 @@ class TestSourcesDedup:
         assert "https://example.com/new.md" in uris
 
 
+class TestEntityUpdateSemantics:
+    """Update path should preserve omitted fields unless explicitly changed."""
+
+    @pytest.mark.asyncio
+    async def test_force_update_preserves_sources_when_omitted(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="Old summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+            sources=[{"uri": "https://example.com/spec.md", "label": "Spec", "type": "github"}],
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "summary": "New summary",
+            "force": True,
+        })
+
+        assert result.entity.summary == "New summary"
+        assert result.entity.sources == existing.sources
+        repos["entity_repo"].upsert.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_force_update_preserves_confirmed_flag_by_default(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="Old summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "name": "ZenOS",
+            "force": True,
+        })
+
+        assert result.entity.name == "ZenOS"
+        assert result.entity.confirmed_by_user is True
+
+    @pytest.mark.asyncio
+    async def test_partial_update_uses_existing_required_fields(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="Old summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            visibility="restricted",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "summary": "Patched summary",
+        })
+
+        assert result.entity.name == "Paceriz"
+        assert result.entity.type == "product"
+        assert result.entity.tags.why == "coach"
+        assert result.entity.visibility == "restricted"
+        assert result.entity.summary == "Patched summary"
+
+
 # ===========================================================================
 # Auto-infer module parent for L3 entities
 # ===========================================================================
@@ -1359,6 +1440,7 @@ class TestGovernanceAIPromptInputFiltering:
             tags=Tags(what=["x"], why="x", how="x", who=["x"]),
         )
         repos["entity_repo"].list_all = AsyncMock(return_value=[saved, module, doc])
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=saved)
 
         gov = _CaptureGovernanceAI()
         svc = OntologyService(

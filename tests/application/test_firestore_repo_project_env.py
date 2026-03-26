@@ -18,6 +18,7 @@ def test_get_db_uses_google_cloud_project_env(monkeypatch):
     monkeypatch.setattr(mod.firestore, "AsyncClient", DummyClient)
     mod._db = None
     _ = mod.get_db()
+    mod._db = None
 
     assert captured["project"] == "customer-a"
 
@@ -37,5 +38,6 @@ def test_get_db_falls_back_to_default_project(monkeypatch):
     monkeypatch.setattr(mod.firestore, "AsyncClient", DummyClient)
     mod._db = None
     _ = mod.get_db()
+    mod._db = None
 
     assert captured["project"] == "zenos-naruvia"

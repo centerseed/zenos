@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from collections import Counter
 
 logger = logging.getLogger(__name__)
@@ -477,40 +477,46 @@ class OntologyService:
           4. Check split criteria (if entity has an ID for relationship lookup)
           5. Return entity + governance advice
         """
-        # --- Fast path: append_sources on existing entity (skip full validation) ---
-        if data.get("id") and data.get("append_sources"):
+        existing: Entity | None = None
+        if data.get("id"):
             existing = await self._entities.get_by_id(data["id"])
-            if existing:
-                append_sources = data["append_sources"]
-                existing_uris = {s.get("uri") for s in existing.sources}
-                added = 0
-                for s in append_sources:
-                    if s.get("uri") not in existing_uris:
-                        existing.sources.append(s)
-                        added += 1
-                if data.get("owner") and not existing.owner:
-                    existing.owner = data["owner"]
-                if added > 0:
-                    existing.updated_at = datetime.utcnow()
-                    saved = await self._entities.upsert(existing)
-                    tag_confidence = apply_tag_confidence(saved.tags)
-                    return UpsertEntityResult(
-                        entity=saved,
-                        tag_confidence=tag_confidence,
-                        split_recommendation=None,
-                        warnings=[f"追加 {added} 個 sources 到 '{existing.name}'"],
-                    )
-                return UpsertEntityResult(
-                    entity=existing,
-                    tag_confidence=apply_tag_confidence(existing.tags),
-                    split_recommendation=None,
-                    warnings=["所有 sources 已存在，跳過"],
+            if existing is None:
+                raise ValueError(
+                    f"Entity '{data['id']}' not found. Use create without id to add a new entity."
                 )
+
+        # --- Fast path: append_sources on existing entity (skip full validation) ---
+        if existing and data.get("append_sources"):
+            append_sources = data["append_sources"]
+            existing_uris = {s.get("uri") for s in existing.sources}
+            added = 0
+            for s in append_sources:
+                if s.get("uri") not in existing_uris:
+                    existing.sources.append(s)
+                    added += 1
+            if data.get("owner") and not existing.owner:
+                existing.owner = data["owner"]
+            if added > 0:
+                existing.updated_at = datetime.now(timezone.utc)
+                saved = await self._entities.upsert(existing)
+                tag_confidence = apply_tag_confidence(saved.tags)
+                return UpsertEntityResult(
+                    entity=saved,
+                    tag_confidence=tag_confidence,
+                    split_recommendation=None,
+                    warnings=[f"追加 {added} 個 sources 到 '{existing.name}'"],
+                )
+            return UpsertEntityResult(
+                entity=existing,
+                tag_confidence=apply_tag_confidence(existing.tags),
+                split_recommendation=None,
+                warnings=["所有 sources 已存在，跳過"],
+            )
 
         # --- Validation ---
 
         # 1. name: strip, length 2-80, no trailing parenthetical
-        name = data.get("name", "")
+        name = data.get("name", existing.name if existing else "")
         if isinstance(name, str):
             name = name.strip()
             data["name"] = name
@@ -527,7 +533,7 @@ class OntologyService:
 
         pre_save_inference = None
 
-        if self._governance_ai and not data.get("type"):
+        if self._governance_ai and not data.get("type") and not existing:
             all_entities = await self._entities.list_all()
             entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
                 all_entities=all_entities,
@@ -576,8 +582,46 @@ class OntologyService:
                 else:
                     warnings.append("GovernanceAI 推斷失敗，已退回規則/手動路徑")
 
+        # For updates, patch on top of the existing entity instead of rebuilding
+        # from sparse input. This preserves omitted fields like sources and
+        # confirmed_by_user unless the caller explicitly changes them.
+        merged_data = dict(data)
+        if existing:
+            existing_tags = existing.tags if isinstance(existing.tags, Tags) else Tags(
+                what="", why="", how="", who=""
+            )
+            merged_tags = {
+                "what": existing_tags.what,
+                "why": existing_tags.why,
+                "how": existing_tags.how,
+                "who": existing_tags.who,
+            }
+            incoming_tags = merged_data.get("tags")
+            if isinstance(incoming_tags, dict):
+                merged_tags.update({k: v for k, v in incoming_tags.items() if v is not None})
+            elif isinstance(incoming_tags, Tags):
+                merged_tags = {
+                    "what": incoming_tags.what,
+                    "why": incoming_tags.why,
+                    "how": incoming_tags.how,
+                    "who": incoming_tags.who,
+                }
+            merged_data.setdefault("name", existing.name)
+            merged_data.setdefault("type", existing.type)
+            merged_data.setdefault("summary", existing.summary)
+            merged_data["tags"] = merged_tags
+            merged_data.setdefault("status", existing.status)
+            merged_data.setdefault("parent_id", existing.parent_id)
+            merged_data.setdefault("details", existing.details)
+            merged_data.setdefault("level", existing.level)
+            merged_data.setdefault("owner", existing.owner)
+            merged_data.setdefault("sources", list(existing.sources))
+            merged_data.setdefault("visibility", existing.visibility)
+            merged_data.setdefault("confirmed_by_user", existing.confirmed_by_user)
+            merged_data.setdefault("last_reviewed_at", existing.last_reviewed_at)
+
         # 2. type enum
-        entity_type = data.get("type", "")
+        entity_type = merged_data.get("type", "")
         valid_types = [e.value for e in EntityType]
         if entity_type not in valid_types:
             raise ValueError(
@@ -586,7 +630,7 @@ class OntologyService:
             )
 
         # 3. status enum — document type allows document-specific statuses
-        status = data.get("status", "active")
+        status = merged_data.get("status", "active")
         _DOCUMENT_STATUSES = {"current", "stale", "draft", "conflict"}
         _BASE_STATUSES = {"active", "paused", "completed", "planned"}
         if entity_type == EntityType.DOCUMENT:
@@ -594,7 +638,7 @@ class OntologyService:
             # Default status for document entities
             if status == "active":
                 status = "current"
-                data["status"] = status
+                merged_data["status"] = status
         else:
             valid_statuses = sorted(_BASE_STATUSES)
         if status not in valid_statuses:
@@ -604,7 +648,7 @@ class OntologyService:
             )
 
         # 4. tags must have four dimensions
-        tags_data = data.get("tags")
+        tags_data = merged_data.get("tags")
         if not isinstance(tags_data, (dict, Tags)):
             raise ValueError("Tags must be a dict with keys: what, why, how, who")
         if isinstance(tags_data, dict):
@@ -616,14 +660,14 @@ class OntologyService:
                 )
 
         # 5. module must have parent_id
-        if entity_type == "module" and not data.get("parent_id"):
+        if entity_type == "module" and not merged_data.get("parent_id"):
             raise ValueError(
                 "Module entity must have parent_id set to the owning product's entity ID. "
                 "Without parent_id, the module will not appear in the Dashboard."
             )
 
         # 6. parent_id existence
-        parent_id = data.get("parent_id")
+        parent_id = merged_data.get("parent_id")
         if parent_id:
             parent = await self._entities.get_by_id(parent_id)
             if parent is None:
@@ -635,24 +679,24 @@ class OntologyService:
         # 6b. Auto-infer module parent for L3 entities
         l3_types = {"document", "goal", "role", "project"}
         if entity_type in l3_types:
-            inferred_parent = await self._infer_module_parent(data)
-            if inferred_parent and inferred_parent != data.get("parent_id"):
+            inferred_parent = await self._infer_module_parent(merged_data)
+            if inferred_parent and inferred_parent != merged_data.get("parent_id"):
                 warnings.append(
-                    f"自動推斷 parent：{data.get('parent_id')} → {inferred_parent}（L3 entity 應掛在 Module 下）"
+                    f"自動推斷 parent：{merged_data.get('parent_id')} → {inferred_parent}（L3 entity 應掛在 Module 下）"
                 )
-                data["parent_id"] = inferred_parent
+                merged_data["parent_id"] = inferred_parent
 
         # 6c. L2 hard rule on write path: new module requires concrete impacts.
-        if self._governance_ai and entity_type == EntityType.MODULE and not data.get("id"):
+        if self._governance_ai and entity_type == EntityType.MODULE and not merged_data.get("id"):
             all_entities = await self._entities.list_all()
             entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
                 all_entities=all_entities,
-                exclude_entity_id=data.get("id"),
+                exclude_entity_id=merged_data.get("id"),
             )
-            infer_entity_data = dict(data)
+            infer_entity_data = dict(merged_data)
             infer_entity_data["_global_context"] = self._build_global_infer_context(
                 all_entities,
-                exclude_entity_id=data.get("id"),
+                exclude_entity_id=merged_data.get("id"),
             )
             pre_save_inference = self._governance_ai.infer_all(
                 infer_entity_data, entity_dicts, unlinked_dicts
@@ -665,7 +709,7 @@ class OntologyService:
                     for rel in pre_save_inference.rels
                 )
             )
-            if not inferred_concrete_impacts and not data.get("force"):
+            if not inferred_concrete_impacts and not merged_data.get("force"):
                 insufficient_reasons = ""
                 if pre_save_inference and pre_save_inference.impacts_context_status == "insufficient":
                     reasons = [r for r in pre_save_inference.impacts_context_gaps if r]
@@ -679,7 +723,7 @@ class OntologyService:
                 )
 
         # 7. duplicate name+type check (new entity only)
-        if not data.get("id"):
+        if not merged_data.get("id"):
             existing = await self._entities.get_by_name(name)
             if existing and existing.type == entity_type:
                 raise ValueError(
@@ -718,9 +762,7 @@ class OntologyService:
                     raise ValueError("\n".join(lines))
 
         # --- Confirmed entity protection: merge-only update (unless force=true) ---
-        if data.get("id"):
-            existing = await self._entities.get_by_id(data["id"])
-            if existing and existing.confirmed_by_user and not data.get("force"):
+        if existing and existing.confirmed_by_user and not merged_data.get("force"):
                 for field_name in ("summary", "status", "parent_id", "level"):
                     existing_val = getattr(existing, field_name, None)
                     new_val = data.get(field_name)
@@ -745,7 +787,7 @@ class OntologyService:
                 warnings.append(
                     f"Entity '{existing.name}' 已確認，僅更新空欄位（加 force=true 可覆寫）"
                 )
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
                 saved = await self._entities.upsert(existing)
                 tag_confidence = apply_tag_confidence(saved.tags)
                 split_rec: SplitRecommendation | None = None
@@ -762,9 +804,9 @@ class OntologyService:
 
         # --- Build entity ---
 
-        tags = Tags(**data["tags"]) if isinstance(data.get("tags"), dict) else data["tags"]
+        tags = Tags(**merged_data["tags"]) if isinstance(merged_data.get("tags"), dict) else merged_data["tags"]
         # Handle append_sources: merge with existing sources if updating
-        sources = data.get("sources", [])
+        sources = merged_data.get("sources", [])
         # Dedup sources by URI
         if sources:
             seen_uris: set[str] = set()
@@ -777,15 +819,13 @@ class OntologyService:
                 elif not uri:
                     deduped.append(s)
             sources = deduped
-        append_sources = data.get("append_sources")
-        if append_sources and data.get("id"):
-            existing = await self._entities.get_by_id(data["id"])
-            if existing:
-                existing_uris = {s.get("uri") for s in existing.sources}
-                sources = list(existing.sources)
-                for s in append_sources:
-                    if s.get("uri") not in existing_uris:
-                        sources.append(s)
+        append_sources = merged_data.get("append_sources")
+        if append_sources and existing:
+            existing_uris = {s.get("uri") for s in existing.sources}
+            sources = list(existing.sources)
+            for s in append_sources:
+                if s.get("uri") not in existing_uris:
+                    sources.append(s)
 
         # Auto-set level based on type; caller-provided level takes precedence.
         _TYPE_TO_LEVEL: dict[str, int] = {
@@ -796,24 +836,48 @@ class OntologyService:
             EntityType.ROLE: 3,
             EntityType.PROJECT: 3,
         }
-        level = data.get("level") if data.get("level") is not None else _TYPE_TO_LEVEL.get(data["type"])
-
-        entity = Entity(
-            name=data["name"],
-            type=data["type"],
-            summary=data["summary"],
-            tags=tags,
-            level=level,
-            status=data.get("status", "active"),
-            id=data.get("id"),
-            parent_id=data.get("parent_id"),
-            details=data.get("details"),
-            confirmed_by_user=data.get("confirmed_by_user", False),
-            owner=data.get("owner"),
-            sources=sources,
-            visibility=data.get("visibility", "public"),
+        level = (
+            merged_data.get("level")
+            if merged_data.get("level") is not None
+            else _TYPE_TO_LEVEL.get(merged_data["type"])
         )
-        entity.updated_at = datetime.utcnow()
+
+        if existing:
+            entity = existing
+            entity.name = merged_data["name"]
+            entity.type = merged_data["type"]
+            entity.summary = merged_data["summary"]
+            entity.tags = tags
+            entity.level = level
+            entity.status = merged_data.get("status", existing.status)
+            entity.parent_id = merged_data.get("parent_id")
+            entity.details = merged_data.get("details")
+            entity.confirmed_by_user = merged_data.get(
+                "confirmed_by_user", existing.confirmed_by_user
+            )
+            entity.owner = merged_data.get("owner")
+            entity.sources = sources
+            entity.visibility = merged_data.get("visibility", existing.visibility)
+            entity.last_reviewed_at = merged_data.get(
+                "last_reviewed_at", existing.last_reviewed_at
+            )
+        else:
+            entity = Entity(
+                name=merged_data["name"],
+                type=merged_data["type"],
+                summary=merged_data["summary"],
+                tags=tags,
+                level=level,
+                status=merged_data.get("status", "active"),
+                id=merged_data.get("id"),
+                parent_id=merged_data.get("parent_id"),
+                details=merged_data.get("details"),
+                confirmed_by_user=merged_data.get("confirmed_by_user", False),
+                owner=merged_data.get("owner"),
+                sources=sources,
+                visibility=merged_data.get("visibility", "public"),
+            )
+        entity.updated_at = datetime.now(timezone.utc)
 
         saved = await self._entities.upsert(entity)
 
@@ -1056,7 +1120,7 @@ class OntologyService:
             sources=sources,
             confirmed_by_user=data.get("confirmed_by_user", False),
         )
-        entity.updated_at = datetime.utcnow()
+        entity.updated_at = datetime.now(timezone.utc)
         saved = await self._entities.upsert(entity)
 
         # Create relationships for additional linked entities
@@ -1111,7 +1175,7 @@ class OntologyService:
             id=data.get("id"),
             confirmed_by_user=data.get("confirmed_by_user", False),
         )
-        protocol.updated_at = datetime.utcnow()
+        protocol.updated_at = datetime.now(timezone.utc)
         return await self._protocols.upsert(protocol)
 
     async def add_blindspot(self, data: dict) -> Blindspot:
@@ -1177,7 +1241,7 @@ class OntologyService:
         Returns:
             dict with collection, id, and confirmed status.
         """
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if collection == "entities":
             entity = await self._entities.get_by_id(item_id)

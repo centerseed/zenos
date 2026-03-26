@@ -30,17 +30,38 @@ pytestmark = pytest.mark.skipif(
 TEST_PREFIX = f"_test_{uuid.uuid4().hex[:8]}"
 TEST_PARTNER_A = f"{TEST_PREFIX}_partner"
 TEST_PARTNER_B = f"{TEST_PREFIX}_partner_b"
+CONNECT_RETRIES = 5
+CONNECT_RETRY_DELAY_SEC = 0.5
 
 
 # ---------------------------------------------------------------------------
 # Module-level setup / teardown for test partners
 # ---------------------------------------------------------------------------
 
+async def _connect_with_retry() -> asyncpg.Connection:
+    for attempt in range(CONNECT_RETRIES):
+        try:
+            return await asyncpg.connect(DB_URL)
+        except (OSError, ConnectionError, TimeoutError, asyncpg.PostgresError):
+            if attempt == CONNECT_RETRIES - 1:
+                raise
+            await asyncio.sleep(CONNECT_RETRY_DELAY_SEC * (2 ** attempt))
+
+
+async def _create_pool_with_retry() -> asyncpg.Pool:
+    for attempt in range(CONNECT_RETRIES):
+        try:
+            return await asyncpg.create_pool(DB_URL, min_size=1, max_size=3)
+        except (OSError, ConnectionError, TimeoutError, asyncpg.PostgresError):
+            if attempt == CONNECT_RETRIES - 1:
+                raise
+            await asyncio.sleep(CONNECT_RETRY_DELAY_SEC * (2 ** attempt))
+
 
 def setup_module(module):  # noqa: ARG001
     """Create test partners synchronously before any test runs."""
     async def _setup():
-        conn = await asyncpg.connect(DB_URL)
+        conn = await _connect_with_retry()
         try:
             await conn.execute(
                 """INSERT INTO zenos.partners (id, email, display_name, api_key, status)
@@ -69,7 +90,10 @@ def setup_module(module):  # noqa: ARG001
 def teardown_module(module):  # noqa: ARG001
     """Delete test partners (CASCADE deletes all related rows) after all tests."""
     async def _teardown():
-        conn = await asyncpg.connect(DB_URL)
+        # Safety guard: never delete non-test partner rows from shared DB.
+        assert TEST_PARTNER_A.startswith(TEST_PREFIX)
+        assert TEST_PARTNER_B.startswith(TEST_PREFIX)
+        conn = await _connect_with_retry()
         try:
             await conn.execute(
                 "DELETE FROM zenos.partners WHERE id = ANY($1::text[])",
@@ -89,7 +113,7 @@ def teardown_module(module):  # noqa: ARG001
 @pytest_asyncio.fixture
 async def pool():
     """Fresh asyncpg pool per test, tied to the test's own event loop."""
-    p = await asyncpg.create_pool(DB_URL, min_size=1, max_size=3)
+    p = await _create_pool_with_retry()
     yield p
     await p.close()
 
@@ -628,7 +652,13 @@ async def test_partner_key_validator():
     validator = SqlPartnerKeyValidator(ttl=0)  # ttl=0 forces refresh every call
 
     api_key = f"{TEST_PREFIX}_key_a"  # pragma: allowlist secret
-    result = await validator.validate(api_key)
+    result = None
+    for attempt in range(CONNECT_RETRIES):
+        result = await validator.validate(api_key)
+        if result is not None:
+            break
+        if attempt < CONNECT_RETRIES - 1:
+            await asyncio.sleep(CONNECT_RETRY_DELAY_SEC * (2 ** attempt))
 
     assert result is not None, f"API key {api_key!r} should be valid"
     assert result["id"] == TEST_PARTNER_A

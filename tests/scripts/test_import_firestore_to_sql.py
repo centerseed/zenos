@@ -375,7 +375,7 @@ class TestUpsertDocumentEntities:
         doc = _document("doc1", linked_ids=["e1", "e2"], partner_id="p1")
         entity_to_partner = {"e1": "p1", "e2": "p1"}
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_document_entities(conn, [doc], entity_to_partner, report, dry_run=False)
         )
         assert conn.execute.call_count == 2
@@ -385,7 +385,7 @@ class TestUpsertDocumentEntities:
         conn = _make_conn()
         doc = _document("doc1", linked_ids=[], partner_id="p1")
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_document_entities(conn, [doc], {}, report, dry_run=False)
         )
         assert conn.execute.call_count == 0
@@ -394,7 +394,7 @@ class TestUpsertDocumentEntities:
         conn = _make_conn()
         doc = _document("doc1", linked_ids=["e1", "e2"], partner_id="p1")
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_document_entities(conn, [doc], {"e1": "p1", "e2": "p1"}, report, dry_run=True)
         )
         assert conn.execute.call_count == 0
@@ -404,7 +404,7 @@ class TestUpsertDocumentEntities:
         conn = _make_conn()
         doc = _document("doc1", linked_ids=["e_missing"], partner_id="p1")
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_document_entities(conn, [doc], {}, report, dry_run=False)
         )
         assert any("e_missing" in w for w in report.warnings)
@@ -413,7 +413,7 @@ class TestUpsertDocumentEntities:
         conn = _make_conn()
         doc = _document("doc1", linked_ids=["e1"], partner_id=None)
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_document_entities(conn, [doc], {}, report, dry_run=False)
         )
         assert conn.execute.call_count == 0
@@ -434,7 +434,7 @@ class TestUpsertBlindspotEntities:
         conn = _make_conn()
         bs = _blindspot("b1", related_ids=["e1", "e2"], partner_id="p1")
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_blindspot_entities(conn, [bs], {"e1": "p1", "e2": "p1"}, report, dry_run=False)
         )
         assert conn.execute.call_count == 2
@@ -444,7 +444,7 @@ class TestUpsertBlindspotEntities:
         conn = _make_conn()
         bs = _blindspot("b1", related_ids=["e1"], partner_id=None)
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_blindspot_entities(conn, [bs], {"e1": "p1"}, report, dry_run=False)
         )
         assert conn.execute.call_count == 1
@@ -453,7 +453,7 @@ class TestUpsertBlindspotEntities:
         conn = _make_conn()
         bs = _blindspot("b1", related_ids=["e1"], partner_id="p1")
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_blindspot_entities(conn, [bs], {"e1": "p1"}, report, dry_run=True)
         )
         assert conn.execute.call_count == 0
@@ -475,7 +475,7 @@ class TestUpsertTaskEntities:
         conn = _make_conn()
         task = _task("t1", "p1", linked=["e1", "e2"])
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_task_entities(conn, [task], report, dry_run=False)
         )
         assert conn.execute.call_count == 2
@@ -485,7 +485,7 @@ class TestUpsertTaskEntities:
         conn = _make_conn()
         task = _task("t1", "p1", linked=["e1"])
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_task_entities(conn, [task], report, dry_run=True)
         )
         assert conn.execute.call_count == 0
@@ -495,7 +495,7 @@ class TestUpsertTaskEntities:
         conn = _make_conn()
         task = _task("t1", "p1", linked=["", None])
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_task_entities(conn, [task], report, dry_run=False)
         )
         assert conn.execute.call_count == 0
@@ -513,7 +513,7 @@ class TestUpsertTaskBlockers:
         conn = _make_conn()
         task = _task("t1", "p1", blocked_by=["t2", "t3"])
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_task_blockers(conn, [task], report, dry_run=False)
         )
         assert conn.execute.call_count == 2
@@ -523,7 +523,7 @@ class TestUpsertTaskBlockers:
         conn = _make_conn()
         task = _task("t1", "p1", blocked_by=["t1"])
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_task_blockers(conn, [task], report, dry_run=False)
         )
         assert conn.execute.call_count == 0
@@ -532,7 +532,7 @@ class TestUpsertTaskBlockers:
         conn = _make_conn()
         task = _task("t1", "p1", blocked_by=["t2"])
         report = _make_report()
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _upsert_task_blockers(conn, [task], report, dry_run=True)
         )
         assert conn.execute.call_count == 0
@@ -620,7 +620,7 @@ class TestEnumFailFastInUpsertPaths:
         bad_entity["partnerId"] = "p1"
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'illegal_type'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_entities(conn, [bad_entity], {"e1": "p1"}, {"e1": None}, report, dry_run=False)
             )
 
@@ -632,7 +632,7 @@ class TestEnumFailFastInUpsertPaths:
         bad_entity["partnerId"] = "p1"
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'ghost'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_entities(conn, [bad_entity], {"e1": "p1"}, {"e1": None}, report, dry_run=False)
             )
 
@@ -648,7 +648,7 @@ class TestEnumFailFastInUpsertPaths:
         }
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'hates'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_relationships(conn, [bad_rel], {"e1": "p1"}, report, dry_run=False)
             )
 
@@ -659,7 +659,7 @@ class TestEnumFailFastInUpsertPaths:
         bad_task["status"] = "limbo"
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'limbo'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_tasks(conn, [bad_task], report, dry_run=False)
             )
 
@@ -670,7 +670,7 @@ class TestEnumFailFastInUpsertPaths:
         bad_task["priority"] = "urgent"
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'urgent'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_tasks(conn, [bad_task], report, dry_run=False)
             )
 
@@ -681,7 +681,7 @@ class TestEnumFailFastInUpsertPaths:
         bad_bs["severity"] = "orange"
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'orange'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_blindspots(conn, [bad_bs], {"b1": "p1"}, report, dry_run=False)
             )
 
@@ -692,7 +692,7 @@ class TestEnumFailFastInUpsertPaths:
         bad_doc["status"] = "forbidden"
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'forbidden'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_documents(conn, [bad_doc], {}, report, dry_run=False)
             )
 
@@ -703,7 +703,7 @@ class TestEnumFailFastInUpsertPaths:
         bad_doc["source"] = {"type": "google_drive", "uri": "https://drive.google.com"}
         report = _make_report()
         with pytest.raises(ValueError, match="illegal enum value 'google_drive'"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _upsert_documents(conn, [bad_doc], {}, report, dry_run=False)
             )
 
@@ -742,7 +742,7 @@ class TestRunImportDryRun:
             ):
                 return await run_import(dry_run=True)
 
-        report = asyncio.get_event_loop().run_until_complete(_run())
+        report = asyncio.run(_run())
 
         assert "partners" in report.counts
         assert "entities" in report.counts
@@ -783,7 +783,7 @@ class TestReadUsageLogs:
         mock_root.get = _fail_get
         mock_db.collection = MagicMock(side_effect=lambda name: mock_col if name == "partners" else mock_root)
 
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             _read_usage_logs(mock_db, self._make_partners())
         )
         assert result == []
@@ -805,7 +805,7 @@ class TestReadUsageLogs:
         mock_db.collection = MagicMock(return_value=mock_col)
 
         with patch("import_firestore_to_sql.logger") as mock_logger:
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 _read_usage_logs(mock_db, self._make_partners())
             )
             assert mock_logger.warning.call_count >= 1

@@ -24,11 +24,20 @@ from zenos.infrastructure.firestore_repo import (
     FirestoreEntityRepository,
     FirestoreProtocolRepository,
     FirestoreRelationshipRepository,
+    get_db,
 )
 
 # Use a single event loop for the entire module so that session-scoped
 # async fixtures and sequential tests share the same Firestore client.
 pytestmark = pytest.mark.asyncio(loop_scope="module")
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _require_firestore_client():
+    """Skip this module when Firestore client is mocked/stubbed by other tests."""
+    db = get_db()
+    if not hasattr(db, "collection"):
+        pytest.skip("Firestore client not available for e2e integration tests")
 
 
 # ------------------------------------------------------------------ #
