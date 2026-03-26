@@ -304,7 +304,7 @@ L2（module）治理硬規則補充：
 
 ### ZenOS 自身（簡單案例）
 
-- 20 個實體，1 份 ontology.md 夠用
+- 20 個實體，1 份 REF-ontology-current-state.md 夠用
 - 因為 Phase 0 沒有大量文件，骨架層和神經層可以合在一起
 - 隨 Phase 1 展開，會需要按領域拆分（product / technical / business / operations）
 

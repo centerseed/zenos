@@ -137,24 +137,66 @@ Dashboard v0 解決了夥伴入口問題（登入、MCP 設定、ontology 瀏覽
 
 **定位**：執行者的工作追蹤介面。
 
+2026-03-26 補充：經 dogfooding 後確認，現行任務 UI 最大問題不是「不好看」，而是 **無法讓 PM 在單一畫面判斷實際狀態**。新版任務 view 的首要目標改為：
+
+1. 不讓任何真實狀態在主畫面消失
+2. 區分「全域視圖」與「個人視圖」，避免局部資料偽裝成全局
+3. 把阻塞、等待驗收、逾期、吞吐量放到第一層，而不是藏在卡片展開內
+4. 讓 PM 能回答三個問題：現在卡在哪、誰手上過載、哪些案子看起來在動其實沒收斂
+
 ### 雙模式切換
 
-- **Pulse**（預設）：公司作戰室
-- **Kanban**：傳統看板
+- **Pulse**（預設）：PM / 老闆看的全局作戰室
+- **Kanban**：執行者看的可操作看板
 
 ### Pulse 模式（四區塊）
 
-1. **指標列**：Active / Moving / Blocked / Overdue / Review 五張卡片
-2. **專案進度條**：每個 product 的任務完成率
-3. **角色 × 專案 矩陣**：行=assignee，列=product，格子=任務數+狀態分佈
-4. **活動時間線**：最近的任務事件 + blindspot 發現
+1. **全域指標列**：Active / Moving / Blocked / Overdue / Review / Done This Week
+2. **風險清單**：阻塞中、等待驗收超過 SLA、逾期任務，依嚴重度排序
+3. **專案健康表**：每個 product 顯示 Done / In Progress / Review / Blocked / Todo，而不是只看完成率
+4. **人員負載表**：每人顯示手上總量、進行中、待 review、blocked、overdue
+5. **活動時間線**：只顯示明確事件，不用 task 當前狀態反推事件文字
+
+### Pulse 模式設計原則
+
+- **一律使用全量 task dataset**，不能受 Kanban tab/filter 影響
+- Pulse 上的任何數字都必須可以 drill-down 到任務清單
+- 專案健康不能只看 `% done`，必須顯示結構性分布
+- 人員負載不能只顯示「最高狀態」，必須同時看見多種狀態共存
+- Review 必須與 In Progress 分開，因為它代表等待他人決策，不是正在推進
+- Blocked 必須有明確 blocker / blocked reason 入口
 
 ### Kanban 模式
 
-- 六欄：Backlog | Todo | In Progress | Review | Done | Blocked
-- 可依 assignee / product / priority 篩選
+- 主欄位：Backlog | Todo | In Progress | Review | Blocked | Done
+- 次欄位或可切換顯示：Cancelled | Archived
+- 可依 assignee / product / priority / overdue / linked entity 篩選
+- 需明確區分：
+  - `All Tasks`：全域任務池
+  - `My Inbox`：指派給我的
+  - `My Outbox`：我建立、等待別人處理的
+  - `Review Queue`：待我驗收或待確認
+
+### Kanban 模式設計原則
+
+- 不能讓 `done / cancelled / archived` 在資料上存在、畫面上消失
+- 切換 tab 只能改變目前看的任務範圍，不能污染 Pulse 所依賴的全域資料
+- 卡片在收合態就要看見足夠多的決策資訊：
+  - assignee
+  - linked product / module
+  - overdue / blocked / waiting review 標記
+  - blocker count
+  - 最後更新時間
+- 展開態才顯示 description / context / acceptance criteria / result 等長文
 
 ---
+
+## 任務 View 補充規格
+
+派工 UI 改版的詳細需求、問題確認、資訊架構、驗收條件，見：
+
+- `docs/archive/specs/deferred-2026-03/SPEC-task-dispatch-ui-redesign.md`
+- `docs/archive/specs/tasks-2026-03/TD1-task-dispatch-ui-redesign.md`
 
 ## 跨分頁共用
 
@@ -201,8 +243,9 @@ Dashboard v0 解決了夥伴入口問題（登入、MCP 設定、ontology 瀏覽
 |--------|------|---------|
 | P0 | 知識地圖 tab（三欄佈局）| 已有 mockup，react-force-graph-2d 已安裝 |
 | P0 | Entity schema 加 owner | Architect |
+| P0 | 任務 UI 改版第一階段（資料範圍修正 + Pulse 真實狀態可視化） | `SPEC-task-dispatch-ui-redesign.md` |
 | P1 | 專案 tab | Owner 欄位就緒後 |
-| P1 | 任務 tab Pulse 模式 | linkedEntities 修復後 |
+| P1 | 任務 tab 第二階段（Kanban 欄位補齊 + drill-down + 真事件時間線） | 第一階段完成後 |
 | P2 | 確認佇列 | |
 | P2 | 團隊 tab | |
 

@@ -21,9 +21,9 @@
 | 三層治理系統 | 事件源層（偵測 CRUD）→ 治理引擎層（AI 分析）→ 確認同步層（人確認 + 級聯更新） | Part 7 |
 | Adapter 架構 | 統一介面 + 多生態系 Adapter（Git/Google/MS/Notion），文件留用戶端 | Part 7 |
 | ZenOS Dashboard | 唯一自建 UI，做六件事：全景圖、確認佇列、Protocol viewer、Storage Map、任務看板、團隊設定。不做文件管理 | Part 7 |
-| Who + Owner 分離 | Who = 多值（context 分發給哪些角色），Owner = 單值（治理問責誰來確認） | enterprise-governance.md |
-| Who 三層模型 | 職能角色（ontology）→ 員工（公司層）→ agents（個人層）。ZenOS 管前兩層，第三層員工自理 | Part 0 + enterprise-governance.md |
-| Pull Model | Agent 自宣告身份，透過 MCP query 帶 role filter 拉 context。ZenOS 不維護 agent registry | enterprise-governance.md |
+| Who + Owner 分離 | Who = 多值（context 分發給哪些角色），Owner = 單值（治理問責誰來確認） | docs/reference/REF-enterprise-governance.md |
+| Who 三層模型 | 職能角色（ontology）→ 員工（公司層）→ agents（個人層）。ZenOS 管前兩層，第三層員工自理 | Part 0 + docs/reference/REF-enterprise-governance.md |
+| Pull Model | Agent 自宣告身份，透過 MCP query 帶 role filter 拉 context。ZenOS 不維護 agent registry | docs/reference/REF-enterprise-governance.md |
 | Action Layer | Ontology 的 output 路徑——任務管理。Ontology Context + 行動屬性。UI 和 MCP 對稱 | Part 7.1 |
 | Entity ≠ Project | Entity(project) 是短期工作容器，Entity(product/module) 是長期知識。知識不跟著專案死 | Part 7.2 + ADR-006 |
 | Dashboard 用語 | UI 不出現 entity/ontology。Product→專案、Module→模組、Knowledge Graph→知識地圖、Entity→「節點」 | Part 7.3 |

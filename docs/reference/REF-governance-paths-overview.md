@@ -79,6 +79,9 @@ LLM 成本：
 治理內容：
 - `source.type`、`linked_entity_ids`、查重
 - 若 caller 沒帶 `linked_entity_ids`，才會啟動自動推斷
+- update 應採 merge semantics：未明示更新的 `parent_id`、`confirmed_by_user`、既有 tags / sources / visibility 不得被清空
+- `linked_entity_ids` 應只接受 `list[str]`；若收到字串化 JSON，server 應先正規化或明確報格式錯誤
+- 文件的 primary linkage 以 `parent_id` 表示；若額外建立 relationship，必須與 primary linkage 保持一致
 
 LLM 成本：
 - 0 或 1 次 `infer_doc_entities`

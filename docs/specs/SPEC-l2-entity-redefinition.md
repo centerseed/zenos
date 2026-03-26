@@ -183,5 +183,5 @@ step 6: 用任何人都懂的語言寫 summary
 ## 相關文件
 
 - `docs/spec.md` Part 4（Ontology 技術路線）、Part 7.2（Entity 分層模型）
-- `docs/glossary.md`（L2 定義速查）
-- `docs/specs/handoff-pm-to-architect-l2-redesign.md`（Architect 技術交接）
+- `docs/reference/REF-glossary.md`（L2 定義速查）
+- `docs/designs/TD-l2-entity-redesign.md`（Architect 技術交接）

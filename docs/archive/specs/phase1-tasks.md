@@ -2,7 +2,7 @@
 
 > Architect 產出 | 日期：2026-03-21
 > 技術設計：`docs/decisions/ADR-003-phase1-mvp-architecture.md`
-> PM Spec：`docs/specs/phase1-ontology-mvp.md`
+> PM Spec：`docs/specs/SPEC-phase1-ontology-mvp.md`
 
 ---
 

@@ -3,7 +3,7 @@
 > 指派：Developer | 預估：半天
 > 依賴：T3, T5
 > 技術設計：`docs/decisions/ADR-003-phase1-mvp-architecture.md`
-> PRD MCP 介面：`docs/specs/phase1-ontology-mvp.md` 交付物 2
+> PRD MCP 介面：`docs/archive/specs/SPEC-phase1-ontology-mvp.md` 交付物 2
 
 ---
 
@@ -55,7 +55,7 @@ source_service = SourceService(...)
 |------|------|------|
 | `upsert_entity` | Entity fields (id optional) | Entity + governance suggestions |
 | `add_relationship` | source_entity_id, target_entity_id, type, description | Relationship |
-| `upsert_document` | Document fields | Document |
+| `upsert_document` | Document fields（`linked_entity_ids` = `list[str]`） | Document |
 | `upsert_protocol` | Protocol fields | Protocol |
 | `add_blindspot` | Blindspot fields | Blindspot |
 | `confirm` | collection: str, id: str | Updated entry |
@@ -90,6 +90,13 @@ async def get_protocol(entity_name: str) -> dict:
 {"error": "INVALID_INPUT", "message": "..."}
 {"error": "ADAPTER_ERROR", "message": "..."}
 ```
+
+### `write(collection="documents")` contract
+
+- 這條路徑是 legacy document payload 到 `Entity(type="document")` 的兼容入口。
+- update 必須是 merge，不是 replace。caller 未帶回的關鍵欄位不得被默默清空。
+- `linked_entity_ids` 的公開格式必須是 `list[str]`；若收到其他格式，必須明確拒絕或正規化，不可逐字元解析。
+- 若文件掛載同時以 `parent_id` 與 relationship 呈現，tool contract 必須保證兩者一致。
 
 ### 啟動入口
 

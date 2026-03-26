@@ -1,6 +1,6 @@
 # 用戶邀請與權限管理 MVP — 技術設計
 
-> Architect handoff for `docs/specs/user-invitation-mvp.md`
+> Architect handoff for `docs/archive/specs/deferred-2026-03/SPEC-user-invitation-mvp.md`
 
 ## PM 開放問題的技術回答
 

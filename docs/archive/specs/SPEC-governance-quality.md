@@ -219,6 +219,98 @@ Governance Score =
 
 ---
 
+## L1 Product Governance Metrics
+
+L1 代表 product 層。它不是另一套獨立骨架，而是把底下 L2 / L3 的治理狀態做 roll-up，讓管理者快速判斷「這個 product 是否健康、是否需要治理介入」。
+
+### L1 的定位
+
+1. L1 是 product 層的總覽視角。
+2. L1 的健康度應該反映底下 L2 的完整度、變更速度與行動閉環。
+3. L1 不取代 L2 的 impacts 規則，而是把 L2 的治理狀態彙總成 product 級別指標。
+4. L1 適合做儀表板總覽與風險雷達，不適合拿來取代細粒度治理判斷。
+
+### L1 指標維度
+
+#### 1. Product Coverage
+
+衡量一個 product 是否有足夠的治理支撐。
+
+**核心指標**
+- product 是否存在且為 active。
+- product 是否有 owner 或明確責任人。
+- 底下核心 L2 是否存在、是否有對應 relationship、owner、protocol 或確認責任。
+- product 相關核心流程是否有 document / protocol entry。
+
+#### 2. Product Freshness
+
+衡量 product 是否跟得上近期變更。
+
+**核心指標**
+- 最近 7 天有變更的 product 相關內容，是否已同步更新對應 ontology entry。
+- 最近 14 天有顯著變更的 product，是否已確認或標記 stale。
+- product 變更到 ontology 更新的中位延遲。
+- stale product 與 stale 下層內容的比例。
+
+#### 3. Product Consistency
+
+衡量 product 底下的治理結構是否自洽。
+
+**核心指標**
+- product 底下 orphan L2 / document / task 的比例。
+- 核心 L2 是否缺 protocol、缺 relationship、缺 impacts。
+- 是否存在重複語意或衝突語意。
+- product 下層是否有明顯責任斷裂。
+
+#### 4. Product Actionability
+
+衡量 product 是否真的形成治理閉環。
+
+**核心指標**
+- product 底下 blindspot 是否有轉成 task。
+- task 是否有進入 review / done。
+- confirm backlog 是否可控。
+- product 變更後是否有回寫 ontology 或標記 stale。
+- product 的治理動作是否能形成持續追蹤的 closure。
+
+### L1 Composite Score
+
+建議 product 層的治理健康分數沿用與整體治理品質一致的結構：
+
+```text
+L1 Product Governance Score =
+  Coverage 30%
++ Freshness 30%
++ Consistency 20%
++ Actionability 20%
+```
+
+### L1 健康門檻
+
+可先沿用三色分級，供 Dashboard 與 weekly review 使用：
+
+- 綠：7 日 confirm rate >= 80%，backlog < 10，且無連續 3 日退化。
+- 黃：7 日 confirm rate 60%-79%，或 backlog 10-30，或有短期退化跡象。
+- 紅：7 日 confirm rate < 60%，或 backlog > 30，或出現明顯事實錯誤 / 缺 impacts 的集中問題。
+
+### L1 Dashboard 建議欄位
+
+- Product 名稱
+- L1 Product Governance Score
+- 趨勢箭頭
+- Coverage / Freshness / Consistency / Actionability 四項分數
+- stale 數量
+- 缺 impacts 的 L2 數量
+- blindspot backlog
+- confirm backlog
+- 最近更新時間
+
+### L1 與 L2 的關係
+
+- L1 的分數應由底下 L2 / L3 狀態 roll-up 而來。
+- L1 不應獨立於 L2 的 impacts 判準存在。
+- L1 主要用於總覽與風險篩查，L2 才是主要治理邊界。
+
 ## 執行流程
 
 ### Daily Governance Loop

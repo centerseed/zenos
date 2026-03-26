@@ -170,7 +170,7 @@ class SourceAdapter(Protocol):
 
 ## governance.py — 治理規則
 
-編碼 `docs/ontology-methodology.md` 的規則：
+編碼 `docs/reference/REF-ontology-methodology.md` 的規則：
 
 ### 1. 拆分粒度檢查
 ```python
@@ -204,7 +204,7 @@ def apply_tag_confidence(tags: Tags | DocumentTags) -> TagConfidence:
 def detect_staleness(entities: list[Entity], documents: list[Document],
                      relationships: list[Relationship]) -> list[StalenessWarning]:
     """
-    實作 ontology-methodology.md 的 4 種過時推斷模式：
+    實作 REF-ontology-methodology.md 的 4 種過時推斷模式：
     - 功能更新但文件沒跟
     - 目標完成但沒關閉
     - 依賴方更新但被依賴方沒反應
@@ -217,7 +217,7 @@ def detect_staleness(entities: list[Entity], documents: list[Document],
 def analyze_blindspots(entities: list[Entity], documents: list[Document],
                        relationships: list[Relationship]) -> list[Blindspot]:
     """
-    實作 ontology-methodology.md 的 7 種盲點推斷：
+    實作 REF-ontology-methodology.md 的 7 種盲點推斷：
     - 文件放錯位置
     - 核心功能文件不足
     - 已確認問題未排時程
@@ -234,7 +234,7 @@ def run_quality_check(entities: list[Entity], documents: list[Document],
                       protocols: list[Protocol], blindspots: list[Blindspot],
                       relationships: list[Relationship]) -> QualityReport:
     """
-    實作 ontology-methodology.md 的 9 項品質檢查清單：
+    實作 REF-ontology-methodology.md 的 9 項品質檢查清單：
     1. 老闆能否 2 分鐘讀完全景？
     2. 依賴關係有無遺漏？
     3. 待確認欄位都有標記？

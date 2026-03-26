@@ -46,11 +46,11 @@
 - 同步計算讓呼叫者立刻看到建議理由，可以當場決定是否覆蓋。
 - 異步補上會導致建立後再查詢時 priority 還是空的，UX 差。
 
-### D4：action-layer-spec.md vs spec.md Part 7.1 的差異對齊
+### D4：SPEC-action-layer.md vs spec.md Part 7.1 的差異對齊
 
 **決策：** 以 spec.md Part 7.1 為 SSOT（因為它是最後更新的，且更完整）。主要對齊：
 
-| 維度 | action-layer-spec.md | spec.md Part 7.1（採用） |
+| 維度 | SPEC-action-layer.md | spec.md Part 7.1（採用） |
 |------|---------------------|------------------------|
 | Collection 名稱 | `actions` | `tasks` |
 | 狀態 | 6 個（draft~cancelled） | 7 個（backlog~archived + blocked） |
@@ -59,7 +59,7 @@
 | 確認機制 | `confirmedByUser` | `confirmedByCreator`（派任者驗收） |
 | Context 自動組裝 | `context_summary` | 保留，但作為 optional 欄位 |
 
-**注意：** action-layer-spec.md 的 `complete_action` 反寫 ontology 邏輯（resolve blindspot、標記 entity stale）合併到 `update_task` 的 `done` 狀態處理中。
+**注意：** SPEC-action-layer.md 的 `complete_action` 反寫 ontology 邏輯（resolve blindspot、標記 entity stale）合併到 `update_task` 的 `done` 狀態處理中。
 
 ### D5：agent-routing.yaml — ZenOS 不定義 schema
 
@@ -69,7 +69,7 @@
 - Who 三層模型的第三層（員工→agents）明確標記「ZenOS 不管」。
 - 定義 schema 等於承擔維護責任，違反 Pull Model 的設計原則。
 - 用戶端的 agent 技術棧多樣（Claude Code skill、GPT、自建 agent），統一 schema 會過早收斂。
-- enterprise-governance.md 已經提供了範例 YAML 格式作為「指引」，足矣。
+- REF-enterprise-governance.md 已經提供了範例 YAML 格式作為「指引」，足矣。
 
 ### D6：confirm 佇列合併 — 統一型別欄位
 

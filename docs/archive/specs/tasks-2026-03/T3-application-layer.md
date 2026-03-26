@@ -57,6 +57,14 @@ class OntologyService:
 3. 呼叫 `governance.check_split_criteria()` 檢查是否建議拆分
 4. 回傳 entity + 治理建議（如有）
 
+**upsert_document 的治理邏輯：**
+1. 驗證 `source.type` 與文件 metadata
+2. 將 legacy document input 映射到 `Entity(type="document")`
+3. 若是更新既有 document entity，必須先讀 existing entity 再做局部 merge，不得因 sparse input 清空 `parent_id`、`confirmed_by_user`、既有 tags / sources / visibility
+4. `linked_entity_ids` 的 canonical input 為 `list[str]`；第一個代表 `parent_id`，其餘代表額外關聯
+5. 若系統會補 relationship，需保證與 `parent_id` 的 primary 掛載語意一致
+6. 回傳更新後的 document entity
+
 **confirm 的邏輯：**
 1. 讀取指定 collection + id 的 document
 2. 設定 `confirmedByUser = true`

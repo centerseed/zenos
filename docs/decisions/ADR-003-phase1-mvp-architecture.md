@@ -5,9 +5,9 @@
 
 ## 背景
 
-PM 交付了 Phase 1 Feature Spec（`docs/specs/phase1-ontology-mvp.md`），定義了四個交付物：Firestore Schema、MCP Tools、治理流程 MVP、GitHub Adapter。Spec 留了 6 個開放問題待 Architect 決策。
+PM 交付了 Phase 1 Feature Spec（`docs/archive/specs/SPEC-phase1-ontology-mvp.md`），定義了四個交付物：Firestore Schema、MCP Tools、治理流程 MVP、GitHub Adapter。Spec 留了 6 個開放問題待 Architect 決策。
 
-同時，`docs/ontology-methodology.md` 定義了完整的 ontology 治理方法論（Phase A~G），這套方法論必須編碼進 MCP server 的行為裡，而不是只停留在文件層級。
+同時，`docs/reference/REF-ontology-methodology.md` 定義了完整的 ontology 治理方法論（Phase A~G），這套方法論必須編碼進 MCP server 的行為裡，而不是只停留在文件層級。
 
 ## 決定
 
@@ -102,7 +102,7 @@ Barry 的 Claude Code ──HTTP SSE──→ Cloud Run（MCP Server）──→
 
 ### 決策 7：治理方法論編碼 → MCP tools 內建治理邏輯
 
-**選擇**：把 `ontology-methodology.md` 的規則編碼成 MCP tool 的行為
+**選擇**：把 `REF-ontology-methodology.md` 的規則編碼成 MCP tool 的行為
 
 | 方法論規則 | 對應的 MCP 實作 |
 |-----------|---------------|
@@ -116,7 +116,7 @@ Barry 的 Claude Code ──HTTP SSE──→ Cloud Run（MCP Server）──→
 **新增的治理 tools（PRD 未列，Architect 補充）：**
 
 ```
-run_quality_check    — 執行 ontology-methodology.md 的 9 項品質檢查
+run_quality_check    — 執行 REF-ontology-methodology.md 的 9 項品質檢查
 run_staleness_check  — 執行過時推斷（跨實體活動度分析）
 run_blindspot_analysis — 執行 7 種盲點推斷模式
 ```

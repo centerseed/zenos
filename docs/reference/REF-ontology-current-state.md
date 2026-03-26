@@ -143,7 +143,7 @@ ZenOS（產品）
 |------|------|-----|-----|----------------|
 | CLAUDE.md | ZenOS 全局 | 快速接手 | — | AI / 新 session |
 | spec.md | ZenOS 全局 | SSOT | Phase 0~3 全部 | Barry / 技術夥伴 |
-| ontology.md | ZenOS | 自我治理 | ontology 範例 | Barry / 新 session |
+| REF-ontology-current-state.md | ZenOS | 自我治理 | ontology 範例 | Barry / 新 session |
 | ontology-instances/paceriz/ | Paceriz | 第一份客戶端 ontology | 多檔架構驗證 | 老闆 / 高管 / AI agent |
 | context-protocols/zenos.md | ZenOS | 理解產品 | — | 行銷夥伴 / 非技術人 |
 | context-protocols/paceriz.md | Paceriz | 行銷素材 | Protocol 範例 | 行銷夥伴 |

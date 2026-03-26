@@ -3,7 +3,7 @@
 **狀態：** Under Review
 **版本：** 2.0（2026-03-25）
 **作者：** PM
-**相關文件：** `docs/specs/zenos-governance-quality.md`、`docs/specs/SPEC-l2-entity-redefinition.md`
+**相關文件：** `docs/archive/specs/SPEC-governance-quality.md`、`docs/specs/SPEC-l2-entity-redefinition.md`
 
 > v1.0 草稿已被本版本完整取代。v1.0 聚焦在治理趨勢快照與 Dashboard 健康度，本版本將目標升級為「讓 log 成為治理演算法迭代的 data foundation」。
 
