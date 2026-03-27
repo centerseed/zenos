@@ -145,6 +145,7 @@ async def test_step1_02_upsert_rizo_ai(svc):
         "status": "active",
         "parent_id": _ids["paceriz"],
         "force": True,
+        "manual_override_reason": "E2E 測試：先建 module，impacts 後補",
     })
     _ids["rizo_ai"] = entity_id
 

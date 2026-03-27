@@ -150,7 +150,8 @@ class TestUpsertEntityValidation:
         )
         assert result.entity.type == "module"
 
-    async def test_new_l2_without_concrete_impacts_is_rejected(self):
+    async def test_new_l2_without_concrete_impacts_becomes_draft_with_warning(self):
+        """DC-3: write new L2 without impacts no longer raises; entity gets status=draft + warning."""
         repos = _mock_repos()
         parent = Entity(
             id="parent-1", name="Product", type="product",
@@ -176,10 +177,13 @@ class TestUpsertEntityValidation:
             blindspot_repo=repos["blindspot_repo"],
             governance_ai=_Gov(),
         )
-        with pytest.raises(ValueError, match="Context gaps: 缺少候選下游實體摘要"):
-            await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
+        result = await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
+        assert result.entity.status == "draft"
+        assert result.warnings is not None
+        assert any("draft" in w for w in result.warnings)
 
-    async def test_new_l2_with_concrete_impacts_passes_hard_rule(self):
+    async def test_new_l2_with_concrete_impacts_inferred_is_draft(self):
+        """DC-2: even when governance AI infers impacts, new L2 still starts as draft."""
         repos = _mock_repos()
         parent = Entity(
             id="parent-1", name="Product", type="product",
@@ -211,6 +215,8 @@ class TestUpsertEntityValidation:
         )
         result = await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
         assert result.entity.type == "module"
+        # DC-2: new L2 is always draft regardless of inferred impacts
+        assert result.entity.status == "draft"
 
     async def test_nonexistent_parent_id(self):
         svc = _make_service()

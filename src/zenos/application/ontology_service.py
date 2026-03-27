@@ -15,7 +15,7 @@ from collections import Counter
 
 logger = logging.getLogger(__name__)
 
-from zenos.domain.governance import apply_tag_confidence, check_split_criteria
+from zenos.domain.governance import apply_tag_confidence, check_split_criteria, find_tech_terms_in_summary
 from zenos.domain.models import (
     Blindspot,
     Document,
@@ -756,16 +756,20 @@ class OntologyService:
                 f"Must be one of: {', '.join(valid_types)}"
             )
 
-        # 3. status enum — document type allows document-specific statuses
+        # 3. status enum — document type allows document-specific statuses;
+        # module (L2) type also allows draft and stale for lifecycle state machine.
         status = merged_data.get("status", "active")
         _DOCUMENT_STATUSES = {"current", "stale", "draft", "conflict", "archived"}
         _BASE_STATUSES = {"active", "paused", "completed", "planned"}
+        _L2_EXTRA_STATUSES = {"draft", "stale"}  # L2 lifecycle states
         if entity_type == EntityType.DOCUMENT:
             valid_statuses = sorted(_BASE_STATUSES | _DOCUMENT_STATUSES)
             # Default status for document entities
             if status == "active":
                 status = "current"
                 merged_data["status"] = status
+        elif entity_type == EntityType.MODULE:
+            valid_statuses = sorted(_BASE_STATUSES | _L2_EXTRA_STATUSES)
         else:
             valid_statuses = sorted(_BASE_STATUSES)
         if status not in valid_statuses:
@@ -813,41 +817,90 @@ class OntologyService:
                 )
                 merged_data["parent_id"] = inferred_parent
 
-        # 6c. L2 hard rule on write path: new module requires concrete impacts.
-        if self._governance_ai and entity_type == EntityType.MODULE and not merged_data.get("id"):
-            all_entities = await self._entities.list_all()
-            entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
-                all_entities=all_entities,
-                exclude_entity_id=merged_data.get("id"),
-            )
-            infer_entity_data = dict(merged_data)
-            infer_entity_data["_global_context"] = self._build_global_infer_context(
-                all_entities,
-                exclude_entity_id=merged_data.get("id"),
-            )
-            pre_save_inference = self._governance_ai.infer_all(
-                infer_entity_data, entity_dicts, unlinked_dicts
-            )
-            inferred_concrete_impacts = bool(
-                pre_save_inference
-                and any(
-                    rel.type == RelationshipType.IMPACTS
-                    and self._is_concrete_impacts_description(rel.description)
-                    for rel in pre_save_inference.rels
+        # 6c. L2 summary quality gate: tech-term scan (warn, may force draft)
+        # Runs on both create and update; detected terms trigger a warning.
+        # For unconfirmed modules, we also force status back to draft so the user
+        # must fix the summary before confirm.
+        if entity_type == EntityType.MODULE:
+            summary = merged_data.get("summary", "")
+            found_terms = find_tech_terms_in_summary(summary)
+            if found_terms:
+                is_confirmed_existing = (
+                    existing is not None and existing.confirmed_by_user
                 )
-            )
-            if not inferred_concrete_impacts and not merged_data.get("force"):
-                insufficient_reasons = ""
-                if pre_save_inference and pre_save_inference.impacts_context_status == "insufficient":
-                    reasons = [r for r in pre_save_inference.impacts_context_gaps if r]
-                    if reasons:
-                        insufficient_reasons = f" Context gaps: {'; '.join(reasons[:3])}."
-                raise ValueError(
-                    "L2 hard rule failed: candidate module has no concrete impacts "
-                    "(A 改了什麼→B 的什麼要跟著看). "
-                    "Please 1) add concrete impacts, 2) downgrade to L3, or 3) re-scope granularity. "
-                    f"If this is an intentional manual override, set force=true.{insufficient_reasons}"
+                if not is_confirmed_existing and not merged_data.get("force"):
+                    merged_data["status"] = "draft"
+                warnings.append(
+                    f"L2 summary 包含技術術語：{', '.join(found_terms)}。"
+                    f"L2 summary 應使用任何角色都聽得懂的語言。"
+                    + (
+                        "已自動降為 draft。"
+                        if not is_confirmed_existing and not merged_data.get("force")
+                        else ""
+                    )
+                    + "修正 summary 後再 confirm。"
                 )
+
+        # 6d. L2 hard rule on write path: check concrete impacts and warn;
+        # new modules always start as draft regardless of inferred impacts.
+        if entity_type == EntityType.MODULE and not merged_data.get("id"):
+            # force=true guard: always require manual_override_reason (independent of governance_ai)
+            if merged_data.get("force"):
+                override_reason = (merged_data.get("manual_override_reason") or "").strip()
+                if not override_reason:
+                    raise ValueError(
+                        "force=true 用於 L2 時必須提供 manual_override_reason，"
+                        "說明為什麼這個 module 可以暫時沒有 impacts。"
+                    )
+                details = merged_data.get("details") or {}
+                if isinstance(details, dict):
+                    details["manual_override_reason"] = override_reason
+                    details["manual_override_at"] = datetime.now(timezone.utc).isoformat()
+                    merged_data["details"] = details
+                warnings.append(
+                    f"L2 以 force 模式寫入（draft）。manual_override_reason: {override_reason}"
+                )
+
+            # LLM impacts inference (only when governance_ai available)
+            if self._governance_ai:
+                all_entities = await self._entities.list_all()
+                entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
+                    all_entities=all_entities,
+                    exclude_entity_id=merged_data.get("id"),
+                )
+                infer_entity_data = dict(merged_data)
+                infer_entity_data["_global_context"] = self._build_global_infer_context(
+                    all_entities,
+                    exclude_entity_id=merged_data.get("id"),
+                )
+                pre_save_inference = self._governance_ai.infer_all(
+                    infer_entity_data, entity_dicts, unlinked_dicts
+                )
+                inferred_concrete_impacts = bool(
+                    pre_save_inference
+                    and any(
+                        rel.type == RelationshipType.IMPACTS
+                        and self._is_concrete_impacts_description(rel.description)
+                        for rel in pre_save_inference.rels
+                    )
+                )
+                if not inferred_concrete_impacts and not merged_data.get("force"):
+                    warnings.append(
+                        "L2 hard rule: 候選 module 尚無具體 impacts（A 改了什麼→B 的什麼要跟著看）。"
+                        "請補充 impacts 後再 confirm。若確認不需要 impacts，可降級為 L3。"
+                    )
+                elif inferred_concrete_impacts:
+                    warnings.append(
+                        "已推斷出具體 impacts 關聯。confirm 後將升級為 active L2。"
+                    )
+
+        # L2 lifecycle: new modules always start as draft.
+        # Users must confirm (via confirm tool) to transition to active.
+        if entity_type == EntityType.MODULE and not merged_data.get("id"):
+            merged_data["status"] = "draft"
+            warnings.append(
+                "L2 entity 初始為 draft 狀態。經 confirm 且至少有 1 條具體 impacts 後才會升為 active。"
+            )
 
         # 7. duplicate name+type check (new entity only)
         if not merged_data.get("id"):
@@ -968,6 +1021,16 @@ class OntologyService:
             if merged_data.get("level") is not None
             else _TYPE_TO_LEVEL.get(merged_data["type"])
         )
+
+        # L2 status transition validation (update path):
+        # draft → active must go through confirm, not write.
+        if existing and existing.type == EntityType.MODULE:
+            new_status = merged_data.get("status", existing.status)
+            if existing.status == "draft" and new_status == "active":
+                raise ValueError(
+                    "L2 entity 不能透過 write 從 draft 直接升為 active。"
+                    "請使用 confirm(collection='entities') 來升級，系統會檢查 impacts gate。"
+                )
 
         if existing:
             entity = existing
@@ -1541,7 +1604,28 @@ class OntologyService:
             entity = await self._entities.get_by_id(item_id)
             if entity is None:
                 raise ValueError(f"Entity '{item_id}' not found")
+
+            # L2 (module) confirmation gate: require at least one outgoing concrete impacts relationship
+            if entity.type == EntityType.MODULE:
+                rels = await self._relationships.list_by_entity(entity.id)
+                has_concrete_impacts = any(
+                    r.type == RelationshipType.IMPACTS
+                    and r.source_entity_id == entity.id
+                    and self._is_concrete_impacts_description(r.description)
+                    for r in rels
+                )
+                if not has_concrete_impacts:
+                    raise ValueError(
+                        f"L2 confirm 失敗：'{entity.name}' 尚無具體 impacts 關聯。"
+                        f"請先用 write(collection='relationships') 補充至少 1 條具體 impacts "
+                        f"（格式：A 改了什麼→B 的什麼要跟著看），再 confirm。"
+                    )
+                # Transition draft/stale → active on confirm
+                if entity.status in ("draft", "stale"):
+                    entity.status = "active"
+
             entity.confirmed_by_user = True
+            entity.last_reviewed_at = now
             entity.updated_at = now
             await self._entities.upsert(entity)
 

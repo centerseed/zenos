@@ -9,8 +9,11 @@ import pytest
 from zenos.domain.governance import (
     analyze_blindspots,
     apply_tag_confidence,
+    check_impacts_target_validity,
+    check_reverse_impacts,
     check_split_criteria,
     detect_staleness,
+    find_stale_l2_downstream_entities,
     run_quality_check,
 )
 from zenos.domain.models import (
@@ -728,3 +731,551 @@ class TestRunQualityCheckL2:
         report = run_quality_check([m1, m2, m3], [], [], [], [])
         check = next(i for i in report.failed if i.name == "l2_impacts_coverage")
         assert "3/3" in check.detail
+
+
+# ──────────────────────────────────────────────
+# Task 4: check_impacts_target_validity
+# ──────────────────────────────────────────────
+
+def _make_impacts_rel(
+    source_id: str,
+    target_id: str,
+    rel_id: str = "r1",
+    description: str = "A 改了規則→B 的流程要跟著看",
+) -> Relationship:
+    return Relationship(
+        id=rel_id,
+        source_entity_id=source_id,
+        target_id=target_id,
+        type=RelationshipType.IMPACTS,
+        description=description,
+    )
+
+
+class TestCheckImpactsTargetValidity:
+    def test_no_relationships_returns_empty(self):
+        """No relationships → no broken impacts."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        result = check_impacts_target_validity([m1], [])
+        assert result == []
+
+    def test_valid_target_returns_empty(self):
+        """Impacts pointing to an active entity → no issues."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        rel = _make_impacts_rel("m1", "m2")
+        result = check_impacts_target_validity([m1, m2], [rel])
+        assert result == []
+
+    def test_detects_not_found_target(self):
+        """Impacts pointing to a non-existent entity → reason='not_found'."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        rel = _make_impacts_rel("m1", "ghost-id")
+        result = check_impacts_target_validity([m1], [rel])
+        assert len(result) == 1
+        assert result[0]["source_entity_id"] == "m1"
+        broken = result[0]["broken_impacts"]
+        assert len(broken) == 1
+        assert broken[0]["reason"] == "not_found"
+        assert broken[0]["target_entity_id"] == "ghost-id"
+        assert broken[0]["target_entity_name"] is None
+
+    def test_detects_stale_target(self):
+        """Impacts pointing to a stale entity → reason='stale'."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(
+            name="M2", entity_type=EntityType.MODULE, entity_id="m2",
+            status=EntityStatus.STALE,
+        )
+        rel = _make_impacts_rel("m1", "m2")
+        result = check_impacts_target_validity([m1, m2], [rel])
+        assert len(result) == 1
+        broken = result[0]["broken_impacts"]
+        assert broken[0]["reason"] == "stale"
+        assert broken[0]["target_status"] == "stale"
+        assert broken[0]["target_entity_name"] == "M2"
+
+    def test_detects_draft_target(self):
+        """Impacts pointing to a draft entity → reason='draft'."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(
+            name="M2", entity_type=EntityType.MODULE, entity_id="m2",
+            status=EntityStatus.DRAFT,
+        )
+        rel = _make_impacts_rel("m1", "m2")
+        result = check_impacts_target_validity([m1, m2], [rel])
+        assert result[0]["broken_impacts"][0]["reason"] == "draft"
+
+    def test_detects_completed_target(self):
+        """Impacts pointing to a completed entity → reason='completed'."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(
+            name="M2", entity_type=EntityType.MODULE, entity_id="m2",
+            status=EntityStatus.COMPLETED,
+        )
+        rel = _make_impacts_rel("m1", "m2")
+        result = check_impacts_target_validity([m1, m2], [rel])
+        assert result[0]["broken_impacts"][0]["reason"] == "completed"
+
+    def test_non_concrete_impacts_ignored(self):
+        """Impacts without concrete change-path description are skipped."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        rel = _make_impacts_rel("m1", "ghost-id", description="A impacts B vaguely")
+        result = check_impacts_target_validity([m1], [rel])
+        assert result == []
+
+    def test_inactive_source_not_checked(self):
+        """Only active L2 modules are source candidates."""
+        m1 = _make_entity(
+            name="M1", entity_type=EntityType.MODULE, entity_id="m1",
+            status=EntityStatus.STALE,
+        )
+        rel = _make_impacts_rel("m1", "ghost-id")
+        result = check_impacts_target_validity([m1], [rel])
+        assert result == []
+
+    def test_suggested_actions_present(self):
+        """Result should include suggested_actions."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        rel = _make_impacts_rel("m1", "ghost-id")
+        result = check_impacts_target_validity([m1], [rel])
+        assert "suggested_actions" in result[0]
+        assert len(result[0]["suggested_actions"]) > 0
+
+    def test_multiple_broken_impacts_grouped_by_source(self):
+        """Multiple broken targets from same source should be in one entry."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        rel1 = _make_impacts_rel("m1", "ghost1", rel_id="r1")
+        rel2 = _make_impacts_rel("m1", "ghost2", rel_id="r2")
+        result = check_impacts_target_validity([m1], [rel1, rel2])
+        assert len(result) == 1
+        assert len(result[0]["broken_impacts"]) == 2
+
+    def test_run_quality_check_includes_item_13(self):
+        """run_quality_check should include l2_impacts_target_validity as item 13."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(
+            name="M2", entity_type=EntityType.MODULE, entity_id="m2",
+            status=EntityStatus.STALE,
+        )
+        rel = _make_impacts_rel("m1", "m2")
+        report = run_quality_check([m1, m2], [], [], [], [rel])
+        all_item_names = [i.name for i in report.passed + report.failed + report.warnings]
+        assert "l2_impacts_target_validity" in all_item_names
+
+    def test_run_quality_check_item_13_fails_on_broken_impacts(self):
+        """Quality check item 13 fails when impacts point to invalid targets."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        rel = _make_impacts_rel("m1", "ghost-id")
+        report = run_quality_check([m1], [], [], [], [rel])
+        failed_names = [i.name for i in report.failed]
+        assert "l2_impacts_target_validity" in failed_names
+
+    def test_run_quality_check_item_13_passes_when_valid(self):
+        """Quality check item 13 passes when all impacts targets are valid."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        rel = _make_impacts_rel("m1", "m2")
+        report = run_quality_check([m1, m2], [], [], [], [rel])
+        passed_names = [i.name for i in report.passed]
+        assert "l2_impacts_target_validity" in passed_names
+
+
+# ──────────────────────────────────────────────
+# Task 5: find_stale_l2_downstream_entities
+# ──────────────────────────────────────────────
+
+class TestFindStaleL2DownstreamEntities:
+    def test_no_stale_modules_returns_empty(self):
+        """No stale modules → no downstream entries."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        result = find_stale_l2_downstream_entities([m1])
+        assert result == []
+
+    def test_stale_module_with_children(self):
+        """Stale module with parent_id children is reported."""
+        stale_mod = _make_entity(
+            name="StaleModule", entity_type=EntityType.MODULE, entity_id="sm1",
+            status=EntityStatus.STALE,
+        )
+        child = Entity(
+            id="c1",
+            name="ChildEntity",
+            type=EntityType.MODULE,
+            summary="a child",
+            tags=Tags(what="test", why="testing", how="auto", who="dev"),
+            status=EntityStatus.ACTIVE,
+            parent_id="sm1",
+            created_at=datetime(2026, 1, 1),
+            updated_at=datetime(2026, 1, 1),
+        )
+        result = find_stale_l2_downstream_entities([stale_mod, child])
+        assert len(result) == 1
+        assert result[0]["stale_module_id"] == "sm1"
+        assert result[0]["stale_module_name"] == "StaleModule"
+        assert len(result[0]["affected_l3_entities"]) == 1
+        assert result[0]["affected_l3_entities"][0]["id"] == "c1"
+        assert result[0]["affected_l3_entities"][0]["name"] == "ChildEntity"
+
+    def test_stale_module_without_children(self):
+        """Stale module with no children reports empty affected_l3_entities."""
+        stale_mod = _make_entity(
+            name="Orphan", entity_type=EntityType.MODULE, entity_id="sm1",
+            status=EntityStatus.STALE,
+        )
+        result = find_stale_l2_downstream_entities([stale_mod])
+        assert len(result) == 1
+        assert result[0]["affected_l3_entities"] == []
+
+    def test_active_module_children_not_reported(self):
+        """Active modules should not appear in results even if they have children."""
+        active_mod = _make_entity(
+            name="ActiveMod", entity_type=EntityType.MODULE, entity_id="am1",
+        )
+        child = Entity(
+            id="c1",
+            name="Child",
+            type=EntityType.MODULE,
+            summary="child",
+            tags=Tags(what="x", why="y", how="z", who="w"),
+            status=EntityStatus.ACTIVE,
+            parent_id="am1",
+            created_at=datetime(2026, 1, 1),
+            updated_at=datetime(2026, 1, 1),
+        )
+        result = find_stale_l2_downstream_entities([active_mod, child])
+        assert result == []
+
+    def test_multiple_stale_modules_each_reported(self):
+        """Each stale module gets its own entry."""
+        sm1 = _make_entity(
+            name="S1", entity_type=EntityType.MODULE, entity_id="sm1",
+            status=EntityStatus.STALE,
+        )
+        sm2 = _make_entity(
+            name="S2", entity_type=EntityType.MODULE, entity_id="sm2",
+            status=EntityStatus.STALE,
+        )
+        result = find_stale_l2_downstream_entities([sm1, sm2])
+        assert len(result) == 2
+        ids = {r["stale_module_id"] for r in result}
+        assert ids == {"sm1", "sm2"}
+
+
+# ──────────────────────────────────────────────
+# Task 6: check_reverse_impacts
+# ──────────────────────────────────────────────
+
+class TestCheckReverseImpacts:
+    def test_no_relationships_returns_empty(self):
+        """No impacts relationships → no reverse check results."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        result = check_reverse_impacts([m1], [])
+        assert result == []
+
+    def test_recently_modified_target_with_source_reported(self):
+        """Entity modified within threshold that is an impacts target is reported."""
+        now = datetime(2026, 3, 27)
+        source = _make_entity(
+            name="Source", entity_type=EntityType.MODULE, entity_id="src1",
+            updated_at=datetime(2026, 1, 1),  # old, not recently modified
+        )
+        target = _make_entity(
+            name="Target", entity_type=EntityType.MODULE, entity_id="tgt1",
+            updated_at=datetime(2026, 3, 20),  # recent: within 30 days of now
+        )
+        rel = _make_impacts_rel("src1", "tgt1")
+        result = check_reverse_impacts([source, target], [rel], now=now)
+        assert len(result) == 1
+        assert result[0]["modified_entity_id"] == "tgt1"
+        assert len(result[0]["impacted_by"]) == 1
+        assert result[0]["impacted_by"][0]["source_entity_id"] == "src1"
+
+    def test_old_target_not_reported(self):
+        """Entity modified outside threshold is not reported."""
+        now = datetime(2026, 3, 27)
+        source = _make_entity(name="Src", entity_type=EntityType.MODULE, entity_id="src1")
+        target = _make_entity(
+            name="Tgt", entity_type=EntityType.MODULE, entity_id="tgt1",
+            updated_at=datetime(2025, 12, 1),  # very old
+        )
+        rel = _make_impacts_rel("src1", "tgt1")
+        result = check_reverse_impacts([source, target], [rel], now=now)
+        assert result == []
+
+    def test_non_concrete_impacts_ignored(self):
+        """Non-concrete impacts relationships are not considered."""
+        now = datetime(2026, 3, 27)
+        source = _make_entity(name="Src", entity_type=EntityType.MODULE, entity_id="src1")
+        target = _make_entity(
+            name="Tgt", entity_type=EntityType.MODULE, entity_id="tgt1",
+            updated_at=datetime(2026, 3, 20),
+        )
+        rel = _make_impacts_rel("src1", "tgt1", description="vague impact")
+        result = check_reverse_impacts([source, target], [rel], now=now)
+        assert result == []
+
+    def test_modified_at_in_iso_format(self):
+        """modified_at field should be ISO datetime string."""
+        now = datetime(2026, 3, 27)
+        source = _make_entity(name="Src", entity_type=EntityType.MODULE, entity_id="src1")
+        mod_time = datetime(2026, 3, 20, 12, 0, 0)
+        target = _make_entity(
+            name="Tgt", entity_type=EntityType.MODULE, entity_id="tgt1",
+            updated_at=mod_time,
+        )
+        rel = _make_impacts_rel("src1", "tgt1")
+        result = check_reverse_impacts([source, target], [rel], now=now)
+        assert result[0]["modified_at"] == mod_time.isoformat()
+
+    def test_needs_review_reason_in_output(self):
+        """Each impacted_by entry should include needs_review_reason."""
+        now = datetime(2026, 3, 27)
+        source = _make_entity(name="Src", entity_type=EntityType.MODULE, entity_id="src1")
+        target = _make_entity(
+            name="Tgt", entity_type=EntityType.MODULE, entity_id="tgt1",
+            updated_at=datetime(2026, 3, 20),
+        )
+        rel = _make_impacts_rel("src1", "tgt1")
+        result = check_reverse_impacts([source, target], [rel], now=now)
+        assert "needs_review_reason" in result[0]["impacted_by"][0]
+
+    def test_custom_threshold_respected(self):
+        """Custom staleness_threshold_days should override default 30."""
+        now = datetime(2026, 3, 27)
+        source = _make_entity(name="Src", entity_type=EntityType.MODULE, entity_id="src1")
+        target = _make_entity(
+            name="Tgt", entity_type=EntityType.MODULE, entity_id="tgt1",
+            updated_at=datetime(2026, 3, 20),  # 7 days ago
+        )
+        rel = _make_impacts_rel("src1", "tgt1")
+        # With threshold=5, 7 days ago is outside threshold → not reported
+        result = check_reverse_impacts([source, target], [rel], now=now, staleness_threshold_days=5)
+        assert result == []
+        # With threshold=10, 7 days ago is within threshold → reported
+        result = check_reverse_impacts([source, target], [rel], now=now, staleness_threshold_days=10)
+        assert len(result) == 1
+
+    def test_entity_without_id_skipped(self):
+        """Entities without id are skipped gracefully."""
+        now = datetime(2026, 3, 27)
+        no_id_entity = _make_entity(
+            name="NoID", entity_type=EntityType.MODULE, entity_id=None,
+            updated_at=datetime(2026, 3, 20),
+        )
+        result = check_reverse_impacts([no_id_entity], [], now=now)
+        assert result == []
+
+
+# ──────────────────────────────────────────────
+# Task 7: check_governance_review_overdue
+# ──────────────────────────────────────────────
+
+from datetime import timezone as _tz
+from zenos.domain.governance import check_governance_review_overdue, find_tech_terms_in_summary
+
+
+def _make_module(
+    name: str,
+    entity_id: str,
+    status: str = EntityStatus.ACTIVE,
+    last_reviewed_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> Entity:
+    """Helper to build a module Entity with optional review timestamps."""
+    base = created_at or datetime(2025, 1, 1, tzinfo=_tz.utc)
+    return Entity(
+        id=entity_id,
+        name=name,
+        type=EntityType.MODULE,
+        summary="A module summary",
+        tags=Tags(what="test", why="test", how="test", who="test"),
+        status=status,
+        created_at=base,
+        updated_at=base,
+        last_reviewed_at=last_reviewed_at,
+    )
+
+
+class TestCheckGovernanceReviewOverdue:
+    """Tests for check_governance_review_overdue domain function."""
+
+    def _now(self) -> datetime:
+        return datetime(2026, 3, 27, tzinfo=_tz.utc)
+
+    def test_never_reviewed_overdue_listed(self):
+        """Active module with last_reviewed_at=None and creation >90 days ago is listed."""
+        mod = _make_module(
+            name="Pricing Rules",
+            entity_id="m1",
+            last_reviewed_at=None,
+            created_at=datetime(2025, 1, 1, tzinfo=_tz.utc),  # > 90 days ago
+        )
+        result = check_governance_review_overdue([mod], now=self._now())
+        assert len(result) == 1
+        assert result[0]["entity_id"] == "m1"
+        assert result[0]["entity_name"] == "Pricing Rules"
+        assert result[0]["last_reviewed_at"] is None
+        assert result[0]["days_overdue"] > 0
+        assert "suggested_action" in result[0]
+
+    def test_never_reviewed_recent_not_listed(self):
+        """Active module with last_reviewed_at=None but created <90 days ago is not listed."""
+        mod = _make_module(
+            name="New Module",
+            entity_id="m2",
+            last_reviewed_at=None,
+            created_at=datetime(2026, 3, 1, tzinfo=_tz.utc),  # 26 days ago
+        )
+        result = check_governance_review_overdue([mod], now=self._now())
+        assert result == []
+
+    def test_recently_reviewed_not_listed(self):
+        """Module reviewed 30 days ago (within 90-day window) is not overdue."""
+        reviewed = datetime(2026, 2, 25, tzinfo=_tz.utc)  # 30 days ago
+        mod = _make_module(
+            name="Reviewed Module",
+            entity_id="m3",
+            last_reviewed_at=reviewed,
+        )
+        result = check_governance_review_overdue([mod], now=self._now())
+        assert result == []
+
+    def test_overdue_reviewed_listed(self):
+        """Module last reviewed >90 days ago is listed as overdue."""
+        reviewed = datetime(2025, 12, 1, tzinfo=_tz.utc)  # ~116 days ago
+        mod = _make_module(
+            name="Overdue Module",
+            entity_id="m4",
+            last_reviewed_at=reviewed,
+        )
+        result = check_governance_review_overdue([mod], now=self._now())
+        assert len(result) == 1
+        assert result[0]["entity_id"] == "m4"
+        assert result[0]["last_reviewed_at"] is not None
+        assert result[0]["days_overdue"] > 0
+
+    def test_inactive_modules_not_listed(self):
+        """Paused or draft modules are not included in overdue check."""
+        paused = _make_module("Paused", "mp", status=EntityStatus.PAUSED,
+                              created_at=datetime(2024, 1, 1, tzinfo=_tz.utc))
+        draft = _make_module("Draft", "md", status="draft",
+                             created_at=datetime(2024, 1, 1, tzinfo=_tz.utc))
+        result = check_governance_review_overdue([paused, draft], now=self._now())
+        assert result == []
+
+    def test_days_overdue_calculation(self):
+        """days_overdue should equal elapsed_days - 90."""
+        reviewed = datetime(2026, 1, 26, tzinfo=_tz.utc)  # 60 days before now
+        # 60 days elapsed, review period 90 days → not overdue
+        mod = _make_module("M", "m5", last_reviewed_at=reviewed)
+        result = check_governance_review_overdue([mod], now=self._now())
+        assert result == []
+
+        # 100 days ago → 100-90=10 days overdue
+        reviewed_100 = datetime(2025, 12, 17, tzinfo=_tz.utc)  # ~100 days ago
+        mod2 = _make_module("M2", "m6", last_reviewed_at=reviewed_100)
+        result2 = check_governance_review_overdue([mod2], now=self._now())
+        assert len(result2) == 1
+        assert result2[0]["days_overdue"] >= 10
+
+    def test_custom_review_period(self):
+        """Custom review_period parameter is respected."""
+        reviewed = datetime(2026, 3, 17, tzinfo=_tz.utc)  # 10 days ago
+        mod = _make_module("M", "m7", last_reviewed_at=reviewed)
+        # 30-day period: 10 days elapsed → not overdue
+        result = check_governance_review_overdue([mod], review_period=timedelta(days=30), now=self._now())
+        assert result == []
+        # 5-day period: 10 days elapsed → overdue
+        result2 = check_governance_review_overdue([mod], review_period=timedelta(days=5), now=self._now())
+        assert len(result2) == 1
+
+    def test_empty_entities_returns_empty(self):
+        """No entities → no overdue items."""
+        result = check_governance_review_overdue([], now=self._now())
+        assert result == []
+
+    def test_quality_check_item_14_present(self):
+        """run_quality_check includes l2_governance_review_overdue item."""
+        mod = _make_module(
+            name="Old Module",
+            entity_id="m8",
+            last_reviewed_at=None,
+            created_at=datetime(2025, 1, 1, tzinfo=_tz.utc),
+        )
+        report = run_quality_check([mod], [], [], [], [])
+        all_names = [i.name for i in report.passed + report.failed]
+        assert "l2_governance_review_overdue" in all_names
+
+    def test_quality_check_overdue_is_warning_not_failure(self):
+        """l2_governance_review_overdue should appear as warning, not failure."""
+        mod = _make_module(
+            name="Old Module",
+            entity_id="m9",
+            last_reviewed_at=None,
+            created_at=datetime(2025, 1, 1, tzinfo=_tz.utc),
+        )
+        report = run_quality_check([mod], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_governance_review_overdue" not in failed_names
+        assert "l2_governance_review_overdue" in warning_names
+
+    def test_quality_check_no_overdue_no_warning(self):
+        """When all modules reviewed recently, no overdue warning."""
+        mod = _make_module(
+            name="Recent Module",
+            entity_id="m10",
+            last_reviewed_at=datetime(2026, 3, 1, tzinfo=_tz.utc),
+        )
+        report = run_quality_check([mod], [], [], [], [])
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_governance_review_overdue" not in warning_names
+
+
+# ──────────────────────────────────────────────
+# Task 9: find_tech_terms_in_summary
+# ──────────────────────────────────────────────
+
+class TestFindTechTermsInSummary:
+    """Tests for the public find_tech_terms_in_summary function."""
+
+    def test_finds_known_tech_term(self):
+        """Should detect a term from _L2_TECH_TERMS list."""
+        found = find_tech_terms_in_summary("We expose a REST API to partners.")
+        assert "REST" in found
+        assert "API" in found
+
+    def test_returns_empty_for_clean_summary(self):
+        """Plain-language summary returns empty list."""
+        found = find_tech_terms_in_summary("這個模組協調跨部門的知識共享流程。")
+        assert found == []
+
+    def test_case_insensitive(self):
+        """Detection is case-insensitive."""
+        found = find_tech_terms_in_summary("This uses graphql for queries.")
+        assert "GraphQL" in found
+
+    def test_whole_word_only(self):
+        """Partial word matches should not trigger (e.g. 'dockers' is not 'Docker')."""
+        found = find_tech_terms_in_summary("We use dockers for deployment.")
+        # 'dockers' contains 'docker' but not as a whole word boundary match
+        assert "Docker" not in found
+
+    def test_empty_string(self):
+        """Empty string returns empty list."""
+        assert find_tech_terms_in_summary("") == []
+
+    def test_none_like_empty(self):
+        """None-equivalent input returns empty list."""
+        assert find_tech_terms_in_summary(None) == []  # type: ignore[arg-type]
+
+    def test_shares_list_with_quality_check(self):
+        """The same terms that fail run_quality_check also appear in find_tech_terms_in_summary."""
+        summary = "We use Kubernetes and Docker for deployment."
+        found = find_tech_terms_in_summary(summary)
+        entity = _make_entity(entity_type=EntityType.MODULE, summary=summary)
+        report = run_quality_check([entity], [], [], [], [])
+        check = next(i for i in report.failed if i.name == "l2_summary_readability")
+        for term in found:
+            assert term in check.detail

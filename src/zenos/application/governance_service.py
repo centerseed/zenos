@@ -13,7 +13,11 @@ from zenos.domain.governance import (
     _find_active_l2_without_concrete_impacts,
     _is_concrete_impacts_description,
     analyze_blindspots,
+    check_governance_review_overdue,
+    check_impacts_target_validity,
+    check_reverse_impacts,
     detect_staleness,
+    find_stale_l2_downstream_entities,
     run_quality_check,
 )
 from zenos.domain.models import (
@@ -142,11 +146,22 @@ class GovernanceService:
         proposals: list[dict] = []
         modules = [
             e for e in entities
-            if e.type == EntityType.MODULE and e.status == "active" and e.id
+            if e.type == EntityType.MODULE and e.status in ("active", "draft") and e.id
         ]
         for mod in modules:
             reasons: list[str] = []
             repair_actions: list[str] = []
+            if mod.status == "draft":
+                reasons.append("L2 尚未 confirm，仍為 draft 狀態")
+                repair_actions.append("補出至少 1 條具體 impacts 後使用 confirm 升為 active")
+                override_reason = (
+                    mod.details.get("manual_override_reason")
+                    if mod.details and isinstance(mod.details, dict)
+                    else None
+                )
+                if override_reason:
+                    reasons.append(f"force 寫入，manual_override_reason: {override_reason}")
+                    repair_actions.append("補出具體 impacts 後 confirm，或降級為 L3")
             if mod.id in modules_without_impacts:
                 reasons.append("缺少具體 impacts，還不能算完成的 L2")
                 repair_actions.append("補出至少 1 條具體 impacts，或降級為 L3")
@@ -264,6 +279,36 @@ class GovernanceService:
             documents=documents,
             relationships=relationships,
         )
+
+    async def check_impacts_target_validity(self) -> list[dict]:
+        """Check that all concrete impacts relationships point to valid entities."""
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        relationships = await self._load_all_relationships(all_entities)
+        return check_impacts_target_validity(entities, relationships)
+
+    async def find_stale_l2_downstream_entities(self) -> list[dict]:
+        """Find L3 entities under stale L2 modules."""
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        return find_stale_l2_downstream_entities(entities)
+
+    async def check_reverse_impacts(self) -> list[dict]:
+        """Check if recently modified entities are targeted by impacts relationships."""
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        relationships = await self._load_all_relationships(all_entities)
+        return check_reverse_impacts(entities, relationships)
+
+    async def check_governance_review_overdue(self) -> list[dict]:
+        """Find active L2 modules overdue for governance review (90-day period).
+
+        Returns list of dicts with entity_id, entity_name, last_reviewed_at,
+        days_overdue, and suggested_action.
+        """
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        return check_governance_review_overdue(entities)
 
     async def run_blindspot_analysis(self) -> list[Blindspot]:
         """Infer blind spots by cross-referencing ontology layers.

@@ -7,7 +7,7 @@ Zero external dependencies.
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from .models import (
     Blindspot,
@@ -188,8 +188,13 @@ def detect_staleness(
       3. Dependency updated but dependant silent
       4. Role disappeared
     """
+    def _to_aware(dt: datetime) -> datetime:
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
     if now is None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
+    else:
+        now = _to_aware(now)
 
     warnings: list[StalenessWarning] = []
     entity_map = {e.id: e for e in entities if e.id}
@@ -209,9 +214,8 @@ def detect_staleness(
         return d.status
 
     def _doc_last_reviewed(d: Entity | Document) -> datetime:
-        if isinstance(d, Document):
-            return d.last_reviewed_at or d.updated_at
-        return d.last_reviewed_at or d.updated_at
+        raw = d.last_reviewed_at or d.updated_at
+        return _to_aware(raw)
 
     def _doc_who(d: Entity | Document) -> list[str]:
         if isinstance(d, Document):
@@ -233,7 +237,7 @@ def detect_staleness(
                 continue
             # Entity updated after doc was last touched
             doc_last = _doc_last_reviewed(doc)
-            if entity.updated_at > doc_last + _STALENESS_THRESHOLD:
+            if _to_aware(entity.updated_at) > doc_last + _STALENESS_THRESHOLD:
                 warnings.append(StalenessWarning(
                     pattern="feature_updated_docs_lagging",
                     description=(
@@ -289,7 +293,7 @@ def detect_staleness(
         target = entity_map.get(rel.target_id)          # B is the dependency
         if not source or not target:
             continue
-        if target.updated_at > source.updated_at + _STALENESS_THRESHOLD:
+        if _to_aware(target.updated_at) > _to_aware(source.updated_at) + _STALENESS_THRESHOLD:
             warnings.append(StalenessWarning(
                 pattern="dependency_updated_dependant_silent",
                 description=(
@@ -642,6 +646,21 @@ _L2_TECH_TERMS: list[str] = [
 # Compiled regex for sentence-ending punctuation (Chinese + Latin).
 _SENTENCE_END_RE = re.compile(r"[。！？.!?]")
 
+# Governance review period: all confirmed L2 modules must be reviewed at least quarterly.
+_GOVERNANCE_REVIEW_PERIOD = timedelta(days=90)
+
+
+def find_tech_terms_in_summary(summary: str) -> list[str]:
+    """Find technical terms that should not appear in L2 summaries.
+
+    L2 summaries represent company-consensus concepts and must be readable
+    by any role, not just engineers.
+    """
+    return [
+        term for term in _L2_TECH_TERMS
+        if re.search(r"\b" + re.escape(term) + r"\b", summary or "", re.IGNORECASE)
+    ]
+
 
 def _is_concrete_impacts_description(description: str) -> bool:
     """Return True when impacts description encodes a concrete change path."""
@@ -676,6 +695,280 @@ def _find_active_l2_without_concrete_impacts(
         impact_entity_ids.add(rel.target_id)
 
     return [m for m in active_modules if m.id not in impact_entity_ids]
+
+
+# ──────────────────────────────────────────────
+# Task 4: impacts 目標有效性檢查
+# ──────────────────────────────────────────────
+
+_INVALID_TARGET_STATUSES = frozenset({"stale", "draft", "completed"})
+
+
+def check_impacts_target_validity(
+    entities: list[Entity],
+    relationships: list[Relationship],
+) -> list[dict]:
+    """Check if impacts targets are still valid (exist and active).
+
+    For each active L2 module that has outgoing concrete impacts, verify that
+    every target entity still exists and is in an acceptable status.
+
+    Returns a list of dicts describing modules with broken impacts:
+    {
+        "source_entity_id": str,
+        "source_entity_name": str,
+        "broken_impacts": [
+            {
+                "relationship_id": str | None,
+                "target_entity_id": str,
+                "target_entity_name": str | None,  # None if not found
+                "reason": "not_found" | "stale" | "draft" | "completed",
+                "target_status": str | None,
+            }
+        ],
+        "suggested_actions": [...],
+    }
+    """
+    entity_map = {e.id: e for e in entities if e.id}
+    active_modules = {
+        e.id: e
+        for e in entities
+        if e.type == EntityType.MODULE and e.status == EntityStatus.ACTIVE and e.id
+    }
+
+    broken: list[dict] = []
+    for rel in relationships:
+        if rel.type != RelationshipType.IMPACTS:
+            continue
+        if not _is_concrete_impacts_description(rel.description):
+            continue
+        if rel.source_entity_id not in active_modules:
+            continue
+
+        target = entity_map.get(rel.target_id)
+        if target is None:
+            reason = "not_found"
+            target_status = None
+            target_name = None
+        elif target.status in _INVALID_TARGET_STATUSES:
+            reason = target.status
+            target_status = target.status
+            target_name = target.name
+        else:
+            continue  # target is valid
+
+        # Find or create entry for this source module
+        entry = next(
+            (b for b in broken if b["source_entity_id"] == rel.source_entity_id),
+            None,
+        )
+        if entry is None:
+            source = active_modules[rel.source_entity_id]
+            entry = {
+                "source_entity_id": rel.source_entity_id,
+                "source_entity_name": source.name,
+                "broken_impacts": [],
+                "suggested_actions": ["標記 stale", "更新 impacts", "移除無效關聯"],
+            }
+            broken.append(entry)
+        entry["broken_impacts"].append({
+            "relationship_id": rel.id,
+            "target_entity_id": rel.target_id,
+            "target_entity_name": target_name,
+            "reason": reason,
+            "target_status": target_status,
+        })
+
+    return broken
+
+
+# ──────────────────────────────────────────────
+# Task 5: stale L2 downstream 影響清單（entity 部分）
+# ──────────────────────────────────────────────
+
+def find_stale_l2_downstream_entities(
+    entities: list[Entity],
+) -> list[dict]:
+    """Find L3 entities under stale L2 modules (via parent_id).
+
+    Task queries are intentionally excluded here; callers in the interface
+    layer can enrich the results with open-task data.
+
+    Returns a list of dicts:
+    {
+        "stale_module_id": str,
+        "stale_module_name": str,
+        "affected_l3_entities": [{"id": str, "name": str, "type": str}],
+    }
+    """
+    stale_modules = [
+        e for e in entities
+        if e.type == EntityType.MODULE and e.status == EntityStatus.STALE and e.id
+    ]
+    if not stale_modules:
+        return []
+
+    results: list[dict] = []
+    for mod in stale_modules:
+        children = [
+            {"id": e.id, "name": e.name, "type": e.type}
+            for e in entities
+            if e.parent_id == mod.id and e.id
+        ]
+        results.append({
+            "stale_module_id": mod.id,
+            "stale_module_name": mod.name,
+            "affected_l3_entities": children,
+        })
+    return results
+
+
+# ──────────────────────────────────────────────
+# Task 6: 反向 impacts 檢查
+# ──────────────────────────────────────────────
+
+def check_reverse_impacts(
+    entities: list[Entity],
+    relationships: list[Relationship],
+    *,
+    now: datetime | None = None,
+    staleness_threshold_days: int | None = None,
+) -> list[dict]:
+    """Check if entities targeted by impacts have been recently modified.
+
+    When B is modified and A impacts B, A needs to review its impacts path.
+
+    Returns a list of dicts:
+    {
+        "modified_entity_id": str,
+        "modified_entity_name": str,
+        "modified_at": str,  # ISO datetime
+        "impacted_by": [
+            {
+                "source_entity_id": str,
+                "source_entity_name": str,
+                "impacts_description": str,
+                "needs_review_reason": str,
+            }
+        ],
+    }
+    """
+    def _to_aware(dt: datetime) -> datetime:
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    else:
+        now = _to_aware(now)
+    threshold = (
+        timedelta(days=staleness_threshold_days)
+        if staleness_threshold_days is not None
+        else _STALENESS_THRESHOLD
+    )
+    cutoff = now - threshold
+
+    entity_map = {e.id: e for e in entities if e.id}
+
+    # Build reverse index: target_id → list of (relationship, source entity)
+    reverse_index: dict[str, list[tuple[Relationship, Entity]]] = {}
+    for rel in relationships:
+        if rel.type != RelationshipType.IMPACTS:
+            continue
+        if not _is_concrete_impacts_description(rel.description):
+            continue
+        source = entity_map.get(rel.source_entity_id)
+        if source is None:
+            continue
+        reverse_index.setdefault(rel.target_id, []).append((rel, source))
+
+    results: list[dict] = []
+    for entity in entities:
+        if not entity.id:
+            continue
+        if _to_aware(entity.updated_at) < cutoff:
+            continue
+        inbound = reverse_index.get(entity.id, [])
+        if not inbound:
+            continue
+        results.append({
+            "modified_entity_id": entity.id,
+            "modified_entity_name": entity.name,
+            "modified_at": entity.updated_at.isoformat(),
+            "impacted_by": [
+                {
+                    "source_entity_id": src.id,
+                    "source_entity_name": src.name,
+                    "impacts_description": rel.description,
+                    "needs_review_reason": (
+                        "impacts 目標已被修改，源頭 L2 應 review impacts 路徑是否仍正確"
+                    ),
+                }
+                for rel, src in inbound
+            ],
+        })
+    return results
+
+
+# ──────────────────────────────────────────────
+# Task 7: governance review overdue check
+# ──────────────────────────────────────────────
+
+def check_governance_review_overdue(
+    entities: list[Entity],
+    review_period: timedelta = _GOVERNANCE_REVIEW_PERIOD,
+    now: datetime | None = None,
+) -> list[dict]:
+    """Find active (confirmed) L2 modules overdue for governance review.
+
+    All confirmed L2 modules should be reviewed at least every quarter
+    (90 days) to verify that their impacts are still valid.
+
+    Returns a list of dicts:
+    {
+        "entity_id": str,
+        "entity_name": str,
+        "last_reviewed_at": str | None,  # ISO datetime or None (never reviewed)
+        "days_overdue": int,
+        "suggested_action": str,
+    }
+    """
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    def _ensure_utc(dt: datetime) -> datetime:
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+    overdue: list[dict] = []
+    active_modules = [
+        e for e in entities
+        if e.type == EntityType.MODULE and e.status == EntityStatus.ACTIVE and e.id
+    ]
+    for mod in active_modules:
+        if mod.last_reviewed_at is None:
+            # Never reviewed: use created_at as baseline (treat None created_at as overdue)
+            baseline = _ensure_utc(mod.created_at) if mod.created_at else now - review_period
+            elapsed = now - baseline
+            if elapsed > review_period:
+                overdue.append({
+                    "entity_id": mod.id,
+                    "entity_name": mod.name,
+                    "last_reviewed_at": None,
+                    "days_overdue": (elapsed - review_period).days,
+                    "suggested_action": "執行 governance review，檢查 impacts 是否仍有效",
+                })
+        else:
+            last = _ensure_utc(mod.last_reviewed_at)
+            elapsed = now - last
+            if elapsed > review_period:
+                overdue.append({
+                    "entity_id": mod.id,
+                    "entity_name": mod.name,
+                    "last_reviewed_at": last.isoformat(),
+                    "days_overdue": (elapsed - review_period).days,
+                    "suggested_action": "執行 governance review，檢查 impacts 是否仍有效",
+                })
+    return overdue
+
 
 def run_quality_check(
     entities: list[Entity],
@@ -960,15 +1253,54 @@ def run_quality_check(
         ),
     ))
 
+    # --- 13. L2 impacts targets still valid? ---
+    # Check that all concrete impacts relationships point to existing, active entities.
+    broken_impacts_report = check_impacts_target_validity(entities, relationships)
+    check13_ok = len(broken_impacts_report) == 0
+    broken_module_names = ", ".join(b["source_entity_name"] for b in broken_impacts_report[:5])
+    if len(broken_impacts_report) > 5:
+        broken_module_names += f" ... (+{len(broken_impacts_report) - 5})"
+    items.append(QualityCheckItem(
+        name="l2_impacts_target_validity",
+        passed=check13_ok,
+        detail=(
+            f"{len(broken_impacts_report)} 個 L2 entity 的 impacts 目標無效或不存在："
+            f"{broken_module_names}。"
+            f"治理修補路徑：標記 stale、更新 impacts、或移除無效關聯。"
+            if not check13_ok
+            else "所有 L2 entity 的 impacts 目標均有效"
+        ),
+    ))
+
+    # --- 14. L2 governance review overdue? ---
+    # All confirmed L2 modules must be reviewed at least quarterly.
+    now = datetime.now(timezone.utc)
+    overdue_modules = check_governance_review_overdue(entities, now=now)
+    # Treat as warning (always passes) — overdue is informational, not a hard failure.
+    # Use len check for detail message
+    items.append(QualityCheckItem(
+        name="l2_governance_review_overdue",
+        passed=True,  # warning-only; does not reduce score
+        detail=(
+            f"{len(overdue_modules)} 個 active L2 entity 逾期未做 governance review："
+            + ", ".join(m["entity_name"] for m in overdue_modules[:5])
+            + (f" ... (+{len(overdue_modules) - 5})" if len(overdue_modules) > 5 else "")
+            if overdue_modules
+            else "所有 active L2 entity 均在 governance review 期限內（90 天）"
+        ),
+    ))
+
     # Compute overall score (warnings don't affect score)
     passed = [i for i in items if i.passed]
     failed = [i for i in items if not i.passed]
-    # Warnings: check3 suspicious all-confirmed + check11 verbose L2 summaries
+    # Warnings: check3 suspicious all-confirmed + check11 verbose L2 summaries + check14 review overdue
     warning_items: list[QualityCheckItem] = []
     if check3_warning:
         warning_items.append(items[2])  # unconfirmed_fields_marked
     if check11_warning_parts:
         warning_items.append(items[10])  # l2_summary_conciseness
+    if overdue_modules:
+        warning_items.append(items[13])  # l2_governance_review_overdue
     score = int((len(passed) / len(items)) * 100) if items else 0
 
     return QualityReport(

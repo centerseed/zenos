@@ -1167,11 +1167,15 @@ async def analyze(
 
     async def _infer_l2_repairs() -> list[dict]:
         all_entities = await ontology_service._entities.list_all()
-        modules = [
+        active_modules = [
             e for e in all_entities
             if e.type == "module" and e.status == "active" and e.id
         ]
-        if not modules:
+        draft_modules = [
+            e for e in all_entities
+            if e.type == "module" and e.status == "draft" and e.id
+        ]
+        if not active_modules and not draft_modules:
             return []
 
         impact_entity_ids: set[str] = set()
@@ -1192,7 +1196,7 @@ async def analyze(
                 impact_entity_ids.add(rel.target_id)
 
         repairs = []
-        for mod in modules:
+        for mod in active_modules:
             if mod.id in impact_entity_ids:
                 continue
             repairs.append({
@@ -1206,6 +1210,23 @@ async def analyze(
                     "重新切粒度",
                 ],
             })
+        for mod in draft_modules:
+            override = (
+                mod.details.get("manual_override_reason")
+                if mod.details and isinstance(mod.details, dict)
+                else None
+            )
+            repairs.append({
+                "entity_id": mod.id,
+                "entity_name": mod.name,
+                "severity": "yellow",
+                "defect": "draft_l2_pending_confirmation",
+                "manual_override_reason": override,
+                "repair_options": [
+                    "補 impacts 後 confirm",
+                    "降級為 L3",
+                ],
+            })
         return repairs
 
     if check_type in ("all", "quality"):
@@ -1213,18 +1234,67 @@ async def analyze(
         results["quality"] = _serialize(report)
         try:
             l2_repairs = await _infer_l2_repairs()
-            results["quality"]["active_l2_missing_impacts"] = len(l2_repairs)
+            active_repairs = [r for r in l2_repairs if r.get("defect") == "active_l2_missing_concrete_impacts"]
+            draft_repairs = [r for r in l2_repairs if r.get("defect") == "draft_l2_pending_confirmation"]
+            results["quality"]["active_l2_missing_impacts"] = len(active_repairs)
+            results["quality"]["draft_l2_pending_confirmation"] = len(draft_repairs)
             if l2_repairs:
                 results["quality"]["l2_impacts_repairs"] = l2_repairs
         except Exception:
             # Repair suggestion is additive and should not break quality report.
-            pass
+            logger.warning("L2 repairs inference failed", exc_info=True)
         try:
             backfill = await governance_service.infer_l2_backfill_proposals()
             results["quality"]["l2_backfill_proposals"] = backfill
             results["quality"]["l2_backfill_count"] = len(backfill)
         except Exception:
-            pass
+            logger.warning("L2 backfill proposals failed", exc_info=True)
+
+        # L2 governance: impacts target validity
+        try:
+            validity_report = await governance_service.check_impacts_target_validity()
+            results["quality"]["l2_impacts_validity"] = validity_report
+        except Exception:
+            logger.warning("L2 impacts target validity check failed", exc_info=True)
+
+        # L2 governance: stale L2 downstream (entity part from domain; task part here)
+        try:
+            downstream_entities = await governance_service.find_stale_l2_downstream_entities()
+            # Enrich with open tasks at interface layer (task_repo available here)
+            _open_statuses = {"backlog", "todo", "in_progress", "review", "blocked"}
+            all_tasks = await task_service.list_tasks(limit=500)
+            for entry in downstream_entities:
+                mod_id = entry["stale_module_id"]
+                affected_tasks = [
+                    {"id": t.id, "title": t.title, "status": t.status}
+                    for t in all_tasks
+                    if mod_id in (t.linked_entities or [])
+                    and t.status in _open_statuses
+                ]
+                entry["affected_tasks"] = affected_tasks
+                entry["suggested_actions"] = [
+                    "重新掛載到 active L2",
+                    "更新引用",
+                    "降級為 sources",
+                ]
+            results["quality"]["l2_stale_downstream"] = downstream_entities
+        except Exception:
+            logger.warning("L2 stale downstream check failed", exc_info=True)
+
+        # L2 governance: reverse impacts check
+        try:
+            reverse_impacts = await governance_service.check_reverse_impacts()
+            results["quality"]["l2_reverse_impacts"] = reverse_impacts
+        except Exception:
+            logger.warning("L2 reverse impacts check failed", exc_info=True)
+
+        # L2 governance: review overdue check
+        try:
+            overdue = await governance_service.check_governance_review_overdue()
+            results["quality"]["l2_governance_review_overdue"] = overdue
+            results["quality"]["l2_review_overdue_count"] = len(overdue)
+        except Exception:
+            logger.warning("L2 governance review overdue check failed", exc_info=True)
 
     if check_type in ("all", "staleness"):
         warnings = await governance_service.run_staleness_check()
