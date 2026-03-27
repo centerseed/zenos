@@ -108,6 +108,14 @@ class TaskService:
 
         blocked_by = data.get("blocked_by", [])
         blocked_reason = data.get("blocked_reason")
+        plan_id = data.get("plan_id")
+        plan_order = data.get("plan_order")
+        depends_on_task_ids = data.get("depends_on_task_ids", [])
+
+        if plan_order is not None and not plan_id:
+            raise ValueError("plan_id is required when plan_order is provided")
+        if plan_order is not None and int(plan_order) < 1:
+            raise ValueError("plan_order must be >= 1")
 
         # Auto-set to blocked if has blockers and not backlog
         if blocked_by and status != TaskStatus.BACKLOG:
@@ -148,6 +156,9 @@ class TaskService:
             priority_reason=priority_reason,
             assignee=data.get("assignee"),
             assignee_role_id=data.get("assignee_role_id"),
+            plan_id=plan_id,
+            plan_order=int(plan_order) if plan_order is not None else None,
+            depends_on_task_ids=depends_on_task_ids,
             created_by=data["created_by"],
             linked_entities=linked_entity_ids,
             linked_protocol=data.get("linked_protocol"),
@@ -207,9 +218,15 @@ class TaskService:
         for field in (
             "assignee", "priority", "description", "blocked_reason",
             "due_date", "result", "acceptance_criteria", "blocked_by",
+            "plan_id", "plan_order", "depends_on_task_ids",
         ):
             if field in updates:
                 setattr(task, field, updates[field])
+
+        if task.plan_order is not None and not task.plan_id:
+            raise ValueError("plan_id is required when plan_order is provided")
+        if task.plan_order is not None and int(task.plan_order) < 1:
+            raise ValueError("plan_order must be >= 1")
 
         task.updated_at = datetime.utcnow()
         saved = await self._tasks.upsert(task)

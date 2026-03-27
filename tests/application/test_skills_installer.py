@@ -15,7 +15,7 @@ from zenos.skills_installer import (
 
 
 def _write_release(root: Path, *, version: str = "1.2.0") -> Path:
-    skills_root = root / ".claude" / "skills"
+    skills_root = root / "skills" / "release"
     skills_root.mkdir(parents=True)
     (skills_root / "manifest.json").write_text(
         json.dumps(

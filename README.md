@@ -52,7 +52,7 @@ ZenOS 是一個把「知識治理（Ontology）」和「行動治理（Task Acti
 
 ## Skill 更新（給使用者）
 
-ZenOS skills 的官方發佈來源是 [`.claude/skills/manifest.json`](/Users/wubaizong/接案/ZenOS/.claude/skills/manifest.json)，
+ZenOS skills 的官方發佈來源是 [`skills/release/manifest.json`](/Users/wubaizong/接案/ZenOS/skills/release/manifest.json)，
 安裝與升級入口統一為 `zenos-skills setup`。
 
 ### 1) 安裝 CLI 入口
@@ -84,6 +84,12 @@ zenos-skills setup --skills-dir ~/.codex/skills
 
 ```bash
 zenos-skills setup --source /Users/wubaizong/接案/ZenOS --skills-dir ~/.codex/skills
+```
+
+若要把同一份 release 同步到本機兩個 host 目錄（`.claude` + `.codex`）：
+
+```bash
+python /Users/wubaizong/接案/ZenOS/scripts/sync_skills_from_release.py
 ```
 
 ### 4) 實際升級範例

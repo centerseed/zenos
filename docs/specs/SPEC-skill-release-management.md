@@ -35,7 +35,7 @@ updated: 2026-03-26
 
 ## 中央發佈來源
 
-ZenOS skills 的中央發佈來源必須是 repo 內的 [`.claude/skills/manifest.json`](/Users/wubaizong/接案/ZenOS/.claude/skills/manifest.json)。
+ZenOS skills 的中央發佈來源必須是 repo 內的 [`skills/release/manifest.json`](/Users/wubaizong/接案/ZenOS/skills/release/manifest.json)。
 
 治理規則：
 
@@ -43,6 +43,7 @@ ZenOS skills 的中央發佈來源必須是 repo 內的 [`.claude/skills/manifes
 - manifest 的 URL 必須可由單一穩定位置存取。正式發佈來源為 main branch 的 raw manifest。
 - `path` 必須指向 manifest 同層目錄下的 skill 發佈內容；目前最小發佈單位為 `SKILL.md`。
 - 未列入 manifest 的 skill 不得由官方升級入口自動安裝。
+- `.claude/`、`.codex/` 僅為本機 host mirror，不得作為官方發佈內容，也不得作為版本真實來源（source of truth）。
 
 ## 版本語意
 
@@ -107,7 +108,7 @@ README 或同級操作文件必須包含：
 ## 驗收證據
 
 - 程式入口：[pyproject.toml](/Users/wubaizong/接案/ZenOS/pyproject.toml) 與 [src/zenos/skills_cli.py](/Users/wubaizong/接案/ZenOS/src/zenos/skills_cli.py)
-- 中央 manifest：[.claude/skills/manifest.json](/Users/wubaizong/接案/ZenOS/.claude/skills/manifest.json)
+- 中央 manifest：[skills/release/manifest.json](/Users/wubaizong/接案/ZenOS/skills/release/manifest.json)
 - 版本比對與原子替換：[src/zenos/skills_installer.py](/Users/wubaizong/接案/ZenOS/src/zenos/skills_installer.py)
 - 回滾測試：[tests/application/test_skills_installer.py](/Users/wubaizong/接案/ZenOS/tests/application/test_skills_installer.py)
 - 任務 ID：`18bece5005234ddc988ebc541a563149`

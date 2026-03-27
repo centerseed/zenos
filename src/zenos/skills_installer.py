@@ -14,7 +14,7 @@ import httpx
 
 DEFAULT_MANIFEST_SOURCE = (
     "https://raw.githubusercontent.com/centerseed/zenos/main/"
-    ".claude/skills/manifest.json"
+    "skills/release/manifest.json"
 )
 VERSION_PATTERN = re.compile(r"^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$", re.MULTILINE)
 
@@ -152,7 +152,9 @@ def _resolve_manifest_source(source: str) -> tuple[str, str, str]:
 
     expanded = Path(source).expanduser()
     if expanded.is_dir():
-        manifest_path = expanded / ".claude" / "skills" / "manifest.json"
+        manifest_path = expanded / "skills" / "release" / "manifest.json"
+        if not manifest_path.exists():
+            manifest_path = expanded / ".claude" / "skills" / "manifest.json"
         if not manifest_path.exists():
             manifest_path = expanded / "manifest.json"
     else:

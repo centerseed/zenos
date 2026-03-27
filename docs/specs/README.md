@@ -2,7 +2,7 @@
 
 `docs/specs/` 只放「現在會影響實作決策」的規格。
 
-## Active (2026-03-26)
+## Active (2026-03-27)
 
 - `SPEC-doc-governance.md`
 - `SPEC-task-governance.md`
@@ -10,6 +10,7 @@
 - `SPEC-partner-context-fix.md`
 - `SPEC-agent-integration-contract.md`
 - `SPEC-governance-observability.md`
+- `SPEC-task-view-clarity.md`
 
 ## Deferred / Historical
 

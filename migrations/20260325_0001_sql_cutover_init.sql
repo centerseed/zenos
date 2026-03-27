@@ -212,6 +212,9 @@ create table if not exists tasks (
   assignee text null,
   assignee_role_id text null,
   created_by text not null,
+  plan_id text null,
+  plan_order integer null,
+  depends_on_task_ids_json jsonb not null default '[]'::jsonb,
   linked_protocol text null,
   linked_blindspot text null,
   source_type text not null default '',
@@ -246,7 +249,11 @@ create table if not exists tasks (
   constraint chk_tasks_review_result
     check ((status <> 'review') or (result is not null)),
   constraint chk_tasks_done_completed_at
-    check ((status <> 'done') or (completed_at is not null))
+    check ((status <> 'done') or (completed_at is not null)),
+  constraint chk_tasks_plan_order_positive
+    check (plan_order is null or plan_order >= 1),
+  constraint chk_tasks_plan_order_requires_plan_id
+    check (plan_order is null or plan_id is not null)
 );
 
 create index if not exists idx_tasks_partner_status on tasks(partner_id, status);
@@ -258,6 +265,11 @@ create index if not exists idx_tasks_partner_priority on tasks(partner_id, prior
 create index if not exists idx_tasks_partner_due_date on tasks(partner_id, due_date);
 create index if not exists idx_tasks_partner_linked_blindspot on tasks(partner_id, linked_blindspot);
 create index if not exists idx_tasks_partner_confirmed on tasks(partner_id, confirmed_by_creator);
+create index if not exists idx_tasks_partner_plan_id on tasks(partner_id, plan_id) where plan_id is not null;
+create index if not exists idx_tasks_partner_plan_order on tasks(partner_id, plan_id, plan_order) where plan_id is not null;
+create unique index if not exists uq_tasks_partner_plan_order
+  on tasks(partner_id, plan_id, plan_order)
+  where plan_id is not null and plan_order is not null;
 
 -- 10) task_blockers
 create table if not exists task_blockers (

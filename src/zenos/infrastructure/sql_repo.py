@@ -779,6 +779,9 @@ class SqlBlindspotRepository:
 
 
 def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: list[str]) -> Task:
+    plan_id = row["plan_id"] if "plan_id" in row else None
+    plan_order = row["plan_order"] if "plan_order" in row else None
+    depends_json = row["depends_on_task_ids_json"] if "depends_on_task_ids_json" in row else None
     return Task(
         id=row["id"],
         title=row["title"],
@@ -788,6 +791,9 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         priority_reason=row["priority_reason"],
         assignee=row["assignee"],
         assignee_role_id=row["assignee_role_id"],
+        plan_id=plan_id,
+        plan_order=plan_order,
+        depends_on_task_ids=_json_loads_safe(depends_json) or [],
         created_by=row["created_by"],
         linked_entities=linked_entities,
         linked_protocol=row["linked_protocol"],
@@ -890,13 +896,14 @@ class SqlTaskRepository:
                 INSERT INTO {SCHEMA}.tasks (
                     id, partner_id, title, description, status, priority,
                     priority_reason, assignee, assignee_role_id, created_by,
+                    plan_id, plan_order, depends_on_task_ids_json,
                     linked_protocol, linked_blindspot, source_type, context_summary,
                     due_date, blocked_reason, acceptance_criteria_json, completed_by,
                     confirmed_by_creator, rejection_reason, result, project,
                     created_at, updated_at, completed_at
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                    $11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21,$22,$23,$24,$25
+                    $11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     title=EXCLUDED.title, description=EXCLUDED.description,
@@ -904,6 +911,9 @@ class SqlTaskRepository:
                     priority_reason=EXCLUDED.priority_reason,
                     assignee=EXCLUDED.assignee,
                     assignee_role_id=EXCLUDED.assignee_role_id,
+                    plan_id=EXCLUDED.plan_id,
+                    plan_order=EXCLUDED.plan_order,
+                    depends_on_task_ids_json=EXCLUDED.depends_on_task_ids_json,
                     linked_protocol=EXCLUDED.linked_protocol,
                     linked_blindspot=EXCLUDED.linked_blindspot,
                     source_type=EXCLUDED.source_type,
@@ -922,6 +932,7 @@ class SqlTaskRepository:
                     task.id, pid, task.title, task.description, task.status,
                     task.priority, task.priority_reason, task.assignee,
                     task.assignee_role_id, task.created_by,
+                    task.plan_id, task.plan_order, _dumps(task.depends_on_task_ids),
                     task.linked_protocol, task.linked_blindspot,
                     task.source_type, task.context_summary, task.due_date,
                     task.blocked_reason, _dumps(task.acceptance_criteria),

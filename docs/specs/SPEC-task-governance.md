@@ -4,7 +4,7 @@ id: SPEC-task-governance
 status: Draft
 ontology_entity: action-layer
 created: 2026-03-26
-updated: 2026-03-26
+updated: 2026-03-27
 ---
 
 # Feature Spec: ZenOS Task Governance
@@ -52,6 +52,7 @@ ZenOS 三層目前可簡化理解為：
 
 - L2 治理：公司共識概念的穩定骨架
 - L3 治理：文件與來源路徑、metadata、ontology linkage 的穩定治理
+- Plan 治理：同一目標下 task 群的執行脈絡與進度治理
 - Task 治理：從知識導出行動，並把行動結果再反饋回知識層
 
 因此 task 不是一般待辦事項，而是：
@@ -62,6 +63,67 @@ ZenOS 三層目前可簡化理解為：
 
 Task 開得太鬆，Action Layer 會退化成雜項待辦清單；
 Task 開得太硬，agent 會繞過 ZenOS 回到外部工具或私有筆記。
+
+---
+
+## Plan 層定義（新增）
+
+Plan 是 task 群的治理容器，不是額外的長文件層。
+
+定位：
+
+- `SPEC`：定義 what/why/boundary
+- `PLAN`：把同一交付目標下的多張 task 綁成可管理的執行脈絡
+- `TASK`：可指派、可驗收的最小行動單位
+
+Plan 必須至少定義以下欄位（可透過 task metadata 或等價方式表達）：
+
+1. `plan_id`：同一計畫群組唯一識別
+2. `goal`：計畫目標（一句話）
+3. `owner`：計畫責任人
+4. `entry_criteria`：何時可啟動
+5. `exit_criteria`：何時可結案
+6. `status`：計畫狀態（例如 active / blocked / done）
+
+Plan 強制規則：
+
+1. 每張 task 必須可追溯到所屬 `spec_id`（或等價治理節點）。
+2. 需要跨多張 task 才能交付的工作，必須掛在同一 `plan_id` 下，不得散落為孤兒票。
+3. Plan 狀態不得由單張 task 直接隱式推斷，必須有明確 owner 判定。
+4. Plan 完成時必須提供彙總證據（至少包含完成範圍、未完成項、風險與後續建議）。
+5. Plan 不得取代 task 驗收；task 仍需逐張滿足 acceptance criteria。
+
+### 派工邊界（新增）
+
+為避免跨 agent 派工歧義，必須採用以下邊界：
+
+1. Plan 不可直接派工，Task 才是唯一可 claim 的執行單位。
+2. agent 不得直接接收「執行某 Plan」指令；必須接收具體 task。
+3. task 若屬於某 plan，必須可回查同 plan 的上下文與順序資訊。
+4. owner / dispatcher 不得用 plan 狀態取代 task 驗收結果。
+
+---
+
+## Task Schema 擴充要求（新增）
+
+為支援 Plan 層協作與正確執行順序，Task 層資料定義必須擴充：
+
+### 必填（當 task 屬於某 plan 時）
+
+- `plan_id`：所屬 task group 識別
+- `plan_order`：同一 plan 內的執行順序（整數，從小到大）
+
+### 選填（建議）
+
+- `depends_on_task_ids`：明確前置依賴（用於非線性流程）
+
+### 行為規則
+
+1. agent 領到 task 後，若有 `plan_id`，必須能拉出同組 task。
+2. agent 執行前必須先檢查順序與依賴是否滿足。
+3. 前置未完成時，不得把後續 task 推進到可執行狀態。
+4. 同一 plan 內不得存在衝突順序（重複 `plan_order` 且語意互斥）。
+5. 缺少順序資訊的 plan task，不得自動派發給 execution agent。
 
 ### 與 L2 / L3 的權責邊界（防重複治理）
 
@@ -151,6 +213,31 @@ Task 開得太硬，agent 會繞過 ZenOS 回到外部工具或私有筆記。
 - task 完成可能反寫 document / blindspot / entity 狀態
 
 但 task 不應拿來取代 spec 或 blindspot 本身。
+
+---
+
+## Draft 文件半自動審核流程（新增）
+
+本流程適用於「不用 API key 常駐 worker、以 CLI/UI agent 為主」的半自動模式。
+
+### 角色與責任
+
+- `reviewer`：找出待審文章、輸出審核意見、做通過/退回判定
+- `editor`：依審核意見修改文章並回填修正證據
+- `owner`：最終確認是否離開 draft
+
+### 標準狀態流
+
+`draft`（文章） -> `todo/in_progress`（審核 task） -> `review`（待 owner） -> `confirmed`（文章離開 draft）或退回循環
+
+### 強制規則
+
+1. 新 draft 文章必須對應至少一張 open 審核 task。
+2. 審核 task 必須有責任落點，優先使用 `assignee_role_id`，不得無 owner。
+3. reviewer 送審前必須在 `result`（或 fallback `Result:` 區塊）提供可驗收輸出。
+4. editor 修改後必須附修正證據（文件連結、commit、變更摘要至少其一）。
+5. owner 未確認前，文件不得離開 draft。
+6. owner 退回時必須記錄退回原因與下一步責任人。
 
 ---
 
@@ -453,6 +540,12 @@ Type A / B 的判斷原則：
 
 若只是同一大主題下的不同驗收邊界，不算重複票。
 
+draft 審核任務另加去重鍵：
+
+- `doc_id + review_round` 為同一輪審核唯一鍵
+- 同一輪不得存在多張 open 審核 task
+- 重開審核必須遞增 `review_round` 並保留前一輪結果
+
 ---
 
 ## Task 完成後的知識反饋
@@ -477,6 +570,13 @@ Task 治理不是單向派工。以下情境完成後，應觸發知識層反饋
 因此，若 task 的完成會改變知識層，acceptance criteria 應至少有一條明確要求相關文檔、blindspot 或 entity 狀態已同步。
 
 若 task 屬於不改變知識層的純行動類（如訪談客戶、確認外部 quota），知識反饋可簡化為：在 result 或 description 的 `Result:` 區塊記錄結論摘要，無需強制更新文件或 entity。
+
+針對 draft 文件審核，知識反饋必須包含：
+
+- 審核摘要（可給 owner 快速判斷）
+- 審核結論（建議通過 / 建議退回）
+- 文章連結與審核證據連結
+- 若需修改，列出必修項目
 
 ---
 
@@ -513,3 +613,8 @@ Task 治理不是單向派工。以下情境完成後，應觸發知識層反饋
 
 4. action -> knowledge 反饋有落地證據
    - 至少一張完成任務在 `result` 或關聯文件中明確記錄知識反饋結果（document / blindspot / entity 至少其一），且驗收者據此通過。
+
+5. 半自動審核閉環可被證據驗證
+   - 至少一篇 draft 文件有完整紀錄：建立審核 task -> reviewer 輸出 -> editor 修正（可選）-> owner 最終確認。
+   - reviewer 輸出可在 task `result` 或 fallback `Result:` 區塊直接查到。
+   - owner 可在 WebUI 一處看到審核摘要與文章連結並完成最終確認。

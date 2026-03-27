@@ -294,6 +294,9 @@ class Task:
     context_summary: str = ""
     due_date: datetime | None = None
     assignee_role_id: str | None = None
+    plan_id: str | None = None
+    plan_order: int | None = None
+    depends_on_task_ids: list[str] = field(default_factory=list)
     blocked_by: list[str] = field(default_factory=list)
     blocked_reason: str | None = None
     acceptance_criteria: list[str] = field(default_factory=list)

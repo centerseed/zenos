@@ -892,6 +892,9 @@ async def _task_handler(
     result: str | None = None,
     project: str | None = None,
     assignee_role_id: str | None = None,
+    plan_id: str | None = None,
+    plan_order: int | None = None,
+    depends_on_task_ids: list[str] | None = None,
 ) -> dict:
     """Core task handler logic — extracted for testability.
 
@@ -941,6 +944,9 @@ async def _task_handler(
                 "acceptance_criteria": acceptance_criteria or [],
                 "project": effective_project,
                 "assignee_role_id": assignee_role_id,
+                "plan_id": plan_id,
+                "plan_order": plan_order,
+                "depends_on_task_ids": depends_on_task_ids or [],
             }
             if task_service is None:
                 await _ensure_services()
@@ -979,6 +985,12 @@ async def _task_handler(
                     updates["due_date"] = datetime.fromisoformat(due_date)
                 except (ValueError, TypeError):
                     return {"error": "INVALID_INPUT", "message": f"Invalid due_date: {due_date}"}
+            if plan_id is not None:
+                updates["plan_id"] = plan_id
+            if plan_order is not None:
+                updates["plan_order"] = plan_order
+            if depends_on_task_ids is not None:
+                updates["depends_on_task_ids"] = depends_on_task_ids
 
             if task_service is None:
                 await _ensure_services()
@@ -1028,6 +1040,9 @@ async def task(
     result: str | None = None,
     project: str | None = None,
     assignee_role_id: str | None = None,
+    plan_id: str | None = None,
+    plan_order: int | None = None,
+    depends_on_task_ids: list[str] | None = None,
 ) -> dict:
     """管理知識驅動的行動項目（Action Layer）。
 
@@ -1048,6 +1063,7 @@ async def task(
     - update 到 review 時，result 為必填（SQL schema 強制）
     - create 時若 blocked_by 非空且 status 不是 backlog，會進入 blocked，且 blocked_reason 必填
     - linked_protocol / linked_blindspot / assignee_role_id / linked_entities 會受資料庫外鍵限制，ID 必須存在於同租戶資料中
+    - task 屬於某個 plan 時，建議帶 plan_id 與 plan_order，讓 agent 能按順序執行
 
     不要用這個工具的情境：
     - 查任務列表 → 用 search(collection="tasks")
@@ -1073,6 +1089,9 @@ async def task(
         project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
             未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
         assignee_role_id: 指向 role entity 的 ID（可選），用於展開角色 context
+        plan_id: 任務群組 ID（PLAN 層識別）
+        plan_order: 任務在 plan 內順序（>=1）
+        depends_on_task_ids: 前置依賴 task IDs（可選）
     """
     return await _task_handler(
         action=action,
@@ -1094,6 +1113,9 @@ async def task(
         result=result,
         project=project,
         assignee_role_id=assignee_role_id,
+        plan_id=plan_id,
+        plan_order=plan_order,
+        depends_on_task_ids=depends_on_task_ids,
     )
 
 

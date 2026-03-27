@@ -521,6 +521,68 @@ async def test_task_list_all_filters(pool):
     assert f"{TEST_PREFIX}_filter_alice" not in done_titles
 
 
+@pytest.mark.asyncio
+async def test_task_plan_fields_roundtrip(pool):
+    """Task plan fields should persist and roundtrip through SQL repo."""
+    from zenos.infrastructure.sql_repo import SqlTaskRepository
+
+    repo = SqlTaskRepository(pool)
+    task = _make_task("plan_roundtrip", status="todo")
+    task.plan_id = f"{TEST_PREFIX}_plan_alpha"
+    task.plan_order = 2
+    task.depends_on_task_ids = ["task-pre-1", "task-pre-2"]
+
+    saved = await repo.upsert(task)
+    assert saved.id is not None
+
+    fetched = await repo.get_by_id(saved.id)
+    assert fetched is not None
+    assert fetched.plan_id == f"{TEST_PREFIX}_plan_alpha"
+    assert fetched.plan_order == 2
+    assert fetched.depends_on_task_ids == ["task-pre-1", "task-pre-2"]
+
+
+@pytest.mark.asyncio
+async def test_task_plan_order_unique_per_partner_plan(pool):
+    """Same partner + plan_id cannot reuse the same plan_order."""
+    from zenos.infrastructure.sql_repo import SqlTaskRepository
+
+    repo = SqlTaskRepository(pool)
+    plan_id = f"{TEST_PREFIX}_plan_unique"
+
+    t1 = _make_task("plan_unique_1", status="todo")
+    t1.plan_id = plan_id
+    t1.plan_order = 1
+    await repo.upsert(t1)
+
+    t2 = _make_task("plan_unique_2", status="todo")
+    t2.plan_id = plan_id
+    t2.plan_order = 1
+
+    with pytest.raises(Exception):
+        await repo.upsert(t2)
+
+
+@pytest.mark.asyncio
+async def test_task_plan_order_can_repeat_across_plans(pool):
+    """The same plan_order is allowed when plan_id differs."""
+    from zenos.infrastructure.sql_repo import SqlTaskRepository
+
+    repo = SqlTaskRepository(pool)
+
+    t1 = _make_task("plan_repeat_a", status="todo")
+    t1.plan_id = f"{TEST_PREFIX}_plan_a"
+    t1.plan_order = 1
+    await repo.upsert(t1)
+
+    t2 = _make_task("plan_repeat_b", status="todo")
+    t2.plan_id = f"{TEST_PREFIX}_plan_b"
+    t2.plan_order = 1
+    saved_t2 = await repo.upsert(t2)
+
+    assert saved_t2.id is not None
+
+
 # ---------------------------------------------------------------------------
 # 7. Cross-tenant isolation
 # ---------------------------------------------------------------------------

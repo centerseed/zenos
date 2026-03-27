@@ -10,8 +10,10 @@ dist/
 
 # Claude Code (contains tokens)
 .mcp.json
-.claude/mcp.json
-.claude/settings.local.json
+.claude/
+
+# Codex local skills mirror
+.codex/
 
 # Skill eval workspace (dev artifacts, not product)
 .claude/skills/pm-workspace/
