@@ -106,7 +106,44 @@ python .claude/skills/zenos-setup/scripts/setup.py \
 
 ---
 
-## Step 3：驗證設定
+## Step 3：安裝 SSOT Skills
+
+MCP 設定完成後，從 ZenOS GitHub repo 拉最新的治理 skill 到當前專案：
+
+```bash
+curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
+  tar -xz --strip-components=1 "zenos-main/skills/"
+```
+
+這會在專案根目錄建立 `skills/` 資料夾，包含：
+
+```
+skills/
+  governance/
+    l2-knowledge-governance.md   ← L2 知識節點治理
+    document-governance.md       ← L3 文件治理
+    task-governance.md           ← Task 治理
+  workflows/
+    knowledge-capture.md         ← 知識擷取
+    knowledge-sync.md            ← 增量同步
+    setup.md                     ← 本文件
+    governance-loop.md           ← 治理閉環
+  README.md                      ← 索引 + 使用說明
+```
+
+**驗證安裝成功：**
+
+```bash
+ls skills/governance/ skills/workflows/
+```
+
+應看到 3 個 governance + 4 個 workflow 檔案。
+
+**之後更新 skill：** 再執行同一行 curl 指令即可拉到最新版。
+
+---
+
+## Step 4：驗證設定
 
 設定完成後，詢問用戶是否要立刻驗證：
 
@@ -126,3 +163,4 @@ python .claude/skills/zenos-setup/scripts/setup.py \
 - **token 安全**：token 只存在本機的 mcp.json，不會傳到其他地方
 - **多專案**：每個 Claude Code 專案可以有自己的 `.claude/mcp.json`，token 各自獨立
 - **全域設定**：如果要在所有專案都能用，把 mcp.json 放到 `~/.claude/mcp.json`
+- **skills 更新**：`skills/` 目錄從 ZenOS repo 拉取，重跑 Step 3 的 curl 指令即可更新到最新版
