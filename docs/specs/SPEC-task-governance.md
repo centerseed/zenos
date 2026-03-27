@@ -655,6 +655,46 @@ Task 治理不是單向派工。以下情境完成後，應觸發知識層反饋
 
 ---
 
+## Task 治理客製化邊界
+
+與 L2 治理一致，Task 治理的規則分為 **server 硬編碼**（不可由用戶調整）與 **用戶可客製**（可由 partner 或 agent 調整的參數）。
+
+### Server 硬編碼（不可調整）
+
+| 規則 | 原因 |
+|------|------|
+| 建票初始狀態只能是 `backlog` 或 `todo` | 防止 agent 跳過排程直接推進狀態 |
+| `linked_entities` 至少 1 個 | 確保 task 有 ontology context，priority recommendation 才有輸入 |
+| 去重搜尋為建票前必要步驟 | 防止 backlog 重複膨脹；search 由 caller 執行，server 提供 API |
+| `review → done` 需 AC 逐條通過 | 驗收是治理閉環的最小保證 |
+| 終態（`done` / `cancelled` / `archived`）不可復活 | 需重做應開新票，保留歷史完整性 |
+| Plan 不可直接派工，Task 是唯一可 claim 的執行單位 | 派工粒度必須可驗收 |
+
+### 用戶可客製（建議範圍）
+
+| 維度 | 預設 | 可調範圍 | 調整方式 |
+|------|------|---------|---------|
+| AC 條數範圍 | 2-5 條 | 1-10 條 | agent 層級設定 |
+| `linked_entities` 上限 | 3 個（建議） | 1-5 個 | agent 層級設定；超過 5 個通常意味粒度太大 |
+| 8 題 checklist 嚴格度 | ≥6 題通過才建票 | ≥4 題即可（寬鬆模式） | agent 層級設定 |
+| priority 覆蓋策略 | 不傳則 server 推薦 | 永遠由 caller 指定 | agent 層級設定 |
+| 知識反饋強制度 | 改變知識層的 task 必須有反饋 AC | 所有 task 都強制 | partner 層級設定 |
+| Draft 審核角色分工 | reviewer + editor + owner 三角色 | reviewer + owner 兩角色（合併 editor） | partner 層級設定 |
+
+### 客製化光譜
+
+```
+不可調                                                    可調
+├──────────────────────────────────┤
+│ 初始狀態限制  終態不復活  去重必要 │  AC 條數  掛點上限  checklist 門檻
+│ 至少 1 linked  AC 逐條驗收       │  priority 策略  反饋強制度  審核角色
+│ Plan 不派工                      │
+└──────────────────────────────────┘
+  server 強制                         agent / partner 可配
+```
+
+---
+
 ## 對 MCP 與未來實作的要求
 
 若要讓 task 治理真正成立，後續實作應支援：
