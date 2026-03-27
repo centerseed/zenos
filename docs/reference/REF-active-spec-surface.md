@@ -1,10 +1,10 @@
 ---
 type: REF
 id: REF-active-spec-surface
-status: Draft
+status: Approved
 ontology_entity: documentation-governance
 created: 2026-03-26
-updated: 2026-03-26
+updated: 2026-03-27
 ---
 
 # Reference: ZenOS Active Spec Surface
@@ -30,7 +30,7 @@ ZenOS 現階段不應讓 `docs/specs/` 同時承載：
 
 ---
 
-## Tier 1 — Current Core Specs (2026-03-26 收斂版)
+## Tier 1 — Current Core Specs (2026-03-27 正式版)
 
 以下是目前仍屬 active decision surface 的核心規格：
 

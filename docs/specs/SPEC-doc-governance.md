@@ -1,7 +1,7 @@
 ---
 type: SPEC
 id: SPEC-doc-governance
-status: Draft
+status: Approved
 ontology_entity: documentation-governance
 created: 2026-03-26
 updated: 2026-03-27

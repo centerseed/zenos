@@ -1,7 +1,7 @@
 ---
 type: SPEC
 id: SPEC-agent-integration-contract
-status: Draft
+status: Approved
 ontology_entity: agent-integration
 created: 2026-03-26
 updated: 2026-03-27
@@ -9,7 +9,7 @@ updated: 2026-03-27
 
 # SPEC: ZenOS Agent Integration Contract
 
-> PM: Codex | Date: 2026-03-26 | Status: Draft
+> PM: Codex | Date: 2026-03-26 | Status: Approved
 
 ## 問題
 

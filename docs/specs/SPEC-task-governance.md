@@ -1,7 +1,7 @@
 ---
 type: SPEC
 id: SPEC-task-governance
-status: Draft
+status: Approved
 ontology_entity: action-layer
 created: 2026-03-26
 updated: 2026-03-27

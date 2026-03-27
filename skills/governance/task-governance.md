@@ -1,7 +1,7 @@
 ---
 type: SKILL
 id: task-governance
-status: Draft
+status: Approved
 ontology_entity: task-governance
 created: 2026-03-27
 updated: 2026-03-27
