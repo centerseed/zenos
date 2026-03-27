@@ -139,6 +139,81 @@ Plan 強制規則：
 
 ---
 
+## Task 生命週期（Lifecycle State Machine）
+
+本 spec 不重新發明 Kanban 狀態集，但必須定義每個狀態轉換的**治理條件**——不是「技術上可以轉」，而是「治理上允許轉」。
+
+### 狀態定義
+
+| 狀態 | 意義 | 是否可接受為初始狀態 |
+|------|------|---------------------|
+| `backlog` | 已識別但尚未排入執行 | ✅ |
+| `todo` | 已排入執行，等待認領 | ✅ |
+| `in_progress` | 有人正在執行 | ❌（不得在建票時直接設定） |
+| `review` | 執行完成，等待驗收 | ❌ |
+| `blocked` | 執行受阻，等待外部條件 | ❌ |
+| `done` | 驗收通過，工作完成 | ❌ |
+| `cancelled` | 不再需要執行 | ❌ |
+| `archived` | 歷史保留，不再活躍 | ❌ |
+
+### 合法轉換與治理條件
+
+```
+                    認領 / 指派
+  backlog → todo ──────────────→ in_progress
+    │                                │
+    │  不再需要                       ├─→ blocked（外部依賴未滿足）
+    ↓                                │      │
+  cancelled                          │      └─→ in_progress（依賴解除）
+                                     ↓
+                                   review
+                                     │
+                          ┌──────────┼──────────┐
+                          ↓          ↓          ↓
+                        done    in_progress  cancelled
+                          │    （退回修正）
+                          ↓
+                       archived
+```
+
+| 轉換 | 治理條件 |
+|------|---------|
+| `backlog → todo` | 確認不是重複票（去重規則通過） |
+| `todo → in_progress` | 有明確 assignee |
+| `in_progress → review` | `result` 或 `Result:` 區塊已填寫完成輸出 |
+| `in_progress → blocked` | description 或 comment 記錄阻塞原因與等待條件 |
+| `blocked → in_progress` | 阻塞條件已解除，有紀錄 |
+| `review → done` | AC 逐條驗收通過 + 知識反饋已完成（若適用） |
+| `review → in_progress` | 驗收未通過，退回修正，記錄退回原因 |
+| `done → archived` | 歷史保留，無治理條件限制 |
+| 任何活躍狀態 → `cancelled` | 記錄取消原因；若有替代票，標記 `[Superseded by: TASK-XXX]` |
+
+### 終態
+
+- `done`：工作完成且驗收通過。可進一步轉 `archived`。
+- `cancelled`：不再執行。不可復活，若需重做應開新票。
+- `archived`：歷史保留。不可復活。
+
+---
+
+## 衝突仲裁（Conflict Resolution）
+
+### 跨 Spec 衝突
+
+本 spec 治理 Task（Action Layer）。當與其他治理 spec 發生衝突時：
+
+1. 依憲法（`docs/spec.md`）第二節第⑥維度的通用仲裁順序處理。
+2. 本 spec 不得覆寫 L2 升降級規則（`SPEC-l2-entity-redefinition` 權威）。
+3. 本 spec 不得覆寫 L3 文件生命週期與 sync contract（`SPEC-doc-governance` 權威）。
+4. 若 task 的 linked_entities 指向某 L2，而該 L2 的治理狀態與 task 預期矛盾（例如 task 要修改一個已 stale 的 L2），應先處理 L2 狀態，再執行 task。
+
+### 與 Plan 層的衝突
+
+- Plan 完成判定不得覆蓋 task 逐張驗收結果。
+- Task 驗收標準（AC）以本 spec 為準，Plan 的 exit_criteria 不得放寬 task 驗收。
+
+---
+
 ## 什麼時候應該開 Task
 
 應開 task 的情境：
