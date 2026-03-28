@@ -1,22 +1,23 @@
 ---
-type: SKILL
-id: knowledge-sync
-status: Draft
-ontology_entity: TBD
-created: 2026-03-27
-updated: 2026-03-27
+name: zenos-sync
+description: >
+  掃描 git log 找出最近變更的文件，比對 ZenOS ontology，批量 propose 更新。
+  支援兩種使用情境：(1) 無引數 = 同步當前專案；(2) 目錄路徑 = 同步指定的外部專案。
+  輔助知識同步 skill——定期執行或在大量文件變更後使用，讓 ontology 跟上 codebase 節奏。
+  當使用者說「同步 ontology」「sync ZenOS」「掃 git 變更」「更新 ontology」「/zenos-sync」，
+  或在一批 commits 後想讓 ontology 跟上，或說「幫我同步 {專案名}」時使用。
+  注意：第一次為某個專案建立 ontology 請用 /zenos-capture {目錄}，
+  /zenos-sync 是為已有 ontology 的專案做增量同步。
+version: 2.0.1
 ---
 
-> 權威來源：本文件是 `/zenos-sync` 操作流程的 SSOT。
-> `.claude/skills/zenos-sync/SKILL.md` 為舊格式，以本文件（`skills/workflows/knowledge-sync.md`）為準。
-
-# knowledge-sync — Git 增量同步
+# /zenos-sync — Git 增量同步
 
 你是 ZenOS 的知識治理 agent。任務：從 **git log** 找出最近的文件變更，
 比對現有 ontology，批量 propose 更新，讓 ontology 和 codebase 保持同步。
 
 **適用時機**：已有 ontology 的專案，需要跟上最近的 commits。
-**首次建構**：請改用 `knowledge-capture`（`/zenos-capture {目錄路徑}`）。
+**首次建構**：請改用 `/zenos-capture {目錄路徑}`。
 
 ---
 
@@ -119,7 +120,7 @@ search(query=文件路徑關鍵詞 或 commit message 關鍵詞)
 → commit message 暗示新模組 → 標記為骨架層 proposal
 ```
 
-利用 **commit message** 推斷變更的 why/how，比讀全文快：
+commit message 只作輔助訊號，不可取代讀全文；高影響文件必讀全文後再寫入：
 - `feat: add ACWR safety check` → 新功能，影響 ACWR module entry
 - `refactor: split WeeklyPlan into v2/v3` → 架構變更，可能需要新實體
 - `fix: correct ACWR calculation` → bug fix，不需要 propose
@@ -127,8 +128,6 @@ search(query=文件路徑關鍵詞 或 commit message 關鍵詞)
 ---
 
 ## Step 4：神經層 — 批量自動寫入 draft
-
-> 文件 entry 的治理合規規則見 `skills/governance/document-governance.md`
 
 ```
 進度：神經層更新中...
@@ -158,13 +157,11 @@ write(collection="entities", id={parent_entity_id}, data={
 })
 ```
 
-**何時讀全文**：commit message 不夠清楚 + 這是高價值文件時，才讀全文。
+**何時讀全文**：高影響文件一律讀全文；中影響文件若 commit message 無法準確判斷才讀全文。
 
 ---
 
 ## Step 5：骨架層 — 列出等待確認
-
-> L2 概念判斷標準與 impacts 撰寫規則見 `skills/governance/l2-knowledge-governance.md`
 
 ```
 ── 骨架層 Proposals（需要你確認）────────────────
@@ -226,7 +223,7 @@ write(collection="entities", id={parent_entity_id}, data={
 ## 注意事項
 
 - **增量，不是全量**：只看 `--since` 以後的變更，避免重複處理
-- **commit message 優先**：先用 message 推斷，讀全文是最後手段
+- **commit message 僅輔助**：高影響文件必讀全文；中影響文件可先看 message 再決定是否讀全文
 - **外部專案支援**：引數是目錄路徑時，所有 git/file 操作都在那個目錄執行
 - **Why/How 一律 draft**：意圖性維度不自動確認
 - **首次建構不適用**：沒有 last_sync 記錄時，引導用戶用 `/zenos-capture {目錄}` 代替
@@ -243,16 +240,20 @@ write(collection="entities", id={parent_entity_id}, data={
 - 同 type + name 不可重複（Server 會回傳既有 ID，改用 update）
 
 ### Entity 必填驗證
-- `type`：`product` / `module` / `goal` / `role` / `project`
+- `type`：`product` / `module` / `goal` / `role` / `project` / `document`
 - `status`：`active` / `paused` / `completed` / `planned`
 - `tags` 必須含四維：`what` / `why` / `how` / `who`
 - **Module 的 `parent_id` 強制必填**，且指向的 entity 必須已存在
 
-### Relationship / Blindspot / Document / Protocol
+### Relationship / Blindspot / Document / Protocol / Entry
 - Relationship：source/target entity 必須存在，type 必須是合法 enum
 - Blindspot：severity 必須是 `red` / `yellow` / `green`，related_entity_ids 必須都存在
 - Document：source.type 必須是 `github` / `gdrive` / `notion` / `upload`。linked_entity_ids 盡量帶上（你掃描時知道屬於誰）。寫入前用 source.uri 查重，已存在就跳過
 - Protocol：entity_id 必須存在，content 必須含 what/why/how/who
+- Entry：entity_id 必須存在，type 必須是 `decision` / `insight` / `limitation` / `change` / `context`，content 上限 200 字元，沒有 confirmed_by_user
 
 ### 寫入順序（建議）
-1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents（帶 linked_entity_ids + source.uri 查重）
+1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents（帶 linked_entity_ids + source.uri 查重）→ 5. 建 entries（帶 entity_id 指向已存在的 L2）
+
+### Sync 不主動產出 entries
+Entries 記的是「code 裡沒有的知識」。Sync 的來源是 git log（code 變更），agent 讀 git log 就能看到。Entry 由 `/zenos-capture`（對話捕獲）或 task 完成流程產出。

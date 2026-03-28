@@ -245,11 +245,15 @@ write(collection="entities", id={parent_entity_id}, data={
 - `tags` 必須含四維：`what` / `why` / `how` / `who`
 - **Module 的 `parent_id` 強制必填**，且指向的 entity 必須已存在
 
-### Relationship / Blindspot / Document / Protocol
+### Relationship / Blindspot / Document / Protocol / Entry
 - Relationship：source/target entity 必須存在，type 必須是合法 enum
 - Blindspot：severity 必須是 `red` / `yellow` / `green`，related_entity_ids 必須都存在
 - Document：source.type 必須是 `github` / `gdrive` / `notion` / `upload`。linked_entity_ids 盡量帶上（你掃描時知道屬於誰）。寫入前用 source.uri 查重，已存在就跳過
 - Protocol：entity_id 必須存在，content 必須含 what/why/how/who
+- Entry：entity_id 必須存在，type 必須是 `decision` / `insight` / `limitation` / `change` / `context`，content 上限 200 字元，沒有 confirmed_by_user
 
 ### 寫入順序（建議）
-1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents（帶 linked_entity_ids + source.uri 查重）
+1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents（帶 linked_entity_ids + source.uri 查重）→ 5. 建 entries（帶 entity_id 指向已存在的 L2）
+
+### Sync 不主動產出 entries
+Entries 記的是「code 裡沒有的知識」。Sync 的來源是 git log（code 變更），agent 讀 git log 就能看到。Entry 由 `/zenos-capture`（對話捕獲）或 task 完成流程產出。

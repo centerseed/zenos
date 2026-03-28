@@ -172,6 +172,12 @@ Relationship 寫入時：
 - `type` 可以是 `impacts`、`depends_on`、`part_of`、`enables`
 - `description` 必須具體——不是「A 依賴 B」，是「A 改了{什麼}→ B 的{什麼}要跟著看」
 
+### C3.5 從核心文件識別 entry 候選
+
+讀完 P0+P1 文件後，如果文件中包含具體的決策脈絡、已知限制、技術約束等 code 裡看不到的知識，按 Step 3.5 的撈→比對→寫入流程產出 entries，掛到對應的 L2 entity。
+
+注意：首次建構時大部分知識會進 L2 summary 或 document，只有符合 entry 嚴格判斷標準（通過兩關）的才記成 entry。
+
 ### C4. 第三階段：P1 文件 — 建 document entry
 
 為每份 P1 文件建立 document entry（C2 已讀過內容，直接寫入，不需要重讀）：
@@ -233,6 +239,9 @@ L2 概念層（entities）：
   • Draft {n} 個 L2 概念（你略過的，待後續確認）
   • Relationships：{n} 個（含 impacts / depends_on / part_of / enables）
 
+知識條目（entries）：
+  • {n} 個 entries（decision/insight/limitation/change/context）
+
 神經層（documents）：
   • P1 精讀 entry：{n} 個（linked 到 L2 entity）
   • P2/P3 追加 sources：{n} 個
@@ -273,16 +282,25 @@ L2 概念層（entities）：
 
 對已存在的 L2 entity，識別對話/文件中 **code 裡不存在** 的知識：
 
-| entry type | 識別信號 | 範例 |
-|-----------|---------|------|
-| `decision` | 「決定用 X 不用 Y」「選擇了 A 方案」 | 「選 VDOT 不選心率區間，因為 Garmin 心率不穩」 |
-| `insight` | 「發現…」「原來…」「關鍵認知」 | 「小模型+全局數據 > 大模型+局部視野」 |
-| `limitation` | 「但是…」「限制是…」「已知問題」 | 「LLM 偶爾產出非法 JSON」 |
-| `change` | 「改成…」「從 X 改為 Y」「不再…」 | 「recovery week 從三級改兩級」 |
-| `context` | 「當初是因為…」「背景是…」 | 「最初做這個是為了解決客戶 onboarding 太慢」 |
+| entry type | 識別信號 | 好的範例 |
+|-----------|---------|---------|
+| `decision` | 「決定用 X 不用 Y」「選擇了 A 方案」 | 「supersede 要先建新 entry 再更新舊的，因為 FK constraint 要求 superseded_by 指向已存在的 ID」 |
+| `insight` | 「發現…」「原來…」「踩坑後的認知」 | 「Garmin 心率在跑步前 3 分鐘不穩定，選型指標時不能依賴早期心率數據」 |
+| `limitation` | 「但是…」「限制是…」「已知問題」 | 「Weekly Summary LLM 呼叫偶爾回傳非法 JSON，目前靠 retry + fallback parser 處理」 |
+| `change` | 「改成…」「從 X 改為 Y」「不再…」 | 「recovery week 從三級改兩級，因為舊的 light 級跟 weekly plan v2 定義衝突」 |
+| `context` | 「當初是因為…」「背景是…」 | 「entity_entries 的 content 限制 200 字元是因為 100 中文字足夠表達一個知識點」 |
 
-**判斷標準：這個知識在 code 裡看得到嗎？看得到就不記。**
-看不到的才值得記——設計決策的理由、選型的脈絡、踩過的坑、改變的原因。
+**判斷標準（必須同時通過兩關才記）：**
+
+**第一關：排除** — 以下任一成立就不記：
+- 已經寫在 ADR / spec / 文件裡 → 文件是 SSOT，entry 不重複文件
+- 產品原則、願景、定位 → 屬於 entity summary 或 tags，不是具體知識點
+- 實作事實（code / git history 看得到）→ agent 自己能拿到
+- 太抽象的 insight（對具體工作沒有指引作用）→ 聽起來對但用不上
+
+**第二關：確認價值** — entry 必須能回答這個問題：
+「某個 agent 或同事下次碰到這個 L2 相關的工作時，看到這條 entry 會改變他的行為嗎？」
+會 → 記。不會 → 不記。
 
 若找不到任何候選，回覆：
 > 這段對話/文件沒有發現值得捕獲的新知識。如果你認為有遺漏，告訴我哪個部分值得存入。
@@ -359,38 +377,32 @@ write(collection="entries", data={
   author: "{發言者或 agent}"
 })
 
-# 情況 2：supersede → 先更新舊的，再寫新的
-write(collection="entries", id="{舊 entry ID}", data={
-  status: "superseded",
-  superseded_by: "{新 entry ID}"
-})
-write(collection="entries", data={
+# 情況 2：supersede → 先建新的（拿到 ID），再更新舊的
+new_entry = write(collection="entries", data={
   entity_id: "{L2 entity ID}",
   type: "decision",
   content: "改用方案 B，因為方案 A 在大流量下效能不足",
   author: "{發言者或 agent}"
 })
+write(collection="entries", id="{舊 entry ID}", data={
+  status: "superseded",
+  superseded_by: new_entry.id
+})
 ```
 
 **寫入規則**：
-- content 必須 ≤ 200 字元（~100 中文字）。寫不下代表要拆成多條或粒度太大
-- context 可選，也 ≤ 200 字元
 - 一條 entry 只掛一個 entity。如果一個決策影響多個 L2，為每個 L2 各寫一條，從該 L2 的角度描述
-- 不寫 code 裡已經有的知識（函式功能、API 介面、模組結構）
-- entry 建了就是 active，沒有 draft→confirmed 流程
 - 語意比對由 client LLM 執行（server 小模型無法可靠判斷語意重複）
 
 **呈現格式**（在 Step 4 骨架層 proposals 之前列出，不需要用戶確認）：
 
 ```
 ── 知識條目 ────────────────────────────────────
-  [E1] 新增 decision → 語意治理 Pipeline
-    「選 VDOT 不選心率區間，因為 Garmin 心率前幾分鐘不穩」
-  [E2] 新增 insight → MCP 介面設計
-    「小模型+全局數據 > 大模型+局部視野」
-  [E3] supersede decision → Action Layer
-    舊：「用三級 recovery week」→ 新：「改用兩級，跟 weekly plan v2 對齊」
-  [--] 跳過 1 條重複（語意治理 Pipeline 已有相同 insight）
+  [E1] 新增 limitation → 訓練閉環分析
+    「Weekly Summary LLM 偶爾回傳非法 JSON，靠 retry + fallback parser 處理」
+  [E2] supersede decision → 跑步科學指標
+    舊：「用三級 recovery week」→ 新：「改兩級，舊的 light 級跟 weekly plan v2 衝突」
+  [--] 跳過 1 條重複（訓練閉環分析 已有相同 limitation）
 ────────────────────────────────────────────────
 ```
 
@@ -439,7 +451,7 @@ write(collection="entries", data={
 
 - **Why/How 是意圖性維度**：AI 填的 Why/How 一律 draft，不直接 confirmed
 - **What/Who 是事實性維度**：AI 準確度高，可直接填入
-- **不存原始內容**：只存語意摘要，原文留在來源（Git/Drive）
+- **Documents 不存原始內容**：document entity 只存語意摘要，原文留在來源（Git/Drive）。Entry 則是直接記錄知識內容
 - **首次建構先骨架後神經**：先確認實體結構，再大量建文件 entry
 - **快**：核心價值是在知識產生點捕獲，速度比完美更重要
 - **只記 code 裡沒有的知識**：entry 記的是決策脈絡、已知限制、重要變更——agent 讀 code 拿不到的東西。模組功能描述、API 介面這類 code 裡有的不記
