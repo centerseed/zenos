@@ -9,6 +9,12 @@ updated: 2026-03-27
 
 # Feature Spec: ZenOS Task Governance
 
+> **治理定位：External（Task 治理模組）**
+> 本 spec 定義 agent 和用戶在建立與管理 task 時必須遵循的規則。屬於可疊加的 Task 治理模組，可獨立於 Doc 治理模組啟用。
+> 規則內容透過 `governance_guide("task")` 提供給任何 MCP client。
+> 內部智慧邏輯（task 信號→blindspot 轉換、linked_entities 推薦、anti-pattern 偵測）不在本 spec 範圍，見 `SPEC-governance-feedback-loop`。
+> 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
+
 ## 背景與動機
 
 ZenOS 的 Action Layer 已經有資料模型、MCP function、狀態流與 priority recommendation。

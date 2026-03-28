@@ -871,11 +871,23 @@ class OntologyService:
                         downgrade_hints.append("q2=False→改為 L3 entity (type=goal/role/project)")
                     if not q3:
                         downgrade_hints.append("q3=False→改為 document type")
-                    warnings.append(
-                        f"LAYER_DOWNGRADE_SUGGESTED: 三問未全通過（q1={q1}, q2={q2}, q3={q3}）。"
-                        f"建議降級：{'；'.join(downgrade_hints)}"
+                    raise ValueError(
+                        f"LAYER_DOWNGRADE_REQUIRED: 三問未全通過（q1={q1}, q2={q2}, q3={q3}）。\n"
+                        f"此內容不符合 L2 標準，必須降級。建議路徑：{'；'.join(downgrade_hints)}\n"
+                        "確認降級後，請使用對應的 collection（documents/entities with non-module type）寫入。\n"
+                        "若確認這是 L2，請修正 layer_decision 中回答 False 的三問，並提供具體的 impacts_draft。"
                     )
-                # Store layer_decision in details regardless of q1/q2/q3 result
+                # All three questions passed — validate impacts_draft
+                impacts_draft = (layer_decision.get("impacts_draft") or "").strip()
+                if not impacts_draft:
+                    raise ValueError(
+                        "IMPACTS_DRAFT_REQUIRED: 三問通過，但未提供 impacts_draft。\n"
+                        "請在 layer_decision 中提供：\n"
+                        "  'impacts_draft': 'A 改了什麼→B 的什麼要跟著看'\n"
+                        "（至少 1 條具體 impacts 描述，格式：A 改了{什麼}→B 的{什麼}要跟著看）\n"
+                        "語意判斷可在 agent 端執行，impacts_draft 是草稿，confirm 時再補 relationship。"
+                    )
+                # Store layer_decision in details
                 existing_details = merged_data.get("details") or {}
                 if isinstance(existing_details, dict):
                     existing_details["layer_decision"] = layer_decision

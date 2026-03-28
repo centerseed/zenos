@@ -195,29 +195,41 @@ A impacts B                          ← 沒有具體傳播路徑，不合格
 
 **前提：** 三問全過。
 
-**MCP 呼叫：**
+**MCP 呼叫（兩步，不能合併）：**
 
+步驟 1：建立 entity
 ```
-mcp__zenos__write({
-  "level": "L2",
+mcp__zenos__write(collection="entities", data={
   "name": "<概念名稱>",
+  "type": "module",
+  "parent_id": "<L1 product 的 entity ID>",
   "summary": "<跨角色都能讀懂的說明>",
-  "status": "draft",           // 永遠從 draft 開始，Server 強制
-  "relationships": [
-    {
-      "type": "impacts",
-      "target": "<目標概念名稱>",
-      "description": "<A 的什麼改了 → B 的什麼要跟著看>"
-    }
-  ]
+  "layer_decision": {
+    "q1_persistent": true,
+    "q2_cross_role": true,
+    "q3_company_consensus": true,
+    "impacts_draft": "<A 改了什麼 → B 的什麼要跟著看（草稿）>"
+  }
+})
+// 記下回傳的 id
+```
+
+步驟 2：分開寫 impacts relationship（不能塞在 entity write 裡）
+```
+mcp__zenos__write(collection="relationships", data={
+  "source_entity_id": "<步驟 1 的 id>",
+  "target_entity_id": "<目標 entity 的 id>",
+  "type": "impacts",
+  "description": "<A 的什麼改了 → B 的什麼要跟著看>"
 })
 ```
 
 **注意：**
 
-- `status` 不需要手動設 `draft`，Server 會強制覆寫為 `draft`；但明確寫出來是好習慣
+- `status` 不需要手動設 `draft`，Server 會強制覆寫為 `draft`
 - `summary` 要用工程師和行銷都能讀懂的語言，不要用技術術語
-- `relationships` 中的 impacts 描述必須包含 `→`
+- impacts 描述必須包含 `→`，Server 的 `_is_concrete_impacts_description()` 會驗證
+- **Relationship 不能塞在 entity write 的 data 裡**；必須用 `collection="relationships"` 單獨寫入
 
 ---
 
@@ -239,11 +251,14 @@ mcp__zenos__confirm({
 - relationships 中是否存在 ≥1 條 `impacts` type 的關係
 - impacts 描述是否含有 `→`（具體傳播路徑）
 
-**如果 confirm 失敗：**
+**如果 confirm 失敗（「尚無具體 impacts 關聯」）：**
 
-1. 先確認 impacts 已寫入 entity（用 `mcp__zenos__get` 檢查）
+1. 用 `mcp__zenos__get` 確認 impacts relationship 是否已寫入
 2. 確認 impacts 描述含 `→` 且有具體的「A 的什麼 → B 的什麼」結構
-3. 修正後重試 confirm
+3. 若 impacts 存在但描述不含 `→`：
+   - **無法直接修改**——Relationship 有去重機制，相同 source→target→type 組合再次 write 只會回傳舊的，不會更新描述
+   - **正確做法**：換一個不同的 target entity，建立含 `→` 的新 impacts relationship
+4. 補齊後重試 confirm
 
 ---
 

@@ -127,8 +127,17 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 從全局理解推斷 impacts 關聯——需要同時理解 A 和 B 才能判斷：
 - 每個 L2 至少要有一條 relationship
 - `impacts` 是最核心的關係類型：「A 改了，B 必須跟著檢查」
-- description 格式：「A 改了{什麼}→ B 的{什麼}要跟著看」
+- description 格式：「A 改了{什麼}→ B 的{什麼}要跟著看」（description 必須含 `→`，Server 會驗證）
 - 說不出具體場景的關係 = noise，不該建
+
+**L2 進入 proposals 的硬性前置條件（兩關都要過，才列入下方輸出）：**
+
+1. 三問全過（Step 2 三問均回答 Yes）
+2. 至少說得出 1 條具體 impacts（Step 5 能填完「A 改了什麼→B 的什麼要跟著看」）
+
+任何一關未過的候選，**不得列入 L2 proposals**，直接走分層路由決策樹降為 L3 document 或 sources。
+
+> 設計理由：impacts gate 只在 `confirm` 時由 Server 驗證，capture 時不擋。若 capture 不自我設限，骨架層會堆滿三問未通過的 draft，ontology 退化成文件索引。這個前置條件是 capture skill 自我執行的品質底線。
 
 **C3 輸出格式（一次性呈現，等用戶確認後寫入）：**
 
@@ -145,6 +154,8 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
   How:  {現在怎麼運作——白話描述，不是技術實作}
   Who:  {誰需要知道——列出所有相關角色}
   來源文件：{從哪些文件統合出這個概念}
+  三問：✓ 跨時間存活 ✓ 跨角色（≥2 個）✓ 公司共識
+  Impacts 草稿：「{A 改了什麼}→{B 的什麼要跟著看}」
 
 [2] ...
 
@@ -168,10 +179,13 @@ L2 entity 寫入時：
 - `parent_id` = product entity ID（**必填**，沒有 parent_id = Dashboard 上看不到）
 - `confirmed_by_user = true`（用戶確認的）
 - `sources` = 從哪些文件統合出這個概念（支援跨文件統合）
+- `layer_decision` = `{q1_persistent: true, q2_cross_role: true, q3_company_consensus: true, impacts_draft: "{proposals 中的 Impacts 草稿}"}`（**Server 強制驗證**，缺少或三問不全通過會被阻擋）
 
 Relationship 寫入時：
 - `type` 可以是 `impacts`、`depends_on`、`part_of`、`enables`
-- `description` 必須具體——不是「A 依賴 B」，是「A 改了{什麼}→ B 的{什麼}要跟著看」
+- `description` 必須具體——不是「A 依賴 B」，是「A 改了{什麼}→ B 的{什麼}要跟著看」；`impacts` 描述必須含 `→`，否則 confirm 時 Server 會擋下
+- **Relationship 不能塞在 entity write 的 data 裡**；必須用 `write(collection="relationships", ...)` 單獨寫入
+- **去重機制**：相同 source→target→type 的組合已存在時，re-write 只會回傳舊的，不會更新描述。若需要修正描述，必須換一個不同的 target entity 建新關聯
 
 ### C4. 第三階段：P1 文件 — 建 document entry
 

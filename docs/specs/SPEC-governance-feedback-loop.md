@@ -9,6 +9,20 @@ updated: 2026-03-28
 
 # Feature Spec: 治理品質回饋迴路
 
+> **治理定位：混合（Internal + Agent-Powered Internal）**
+> 本 spec 定義的 10 項治理風險與對應機制橫跨內外邊界：
+> - **P0-1（分層路由）**：External 規則（三問強制） + Internal 執行（server 端驗證）
+> - **P0-2（冷啟��排序）**：Agent-Powered Internal（server 提供品質信號，agent 排序）
+> - **P1-1（task→blindspot）**：Agent-Powered Internal（server 提供 task 歷史模式，agent 判斷）
+> - **P1-2（impacts 斷鏈）**：Internal（server 圖拓撲分析） + Agent-Powered Internal（agent 建議修復）
+> - **P1-3（過時文件）**：Agent-Powered Internal（server 提供矛盾信號，agent 判斷）
+> - **P2-1（使用信號）**：Internal（server 追蹤 search_unused）
+> - **P2-2（Summary 品質）**：Agent-Powered Internal（server 提供歷史 + 使用數據，agent 評估）
+> - **P2-3（規則傳播）**：Internal（自動追蹤）
+>
+> Agent-Powered Internal 功能透過 `analyze` API 的付費 check_type 暴露全局上下文，由 agent 的大模型執行推理。
+> 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
+
 ## 第一章：背景與動機
 
 ### 問題陳述

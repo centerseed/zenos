@@ -163,6 +163,8 @@ async def test_step1_03_upsert_training_plan(svc):
         },
         "status": "active",
         "parent_id": _ids["paceriz"],
+        "force": True,
+        "manual_override_reason": "E2E 測試：先建 module，impacts 後補",
     })
     _ids["training_plan"] = entity_id
 
@@ -180,6 +182,8 @@ async def test_step1_04_upsert_data_integration(svc):
         },
         "status": "active",
         "parent_id": _ids["paceriz"],
+        "force": True,
+        "manual_override_reason": "E2E 測試：先建 module，impacts 後補",
     })
     _ids["data_integration"] = entity_id
 
@@ -197,6 +201,8 @@ async def test_step1_05_upsert_acwr(svc):
         },
         "status": "active",
         "parent_id": _ids["paceriz"],
+        "force": True,
+        "manual_override_reason": "E2E 測試：先建 module，impacts 後補",
         "details": {
             "known_issues": [
                 "第一週無保護（ACWR = 9999）",

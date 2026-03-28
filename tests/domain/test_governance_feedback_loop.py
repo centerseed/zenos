@@ -350,23 +350,47 @@ class TestLayerDecisionGate:
         assert result.entity is not None
         assert result.entity.type == "module"
 
-    async def test_dc12_layer_decision_q1_false_writes_with_warning(self):
-        """DC-12: layer_decision with q1=False → writes (still draft), warning contains LAYER_DOWNGRADE_SUGGESTED."""
+    async def test_dc12_layer_decision_q1_false_raises(self):
+        """DC-12: layer_decision with q1=False → raises LAYER_DOWNGRADE_REQUIRED."""
         svc, _ = _make_ontology_service()
         layer_decision = {**_VALID_LAYER_DECISION, "q1_persistent": False}
         data = {**_VALID_MODULE_DATA, "layer_decision": layer_decision}
-        result = await svc.upsert_entity(data)
-        assert result.entity is not None
-        assert result.warnings is not None
-        assert any("LAYER_DOWNGRADE_SUGGESTED" in w for w in result.warnings)
+        with pytest.raises(ValueError, match="LAYER_DOWNGRADE_REQUIRED"):
+            await svc.upsert_entity(data)
 
-    async def test_dc12_layer_decision_q2_false_writes_with_warning(self):
-        """DC-12: layer_decision with q2=False → writes with LAYER_DOWNGRADE_SUGGESTED."""
+    async def test_dc12_layer_decision_q2_false_raises(self):
+        """DC-12: layer_decision with q2=False → raises LAYER_DOWNGRADE_REQUIRED."""
         svc, _ = _make_ontology_service()
         layer_decision = {**_VALID_LAYER_DECISION, "q2_cross_role": False}
         data = {**_VALID_MODULE_DATA, "layer_decision": layer_decision}
-        result = await svc.upsert_entity(data)
-        assert any("LAYER_DOWNGRADE_SUGGESTED" in w for w in (result.warnings or []))
+        with pytest.raises(ValueError, match="LAYER_DOWNGRADE_REQUIRED"):
+            await svc.upsert_entity(data)
+
+    async def test_dc16a_layer_decision_all_pass_but_empty_impacts_draft_raises(self):
+        """DC-16a: layer_decision with all True but empty impacts_draft → raises IMPACTS_DRAFT_REQUIRED."""
+        svc, _ = _make_ontology_service()
+        layer_decision = {
+            "q1_persistent": True,
+            "q2_cross_role": True,
+            "q3_company_consensus": True,
+            "impacts_draft": "",  # empty
+        }
+        data = {**_VALID_MODULE_DATA, "layer_decision": layer_decision}
+        with pytest.raises(ValueError, match="IMPACTS_DRAFT_REQUIRED"):
+            await svc.upsert_entity(data)
+
+    async def test_dc16b_layer_decision_all_pass_but_missing_impacts_draft_raises(self):
+        """DC-16b: layer_decision with all True but missing impacts_draft key → raises IMPACTS_DRAFT_REQUIRED."""
+        svc, _ = _make_ontology_service()
+        layer_decision = {
+            "q1_persistent": True,
+            "q2_cross_role": True,
+            "q3_company_consensus": True,
+            # impacts_draft missing
+        }
+        data = {**_VALID_MODULE_DATA, "layer_decision": layer_decision}
+        with pytest.raises(ValueError, match="IMPACTS_DRAFT_REQUIRED"):
+            await svc.upsert_entity(data)
 
     async def test_dc13_force_with_reason_bypasses_layer_decision(self):
         """DC-13: force=True + manual_override_reason → bypass succeeds, warning contains bypass message."""

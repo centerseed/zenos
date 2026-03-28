@@ -1,5 +1,11 @@
 # Feature Spec: 治理可觀測性（Governance Observability）
 
+> **治理定位：Internal（治理基礎設施 → Quality Intelligence 數據基礎）**
+> 本 spec 定義 server 內部的 LLM 推斷審計、準確度追蹤與 eval dataset 匯出機制。
+> 不透過 governance_guide 暴露給��部 agent——這是 ZenOS 飛輪的數據基礎。
+> 部分能力（推斷準確度趨勢、健康度指標）可透過 Dashboard 對用戶可見，但演算法細節不對外。
+> 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
+
 **狀態：** Under Review
 **版本：** 2.0（2026-03-25）
 **作者：** PM

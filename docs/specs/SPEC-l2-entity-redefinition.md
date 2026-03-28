@@ -9,6 +9,12 @@ updated: 2026-03-27
 
 # Feature Spec: L2 Entity 重新定義——從技術模組到公司共識概念
 
+> **治理定位：External（Base Layer）**
+> 本 spec 定義 L2 entity 的判斷標準、生命週期與品質門檻。屬於 Base Layer 核心治理，所有用戶都適用。
+> 規則內容透過 `governance_guide("entity")` 提供給任何 MCP client。
+> 內部智慧邏輯（L2 推斷演��法、語意閘 prompt、腐化偵測）不在本 spec 範圍。
+> 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
+
 **版本：** 1.2（2026-03-27）
 **作者：** PM
 **相關 ADR：** ADR-002（Knowledge Ontology North Star）

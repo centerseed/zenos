@@ -9,6 +9,12 @@ updated: 2026-03-27
 
 # Feature Spec: ZenOS-Enabled 專案文件治理規則
 
+> **治理定位：External（Doc 治理模組）**
+> 本 spec 定義 agent 和用戶在管理文件時必須遵循的規則。屬於可疊加的 Doc 治理模組，可獨立於 Task 治理模組啟用。
+> 規則內容透過 `governance_guide("document")` 提供給任何 MCP client。
+> 內部智慧邏輯（過時偵測演算法、關聯推斷、去重匹配）不在本 spec 範圍，見 `SPEC-governance-feedback-loop`。
+> 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
+
 ## 背景與動機
 
 任何導入 ZenOS 的專案，最終都需要讓文件同時服務三件事：
