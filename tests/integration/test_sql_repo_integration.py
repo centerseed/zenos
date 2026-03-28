@@ -84,7 +84,10 @@ def setup_module(module):  # noqa: ARG001
         finally:
             await conn.close()
 
-    asyncio.run(_setup())
+    try:
+        asyncio.run(_setup())
+    except Exception:
+        pytest.skip("DB not reachable — skipping integration tests")
 
 
 def teardown_module(module):  # noqa: ARG001
