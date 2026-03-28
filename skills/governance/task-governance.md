@@ -143,10 +143,17 @@ updated: 2026-03-27
 5. 補齊 description（背景 / 問題 / 期望結果）
    與 acceptance_criteria（2-5 條可觀察條件）
 
-6. 呼叫 task(action="create")
+6. 判斷是否屬於某個 plan（必做，不得跳過）
+   - 這批票是同一個目標下的多個步驟？→ 必須帶 plan_id + plan_order
+   - 這張票是獨立的一次性任務？→ 不需要 plan_id
+   - plan_id 命名規則：plan-{project}-{主題}-{slug}，例：plan-paceriz-ontology-quality
+   - plan_order 從 1 開始，代表執行順序；同 plan 內不得重複
+   ⚠️  一次建多張票時，必須在 create 時就帶入 plan_id / plan_order，不得事後補票
+
+7. 呼叫 task(action="create")，plan_id / plan_order 在 create 時一併傳入
 ```
 
-心法：先去重 → 再定類型 → 再選 context → 最後才建票。
+心法：先去重 → 再定類型 → 再選 context → 判斷 plan 歸屬 → 最後才建票。
 
 ---
 
@@ -379,12 +386,14 @@ reviewer 的 `result` 或 `Result:` 區塊必須包含：
 # 建票前去重（必須）
 mcp__zenos__search(collection="tasks", status="backlog,todo,in_progress,review,blocked", q="<關鍵字>")
 
-# 建票
+# 建票（plan_id / plan_order 在 create 時一併傳入，不得事後補）
 mcp__zenos__task(action="create", title="<動詞開頭>", description="<背景/問題/期望結果>",
     acceptance_criteria=["<條件1>", "<條件2>"],
     linked_entities=["<節點1>", "<節點2>"],
     status="backlog",  # 或 "todo"
-    assignee="<角色或人名>")
+    assignee="<角色或人名>",
+    plan_id="plan-{project}-{主題}",  # 屬於 plan 時必填；獨立任務可省略
+    plan_order=1)                      # 同 plan 內執行順序，從 1 開始
 
 # 更新狀態
 mcp__zenos__task(action="update", task_id="<id>", status="<新狀態>")
