@@ -9,6 +9,10 @@ updated: 2026-03-28
 
 # setup — ZenOS 初始化與更新
 
+> ⚠️ **即使 MCP 已連線，仍然必須從 Step 1 開始走完整流程。**
+> MCP 已通 = 跳過 1b（token 設定），但 Step 2（拉 skills）和 Step 3（設定 agent）必須執行。
+> 不要看到 MCP 已通就自行結束。
+
 本 skill 讓任何 AI agent（Claude Code、Codex、Gemini、ChatGPT、自建 agent）
 在任何專案中啟用 ZenOS 治理能力。
 
@@ -88,6 +92,22 @@ URL:  https://zenos-mcp-165893875709.asia-east1.run.app/mcp
 curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
   tar -xz --strip-components=1 "zenos-main/skills/"
 ```
+
+**若 agent 執行 curl 被沙箱權限擋住**（常見於 Claude Code 等平台）：
+
+不要卡住。直接請用戶在終端機手動執行：
+
+```
+上面的 curl 指令被平台安全限制擋住了。
+請你在終端機直接執行以下指令：
+
+curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
+  tar -xz --strip-components=1 "zenos-main/skills/"
+
+完成後告訴我，我繼續下一步。
+```
+
+用戶執行完後，驗證 `skills/governance/` 和 `skills/workflows/` 存在再繼續。
 
 完成後專案根目錄會有：
 
