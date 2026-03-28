@@ -64,6 +64,13 @@ def _module_data(**overrides) -> dict:
         "summary": "定義方案與升降級規則",
         "tags": {"what": "pricing", "why": "revenue", "how": "rules", "who": "pm"},
         "parent_id": "prod-1",
+        # P0-1: layer_decision required for new L2 writes
+        "layer_decision": {
+            "q1_persistent": True,
+            "q2_cross_role": True,
+            "q3_company_consensus": True,
+            "impacts_draft": "pricing 規則改了→billing 相關流程要跟著看",
+        },
     }
     defaults.update(overrides)
     return defaults

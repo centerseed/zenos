@@ -768,7 +768,7 @@ class TestCheckImpactsTargetValidity:
         assert result == []
 
     def test_detects_not_found_target(self):
-        """Impacts pointing to a non-existent entity → reason='not_found'."""
+        """Impacts pointing to a non-existent entity → reason='target_missing'."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
         rel = _make_impacts_rel("m1", "ghost-id")
         result = check_impacts_target_validity([m1], [rel])
@@ -776,12 +776,14 @@ class TestCheckImpactsTargetValidity:
         assert result[0]["source_entity_id"] == "m1"
         broken = result[0]["broken_impacts"]
         assert len(broken) == 1
-        assert broken[0]["reason"] == "not_found"
+        assert broken[0]["reason"] == "target_missing"
         assert broken[0]["target_entity_id"] == "ghost-id"
         assert broken[0]["target_entity_name"] is None
+        assert "impacts_description" in broken[0]
+        assert "suggested_action" in broken[0]
 
     def test_detects_stale_target(self):
-        """Impacts pointing to a stale entity → reason='stale'."""
+        """Impacts pointing to a stale entity → reason='target_stale'."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
         m2 = _make_entity(
             name="M2", entity_type=EntityType.MODULE, entity_id="m2",
@@ -791,12 +793,12 @@ class TestCheckImpactsTargetValidity:
         result = check_impacts_target_validity([m1, m2], [rel])
         assert len(result) == 1
         broken = result[0]["broken_impacts"]
-        assert broken[0]["reason"] == "stale"
-        assert broken[0]["target_status"] == "stale"
+        assert broken[0]["reason"] == "target_stale"
         assert broken[0]["target_entity_name"] == "M2"
+        assert "stale" in broken[0]["suggested_action"]
 
     def test_detects_draft_target(self):
-        """Impacts pointing to a draft entity → reason='draft'."""
+        """Impacts pointing to a draft entity → reason='target_draft'."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
         m2 = _make_entity(
             name="M2", entity_type=EntityType.MODULE, entity_id="m2",
@@ -804,10 +806,10 @@ class TestCheckImpactsTargetValidity:
         )
         rel = _make_impacts_rel("m1", "m2")
         result = check_impacts_target_validity([m1, m2], [rel])
-        assert result[0]["broken_impacts"][0]["reason"] == "draft"
+        assert result[0]["broken_impacts"][0]["reason"] == "target_draft"
 
     def test_detects_completed_target(self):
-        """Impacts pointing to a completed entity → reason='completed'."""
+        """Impacts pointing to a completed entity → reason='target_draft' (non-active catch-all)."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
         m2 = _make_entity(
             name="M2", entity_type=EntityType.MODULE, entity_id="m2",
@@ -815,7 +817,7 @@ class TestCheckImpactsTargetValidity:
         )
         rel = _make_impacts_rel("m1", "m2")
         result = check_impacts_target_validity([m1, m2], [rel])
-        assert result[0]["broken_impacts"][0]["reason"] == "completed"
+        assert result[0]["broken_impacts"][0]["reason"] == "target_draft"
 
     def test_non_concrete_impacts_ignored(self):
         """Impacts without concrete change-path description are skipped."""

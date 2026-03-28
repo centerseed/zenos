@@ -703,6 +703,21 @@ def _find_active_l2_without_concrete_impacts(
 
 _INVALID_TARGET_STATUSES = frozenset({"stale", "draft", "completed"})
 
+_IMPACTS_SUGGESTED_ACTIONS: dict[str, str] = {
+    "target_missing": "目標 entity 已不存在，建議移除此 impacts 關聯",
+    "target_stale": "目標 entity 已標記為 stale，建議確認是否有新的替代 entity，或更新 impacts 目標",
+    "target_draft": "目標 entity 仍為 draft，建議先 confirm 目標 entity，或暫緩此 impacts",
+}
+
+
+def _broken_impact_reason(target_status: str | None) -> str:
+    """Map target status to structured reason enum."""
+    if target_status is None:
+        return "target_missing"
+    if target_status == "stale":
+        return "target_stale"
+    return "target_draft"
+
 
 def check_impacts_target_validity(
     entities: list[Entity],
@@ -720,10 +735,11 @@ def check_impacts_target_validity(
         "broken_impacts": [
             {
                 "relationship_id": str | None,
+                "impacts_description": str,       # concrete impacts description text
                 "target_entity_id": str,
                 "target_entity_name": str | None,  # None if not found
-                "reason": "not_found" | "stale" | "draft" | "completed",
-                "target_status": str | None,
+                "reason": "target_missing" | "target_stale" | "target_draft",
+                "suggested_action": str,
             }
         ],
         "suggested_actions": [...],
@@ -747,12 +763,10 @@ def check_impacts_target_validity(
 
         target = entity_map.get(rel.target_id)
         if target is None:
-            reason = "not_found"
-            target_status = None
+            reason = "target_missing"
             target_name = None
         elif target.status in _INVALID_TARGET_STATUSES:
-            reason = target.status
-            target_status = target.status
+            reason = _broken_impact_reason(target.status)
             target_name = target.name
         else:
             continue  # target is valid
@@ -773,10 +787,11 @@ def check_impacts_target_validity(
             broken.append(entry)
         entry["broken_impacts"].append({
             "relationship_id": rel.id,
+            "impacts_description": rel.description or "",
             "target_entity_id": rel.target_id,
             "target_entity_name": target_name,
             "reason": reason,
-            "target_status": target_status,
+            "suggested_action": _IMPACTS_SUGGESTED_ACTIONS.get(reason, ""),
         })
 
     return broken
@@ -1309,3 +1324,315 @@ def run_quality_check(
         failed=failed,
         warnings=warning_items,
     )
+
+
+# ──────────────────────────────────────────────
+# P0-2: 品質校正優先級（Quality Correction Priority）
+# ──────────────────────────────────────────────
+
+def _has_technical_summary_domain(summary: str) -> bool:
+    """Check if summary contains technical terms (domain-layer copy, no application import)."""
+    return any(
+        re.search(r"\b" + re.escape(term) + r"\b", summary or "", re.IGNORECASE)
+        for term in _L2_TECH_TERMS
+    )
+
+
+def _compute_impacts_vagueness(entity_id: str, relationships: list[Relationship]) -> int:
+    """Compute impacts vagueness dimension score (0/1/2)."""
+    outgoing_impacts = [
+        r for r in relationships
+        if r.source_entity_id == entity_id and r.type == RelationshipType.IMPACTS
+    ]
+    if not outgoing_impacts:
+        return 2
+    has_concrete = any(_is_concrete_impacts_description(r.description) for r in outgoing_impacts)
+    return 0 if has_concrete else 1
+
+
+def _compute_summary_generality(summary: str) -> int:
+    """Compute summary generality dimension score (0/1/2)."""
+    if _has_technical_summary_domain(summary):
+        return 0
+    if len(summary) >= 30:
+        return 1
+    return 2
+
+
+def _compute_three_q_confidence(entity: Entity) -> float:
+    """Compute three-question confidence dimension score (0/0.5/1.0/1.5/2.0)."""
+    tags = entity.tags if entity.tags else Tags(what="", why="", how="", who="")
+    has_why = bool((tags.why or "").strip())
+    has_how = bool((tags.how or "").strip())
+    has_layer_decision = bool(
+        entity.details
+        and isinstance(entity.details, dict)
+        and entity.details.get("layer_decision")
+    )
+
+    if entity.status == EntityStatus.ACTIVE and has_why and has_how:
+        return 0.0
+    if entity.status == EntityStatus.DRAFT:
+        if has_layer_decision:
+            return 0.5
+        if has_why and has_how:
+            return 1.0
+        if has_why or has_how:
+            return 1.5
+    return 2.0
+
+
+def _top_repair_action(dimensions: dict) -> str:
+    """Return the repair action for the highest-weighted dimension."""
+    weighted = {
+        "impacts_vagueness": dimensions["impacts_vagueness"] * 0.5,
+        "summary_generality": dimensions["summary_generality"] * 0.3,
+        "three_q_confidence": dimensions["three_q_confidence"] * 0.2,
+    }
+    top_dim = max(weighted, key=lambda k: weighted[k])
+    actions = {
+        "impacts_vagueness": "補充至少 1 條具體 impacts（A 改了什麼→B 的什麼要跟著看）",
+        "summary_generality": "改寫 summary，加入核心挑戰、已知限制或關鍵技術名詞",
+        "three_q_confidence": "完善 tags.why 和 tags.how，或重新走三問判斷確認分層正確",
+    }
+    return actions[top_dim]
+
+
+def compute_quality_correction_priority(
+    entities: list[Entity],
+    relationships: list[Relationship],
+) -> list[dict]:
+    """Compute quality correction priority for L2 entities.
+
+    Three dimensions (all without external dependencies):
+      1. impacts_vagueness (0/1/2)
+      2. summary_generality (0/1/2)
+      3. three_q_confidence (0/0.5/1.0/1.5/2.0)
+
+    score = impacts_vagueness*0.5 + summary_generality*0.3 + three_q_confidence*0.2
+
+    Returns list of dicts sorted by score descending (highest = most urgent).
+    Only evaluates type==MODULE, status in (draft, active).
+    """
+    target_modules = [
+        e for e in entities
+        if e.type == EntityType.MODULE
+        and e.status in (EntityStatus.DRAFT, EntityStatus.ACTIVE)
+        and e.id
+    ]
+
+    ranked: list[dict] = []
+    for mod in target_modules:
+        iv = _compute_impacts_vagueness(mod.id, relationships)
+        sg = _compute_summary_generality(mod.summary or "")
+        tq = _compute_three_q_confidence(mod)
+        score = round(iv * 0.5 + sg * 0.3 + tq * 0.2, 4)
+        dimensions = {
+            "impacts_vagueness": iv,
+            "summary_generality": sg,
+            "three_q_confidence": tq,
+        }
+        ranked.append({
+            "entity_id": mod.id,
+            "entity_name": mod.name,
+            "score": score,
+            "dimensions": dimensions,
+            "top_repair_action": _top_repair_action(dimensions),
+        })
+
+    ranked.sort(key=lambda x: x["score"], reverse=True)
+    return ranked
+
+
+# ──────────────────────────────────────────────
+# P1-1: Task 信號輔助函數（純函數）
+# ──────────────────────────────────────────────
+
+PROBLEM_SIGNAL_KEYWORDS: frozenset[str] = frozenset({
+    # 中文
+    "已知問題", "已知限制", "workaround", "繞過", "失敗", "無法",
+    "bug", "問題", "限制", "例外", "不支援", "timeout", "衝突",
+    # 英文
+    "known issue", "fail", "error", "limit",
+    "exception", "not supported", "conflict", "broken", "issue",
+})
+
+
+def _task_problem_tokens(result_text: str, description_text: str) -> set[str]:
+    """Extract problem-related keywords from task result + description."""
+    text = f"{result_text or ''} {description_text or ''}".lower()
+    return {kw for kw in PROBLEM_SIGNAL_KEYWORDS if kw in text}
+
+
+def _tasks_are_similar(tokens1: set[str], tokens2: set[str], threshold: int = 2) -> bool:
+    """Return True if two task problem-token sets overlap >= threshold."""
+    return len(tokens1 & tokens2) >= threshold
+
+
+def _blindspot_threshold(entity_task_count: int) -> int:
+    """Dynamic threshold for blindspot suggestion based on project size."""
+    if entity_task_count < 20:
+        return 2
+    if entity_task_count <= 100:
+        return 3
+    return 5
+
+
+# ──────────────────────────────────────────────
+# P1-3: 文件一致性標記（Document Consistency Detection）
+# ──────────────────────────────────────────────
+
+_VERSION_PATTERN = re.compile(r"v(\d+)\.(\d+)", re.IGNORECASE)
+
+CONTRADICTION_PAIRS: list[tuple[str, str]] = [
+    ("不支援", "支援"),
+    ("廢棄", "推薦"),
+    ("已移除", "現有"),
+    ("deprecated", "recommended"),
+    ("removed", "current"),
+]
+
+_DOC_STALE_THRESHOLD_DAYS = 180
+_ENTITY_RECENT_UPDATE_DAYS = 90
+
+
+def _extract_version(text: str) -> tuple[int, int] | None:
+    """Extract version tuple (major, minor) from text, or None."""
+    m = _VERSION_PATTERN.search(text or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _get_doc_linked_entity_ids(doc: Entity) -> list[str]:
+    """Get linked entity IDs from a document entity (via parent_id)."""
+    return [doc.parent_id] if doc.parent_id else []
+
+
+def detect_stale_documents_from_consistency(
+    entities: list[Entity],
+    relationships: list[Relationship],
+) -> list[dict]:
+    """Detect potentially stale documents via three consistency signals.
+
+    Signal 1: version_lag — document version is >= 2 major versions behind
+        the newest version found in same entity group.
+    Signal 2: contradictory_signal — two documents under same entity have
+        opposing keyword pairs in their name or summary.
+    Signal 3: entity_updated_but_doc_stale — L2 entity updated within 90
+        days but its linked documents haven't been updated in 180+ days.
+
+    Returns list of dicts:
+    {
+        "document_id": str,
+        "document_title": str,
+        "linked_entity_id": str | None,
+        "linked_entity_name": str | None,
+        "reason": str,
+        "detail": str,
+        "suggested_action": str,
+    }
+    """
+    now = datetime.now(timezone.utc)
+
+    def _to_aware(dt: datetime) -> datetime:
+        return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+    doc_entities = [e for e in entities if e.type == EntityType.DOCUMENT and e.id]
+    entity_map = {e.id: e for e in entities if e.id}
+
+    # Group documents by linked entity (parent_id or via relationships)
+    docs_by_linked: dict[str, list[Entity]] = {}
+    for doc in doc_entities:
+        linked_ids = _get_doc_linked_entity_ids(doc)
+        # Also check part_of relationships
+        for rel in relationships:
+            if rel.source_entity_id == doc.id and rel.type in (
+                RelationshipType.PART_OF,
+            ):
+                if rel.target_id:
+                    linked_ids.append(rel.target_id)
+        if linked_ids:
+            for eid in linked_ids:
+                docs_by_linked.setdefault(eid, []).append(doc)
+        else:
+            docs_by_linked.setdefault("__unlinked__", []).append(doc)
+
+    warnings: list[dict] = []
+    seen_doc_ids: set[str] = set()
+
+    def _add_warning(doc: Entity, linked_id: str | None, reason: str, detail: str) -> None:
+        if doc.id in seen_doc_ids:
+            return
+        seen_doc_ids.add(doc.id)
+        linked_entity = entity_map.get(linked_id) if linked_id else None
+        warnings.append({
+            "document_id": doc.id,
+            "document_title": doc.name,
+            "linked_entity_id": linked_id,
+            "linked_entity_name": linked_entity.name if linked_entity else None,
+            "reason": reason,
+            "detail": detail,
+            "suggested_action": "確認是否已被更新版本取代，若是請走 archive/supersede 流程",
+        })
+
+    # Signal 1: version_lag
+    for linked_id, docs in docs_by_linked.items():
+        if linked_id == "__unlinked__":
+            continue
+        versioned = []
+        for doc in docs:
+            ver = _extract_version(doc.name) or _extract_version(doc.summary or "")
+            if ver:
+                versioned.append((doc, ver))
+        if len(versioned) < 2:
+            continue
+        max_major = max(v[0] for _, v in versioned)
+        for doc, ver in versioned:
+            if max_major - ver[0] >= 2:
+                _add_warning(
+                    doc, linked_id, "version_lag",
+                    f"發現更新版本 v{max_major}.x 存在於同一模組下的其他文件",
+                )
+
+    # Signal 2: contradictory_signal
+    for linked_id, docs in docs_by_linked.items():
+        if linked_id == "__unlinked__" or len(docs) < 2:
+            continue
+        for i in range(len(docs)):
+            for j in range(i + 1, len(docs)):
+                doc_a, doc_b = docs[i], docs[j]
+                text_a = f"{doc_a.name} {doc_a.summary or ''}".lower()
+                text_b = f"{doc_b.name} {doc_b.summary or ''}".lower()
+                for neg_word, pos_word in CONTRADICTION_PAIRS:
+                    if neg_word in text_a and pos_word in text_b:
+                        _add_warning(
+                            doc_a, linked_id, "contradictory_signal",
+                            f"與文件 '{doc_b.name}' 在同一模組下出現矛盾詞：'{neg_word}' vs '{pos_word}'",
+                        )
+                    elif pos_word in text_a and neg_word in text_b:
+                        _add_warning(
+                            doc_b, linked_id, "contradictory_signal",
+                            f"與文件 '{doc_a.name}' 在同一模組下出現矛盾詞：'{neg_word}' vs '{pos_word}'",
+                        )
+
+    # Signal 3: entity_updated_but_doc_stale
+    stale_threshold = timedelta(days=_DOC_STALE_THRESHOLD_DAYS)
+    recent_threshold = timedelta(days=_ENTITY_RECENT_UPDATE_DAYS)
+    for linked_id, docs in docs_by_linked.items():
+        if linked_id == "__unlinked__":
+            continue
+        linked_entity = entity_map.get(linked_id)
+        if not linked_entity or linked_entity.type != EntityType.MODULE:
+            continue
+        entity_updated_at = _to_aware(linked_entity.updated_at)
+        if now - entity_updated_at > recent_threshold:
+            continue  # entity not recently updated
+        for doc in docs:
+            doc_updated_at = _to_aware(doc.updated_at)
+            if now - doc_updated_at > stale_threshold:
+                _add_warning(
+                    doc, linked_id, "entity_updated_but_doc_stale",
+                    f"關聯的 L2 entity '{linked_entity.name}' 在近 {_ENTITY_RECENT_UPDATE_DAYS} 天有更新，"
+                    f"但此文件超過 {_DOC_STALE_THRESHOLD_DAYS} 天未更新",
+                )
+
+    return warnings

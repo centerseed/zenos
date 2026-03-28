@@ -7,16 +7,22 @@ in governance.py. Each method returns a governance result object.
 from __future__ import annotations
 
 import re
+from collections import Counter
 
 from zenos.domain.governance import (
     _L2_TECH_TERMS,
+    _blindspot_threshold,
     _find_active_l2_without_concrete_impacts,
     _is_concrete_impacts_description,
+    _task_problem_tokens,
+    _tasks_are_similar,
     analyze_blindspots,
     check_governance_review_overdue,
     check_impacts_target_validity,
     check_reverse_impacts,
+    compute_quality_correction_priority,
     detect_staleness,
+    detect_stale_documents_from_consistency,
     find_stale_l2_downstream_entities,
     run_quality_check,
 )
@@ -44,11 +50,13 @@ class GovernanceService:
         relationship_repo: RelationshipRepository | None = None,
         protocol_repo: ProtocolRepository | None = None,
         blindspot_repo: BlindspotRepository | None = None,
+        task_repo=None,  # TaskRepository (duck typing to avoid circular import)
     ) -> None:
         self._entities = entity_repo
         self._relationships = relationship_repo
         self._protocols = protocol_repo
         self._blindspots = blindspot_repo
+        self._tasks = task_repo
 
     async def _load_all_relationships(self, entities: list) -> list:
         """Collect all relationships by querying each entity's relationships."""
@@ -263,22 +271,149 @@ class GovernanceService:
             relationships=relationships,
         )
 
-    async def run_staleness_check(self) -> list[StalenessWarning]:
+    async def run_staleness_check(self) -> dict:
         """Detect staleness patterns across entities and documents.
 
         Fetches all entities and relationships, then delegates to
-        domain.governance.detect_staleness.
+        domain.governance.detect_staleness and detect_stale_documents_from_consistency.
+
+        Returns a dict with:
+          - warnings: list[StalenessWarning]
+          - document_consistency_warnings: list[dict]
         """
         all_entities = await self._entities.list_all()
         entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
         documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
         relationships = await self._load_all_relationships(all_entities)
 
-        return detect_staleness(
+        staleness_warnings = detect_staleness(
             entities=entities,
             documents=documents,
             relationships=relationships,
         )
+        doc_consistency_warnings = detect_stale_documents_from_consistency(
+            entities=all_entities,
+            relationships=relationships,
+        )
+        return {
+            "warnings": staleness_warnings,
+            "document_consistency_warnings": doc_consistency_warnings,
+        }
+
+    async def run_quality_correction_priority(self) -> dict:
+        """Compute quality correction priority for L2 entities.
+
+        Returns a dict with:
+          - total_l2_entities: int
+          - ranked: list[dict]
+          - needs_immediate_review: int (score > 1.5)
+        """
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        relationships = await self._load_all_relationships(all_entities)
+
+        ranked = compute_quality_correction_priority(entities, relationships)
+        needs_immediate_review = sum(1 for r in ranked if r["score"] > 1.5)
+        return {
+            "total_l2_entities": len(ranked),
+            "ranked": ranked,
+            "needs_immediate_review": needs_immediate_review,
+        }
+
+    async def infer_blindspots_from_tasks(self) -> list[dict]:
+        """Infer blindspot suggestions from task execution history.
+
+        For each active L2 entity, find done/cancelled tasks that share
+        problem-signal keywords. If a cluster of similar-problem tasks
+        meets the dynamic threshold, suggest a blindspot.
+
+        Returns list of dicts (empty if task_repo is None).
+        """
+        if self._tasks is None:
+            return []
+
+        all_entities = await self._entities.list_all()
+        active_modules = [
+            e for e in all_entities
+            if e.type == EntityType.MODULE and e.status == "active" and e.id
+        ]
+
+        suggestions: list[dict] = []
+        for mod in active_modules:
+            tasks = await self._tasks.list_all(
+                linked_entity=mod.id,
+                status=["done", "cancelled"],
+                limit=200,
+            )
+            if not tasks:
+                continue
+
+            task_tokens = [
+                (t, _task_problem_tokens(
+                    getattr(t, "result", None) or "",
+                    getattr(t, "description", None) or "",
+                ))
+                for t in tasks
+            ]
+            # Only keep tasks with at least one problem token
+            problem_tasks = [(t, toks) for t, toks in task_tokens if toks]
+            if not problem_tasks:
+                continue
+
+            threshold = _blindspot_threshold(len(tasks))
+
+            # Find clusters: group tasks by shared problem tokens
+            # Build adjacency: task i similar to task j
+            n = len(problem_tasks)
+            cluster_map: dict[int, int] = {}  # task index -> cluster root
+            for i in range(n):
+                for j in range(i + 1, n):
+                    if _tasks_are_similar(problem_tasks[i][1], problem_tasks[j][1]):
+                        root_i = cluster_map.get(i, i)
+                        root_j = cluster_map.get(j, j)
+                        if root_i != root_j:
+                            for k, v in list(cluster_map.items()):
+                                if v == root_j:
+                                    cluster_map[k] = root_i
+                            cluster_map[j] = root_i
+                        elif i not in cluster_map:
+                            cluster_map[i] = i
+                        if j not in cluster_map:
+                            cluster_map[j] = root_i
+
+            # Determine cluster sizes
+            roots = [cluster_map.get(i, i) for i in range(n)]
+            cluster_counts = Counter(roots)
+            max_cluster_root = max(cluster_counts, key=lambda k: cluster_counts[k])
+            max_size = cluster_counts[max_cluster_root]
+
+            if max_size < threshold:
+                continue
+
+            # Collect matched tasks and dominant keywords for the largest cluster
+            matched_tasks = [
+                problem_tasks[i][0]
+                for i in range(n)
+                if cluster_map.get(i, i) == max_cluster_root
+            ]
+            all_tokens: set[str] = set()
+            for _, toks in [problem_tasks[i] for i in range(n) if cluster_map.get(i, i) == max_cluster_root]:
+                all_tokens |= toks
+            keyword_sample = "、".join(sorted(all_tokens)[:3])
+
+            suggestions.append({
+                "entity_id": mod.id,
+                "entity_name": mod.name,
+                "pattern_summary": f"{max_size} 張 task 提到 '{keyword_sample}' 問題",
+                "matched_tasks": [getattr(t, "id", str(t)) for t in matched_tasks],
+                "suggested_blindspot": {
+                    "description": f"{mod.name} 有反覆出現的問題：{keyword_sample}，agent 需要額外處理",
+                    "severity": "yellow",
+                    "suggested_action": "在 sources 中記錄 workaround 步驟，或更新 L2 summary 加入已知限制",
+                },
+            })
+
+        return suggestions
 
     async def check_impacts_target_validity(self) -> list[dict]:
         """Check that all concrete impacts relationships point to valid entities."""

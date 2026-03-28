@@ -891,7 +891,9 @@ class TestAnalyzeTool:
         ]
 
         with patch("zenos.interface.tools.governance_service") as mock_gs:
-            mock_gs.run_staleness_check = AsyncMock(return_value=warnings)
+            mock_gs.run_staleness_check = AsyncMock(
+                return_value={"warnings": warnings, "document_consistency_warnings": [], "document_consistency_count": 0}
+            )
 
             result = await analyze(check_type="staleness")
 
@@ -916,7 +918,9 @@ class TestAnalyzeTool:
 
         with patch("zenos.interface.tools.governance_service") as mock_gs:
             mock_gs.run_quality_check = AsyncMock(return_value=report)
-            mock_gs.run_staleness_check = AsyncMock(return_value=[])
+            mock_gs.run_staleness_check = AsyncMock(
+                return_value={"warnings": [], "document_consistency_warnings": [], "document_consistency_count": 0}
+            )
             mock_gs.run_blindspot_analysis = AsyncMock(return_value=[])
             mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
 
@@ -942,7 +946,9 @@ class TestAnalyzeTool:
              patch("zenos.interface.tools.ontology_service") as mock_os, \
              patch("zenos.interface.tools.blindspot_repo") as mock_br:
             mock_gs.run_quality_check = AsyncMock(return_value=report)
-            mock_gs.run_staleness_check = AsyncMock(return_value=[])
+            mock_gs.run_staleness_check = AsyncMock(
+                return_value={"warnings": [], "document_consistency_warnings": [], "document_consistency_count": 0}
+            )
             mock_gs.run_blindspot_analysis = AsyncMock(return_value=[])
             mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
             mock_os._entities = AsyncMock()

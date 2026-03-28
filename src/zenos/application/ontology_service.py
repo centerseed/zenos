@@ -844,6 +844,43 @@ class OntologyService:
         # 6d. L2 hard rule on write path: check concrete impacts and warn;
         # new modules always start as draft regardless of inferred impacts.
         if entity_type == EntityType.MODULE and not merged_data.get("id"):
+            # P0-1: layer_decision gate — enforce three-question routing on new L2 write
+            force = merged_data.get("force")
+            layer_decision = merged_data.get("layer_decision")
+            if not force and layer_decision is None:
+                raise ValueError(
+                    "LAYER_DECISION_REQUIRED: 寫入 L2 entity 前必須完成分層判斷。\n"
+                    "請在 data 中提供 layer_decision: {\n"
+                    "  'q1_persistent': bool,  # 跨時間存活？不是一次性研究？\n"
+                    "  'q2_cross_role': bool,  # 跨越 ≥2 個不同角色？\n"
+                    "  'q3_company_consensus': bool,  # 公司共識概念，非個人判斷？\n"
+                    "  'impacts_draft': str  # 候選 impacts（可草稿，格式 A→B）\n"
+                    "}\n"
+                    "或提供 force=True 加 manual_override_reason 來 bypass（需有理由）。\n"
+                    "若三問未全通過，建議降級：q1=False→document+sources, q2=False→L3, q3=False→document"
+                )
+            if not force and layer_decision is not None:
+                q1 = bool(layer_decision.get("q1_persistent"))
+                q2 = bool(layer_decision.get("q2_cross_role"))
+                q3 = bool(layer_decision.get("q3_company_consensus"))
+                if not (q1 and q2 and q3):
+                    downgrade_hints = []
+                    if not q1:
+                        downgrade_hints.append("q1=False→改為 document 掛在相關 L2 的 sources")
+                    if not q2:
+                        downgrade_hints.append("q2=False→改為 L3 entity (type=goal/role/project)")
+                    if not q3:
+                        downgrade_hints.append("q3=False→改為 document type")
+                    warnings.append(
+                        f"LAYER_DOWNGRADE_SUGGESTED: 三問未全通過（q1={q1}, q2={q2}, q3={q3}）。"
+                        f"建議降級：{'；'.join(downgrade_hints)}"
+                    )
+                # Store layer_decision in details regardless of q1/q2/q3 result
+                existing_details = merged_data.get("details") or {}
+                if isinstance(existing_details, dict):
+                    existing_details["layer_decision"] = layer_decision
+                    merged_data["details"] = existing_details
+
             # force=true guard: always require manual_override_reason (independent of governance_ai)
             if merged_data.get("force"):
                 override_reason = (merged_data.get("manual_override_reason") or "").strip()
@@ -857,6 +894,9 @@ class OntologyService:
                     details["manual_override_reason"] = override_reason
                     details["manual_override_at"] = datetime.now(timezone.utc).isoformat()
                     merged_data["details"] = details
+                warnings.append(
+                    f"bypass layer_decision check: {override_reason}"
+                )
                 warnings.append(
                     f"L2 以 force 模式寫入（draft）。manual_override_reason: {override_reason}"
                 )

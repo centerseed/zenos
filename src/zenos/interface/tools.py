@@ -206,6 +206,7 @@ async def _ensure_services() -> None:
             relationship_repo=relationship_repo,
             protocol_repo=protocol_repo,
             blindspot_repo=blindspot_repo,
+            task_repo=task_repo,
         )
     if source_service is None:
         source_service = SourceService(
@@ -633,6 +634,8 @@ async def write(
               選填：sources([{uri, label, type}]) 或 append_sources（追加不覆蓋）
               選填：visibility（"public" | "restricted"，預設 public）
               選填：force（true 時可覆寫已確認 entity 的非空欄位）
+              選填：layer_decision({q1_persistent, q2_cross_role, q3_company_consensus, impacts_draft})
+                    — 新建 L2（type=module）時必填，除非 force=True
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary。更新語意為 merge update（未提供欄位不清空）。
                linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
@@ -1141,13 +1144,15 @@ async def analyze(
     - 只看品質分數 → analyze(check_type="quality")
     - 找過時內容 → analyze(check_type="staleness")
     - 推斷盲點 → analyze(check_type="blindspot")
+    - 只看 impacts 斷鏈 → analyze(check_type="impacts")
+    - 只看文件一致性 → analyze(check_type="document_consistency")
 
     不要用這個工具的情境：
     - 搜尋或列出條目 → 用 search
     - 更新 ontology 內容 → 用 write
 
     Args:
-        check_type: "all" / "quality" / "staleness" / "blindspot"
+        check_type: "all" / "quality" / "staleness" / "blindspot" / "impacts" / "document_consistency"
     """
     await _ensure_services()
     results: dict = {}
@@ -1257,6 +1262,13 @@ async def analyze(
         except Exception:
             logger.warning("L2 impacts target validity check failed", exc_info=True)
 
+        # P0-2: quality correction priority
+        try:
+            priority_report = await governance_service.run_quality_correction_priority()
+            results["quality"]["quality_correction_priority"] = priority_report
+        except Exception:
+            logger.warning("Quality correction priority failed", exc_info=True)
+
         # L2 governance: stale L2 downstream (entity part from domain; task part here)
         try:
             downstream_entities = await governance_service.find_stale_l2_downstream_entities()
@@ -1296,12 +1308,22 @@ async def analyze(
         except Exception:
             logger.warning("L2 governance review overdue check failed", exc_info=True)
 
-    if check_type in ("all", "staleness"):
-        warnings = await governance_service.run_staleness_check()
-        results["staleness"] = {
-            "warnings": [_serialize(w) for w in warnings],
-            "count": len(warnings),
-        }
+    if check_type in ("all", "staleness", "document_consistency"):
+        staleness_result = await governance_service.run_staleness_check()
+        staleness_warnings = staleness_result["warnings"]
+        doc_consistency_warnings = staleness_result["document_consistency_warnings"]
+        if check_type != "document_consistency":
+            results["staleness"] = {
+                "warnings": [_serialize(w) for w in staleness_warnings],
+                "count": len(staleness_warnings),
+                "document_consistency_warnings": doc_consistency_warnings,
+                "document_consistency_count": len(doc_consistency_warnings),
+            }
+        if check_type == "document_consistency":
+            results["document_consistency"] = {
+                "document_consistency_warnings": doc_consistency_warnings,
+                "document_consistency_count": len(doc_consistency_warnings),
+            }
 
     if check_type in ("all", "blindspot"):
         blindspots = await governance_service.run_blindspot_analysis()
@@ -1309,11 +1331,29 @@ async def analyze(
             "blindspots": [_serialize(b) for b in blindspots],
             "count": len(blindspots),
         }
+        try:
+            task_signal_suggestions = await governance_service.infer_blindspots_from_tasks()
+            results["blindspots"]["task_signal_suggestions"] = task_signal_suggestions
+            results["blindspots"]["task_signal_count"] = len(task_signal_suggestions)
+        except Exception:
+            logger.warning("Task signal blindspot inference failed", exc_info=True)
+            results["blindspots"]["task_signal_suggestions"] = []
+            results["blindspots"]["task_signal_count"] = 0
+
+    if check_type == "impacts":
+        try:
+            validity_report = await governance_service.check_impacts_target_validity()
+            results.setdefault("quality", {})["l2_impacts_validity"] = validity_report
+        except Exception:
+            logger.warning("Impacts target validity check failed (impacts check_type)", exc_info=True)
 
     if not results:
         return {
             "error": "INVALID_INPUT",
-            "message": f"Unknown check_type '{check_type}'. Use: all, quality, staleness, blindspot",
+            "message": (
+                f"Unknown check_type '{check_type}'. "
+                "Use: all, quality, staleness, blindspot, impacts, document_consistency"
+            ),
         }
 
     if check_type == "all":

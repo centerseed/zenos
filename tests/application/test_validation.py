@@ -58,6 +58,14 @@ def _make_service(repos: dict | None = None) -> OntologyService:
     return OntologyService(**r)
 
 
+_DEFAULT_LAYER_DECISION = {
+    "q1_persistent": True,
+    "q2_cross_role": True,
+    "q3_company_consensus": True,
+    "impacts_draft": "A 改了什麼→B 的什麼要跟著看",
+}
+
+
 def _valid_entity_data(**overrides) -> dict:
     """Minimal valid entity data dict."""
     defaults = {
@@ -68,6 +76,9 @@ def _valid_entity_data(**overrides) -> dict:
         "status": "active",
     }
     defaults.update(overrides)
+    # P0-1: new module entities require layer_decision
+    if defaults.get("type") == "module" and not defaults.get("id") and not defaults.get("force"):
+        defaults.setdefault("layer_decision", _DEFAULT_LAYER_DECISION)
     return defaults
 
 

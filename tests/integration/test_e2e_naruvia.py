@@ -463,7 +463,8 @@ async def test_step3_03_quality_check(gov):
 
 async def test_step3_04_staleness_check(gov):
     warnings = await gov.run_staleness_check()
-    assert isinstance(warnings, list)
+    assert isinstance(warnings, dict)
+    assert "warnings" in warnings
 
 
 async def test_step3_05_blindspot_analysis(gov):
