@@ -977,6 +977,7 @@ class TestSqlEntityEntryRepository:
             "source_task_id": None,
             "status": "active",
             "superseded_by": None,
+            "archive_reason": None,
             "created_at": NOW,
         }
 

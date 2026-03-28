@@ -346,4 +346,5 @@ class EntityEntry:
     author: str | None = None
     source_task_id: str | None = None
     superseded_by: str | None = None  # ID of the entry that supersedes this one
+    archive_reason: str | None = None  # required when status='archived'; values: 'merged' | 'manual'
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

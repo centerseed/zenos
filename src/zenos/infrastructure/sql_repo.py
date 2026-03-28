@@ -1141,6 +1141,7 @@ def _row_to_entry(row: asyncpg.Record) -> EntityEntry:
         source_task_id=row["source_task_id"],
         status=row["status"],
         superseded_by=row["superseded_by"],
+        archive_reason=row["archive_reason"],
         created_at=_to_dt(row["created_at"]) or _now(),
     )
 
@@ -1205,19 +1206,58 @@ class SqlEntityEntryRepository:
         return [_row_to_entry(r) for r in rows]
 
     async def update_status(
-        self, entry_id: str, status: str, superseded_by: str | None = None
+        self, entry_id: str, status: str, superseded_by: str | None = None,
+        archive_reason: str | None = None,
     ) -> EntityEntry | None:
-        """Update entry status (e.g. for supersede flow). Returns updated entry or None."""
+        """Update entry status, superseded_by, and archive_reason. Returns updated entry or None."""
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""UPDATE {SCHEMA}.entity_entries
-                    SET status = $1, superseded_by = $2
-                    WHERE id = $3 AND partner_id = $4
+                    SET status = $1, superseded_by = $2, archive_reason = $3
+                    WHERE id = $4 AND partner_id = $5
                     RETURNING *""",
-                status, superseded_by, entry_id, pid,
+                status, superseded_by, archive_reason, entry_id, pid,
             )
         return _row_to_entry(row) if row else None
+
+    async def list_saturated_entities(self, threshold: int = 20) -> list[dict]:
+        """Return entities that have >= threshold active entries.
+
+        Returns list of dicts: {entity_id, entity_name, active_count}.
+        """
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT ee.entity_id, e.name AS entity_name, COUNT(*) AS active_count
+                    FROM {SCHEMA}.entity_entries ee
+                    JOIN {SCHEMA}.entities e
+                      ON e.id = ee.entity_id AND e.partner_id = ee.partner_id
+                    WHERE ee.partner_id = $1 AND ee.status = 'active'
+                    GROUP BY ee.entity_id, e.name
+                    HAVING COUNT(*) >= $2
+                    ORDER BY active_count DESC""",
+                pid, threshold,
+            )
+        return [
+            {
+                "entity_id": r["entity_id"],
+                "entity_name": r["entity_name"],
+                "active_count": int(r["active_count"]),
+            }
+            for r in rows
+        ]
+
+    async def count_active_by_entity(self, entity_id: str) -> int:
+        """Count active entries for an entity. Used for saturation check."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""SELECT COUNT(*) as cnt FROM {SCHEMA}.entity_entries
+                    WHERE partner_id = $1 AND entity_id = $2 AND status = 'active'""",
+                pid, entity_id,
+            )
+        return int(row["cnt"]) if row else 0
 
     async def search_content(self, query: str, limit: int = 20) -> list[dict]:
         """Search entries by content keyword, returning entries with entity context.

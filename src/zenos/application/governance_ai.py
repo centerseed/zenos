@@ -1,9 +1,10 @@
 """GovernanceAI — LLM-based automatic inference for the write path.
 
-Provides three core functions:
+Provides four core functions:
   - _rule_classify: pure-rule entity classification (no LLM)
   - infer_all: unified LLM call for type/parent/duplicate/rels/docs
   - infer_task_links: infer entity links for new tasks
+  - consolidate_entries: propose a consolidation plan for saturated entities
 
 All LLM calls are wrapped in try/except so failures never block writes.
 """
@@ -61,6 +62,19 @@ class GovernanceInference(BaseModel):
 
 class TaskLinkInference(BaseModel):
     entity_ids: list[str] = []
+
+
+class ConsolidationMergeGroup(BaseModel):
+    source_entry_ids: list[str]
+    merged_content: str  # max 200 chars, the merged entry content
+
+
+class ConsolidationProposal(BaseModel):
+    entity_id: str
+    entity_name: str
+    merge_groups: list[ConsolidationMergeGroup]
+    keep_as_is: list[str]  # entry IDs that should not be merged
+    estimated_after_count: int  # active entries count after consolidation
 
 
 # ──────────────────────────────────────────────
@@ -517,3 +531,79 @@ class GovernanceAI:
             )
             logger.warning("GovernanceAI.infer_task_links failed", exc_info=True)
             return []
+
+    def consolidate_entries(
+        self,
+        entity_id: str,
+        entity_name: str,
+        entries: list[dict],  # list of {id, type, content}
+    ) -> ConsolidationProposal | None:
+        """Analyze saturated entries and propose a consolidation plan.
+
+        Called when an entity has >= 20 active entries. Returns a consolidation
+        proposal for human review. Returns None on LLM failure.
+        """
+        if not entries:
+            return None
+
+        entry_lines = "\n".join(
+            f"{e['id']}|{e['type']}|{self._compact_text(e['content'], 200)}"
+            for e in entries
+        )
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "你是 ontology 治理 AI。一個 L2 entity 的知識條目已達上限，需要歸納壓縮。\n"
+                    "任務：分析哪些 entries 描述相同或相近的主題，可以合併成一條更完整的 entry。\n"
+                    "規則：\n"
+                    "1) 合併後的 merged_content 必須保留所有重要資訊，且不超過 200 字元\n"
+                    "2) 不相關的 entries 放進 keep_as_is\n"
+                    "3) estimated_after_count = merge_groups 數量 + keep_as_is 數量\n"
+                    "4) 歸納後 estimated_after_count 必須 < 20\n"
+                    "5) 每個 entry 只能出現在 merge_groups 或 keep_as_is 其中一個\n"
+                    "6) merged_content 語言跟原始 entries 保持一致\n"
+                    "回傳 JSON：entity_id, entity_name, merge_groups, keep_as_is, estimated_after_count"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"Entity: {entity_id} | {entity_name}\n"
+                    f"Active entries（格式：id|type|content）：\n{entry_lines}"
+                ),
+            },
+        ]
+
+        try:
+            result = self._llm.chat_structured(
+                messages=messages,
+                response_schema=ConsolidationProposal,
+                temperature=0.1,
+            )
+            self._schedule_usage_log("governance.consolidate_entries")
+            _audit_governance(
+                "governance.consolidate_entries",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "entity_id": entity_id,
+                    "entity_name": entity_name,
+                    "input_entry_count": len(entries),
+                    "estimated_after_count": result.estimated_after_count,
+                },
+            )
+            # Override entity_id/entity_name in case LLM fills them incorrectly
+            result.entity_id = entity_id
+            result.entity_name = entity_name
+            return result
+        except Exception:
+            _audit_governance(
+                "governance.consolidate_entries.error",
+                {
+                    "model": getattr(self._llm, "model", ""),
+                    "entity_id": entity_id,
+                },
+            )
+            logger.warning("GovernanceAI.consolidate_entries failed", exc_info=True)
+            return None

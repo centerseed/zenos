@@ -824,7 +824,13 @@ async def write(
                     return {"error": "INVALID_INPUT", "message": f"status 必須是 {valid_statuses} 之一"}
                 if new_status == "superseded" and not superseded_by:
                     return {"error": "INVALID_INPUT", "message": "status=superseded 時必填 superseded_by"}
-                updated = await entry_repo.update_status(id, new_status, superseded_by)
+                archive_reason = data.get("archive_reason")
+                if new_status == "archived":
+                    if not archive_reason:
+                        return {"error": "INVALID_INPUT", "message": "status=archived 時必填 archive_reason"}
+                    if archive_reason not in ("merged", "manual"):
+                        return {"error": "INVALID_INPUT", "message": "archive_reason 必須是 merged 或 manual"}
+                updated = await entry_repo.update_status(id, new_status, superseded_by, archive_reason)
                 if updated is None:
                     return {"error": "NOT_FOUND", "message": f"Entry '{id}' not found"}
                 return _serialize(updated)
@@ -861,7 +867,14 @@ async def write(
                 target={"collection": collection, "id": result.id},
                 changes={"input": data},
             )
-            return _serialize(result)
+            response = _serialize(result)
+            active_count = await entry_repo.count_active_by_entity(entity_id)
+            if active_count >= 20:
+                response["warning"] = (
+                    "此 entity 已達 20 條 active entries 上限，"
+                    "建議執行 analyze(check_type='quality') 觸發歸納"
+                )
+            return response
 
         else:
             return {
@@ -1320,6 +1333,33 @@ async def analyze(
             })
         return repairs
 
+    async def _check_entry_saturation() -> list[dict]:
+        """Detect saturated entities (>= 20 active entries) and produce consolidation proposals."""
+        if entry_repo is None or _governance_ai is None:
+            return []
+        saturated = await entry_repo.list_saturated_entities(threshold=20)
+        if not saturated:
+            return []
+
+        proposals = []
+        for item in saturated:
+            entity_id = item["entity_id"]
+            entity_name = item["entity_name"]
+            active_count = item["active_count"]
+            entries = await entry_repo.list_by_entity(entity_id, status="active")
+            entry_dicts = [
+                {"id": e.id, "type": e.type, "content": e.content}
+                for e in entries
+            ]
+            proposal = _governance_ai.consolidate_entries(entity_id, entity_name, entry_dicts)
+            proposals.append({
+                "entity_id": entity_id,
+                "entity_name": entity_name,
+                "active_count": active_count,
+                "consolidation_proposal": proposal.model_dump() if proposal else None,
+            })
+        return proposals
+
     if check_type in ("all", "quality"):
         report = await governance_service.run_quality_check()
         results["quality"] = _serialize(report)
@@ -1393,6 +1433,14 @@ async def analyze(
             results["quality"]["l2_review_overdue_count"] = len(overdue)
         except Exception:
             logger.warning("L2 governance review overdue check failed", exc_info=True)
+
+        # Entry saturation detection
+        try:
+            entry_saturation = await _check_entry_saturation()
+            results["quality"]["entry_saturation"] = entry_saturation
+            results["quality"]["entry_saturation_count"] = len(entry_saturation)
+        except Exception:
+            logger.warning("Entry saturation check failed", exc_info=True)
 
     if check_type in ("all", "staleness", "document_consistency"):
         staleness_result = await governance_service.run_staleness_check()

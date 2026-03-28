@@ -9,7 +9,7 @@ and test that each tool function correctly:
 """
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -975,6 +975,107 @@ class TestAnalyzeTool:
         assert result["error"] == "INVALID_INPUT"
         assert "Unknown check_type" in result["message"]
 
+    async def test_analyze_quality_entry_saturation_empty(self):
+        """analyze quality: entry_saturation=[] and count=0 when no saturated entities."""
+        from zenos.interface.tools import analyze
+        from zenos.application.governance_ai import GovernanceAI
+        import zenos.interface.tools as tools_mod
+
+        report = QualityReport(score=90, passed=[], failed=[], warnings=[])
+
+        with patch("zenos.interface.tools.governance_service") as mock_gs, \
+             patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools._governance_ai") as mock_ai:
+            mock_gs.run_quality_check = AsyncMock(return_value=report)
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
+            mock_gs.check_governance_review_overdue = AsyncMock(return_value=[])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[])
+            tools_mod.entry_repo.list_saturated_entities = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="quality")
+
+            assert "quality" in result
+            assert result["quality"]["entry_saturation"] == []
+            assert result["quality"]["entry_saturation_count"] == 0
+
+    async def test_analyze_quality_entry_saturation_has_proposal(self):
+        """analyze quality: saturated entity produces proposal in entry_saturation."""
+        from zenos.interface.tools import analyze
+        from zenos.application.governance_ai import ConsolidationProposal, ConsolidationMergeGroup
+        import zenos.interface.tools as tools_mod
+
+        report = QualityReport(score=70, passed=[], failed=[], warnings=[])
+
+        entries = [_make_entry(id=f"entry-{i}") for i in range(20)]
+        proposal = ConsolidationProposal(
+            entity_id="ent-1",
+            entity_name="ZenOS",
+            merge_groups=[
+                ConsolidationMergeGroup(
+                    source_entry_ids=["entry-0", "entry-1"],
+                    merged_content="Combined insight about PostgreSQL",
+                )
+            ],
+            keep_as_is=[f"entry-{i}" for i in range(2, 20)],
+            estimated_after_count=19,
+        )
+
+        mock_ai = MagicMock()
+        mock_ai.consolidate_entries = MagicMock(return_value=proposal)
+
+        with patch("zenos.interface.tools.governance_service") as mock_gs, \
+             patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools._governance_ai", mock_ai):
+            mock_gs.run_quality_check = AsyncMock(return_value=report)
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
+            mock_gs.check_governance_review_overdue = AsyncMock(return_value=[])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[])
+            tools_mod.entry_repo.list_saturated_entities = AsyncMock(return_value=[
+                {"entity_id": "ent-1", "entity_name": "ZenOS", "active_count": 20}
+            ])
+            tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=entries)
+
+            result = await analyze(check_type="quality")
+
+            assert result["quality"]["entry_saturation_count"] == 1
+            saturation_items = result["quality"]["entry_saturation"]
+            assert len(saturation_items) == 1
+            assert saturation_items[0]["entity_id"] == "ent-1"
+            assert saturation_items[0]["consolidation_proposal"] is not None
+
+    async def test_analyze_quality_entry_saturation_llm_failure(self):
+        """analyze quality: LLM failure in consolidate_entries -> proposal is None, analyze doesn't crash."""
+        from zenos.interface.tools import analyze
+        import zenos.interface.tools as tools_mod
+
+        report = QualityReport(score=70, passed=[], failed=[], warnings=[])
+
+        entries = [_make_entry(id=f"entry-{i}") for i in range(20)]
+
+        mock_ai = MagicMock()
+        mock_ai.consolidate_entries = MagicMock(return_value=None)  # LLM failure
+
+        with patch("zenos.interface.tools.governance_service") as mock_gs, \
+             patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools._governance_ai", mock_ai):
+            mock_gs.run_quality_check = AsyncMock(return_value=report)
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
+            mock_gs.check_governance_review_overdue = AsyncMock(return_value=[])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[])
+            tools_mod.entry_repo.list_saturated_entities = AsyncMock(return_value=[
+                {"entity_id": "ent-1", "entity_name": "ZenOS", "active_count": 20}
+            ])
+            tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=entries)
+
+            result = await analyze(check_type="quality")
+
+            assert "quality" in result
+            assert result["quality"]["entry_saturation_count"] == 1
+            assert result["quality"]["entry_saturation"][0]["consolidation_proposal"] is None
+
 
 # ===================================================================
 # write(collection="entries") tests
@@ -992,6 +1093,7 @@ def _make_entry(**overrides) -> EntityEntry:
         author="Alice",
         source_task_id=None,
         superseded_by=None,
+        archive_reason=None,
         created_at=datetime(2026, 3, 28, tzinfo=timezone.utc),
     )
     defaults.update(overrides)
@@ -1008,6 +1110,7 @@ class TestWriteEntriesCollection:
 
         entry = _make_entry()
         tools_mod.entry_repo.create = AsyncMock(return_value=entry)
+        tools_mod.entry_repo.count_active_by_entity = AsyncMock(return_value=5)
 
         result = await write(
             collection="entries",
@@ -1023,6 +1126,7 @@ class TestWriteEntriesCollection:
         assert result["id"] == "entry-1"
         assert result["type"] == "decision"
         assert result["content"] == "We chose PostgreSQL for reliability"
+        assert "warning" not in result
         tools_mod.entry_repo.create.assert_called_once()
 
     async def test_write_entry_missing_entity_id(self):
@@ -1122,7 +1226,7 @@ class TestWriteEntriesCollection:
         assert result["status"] == "superseded"
         assert result["superseded_by"] == "entry-2"
         tools_mod.entry_repo.update_status.assert_called_once_with(
-            "entry-1", "superseded", "entry-2"
+            "entry-1", "superseded", "entry-2", None
         )
 
     async def test_write_entry_update_status_not_found(self):
@@ -1135,10 +1239,57 @@ class TestWriteEntriesCollection:
         result = await write(
             collection="entries",
             id="nonexistent",
-            data={"status": "archived"},
+            data={"status": "archived", "archive_reason": "manual"},
         )
 
         assert result["error"] == "NOT_FOUND"
+
+    async def test_write_entry_archive_with_reason_success(self):
+        """write entries with status=archived and archive_reason=manual succeeds."""
+        from zenos.interface.tools import write
+        import zenos.interface.tools as tools_mod
+
+        archived_entry = _make_entry(status="archived", archive_reason="manual")
+        tools_mod.entry_repo.update_status = AsyncMock(return_value=archived_entry)
+
+        result = await write(
+            collection="entries",
+            id="entry-1",
+            data={"status": "archived", "archive_reason": "manual"},
+        )
+
+        assert "error" not in result
+        assert result["status"] == "archived"
+        assert result["archive_reason"] == "manual"
+        tools_mod.entry_repo.update_status.assert_called_once_with(
+            "entry-1", "archived", None, "manual"
+        )
+
+    async def test_write_entry_archive_missing_reason(self):
+        """write entries with status=archived but no archive_reason returns INVALID_INPUT."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            id="entry-1",
+            data={"status": "archived"},
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "archive_reason" in result["message"]
+
+    async def test_write_entry_archive_invalid_reason(self):
+        """write entries with invalid archive_reason returns INVALID_INPUT."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            id="entry-1",
+            data={"status": "archived", "archive_reason": "invalid_value"},
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "archive_reason" in result["message"]
 
     async def test_write_entry_superseded_requires_superseded_by(self):
         """write entries with status=superseded requires superseded_by field."""
@@ -1152,6 +1303,49 @@ class TestWriteEntriesCollection:
 
         assert result["error"] == "INVALID_INPUT"
         assert "superseded_by" in result["message"]
+
+
+# ===================================================================
+# write(collection="entries") — saturation warning tests (T2)
+# ===================================================================
+
+@pytest.mark.asyncio
+class TestWriteEntriesSaturationWarning:
+
+    async def test_write_entry_no_warning_when_below_limit(self):
+        """write entries: no warning when active count < 20."""
+        from zenos.interface.tools import write
+        import zenos.interface.tools as tools_mod
+
+        entry = _make_entry()
+        tools_mod.entry_repo.create = AsyncMock(return_value=entry)
+        tools_mod.entry_repo.count_active_by_entity = AsyncMock(return_value=19)
+
+        result = await write(
+            collection="entries",
+            data={"entity_id": "ent-1", "type": "decision", "content": "PostgreSQL chosen"},
+        )
+
+        assert "error" not in result
+        assert "warning" not in result
+
+    async def test_write_entry_warning_when_at_limit(self):
+        """write entries: warning returned when active count >= 20."""
+        from zenos.interface.tools import write
+        import zenos.interface.tools as tools_mod
+
+        entry = _make_entry()
+        tools_mod.entry_repo.create = AsyncMock(return_value=entry)
+        tools_mod.entry_repo.count_active_by_entity = AsyncMock(return_value=20)
+
+        result = await write(
+            collection="entries",
+            data={"entity_id": "ent-1", "type": "decision", "content": "PostgreSQL chosen"},
+        )
+
+        assert "error" not in result
+        assert "warning" in result
+        assert "analyze" in result["warning"]
 
 
 # ===================================================================
