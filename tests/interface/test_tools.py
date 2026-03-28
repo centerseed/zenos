@@ -24,6 +24,7 @@ from zenos.domain.models import (
     Document,
     DocumentTags,
     Entity,
+    EntityEntry,
     Gap,
     Protocol,
     QualityCheckItem,
@@ -47,7 +48,8 @@ def _mock_tool_bootstrap():
     with patch("zenos.interface.tools._ensure_services", new=AsyncMock(return_value=None)), \
          patch("zenos.interface.tools.ontology_service", new=AsyncMock()), \
          patch("zenos.interface.tools.task_service", new=AsyncMock()), \
-         patch("zenos.interface.tools.entity_repo", new=AsyncMock()):
+         patch("zenos.interface.tools.entity_repo", new=AsyncMock()), \
+         patch("zenos.interface.tools.entry_repo", new=AsyncMock()):
         yield
 
 def _make_entity(**overrides) -> Entity:
@@ -972,3 +974,368 @@ class TestAnalyzeTool:
 
         assert result["error"] == "INVALID_INPUT"
         assert "Unknown check_type" in result["message"]
+
+
+# ===================================================================
+# write(collection="entries") tests
+# ===================================================================
+
+def _make_entry(**overrides) -> EntityEntry:
+    defaults = dict(
+        id="entry-1",
+        partner_id="partner-abc",
+        entity_id="ent-1",
+        type="decision",
+        content="We chose PostgreSQL for reliability",
+        status="active",
+        context=None,
+        author="Alice",
+        source_task_id=None,
+        superseded_by=None,
+        created_at=datetime(2026, 3, 28, tzinfo=timezone.utc),
+    )
+    defaults.update(overrides)
+    return EntityEntry(**defaults)
+
+
+@pytest.mark.asyncio
+class TestWriteEntriesCollection:
+
+    async def test_write_entry_success(self):
+        """write(collection='entries') creates an entry and returns serialized result."""
+        from zenos.interface.tools import write
+        import zenos.interface.tools as tools_mod
+
+        entry = _make_entry()
+        tools_mod.entry_repo.create = AsyncMock(return_value=entry)
+
+        result = await write(
+            collection="entries",
+            data={
+                "entity_id": "ent-1",
+                "type": "decision",
+                "content": "We chose PostgreSQL for reliability",
+                "author": "Alice",
+            },
+        )
+
+        assert "error" not in result
+        assert result["id"] == "entry-1"
+        assert result["type"] == "decision"
+        assert result["content"] == "We chose PostgreSQL for reliability"
+        tools_mod.entry_repo.create.assert_called_once()
+
+    async def test_write_entry_missing_entity_id(self):
+        """write entries returns INVALID_INPUT when entity_id is missing."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            data={"type": "decision", "content": "Some content"},
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "entity_id" in result["message"]
+
+    async def test_write_entry_missing_content(self):
+        """write entries returns INVALID_INPUT when content is missing."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            data={"entity_id": "ent-1", "type": "decision"},
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+
+    async def test_write_entry_content_too_long(self):
+        """write entries rejects content exceeding 200 chars."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            data={
+                "entity_id": "ent-1",
+                "type": "decision",
+                "content": "x" * 201,
+            },
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "200" in result["message"]
+
+    async def test_write_entry_empty_content(self):
+        """write entries rejects empty content."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            data={"entity_id": "ent-1", "type": "decision", "content": ""},
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+
+    async def test_write_entry_invalid_type(self):
+        """write entries rejects unknown type value."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            data={"entity_id": "ent-1", "type": "unknown_type", "content": "some content"},
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "type" in result["message"]
+
+    async def test_write_entry_context_too_long(self):
+        """write entries rejects context exceeding 200 chars."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            data={
+                "entity_id": "ent-1",
+                "type": "insight",
+                "content": "Valid content",
+                "context": "c" * 201,
+            },
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "context" in result["message"]
+
+    async def test_write_entry_update_status_supersede(self):
+        """write entries with id updates status for supersede flow."""
+        from zenos.interface.tools import write
+        import zenos.interface.tools as tools_mod
+
+        old_entry = _make_entry(status="superseded", superseded_by="entry-2")
+        tools_mod.entry_repo.update_status = AsyncMock(return_value=old_entry)
+
+        result = await write(
+            collection="entries",
+            id="entry-1",
+            data={"status": "superseded", "superseded_by": "entry-2"},
+        )
+
+        assert "error" not in result
+        assert result["status"] == "superseded"
+        assert result["superseded_by"] == "entry-2"
+        tools_mod.entry_repo.update_status.assert_called_once_with(
+            "entry-1", "superseded", "entry-2"
+        )
+
+    async def test_write_entry_update_status_not_found(self):
+        """write entries update returns NOT_FOUND when entry doesn't exist."""
+        from zenos.interface.tools import write
+        import zenos.interface.tools as tools_mod
+
+        tools_mod.entry_repo.update_status = AsyncMock(return_value=None)
+
+        result = await write(
+            collection="entries",
+            id="nonexistent",
+            data={"status": "archived"},
+        )
+
+        assert result["error"] == "NOT_FOUND"
+
+    async def test_write_entry_superseded_requires_superseded_by(self):
+        """write entries with status=superseded requires superseded_by field."""
+        from zenos.interface.tools import write
+
+        result = await write(
+            collection="entries",
+            id="entry-1",
+            data={"status": "superseded"},
+        )
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "superseded_by" in result["message"]
+
+
+# ===================================================================
+# get(collection="entities") with active_entries tests
+# ===================================================================
+
+@pytest.mark.asyncio
+class TestGetEntitiesActiveEntries:
+
+    async def test_get_entity_by_name_includes_active_entries(self):
+        """get(collection='entities', name=...) includes active_entries in response."""
+        from zenos.interface.tools import get
+        import zenos.interface.tools as tools_mod
+        from zenos.application.ontology_service import EntityWithRelationships
+
+        entity = _make_entity()
+        entry = _make_entry(entity_id=entity.id)
+        result_obj = EntityWithRelationships(entity=entity, relationships=[])
+
+        tools_mod.ontology_service.get_entity = AsyncMock(return_value=result_obj)
+        tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=[entry])
+
+        result = await get(collection="entities", name="Paceriz")
+
+        assert "active_entries" in result
+        assert len(result["active_entries"]) == 1
+        assert result["active_entries"][0]["type"] == "decision"
+        tools_mod.entry_repo.list_by_entity.assert_called_once()
+
+    async def test_get_entity_active_entries_empty_when_none(self):
+        """get(collection='entities') returns empty active_entries list when no entries."""
+        from zenos.interface.tools import get
+        import zenos.interface.tools as tools_mod
+        from zenos.application.ontology_service import EntityWithRelationships
+
+        entity = _make_entity()
+        result_obj = EntityWithRelationships(entity=entity, relationships=[])
+
+        tools_mod.ontology_service.get_entity = AsyncMock(return_value=result_obj)
+        tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=[])
+
+        result = await get(collection="entities", name="Paceriz")
+
+        assert "active_entries" in result
+        assert result["active_entries"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tool 8: governance_guide
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestGovernanceGuideTool:
+    """Tests for the governance_guide MCP tool (DC-1, DC-2, DC-3, DC-4, DC-5, DC-6)."""
+
+    # ── DC-1: Returns correct structure ─────────────────────────────────────
+
+    async def test_returns_correct_structure_for_valid_input(self):
+        """governance_guide returns {topic, level, version, content} for valid input."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="entity", level=1)
+
+        assert result["topic"] == "entity"
+        assert result["level"] == 1
+        assert result["version"] == "1.0"
+        assert isinstance(result["content"], str)
+        assert len(result["content"]) > 0
+
+    async def test_default_level_is_1(self):
+        """governance_guide defaults to level=1 when level not provided."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="capture")
+
+        assert result["level"] == 1
+        assert result["topic"] == "capture"
+
+    # ── DC-2: All four topics × three levels ────────────────────────────────
+
+    @pytest.mark.parametrize("topic", ["entity", "document", "task", "capture"])
+    @pytest.mark.parametrize("level", [1, 2, 3])
+    async def test_all_topics_and_levels_return_content(self, topic, level):
+        """Each of the 12 topic/level combinations returns non-empty content."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic=topic, level=level)
+
+        assert "error" not in result
+        assert result["topic"] == topic
+        assert result["level"] == level
+        assert result["version"] == "1.0"
+        assert isinstance(result["content"], str)
+        assert len(result["content"]) >= 100, (
+            f"Content for {topic} level={level} is too short: {len(result['content'])} chars"
+        )
+
+    async def test_level1_content_is_shorter_than_level3(self):
+        """Level 1 content is shorter than Level 3 for the same topic."""
+        from zenos.interface.tools import governance_guide
+
+        result_l1 = await governance_guide(topic="entity", level=1)
+        result_l3 = await governance_guide(topic="entity", level=3)
+
+        assert len(result_l1["content"]) < len(result_l3["content"])
+
+    # ── DC-3: Invalid input returns INVALID_INPUT error ─────────────────────
+
+    async def test_invalid_topic_returns_error(self):
+        """Invalid topic returns INVALID_INPUT error with valid topics listed."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="unknown_topic", level=1)
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "unknown_topic" in result["message"]
+        # Must list valid topics in the message
+        for valid in ["entity", "document", "task", "capture"]:
+            assert valid in result["message"]
+
+    async def test_invalid_level_returns_error(self):
+        """Invalid level returns INVALID_INPUT error with valid levels listed."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="entity", level=99)
+
+        assert result["error"] == "INVALID_INPUT"
+        assert "99" in result["message"]
+        assert "1/2/3" in result["message"]
+
+    async def test_level_zero_returns_error(self):
+        """Level 0 (boundary) returns INVALID_INPUT error."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="task", level=0)
+
+        assert result["error"] == "INVALID_INPUT"
+
+    async def test_empty_topic_returns_error(self):
+        """Empty string topic returns INVALID_INPUT error."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="", level=1)
+
+        assert result["error"] == "INVALID_INPUT"
+
+    # ── DC-4: Content is server-side (smoke test via import) ────────────────
+
+    async def test_rules_come_from_server_module_not_external_files(self):
+        """Rules are served from GOVERNANCE_RULES dict, not read from filesystem."""
+        from zenos.interface.governance_rules import GOVERNANCE_RULES
+
+        # Verify the dict has all required keys
+        assert set(GOVERNANCE_RULES.keys()) == {"entity", "document", "task", "capture"}
+        for topic, levels in GOVERNANCE_RULES.items():
+            assert set(levels.keys()) == {1, 2, 3}, (
+                f"Topic '{topic}' missing levels: {set(levels.keys())}"
+            )
+
+    # ── DC-5: No internal algorithm details exposed ──────────────────────────
+
+    async def test_entity_rules_do_not_expose_llm_prompts(self):
+        """Entity rules mention three-question requirement but not LLM prompt internals."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="entity", level=3)
+        content = result["content"]
+
+        # Must mention the three-question gate (external rule)
+        assert "三問" in content
+        # Must NOT expose internal LLM prompt details
+        assert "system prompt" not in content.lower()
+        assert "temperature" not in content.lower()
+
+    async def test_capture_rules_describe_routing_not_llm_internals(self):
+        """Capture rules describe routing logic but not LLM model selection internals."""
+        from zenos.interface.tools import governance_guide
+
+        result = await governance_guide(topic="capture", level=2)
+        content = result["content"]
+
+        # External rule: routing is mentioned
+        assert "LAYER_DOWNGRADE_REQUIRED" in content
+        # No internal model details
+        assert "gemini" not in content.lower()
+        assert "flash" not in content.lower()

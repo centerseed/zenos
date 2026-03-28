@@ -1,13 +1,14 @@
-"""ZenOS MCP Server — 7 consolidated tools for ontology + action layer.
+"""ZenOS MCP Server — 8 consolidated tools for ontology + action layer.
 
-Consolidated from 17 tools to 7, optimized for agent comprehension:
-  1. search   — find and list across all collections
-  2. get      — retrieve one specific item by name or ID
-  3. read_source — read raw file content via adapter
-  4. write    — create/update ontology entries
-  5. confirm  — approve knowledge drafts or accept/reject tasks
-  6. task     — create, update, and list action items
-  7. analyze  — run governance health checks
+Consolidated from 17 tools to 7, plus governance_guide:
+  1. search         — find and list across all collections
+  2. get            — retrieve one specific item by name or ID
+  3. read_source    — read raw file content via adapter
+  4. write          — create/update ontology entries
+  5. confirm        — approve knowledge drafts or accept/reject tasks
+  6. task           — create, update, and list action items
+  7. analyze        — run governance health checks
+  8. governance_guide — retrieve governance rules by topic/level (no auth required)
 
 Design principles (from MCP tool description research):
   - Each tool answers ONE agent question ("I want to find...", "I want to write...")
@@ -27,6 +28,7 @@ import logging
 import os
 import time
 import json
+import uuid
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime
@@ -41,6 +43,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 from zenos.application.governance_ai import GovernanceAI
+from zenos.domain.models import EntityEntry
 from zenos.application.governance_service import GovernanceService
 from zenos.application.ontology_service import OntologyService
 from zenos.application.source_service import SourceService
@@ -49,6 +52,7 @@ from zenos.infrastructure.llm_client import create_llm_client
 from zenos.infrastructure.sql_repo import (
     SqlBlindspotRepository,
     SqlDocumentRepository,
+    SqlEntityEntryRepository,
     SqlEntityRepository,
     SqlPartnerKeyValidator,
     SqlProtocolRepository,
@@ -57,6 +61,7 @@ from zenos.infrastructure.sql_repo import (
     get_pool,
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
+from zenos.interface.governance_rules import GOVERNANCE_RULES
 
 # ──────────────────────────────────────────────
 # Agent Identity — ContextVar for partner data
@@ -152,12 +157,13 @@ document_repo: SqlDocumentRepository | None = None
 protocol_repo: SqlProtocolRepository | None = None
 blindspot_repo: SqlBlindspotRepository | None = None
 task_repo: SqlTaskRepository | None = None
+entry_repo: SqlEntityEntryRepository | None = None
 
 
 async def _ensure_repos() -> None:
     """Lazily initialise all SQL repositories on first tool invocation."""
     global _repos_ready, entity_repo, relationship_repo, document_repo
-    global protocol_repo, blindspot_repo, task_repo
+    global protocol_repo, blindspot_repo, task_repo, entry_repo
     if _repos_ready:
         return
     pool = await get_pool()
@@ -167,6 +173,7 @@ async def _ensure_repos() -> None:
     protocol_repo = SqlProtocolRepository(pool)
     blindspot_repo = SqlBlindspotRepository(pool)
     task_repo = SqlTaskRepository(pool)
+    entry_repo = SqlEntityEntryRepository(pool)
     _repos_ready = True
 
 source_adapter = GitHubAdapter()
@@ -256,6 +263,11 @@ def _convert_datetimes(data: dict) -> dict:
         else:
             out[key] = value
     return out
+
+
+def _new_id() -> str:
+    """Generate a short unique ID (32-char hex UUID4)."""
+    return uuid.uuid4().hex
 
 
 def _audit_log(
@@ -356,6 +368,14 @@ async def search(
         ][:limit]
         if matched_tasks:
             results["tasks"] = [_serialize(t) for t in matched_tasks]
+
+        # Also search entity entries content
+        entry_hits = await entry_repo.search_content(query, limit=limit)
+        if entry_hits:
+            results["entries"] = [
+                {**_serialize(hit["entry"]), "entity_name": hit["entity_name"]}
+                for hit in entry_hits
+            ]
 
         return results
 
@@ -497,7 +517,12 @@ async def get(
             result = None
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Entity not found"}
-        return _serialize(result)
+        response = _serialize(result)
+        # Attach active entries so callers see the entity as a knowledge container
+        eid = result.entity.id
+        active_entries = await entry_repo.list_by_entity(eid) if eid else []
+        response["active_entries"] = [_serialize(e) for e in active_entries]
+        return response
 
     elif collection == "protocols":
         if name:
@@ -619,6 +644,7 @@ async def write(
     - 建立 Protocol → collection="protocols"
     - 記錄盲點 → collection="blindspots"
     - 建立關係 → collection="relationships"
+    - 記錄 entity 知識條目 → collection="entries"
 
     不要用這個工具的情境：
     - 管理任務（建立/更新） → 用 task
@@ -645,11 +671,20 @@ async def write(
     blindspots: description, severity(red/yellow/green), suggested_action
     relationships: source_entity_id, target_entity_id, type(depends_on/serves/
                    owned_by/part_of/blocks/related_to/impacts/enables), description
+    entries: entity_id（必填）, type（必填：decision/insight/limitation/change/context）,
+             content（必填：1-200 字元）
+             選填：context（額外脈絡，最多 200 字元）, author, source_task_id
+
+             supersede 流程：
+             1. 先建立新 entry（write collection="entries", data={entity_id, type, content, ...}）
+             2. 拿到新 entry id 後，更新舊 entry 狀態：
+                write collection="entries", id=<舊 entry id>,
+                data={status="superseded", superseded_by=<新 entry id>}
 
     Args:
-        collection: entities/documents/protocols/blindspots/relationships
+        collection: entities/documents/protocols/blindspots/relationships/entries
         data: 集合對應的欄位（見上方說明）
-        id: 更新時提供既有 ID，不提供則新增
+        id: entries 更新 status 時提供既有 entry ID；其他集合新增時不提供
     """
     await _ensure_services()
     try:
@@ -777,11 +812,62 @@ async def write(
             )
             return response
 
+        elif collection == "entries":
+            # Update status flow (e.g. supersede)
+            if id:
+                new_status = data.get("status")
+                superseded_by = data.get("superseded_by")
+                if not new_status:
+                    return {"error": "INVALID_INPUT", "message": "entries 更新時 data 需提供 status"}
+                valid_statuses = {"active", "superseded", "archived"}
+                if new_status not in valid_statuses:
+                    return {"error": "INVALID_INPUT", "message": f"status 必須是 {valid_statuses} 之一"}
+                if new_status == "superseded" and not superseded_by:
+                    return {"error": "INVALID_INPUT", "message": "status=superseded 時必填 superseded_by"}
+                updated = await entry_repo.update_status(id, new_status, superseded_by)
+                if updated is None:
+                    return {"error": "NOT_FOUND", "message": f"Entry '{id}' not found"}
+                return _serialize(updated)
+
+            # Create new entry
+            entity_id = data.get("entity_id")
+            entry_type = data.get("type")
+            content = data.get("content")
+            if not entity_id or not entry_type or not content:
+                return {"error": "INVALID_INPUT", "message": "entries 必填：entity_id, type, content"}
+            if not (1 <= len(content) <= 200):
+                return {"error": "INVALID_INPUT", "message": "content 必須 1-200 字元"}
+            valid_types = {"decision", "insight", "limitation", "change", "context"}
+            if entry_type not in valid_types:
+                return {"error": "INVALID_INPUT", "message": f"type 必須是 {valid_types} 之一"}
+            context = data.get("context")
+            if context and len(context) > 200:
+                return {"error": "INVALID_INPUT", "message": "context 最多 200 字元"}
+
+            pid = (_current_partner.get() or {}).get("id", "")
+            entry = EntityEntry(
+                id=_new_id(),
+                partner_id=pid,
+                entity_id=entity_id,
+                type=entry_type,
+                content=content,
+                context=context,
+                author=data.get("author"),
+                source_task_id=data.get("source_task_id"),
+            )
+            result = await entry_repo.create(entry)
+            _audit_log(
+                event_type="ontology.entry.create",
+                target={"collection": collection, "id": result.id},
+                changes={"input": data},
+            )
+            return _serialize(result)
+
         else:
             return {
                 "error": "INVALID_INPUT",
                 "message": f"Unknown collection '{collection}'. "
-                f"Use: entities, documents, protocols, blindspots, relationships",
+                f"Use: entities, documents, protocols, blindspots, relationships, entries",
             }
     except (ValueError, KeyError, TypeError) as e:
         return {"error": "INVALID_INPUT", "message": str(e)}
@@ -1442,6 +1528,61 @@ async def analyze(
             pass
 
     return results
+
+
+# ===================================================================
+# Tool 8: governance_guide — retrieve governance rules by topic/level
+# ===================================================================
+
+_VALID_TOPICS = frozenset(GOVERNANCE_RULES.keys())
+_VALID_LEVELS = frozenset({1, 2, 3})
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def governance_guide(
+    topic: str,
+    level: int = 1,
+) -> dict:
+    """取得 ZenOS 治理規則指南。
+
+    讓任何 MCP client 按需載入 ZenOS 治理規則，取代 local skill 文件。
+    規則分四個主題，三個深度層級。不需要 DB 連線，不需要 partner key。
+
+    使用時機：
+    - 開始 capture/write 操作前想確認規則 → governance_guide(topic="entity", level=1)
+    - 需要完整建票規則 → governance_guide(topic="task", level=2)
+    - 需要含範例的 capture 指南 → governance_guide(topic="capture", level=3)
+
+    Args:
+        topic: 規則主題。entity=L2知識節點治理, document=L3文件治理,
+               task=任務建票與驗收, capture=知識捕獲分層路由
+        level: 深度層級。1=核心摘要(~1k tokens), 2=完整規則(~2-3k),
+               3=含範例(~3-5k)。預設 1。
+
+    Returns:
+        dict with keys: topic, level, version, content
+        On invalid input: {"error": "INVALID_INPUT", "message": "..."}
+    """
+    if topic not in _VALID_TOPICS:
+        return {
+            "error": "INVALID_INPUT",
+            "message": f"topic 必須是 {sorted(_VALID_TOPICS)} 之一，收到：'{topic}'",
+        }
+    if level not in _VALID_LEVELS:
+        return {
+            "error": "INVALID_INPUT",
+            "message": f"level 必須是 1/2/3，收到：{level}",
+        }
+
+    return {
+        "topic": topic,
+        "level": level,
+        "version": "1.0",
+        "content": GOVERNANCE_RULES[topic][level],
+    }
 
 
 # ===================================================================

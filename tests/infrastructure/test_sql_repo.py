@@ -953,3 +953,175 @@ class TestCrossTenantAndTransaction:
         asyncio.get_event_loop().run_until_complete(repo.add(bs))
 
         conn.transaction.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SqlEntityEntryRepository
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSqlEntityEntryRepository:
+
+    @pytest.fixture(autouse=True)
+    def patch_partner(self, monkeypatch):
+        _set_partner(monkeypatch)
+
+    def _entry_row(self, eid: str = "entry1") -> dict:
+        return {
+            "id": eid,
+            "partner_id": PARTNER_ID,
+            "entity_id": "ent1",
+            "type": "decision",
+            "content": "We decided to use PostgreSQL",
+            "context": "After evaluating DynamoDB",
+            "author": "Alice",
+            "source_task_id": None,
+            "status": "active",
+            "superseded_by": None,
+            "created_at": NOW,
+        }
+
+    def test_create_inserts_and_returns_entry(self, monkeypatch):
+        """create() inserts row and returns the entry with partner_id scoping."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.domain.models import EntityEntry
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlEntityEntryRepository(pool)
+        entry = EntityEntry(
+            id="entry1",
+            partner_id=PARTNER_ID,
+            entity_id="ent1",
+            type="decision",
+            content="We decided to use PostgreSQL",
+            created_at=NOW,
+        )
+        result = asyncio.get_event_loop().run_until_complete(repo.create(entry))
+
+        assert result.id == "entry1"
+        assert result.content == "We decided to use PostgreSQL"
+        # Verify SQL was called with partner_id as $2
+        sql = conn.execute.call_args[0][0]
+        assert "entity_entries" in sql
+        assert conn.execute.call_args[0][2] == PARTNER_ID
+
+    def test_get_by_id_returns_entry_when_found(self, monkeypatch):
+        """get_by_id maps row to EntityEntry domain model with partner_id scoping."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        import asyncio
+
+        row = _make_row(**self._entry_row("entry1"))
+        pool, conn = _make_pool(fetchrow=row)
+        repo = SqlEntityEntryRepository(pool)
+
+        entry = asyncio.get_event_loop().run_until_complete(repo.get_by_id("entry1"))
+
+        assert entry is not None
+        assert entry.id == "entry1"
+        assert entry.type == "decision"
+        assert entry.content == "We decided to use PostgreSQL"
+        assert entry.status == "active"
+        assert entry.context == "After evaluating DynamoDB"
+        sql = conn.fetchrow.call_args[0][0]
+        assert "partner_id" in sql
+        assert conn.fetchrow.call_args[0][2] == PARTNER_ID
+
+    def test_get_by_id_returns_none_when_missing(self):
+        """get_by_id returns None when row not found."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        import asyncio
+
+        pool, _ = _make_pool(fetchrow=None)
+        repo = SqlEntityEntryRepository(pool)
+        entry = asyncio.get_event_loop().run_until_complete(repo.get_by_id("missing"))
+        assert entry is None
+
+    def test_list_by_entity_filters_by_active_status_by_default(self, monkeypatch):
+        """list_by_entity default status='active' adds status filter to SQL."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        import asyncio
+
+        row = _make_row(**self._entry_row("entry1"))
+        pool, conn = _make_pool(fetch=[row])
+        repo = SqlEntityEntryRepository(pool)
+
+        entries = asyncio.get_event_loop().run_until_complete(repo.list_by_entity("ent1"))
+
+        assert len(entries) == 1
+        assert entries[0].entity_id == "ent1"
+        sql = conn.fetch.call_args[0][0]
+        assert "status" in sql
+        assert conn.fetch.call_args[0][3] == "active"
+
+    def test_list_by_entity_with_status_none_omits_status_filter(self, monkeypatch):
+        """list_by_entity(status=None) fetches all statuses for an entity."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        import asyncio
+
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlEntityEntryRepository(pool)
+
+        asyncio.get_event_loop().run_until_complete(repo.list_by_entity("ent1", status=None))
+
+        sql = conn.fetch.call_args[0][0]
+        # status parameter $3 should NOT appear when status=None
+        assert "$3" not in sql
+
+    def test_update_status_returns_updated_entry(self, monkeypatch):
+        """update_status issues UPDATE...RETURNING and maps result to EntityEntry."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        import asyncio
+
+        updated_row_data = self._entry_row("entry1")
+        updated_row_data["status"] = "superseded"
+        updated_row_data["superseded_by"] = "entry2"
+        row = _make_row(**updated_row_data)
+        pool, conn = _make_pool(fetchrow=row)
+        repo = SqlEntityEntryRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            repo.update_status("entry1", "superseded", "entry2")
+        )
+
+        assert result is not None
+        assert result.status == "superseded"
+        assert result.superseded_by == "entry2"
+        sql = conn.fetchrow.call_args[0][0]
+        assert "UPDATE" in sql
+        assert "RETURNING" in sql
+        assert "partner_id" in sql
+
+    def test_update_status_returns_none_when_not_found(self):
+        """update_status returns None when entry not found."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        import asyncio
+
+        pool, _ = _make_pool(fetchrow=None)
+        repo = SqlEntityEntryRepository(pool)
+        result = asyncio.get_event_loop().run_until_complete(
+            repo.update_status("missing", "archived")
+        )
+        assert result is None
+
+    def test_search_content_returns_entries_with_entity_name(self, monkeypatch):
+        """search_content JOINs entities table and returns entity_name context."""
+        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        import asyncio
+
+        row_data = self._entry_row("entry1")
+        row_data["entity_name"] = "ZenOS Core"
+        row = _make_row(**row_data)
+        pool, conn = _make_pool(fetch=[row])
+        repo = SqlEntityEntryRepository(pool)
+
+        results = asyncio.get_event_loop().run_until_complete(
+            repo.search_content("PostgreSQL")
+        )
+
+        assert len(results) == 1
+        assert results[0]["entity_name"] == "ZenOS Core"
+        assert results[0]["entry"].content == "We decided to use PostgreSQL"
+        sql = conn.fetch.call_args[0][0]
+        assert "JOIN" in sql
+        assert "LOWER" in sql
+        assert "partner_id" in sql

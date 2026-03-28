@@ -6,6 +6,9 @@ import pytest
 
 from zenos.domain.models import (
     Entity,
+    EntityEntry,
+    EntryStatus,
+    EntryType,
     EntityType,
     RelationshipType,
     Tags,
@@ -101,3 +104,69 @@ class TestEntityLevelField:
             level=None,
         )
         assert entity.level is None
+
+
+# ──────────────────────────────────────────────
+# EntityEntry domain model
+# ──────────────────────────────────────────────
+
+class TestEntityEntryModel:
+    def test_entry_type_enum_values(self):
+        assert EntryType.DECISION == "decision"
+        assert EntryType.INSIGHT == "insight"
+        assert EntryType.LIMITATION == "limitation"
+        assert EntryType.CHANGE == "change"
+        assert EntryType.CONTEXT == "context"
+        assert len(EntryType) == 5
+
+    def test_entry_status_enum_values(self):
+        assert EntryStatus.ACTIVE == "active"
+        assert EntryStatus.SUPERSEDED == "superseded"
+        assert EntryStatus.ARCHIVED == "archived"
+        assert len(EntryStatus) == 3
+
+    def test_entity_entry_defaults(self):
+        entry = EntityEntry(
+            id="e1",
+            partner_id="p1",
+            entity_id="ent1",
+            type=EntryType.DECISION,
+            content="A decision was made",
+        )
+        assert entry.status == "active"
+        assert entry.context is None
+        assert entry.author is None
+        assert entry.source_task_id is None
+        assert entry.superseded_by is None
+        assert entry.created_at is not None
+
+    def test_entity_entry_all_fields(self):
+        from datetime import datetime, timezone
+        ts = datetime(2026, 3, 28, tzinfo=timezone.utc)
+        entry = EntityEntry(
+            id="e1",
+            partner_id="p1",
+            entity_id="ent1",
+            type=EntryType.INSIGHT,
+            content="An insight about the domain",
+            status=EntryStatus.SUPERSEDED,
+            context="Additional context here",
+            author="Barry",
+            source_task_id="task-99",
+            superseded_by="e2",
+            created_at=ts,
+        )
+        assert entry.type == "insight"
+        assert entry.status == "superseded"
+        assert entry.superseded_by == "e2"
+        assert entry.author == "Barry"
+        assert entry.created_at == ts
+
+    def test_entry_type_is_str_enum(self):
+        """EntryType members are also plain strings (str, Enum)."""
+        assert isinstance(EntryType.DECISION, str)
+        assert EntryType.DECISION == "decision"
+
+    def test_entry_status_is_str_enum(self):
+        assert isinstance(EntryStatus.ACTIVE, str)
+        assert EntryStatus.ACTIVE == "active"

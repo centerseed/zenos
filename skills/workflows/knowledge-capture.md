@@ -1,16 +1,17 @@
 ---
-type: SKILL
-id: knowledge-capture
-status: Draft
-ontology_entity: TBD
-created: 2026-03-27
-updated: 2026-03-27
+name: zenos-capture
+description: >
+  從當前對話、單一文件、或整個專案目錄擷取知識並寫入 ZenOS ontology。
+  三種模式：(1) 無引數 = 從最近對話捕獲；(2) 單一檔案 = 讀該檔案；
+  (3) 目錄路徑 = 首次建構模式，自動掃描目錄內所有文件並批量建構 ontology。
+  當使用者說「存進 ontology」「記到 ZenOS」「capture 這段」「/zenos-capture」，
+  或說「把這個專案加入 ZenOS」「幫我建這個服務的 ontology」「把這個 repo 的文件掃進去」，
+  或在討論完某個設計決策後想保存到知識層時，一定要使用這個 skill。
+  引數範例：無引數、path/to/file.md、/Users/me/project/（目錄）
+version: 2.1.0
 ---
 
-> 權威來源：本文件是 `/zenos-capture` 操作流程的 SSOT。
-> `.claude/skills/zenos-capture/SKILL.md` 為舊格式，以本文件（`skills/workflows/knowledge-capture.md`）為準。
-
-# knowledge-capture — 知識捕獲 + 首次建構
+# /zenos-capture — 知識捕獲 + 首次建構
 
 你是 ZenOS 的知識治理 agent。根據引數自動選擇模式：
 
@@ -92,8 +93,6 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 
 ### C3. 第二階段：全局 L2 統合
 
-> L2 三問判斷與 impacts 撰寫規則見 `skills/governance/l2-knowledge-governance.md`
-
 這是核心步驟。你已經讀完所有核心文件，現在以全公司的視野統合理解，按以下 5 步思考，**最後一次性呈現 proposals，等用戶確認後才寫入**。
 
 **Step 1：全景理解**
@@ -127,17 +126,8 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
 從全局理解推斷 impacts 關聯——需要同時理解 A 和 B 才能判斷：
 - 每個 L2 至少要有一條 relationship
 - `impacts` 是最核心的關係類型：「A 改了，B 必須跟著檢查」
-- description 格式：「A 改了{什麼}→ B 的{什麼}要跟著看」（description 必須含 `→`，Server 會驗證）
+- description 格式：「A 改了{什麼}→ B 的{什麼}要跟著看」
 - 說不出具體場景的關係 = noise，不該建
-
-**L2 進入 proposals 的硬性前置條件（兩關都要過，才列入下方輸出）：**
-
-1. 三問全過（Step 2 三問均回答 Yes）
-2. 至少說得出 1 條具體 impacts（Step 5 能填完「A 改了什麼→B 的什麼要跟著看」）
-
-任何一關未過的候選，**不得列入 L2 proposals**，直接走分層路由決策樹降為 L3 document 或 sources。
-
-> 設計理由：impacts gate 只在 `confirm` 時由 Server 驗證，capture 時不擋。若 capture 不自我設限，骨架層會堆滿三問未通過的 draft，ontology 退化成文件索引。這個前置條件是 capture skill 自我執行的品質底線。
 
 **C3 輸出格式（一次性呈現，等用戶確認後寫入）：**
 
@@ -154,8 +144,6 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
   How:  {現在怎麼運作——白話描述，不是技術實作}
   Who:  {誰需要知道——列出所有相關角色}
   來源文件：{從哪些文件統合出這個概念}
-  三問：✓ 跨時間存活 ✓ 跨角色（≥2 個）✓ 公司共識
-  Impacts 草稿：「{A 改了什麼}→{B 的什麼要跟著看}」
 
 [2] ...
 
@@ -179,17 +167,12 @@ L2 entity 寫入時：
 - `parent_id` = product entity ID（**必填**，沒有 parent_id = Dashboard 上看不到）
 - `confirmed_by_user = true`（用戶確認的）
 - `sources` = 從哪些文件統合出這個概念（支援跨文件統合）
-- `layer_decision` = `{q1_persistent: true, q2_cross_role: true, q3_company_consensus: true, impacts_draft: "{proposals 中的 Impacts 草稿}"}`（**Server 強制驗證**，缺少或三問不全通過會被阻擋）
 
 Relationship 寫入時：
 - `type` 可以是 `impacts`、`depends_on`、`part_of`、`enables`
-- `description` 必須具體——不是「A 依賴 B」，是「A 改了{什麼}→ B 的{什麼}要跟著看」；`impacts` 描述必須含 `→`，否則 confirm 時 Server 會擋下
-- **Relationship 不能塞在 entity write 的 data 裡**；必須用 `write(collection="relationships", ...)` 單獨寫入
-- **去重機制**：相同 source→target→type 的組合已存在時，re-write 只會回傳舊的，不會更新描述。若需要修正描述，必須換一個不同的 target entity 建新關聯
+- `description` 必須具體——不是「A 依賴 B」，是「A 改了{什麼}→ B 的{什麼}要跟著看」
 
 ### C4. 第三階段：P1 文件 — 建 document entry
-
-> 文件治理合規流程見 `skills/governance/document-governance.md`
 
 為每份 P1 文件建立 document entry（C2 已讀過內容，直接寫入，不需要重讀）：
 
@@ -286,6 +269,21 @@ L2 概念層（entities）：
 | 文件更新 | 已知文件的狀態或摘要需要更新 |
 | 盲點 | 發現的知識缺口、風險、矛盾 |
 
+**知識條目候選（自動寫入，不需確認）**：
+
+對已存在的 L2 entity，識別對話/文件中 **code 裡不存在** 的知識：
+
+| entry type | 識別信號 | 範例 |
+|-----------|---------|------|
+| `decision` | 「決定用 X 不用 Y」「選擇了 A 方案」 | 「選 VDOT 不選心率區間，因為 Garmin 心率不穩」 |
+| `insight` | 「發現…」「原來…」「關鍵認知」 | 「小模型+全局數據 > 大模型+局部視野」 |
+| `limitation` | 「但是…」「限制是…」「已知問題」 | 「LLM 偶爾產出非法 JSON」 |
+| `change` | 「改成…」「從 X 改為 Y」「不再…」 | 「recovery week 從三級改兩級」 |
+| `context` | 「當初是因為…」「背景是…」 | 「最初做這個是為了解決客戶 onboarding 太慢」 |
+
+**判斷標準：這個知識在 code 裡看得到嗎？看得到就不記。**
+看不到的才值得記——設計決策的理由、選型的脈絡、踩過的坑、改變的原因。
+
 若找不到任何候選，回覆：
 > 這段對話/文件沒有發現值得捕獲的新知識。如果你認為有遺漏，告訴我哪個部分值得存入。
 
@@ -324,6 +322,78 @@ write(collection="documents", data={
 
 若無 git remote → `file://{絕對路徑}`（並在 summary 中標記）
 
+### Step 3.5：知識條目 — 撈、比對、寫入
+
+對 Step 1 識別的每個知識條目候選，執行以下流程：
+
+**3.5a. 撈現有 entries**
+
+```
+# 確認目標 L2 entity 存在
+search(collection="entities", query="{相關 L2 名稱}")
+
+# 撈該 L2 的所有 active entries
+search(collection="entries", entity_id="{L2 entity ID}", status="active")
+```
+
+**3.5b. LLM 比對候選 vs 現有 entries**
+
+拿到現有 entries 後，逐條比對候選內容：
+
+| 比對結果 | 判斷標準 | 動作 |
+|---------|---------|------|
+| **完全重複** | 現有 entry 已說了同樣的事（語意相同，不只是字面相同） | 跳過，不寫 |
+| **同主題有新資訊** | 現有 entry 講同一件事，但候選包含更完整/更新的描述 | supersede 舊 entry + 寫新 entry |
+| **矛盾（決策被推翻）** | 現有 decision 說用 A，候選 decision 說改用 B | supersede 舊 entry + 寫新 entry |
+| **全新知識** | 現有 entries 裡沒有相關內容 | 直接寫入新 entry |
+
+**3.5c. 執行寫入**
+
+```
+# 情況 1：全新 → 直接寫
+write(collection="entries", data={
+  entity_id: "{L2 entity ID}",
+  type: "decision",
+  content: "選 VDOT 不選心率區間，因為 Garmin 心率前幾分鐘不穩",
+  context: "在評估了三種方案後做出的決定",  # 可選
+  author: "{發言者或 agent}"
+})
+
+# 情況 2：supersede → 先更新舊的，再寫新的
+write(collection="entries", id="{舊 entry ID}", data={
+  status: "superseded",
+  superseded_by: "{新 entry ID}"
+})
+write(collection="entries", data={
+  entity_id: "{L2 entity ID}",
+  type: "decision",
+  content: "改用方案 B，因為方案 A 在大流量下效能不足",
+  author: "{發言者或 agent}"
+})
+```
+
+**寫入規則**：
+- content 必須 ≤ 200 字元（~100 中文字）。寫不下代表要拆成多條或粒度太大
+- context 可選，也 ≤ 200 字元
+- 一條 entry 只掛一個 entity。如果一個決策影響多個 L2，為每個 L2 各寫一條，從該 L2 的角度描述
+- 不寫 code 裡已經有的知識（函式功能、API 介面、模組結構）
+- entry 建了就是 active，沒有 draft→confirmed 流程
+- 語意比對由 client LLM 執行（server 小模型無法可靠判斷語意重複）
+
+**呈現格式**（在 Step 4 骨架層 proposals 之前列出，不需要用戶確認）：
+
+```
+── 知識條目 ────────────────────────────────────
+  [E1] 新增 decision → 語意治理 Pipeline
+    「選 VDOT 不選心率區間，因為 Garmin 心率前幾分鐘不穩」
+  [E2] 新增 insight → MCP 介面設計
+    「小模型+全局數據 > 大模型+局部視野」
+  [E3] supersede decision → Action Layer
+    舊：「用三級 recovery week」→ 新：「改用兩級，跟 weekly plan v2 對齊」
+  [--] 跳過 1 條重複（語意治理 Pipeline 已有相同 insight）
+────────────────────────────────────────────────
+```
+
 ### Step 4：骨架層列出等待確認
 
 ```
@@ -355,6 +425,9 @@ write(collection="documents", data={
 ```
 ✅ /zenos-capture 完成
 
+知識條目（自動寫入）：
+  • [decision] {content 摘要} → {L2 entity 名稱}
+  • [insight] {content 摘要} → {L2 entity 名稱}
 神經層（自動 draft）：• {文件標題} → documents/{id}
 骨架層（你確認的）：• {實體名稱} → entities/{id}
 待確認：呼叫 search(confirmed_only=false) 查看
@@ -369,6 +442,9 @@ write(collection="documents", data={
 - **不存原始內容**：只存語意摘要，原文留在來源（Git/Drive）
 - **首次建構先骨架後神經**：先確認實體結構，再大量建文件 entry
 - **快**：核心價值是在知識產生點捕獲，速度比完美更重要
+- **只記 code 裡沒有的知識**：entry 記的是決策脈絡、已知限制、重要變更——agent 讀 code 拿不到的東西。模組功能描述、API 介面這類 code 裡有的不記
+- **100 字一個知識點**：entry content 上限 200 字元（~100 中文字）。寫不下代表要拆或粒度太大
+- **Entry 不需要確認**：entry 建了就是 active，沒有 draft→confirmed。品質靠 server 端 Internal 治理 API
 
 ---
 
@@ -405,8 +481,18 @@ write(collection="documents", data={
 - `entity_id` 必須是已存在的 entity
 - `content` 必須包含四維：`what` / `why` / `how` / `who`
 
+### Entry 驗證
+- `entity_id` 必須是已存在的 entity
+- `type` 必須是：`decision` / `insight` / `limitation` / `change` / `context`
+- `content` 必填，上限 200 字元（~100 中文字）
+- `context` 可選，上限 200 字元
+- `status` 必須是：`active` / `superseded` / `archived`
+- `status = superseded` 時 `superseded_by` 必填
+- 沒有 `confirmed_by_user`，建了就是 active
+
 ### 建議的寫入順序
 1. 先建 product entity（拿到 ID）
 2. 再建 module entity（帶 parent_id 指向 product）
 3. 再建 relationships（source/target 都已存在）
 4. 建 documents（帶 linked_entity_ids + 寫入前用 source.uri 查重，已存在就跳過）
+5. 建 entries（帶 entity_id 指向已存在的 L2 entity）

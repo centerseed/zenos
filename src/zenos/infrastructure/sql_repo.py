@@ -21,6 +21,7 @@ from zenos.domain.models import (
     Document,
     DocumentTags,
     Entity,
+    EntityEntry,
     Gap,
     Protocol as OntologyProtocol,
     Relationship,
@@ -1121,3 +1122,128 @@ class SqlPartnerKeyValidator:
             logger.exception("Failed to refresh partner cache from SQL")
             if not self._cache:
                 self._cache_ts = time.time()
+
+
+# ===================================================================
+# EntityEntry Repository
+# ===================================================================
+
+
+def _row_to_entry(row: asyncpg.Record) -> EntityEntry:
+    return EntityEntry(
+        id=row["id"],
+        partner_id=row["partner_id"],
+        entity_id=row["entity_id"],
+        type=row["type"],
+        content=row["content"],
+        context=row["context"],
+        author=row["author"],
+        source_task_id=row["source_task_id"],
+        status=row["status"],
+        superseded_by=row["superseded_by"],
+        created_at=_to_dt(row["created_at"]) or _now(),
+    )
+
+
+class SqlEntityEntryRepository:
+    """PostgreSQL-backed repository for entity knowledge entries.
+
+    All queries are scoped by partner_id to enforce multi-tenant isolation.
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def create(self, entry: EntityEntry) -> EntityEntry:
+        """Insert a new entry and return it."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {SCHEMA}.entity_entries (
+                    id, partner_id, entity_id, type, content,
+                    context, author, source_task_id, status,
+                    superseded_by, created_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                """,
+                entry.id, pid, entry.entity_id, entry.type, entry.content,
+                entry.context, entry.author, entry.source_task_id, entry.status,
+                entry.superseded_by, entry.created_at,
+            )
+        return entry
+
+    async def get_by_id(self, entry_id: str) -> EntityEntry | None:
+        """Fetch a single entry by ID, scoped to the current partner."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT * FROM {SCHEMA}.entity_entries WHERE id = $1 AND partner_id = $2",
+                entry_id, pid,
+            )
+        return _row_to_entry(row) if row else None
+
+    async def list_by_entity(
+        self, entity_id: str, status: str | None = "active"
+    ) -> list[EntityEntry]:
+        """List entries for an entity. Defaults to active only; pass None for all."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            if status is not None:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {SCHEMA}.entity_entries
+                        WHERE partner_id = $1 AND entity_id = $2 AND status = $3
+                        ORDER BY created_at DESC""",
+                    pid, entity_id, status,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {SCHEMA}.entity_entries
+                        WHERE partner_id = $1 AND entity_id = $2
+                        ORDER BY created_at DESC""",
+                    pid, entity_id,
+                )
+        return [_row_to_entry(r) for r in rows]
+
+    async def update_status(
+        self, entry_id: str, status: str, superseded_by: str | None = None
+    ) -> EntityEntry | None:
+        """Update entry status (e.g. for supersede flow). Returns updated entry or None."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""UPDATE {SCHEMA}.entity_entries
+                    SET status = $1, superseded_by = $2
+                    WHERE id = $3 AND partner_id = $4
+                    RETURNING *""",
+                status, superseded_by, entry_id, pid,
+            )
+        return _row_to_entry(row) if row else None
+
+    async def search_content(self, query: str, limit: int = 20) -> list[dict]:
+        """Search entries by content keyword, returning entries with entity context.
+
+        Returns a list of dicts: {entry: EntityEntry, entity_id: str}.
+        The caller can enrich with entity names via entity_repo.
+        """
+        pid = _get_partner_id()
+        query_lower = f"%{query.lower()}%"
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT ee.*, e.name AS entity_name
+                    FROM {SCHEMA}.entity_entries ee
+                    JOIN {SCHEMA}.entities e
+                      ON e.id = ee.entity_id AND e.partner_id = ee.partner_id
+                    WHERE ee.partner_id = $1
+                      AND LOWER(ee.content) LIKE $2
+                    ORDER BY ee.created_at DESC
+                    LIMIT $3""",
+                pid, query_lower, limit,
+            )
+        results = []
+        for row in rows:
+            entry = _row_to_entry(row)
+            results.append({
+                "entry": entry,
+                "entity_name": row["entity_name"],
+            })
+        return results

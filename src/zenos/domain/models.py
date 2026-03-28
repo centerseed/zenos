@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 
 
@@ -308,3 +308,42 @@ class Task:
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None
+
+
+# ──────────────────────────────────────────────
+# Entity Entries (知識容器)
+# ──────────────────────────────────────────────
+
+class EntryType(str, Enum):
+    DECISION = "decision"
+    INSIGHT = "insight"
+    LIMITATION = "limitation"
+    CHANGE = "change"
+    CONTEXT = "context"
+
+
+class EntryStatus(str, Enum):
+    ACTIVE = "active"
+    SUPERSEDED = "superseded"
+    ARCHIVED = "archived"
+
+
+@dataclass
+class EntityEntry:
+    """A structured knowledge entry attached to an L2 entity.
+
+    Entries make an entity a knowledge container, not just an index pointer.
+    Each entry captures a specific type of knowledge (decision, insight, etc.)
+    with an optional context and lineage (superseded_by).
+    """
+    id: str
+    partner_id: str
+    entity_id: str
+    type: str  # EntryType value
+    content: str  # 1-200 chars
+    status: str = "active"  # EntryStatus value
+    context: str | None = None  # optional extra context, max 200 chars
+    author: str | None = None
+    source_task_id: str | None = None
+    superseded_by: str | None = None  # ID of the entry that supersedes this one
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
