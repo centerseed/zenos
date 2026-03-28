@@ -4,98 +4,66 @@ id: setup
 status: Draft
 ontology_entity: TBD
 created: 2026-03-27
-updated: 2026-03-27
+updated: 2026-03-28
 ---
-
-> 權威來源：本文件是 `/zenos-setup` 操作流程的 SSOT。
-> `.claude/skills/zenos-setup/SKILL.md` 為舊格式，以本文件（`skills/workflows/setup.md`）為準。
 
 # setup — ZenOS 初始化與更新
 
-本 skill 有兩種執行路徑，自動判斷：
+本 skill 讓任何 AI agent（Claude Code、Codex、Gemini、ChatGPT、自建 agent）
+在任何專案中啟用 ZenOS 治理能力。
 
-| 路徑 | 觸發條件 | 執行步驟 |
-|------|---------|---------|
-| **首次設定** | MCP 連不上 | Step 0 → Step 1（MCP 設定）→ 重啟 → Step 2 → Step 3 |
-| **更新模式** | MCP 已通 | Step 0 → Step 2（pull 最新 skills + 薄殼）→ Step 3（檢查 prompt） |
-
-設定一次 MCP 後，之後只要跑 `/zenos-setup` 就會自動走更新模式，pull 最新治理 skill 到本地專案。
+**設計原則**：本文件定義「要達成什麼」，不綁死「怎麼做」。
+各平台的 agent 足夠聰明，能根據原則自行完成平台特定的設定。
 
 ---
 
-## Step 0：探測 MCP 連線
+## 執行路徑（自動判斷）
 
-**嘗試呼叫 MCP：**
+| 路徑 | 觸發條件 | 做什麼 |
+|------|---------|--------|
+| **首次設定** | MCP 連不上 | Step 1 → Step 2 → Step 3 → Step 4 |
+| **更新模式** | MCP 已通 | Step 2 → Step 3（檢查）→ Step 4 |
+
+設定一次後，之後跑 setup 就只會 pull 最新 skills。
+
+---
+
+## Step 1：MCP 連線
+
+### 1a. 先探測
+
+嘗試呼叫 ZenOS MCP（Cloud Run 有冷啟動，最多重試 3 次，間隔 5-10 秒）：
 
 ```
 mcp__zenos__search(query="ZenOS", collection="entities")
 ```
 
-Cloud Run 有冷啟動延遲，第一次可能超時。**最多重試 3 次，每次間隔 5-10 秒**。
-
-**判斷結果：**
-
 | 結果 | 下一步 |
 |------|--------|
-| 收到正常回應（有結果或空列表） | MCP 已通 → **跳到 Step 2（更新模式）** |
-| 連續 3 次超時或連線錯誤 | MCP 未設定 → **進入 Step 1（首次設定）** |
-| 回傳 401 / 403（認證失敗） | token 過期或無效 → **進入 Step 1** |
+| 正常回應 | MCP 已通 → **跳到 Step 2** |
+| 連續超時或連線錯誤 | 進入 1b |
+| 401 / 403 | token 無效，進入 1b |
 
-**若 MCP 已通（更新模式），告知用戶：**
+### 1b. 設定 MCP（僅在 1a 未通時）
 
-```
-✅ MCP 已連線，進入更新模式。
-正在為你 pull 最新的治理 skill...
-```
+**問用戶要 API token**，然後把 MCP endpoint 設定寫入當前平台的 MCP 設定位置。
 
----
-
-## Step 1：MCP 連線設定（僅在 Step 0 未通時執行）
-
-### 確認使用模式
+MCP endpoint 資訊：
 
 ```
-你要設定哪種模式？
-
-[1] Cloud 模式（推薦）
-    連到 ZenOS 雲端服務，需要 API token
-    適合：一般用戶、行銷夥伴、客戶
-
-[2] 本地開發模式
-    在本機跑 ZenOS MCP server，需要 GCP + GitHub 憑證
-    適合：ZenOS 開發者
-
-請輸入 1 或 2：
+URL:  https://zenos-mcp-165893875709.asia-east1.run.app/mcp
+認證: URL query parameter ?api_key={TOKEN}
+協定: HTTP (Streamable HTTP MCP)
 ```
 
-### Cloud 模式（選 1）
+**設定原則（不綁平台）：**
 
-**問用戶要 API token：**
+1. 找到當前平台存放 MCP server 設定的位置
+2. 新增一個名為 `zenos` 的 MCP server，類型 HTTP，URL 如上
+3. Token 不可進 git——確認該設定檔在 `.gitignore` 中
+4. 設定完成後可能需要重啟 agent 環境才生效
 
-```
-請輸入你的 ZenOS API token：
-（從 ZenOS 管理員或 https://zenos.app/settings 取得）
-```
-
-等用戶貼上 token 後，執行：
-
-```bash
-python .claude/skills/zenos-setup/scripts/setup.py --token {用戶輸入的 token}
-```
-
-**如果 script 成功：**
-```
-✅ MCP 設定完成！
-
-已寫入 .claude/mcp.json：
-  zenos (Cloud) → https://zenos-mcp-xxx.run.app/mcp
-
-需要重啟 Claude Code 才能生效（Cmd+R 或關掉重開）。
-重啟後再執行一次 /zenos-setup，會自動跳到 skill 同步步驟。
-```
-
-**如果 script 失敗（Python 不在路徑等）：**
-手動引導用戶建立 `.claude/mcp.json`：
+**Claude Code 參考**：設定檔為 `.claude/mcp.json`（專案）或 `~/.claude/mcp.json`（全域）：
 
 ```json
 {
@@ -108,250 +76,163 @@ python .claude/skills/zenos-setup/scripts/setup.py --token {用戶輸入的 toke
 }
 ```
 
-把 `{TOKEN}` 替換成用戶輸入的 token，存到專案根目錄的 `.claude/mcp.json`。
-
-### 本地開發模式（選 2）
-
-依序問用戶：
-
-```
-1. Google Cloud Project ID（如 zenos-naruvia）：
-2. GitHub Personal Access Token（ghp_ 開頭）：
-3. Python venv 路徑（預設 .venv/bin/python，直接 Enter 跳過）：
-```
-
-收集完後執行：
-
-```bash
-python .claude/skills/zenos-setup/scripts/setup.py \
-  --local \
-  --gcp-project {GCP_PROJECT} \
-  --github-token {GITHUB_TOKEN} \
-  --venv-python {VENV_PYTHON}
-```
+**本地開發模式**（僅 ZenOS 開發者）：需要 GCP project ID + GitHub token，用 `scripts/setup.py --local` 設定。
 
 ---
 
-## Step 2：同步 SSOT Skills（首次設定 + 更新模式都執行）
+## Step 2：拉取 SSOT Skills
 
-### 2a. 從 GitHub 拉最新 skills
-
-從 ZenOS GitHub repo 拉最新的治理 skill 到當前專案：
+從 ZenOS GitHub repo 拉最新的治理 skill 到當前專案根目錄：
 
 ```bash
 curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
   tar -xz --strip-components=1 "zenos-main/skills/"
 ```
 
-這會在專案根目錄建立（或更新）`skills/` 資料夾：
+完成後專案根目錄會有：
 
 ```
 skills/
-  governance/
-    l2-knowledge-governance.md   ← L2 知識節點治理
-    document-governance.md       ← L3 文件治理
-    task-governance.md           ← Task 治理
-  workflows/
-    knowledge-capture.md         ← 知識擷取
-    knowledge-sync.md            ← 增量同步
-    setup.md                     ← 本文件
-    governance-loop.md           ← 治理閉環
-  README.md                      ← 索引 + 使用說明
+  governance/          ← 治理規則（L2 / L3 文件 / Task）
+  workflows/           ← 操作流程（capture / sync / setup / governance-loop）
+  agents/              ← 角色參考設定（architect / pm / developer / qa / designer / marketing）
+  README.md            ← 索引 + 使用指南
 ```
 
-**驗證安裝成功：**
+**驗證**：確認 `skills/governance/` 有 3 個檔案、`skills/workflows/` 有 4 個檔案。
 
-```bash
-ls skills/governance/ skills/workflows/
-```
-
-應看到 3 個 governance + 4 個 workflow 檔案。
-
-### 2b. 生成 Claude Code Slash Command 薄殼（僅 Claude Code 適用）
-
-如果當前平台是 Claude Code，需要在 `.claude/skills/` 建立 slash command 的薄殼檔案，讓 `/zenos-capture`、`/zenos-sync` 等指令可用。
-
-**逐一建立以下 4 個薄殼：**
-
-```bash
-mkdir -p .claude/skills/zenos-capture .claude/skills/zenos-sync .claude/skills/zenos-setup .claude/skills/zenos-governance
-```
-
-**`.claude/skills/zenos-capture/SKILL.md`**
-
-```markdown
----
-name: zenos-capture
-description: >
-  從當前對話、單一文件、或整個專案目錄擷取知識並寫入 ZenOS ontology。
-  當使用者說「存進 ontology」「記到 ZenOS」「capture 這段」「/zenos-capture」，
-  或說「把這個專案加入 ZenOS」「幫我建這個服務的 ontology」時使用。
-version: 2.0.0
----
-# /zenos-capture
-**本 skill 的 SSOT 位於 `skills/workflows/knowledge-capture.md`。**
-請先用 Read tool 讀取 `skills/workflows/knowledge-capture.md` 的完整內容，然後嚴格按照該文件的流程執行。
-```
-
-**`.claude/skills/zenos-sync/SKILL.md`**
-
-```markdown
----
-name: zenos-sync
-description: >
-  掃描 git log 找出最近變更的文件，比對 ZenOS ontology，批量 propose 更新。
-  當使用者說「同步 ontology」「sync ZenOS」「掃 git 變更」「/zenos-sync」時使用。
-  注意：第一次為某個專案建立 ontology 請用 /zenos-capture。
-version: 2.0.0
----
-# /zenos-sync
-**本 skill 的 SSOT 位於 `skills/workflows/knowledge-sync.md`。**
-請先用 Read tool 讀取 `skills/workflows/knowledge-sync.md` 的完整內容，然後嚴格按照該文件的流程執行。
-```
-
-**`.claude/skills/zenos-setup/SKILL.md`**
-
-```markdown
----
-name: zenos-setup
-description: >
-  ZenOS 初始化設定——探測 MCP 連線、安裝 SSOT skills、設定 agent prompt。
-  當使用者說「設定 ZenOS」「初始化 ZenOS」「setup ZenOS」「/zenos-setup」時使用。
-version: 2.0.0
----
-# /zenos-setup
-**本 skill 的 SSOT 位於 `skills/workflows/setup.md`。**
-請先用 Read tool 讀取 `skills/workflows/setup.md` 的完整內容，然後嚴格按照該文件的流程執行。
-注意：setup script 位於 `.claude/skills/zenos-setup/scripts/setup.py`，路徑不變。
-```
-
-**`.claude/skills/zenos-governance/SKILL.md`**
-
-```markdown
----
-name: zenos-governance
-description: >
-  ZenOS 治理總控。當使用者要「讓 agent 自動治理現有專案」或
-  「掃描結果不滿意，請自動修復」時使用。
-version: 2.0.0
----
-# /zenos-governance
-**本 skill 的 SSOT 位於 `skills/workflows/governance-loop.md`。**
-請先用 Read tool 讀取 `skills/workflows/governance-loop.md` 的完整內容，然後嚴格按照該文件的流程執行。
-
-相關治理規則（按需載入）：
-- L2 治理：`skills/governance/l2-knowledge-governance.md`
-- L3 文件治理：`skills/governance/document-governance.md`
-- Task 治理：`skills/governance/task-governance.md`
-```
-
-**冪等檢查**：建立前先確認 `.claude/skills/zenos-*/SKILL.md` 是否已存在。若已存在且內容與上方模板一致，跳過；若內容不同（舊版），覆蓋更新。
-
-**非 Claude Code 平台**：跳過此步驟。其他平台直接透過 Step 3 的 prompt 指示讓 agent 讀取 `skills/` 目錄。
+**更新**：重跑同一行 curl 即可覆蓋更新到最新版。
 
 ---
 
-## Step 3：設定 Agent Prompt（讓 agent 載入治理 skill）
+## Step 3：讓 Agent 載入治理能力
 
-Skills 拉下來後，需要在 agent 的設定中加入載入指示，agent 才會在對應場景自動讀取治理規則。
+這是最關鍵的一步。用戶需要決定**哪些 agent 要啟用哪些 ZenOS 能力**。
 
-**先檢查是否已設定過：**
-
-```
-Grep(pattern="ZenOS 治理技能", path="CLAUDE.md")  # 或 AGENTS.md 等
-```
-
-- 已有 `## ZenOS 治理技能` 段落 → 告知「Agent prompt 已設定，跳過」→ 進入 Step 4
-- 沒有 → 繼續引導
-
-**告知用戶：**
+### 3a. 問用戶要啟用什麼
 
 ```
-Skills 已同步完成。接下來需要讓你的 agent 知道這些 skill 的存在。
+Skills 已同步。接下來選擇你要啟用的治理能力：
 
-請在你的 agent 設定檔中加入以下內容：
+[A] 完整治理（推薦）
+    包含：L2 知識治理 + L3 文件治理 + Task 治理
+    適合：核心開發團隊
 
-┌─────────────────────────────────────────────────┐
-│ ## ZenOS 治理技能                                │
-│                                                  │
-│ 寫文件前讀：skills/governance/document-governance.md  │
-│ 操作 L2 節點前讀：skills/governance/l2-knowledge-governance.md │
-│ 建票/管票前讀：skills/governance/task-governance.md    │
-└─────────────────────────────────────────────────┘
+[B] 文件 + Task 治理
+    包含：L3 文件治理 + Task 治理
+    適合：PM、一般開發者
 
-要加在哪裡？依你的平台：
+[C] 僅 Task 治理
+    包含：Task 建票品質、驗收、知識反饋
+    適合：只需要任務管理的團隊成員
 
-  Claude Code  → 專案根目錄的 CLAUDE.md
-  Codex        → AGENTS.md 或 agent 的 system prompt
-  ChatGPT      → Custom GPT 的 Instructions
-  Gemini       → System instruction
-  自建 agent   → System prompt
+[D] 自選
+    你指定要啟用哪些
 
-要我幫你自動加到 CLAUDE.md 嗎？（y/n）
+請選擇：
 ```
 
-**若用戶回答 y（且當前專案有 CLAUDE.md）：**
+### 3b. 設定原則（跨平台通用）
 
-1. 讀取現有 CLAUDE.md
-2. 檢查是否已有 `## ZenOS 治理技能` 段落
-   - 已有 → 告知「已經設定過了，跳過」
-   - 沒有 → 在檔案末尾追加載入指示
-3. 顯示變更確認
+不論選了什麼，agent 的設定必須達成以下效果：
 
-**若用戶回答 n 或其他平台：**
+**原則 1：Agent 必須知道治理 skill 的位置**
+
+Agent 在執行受治理操作前，能找到並讀取 `skills/governance/` 下的對應檔案。
+具體做法因平台而異（system prompt、CLAUDE.md、AGENTS.md、Instructions 等），
+但效果必須等價於以下指示：
 
 ```
-沒問題，請手動把上面那段文字貼到你的 agent 設定中。
-完成後你的 agent 就會在對應場景自動載入治理規則。
+## ZenOS 治理技能
+
+{根據用戶選擇的能力組合，列出對應的載入指示}
 ```
+
+能力對照表：
+
+| 能力 | 載入指示 |
+|------|---------|
+| L2 知識治理 | 操作 L2 節點前讀：`skills/governance/l2-knowledge-governance.md` |
+| L3 文件治理 | 寫文件前讀：`skills/governance/document-governance.md` |
+| Task 治理 | 建票/管票前讀：`skills/governance/task-governance.md` |
+
+**原則 2：條件式載入**
+
+指示中應包含條件判斷——若 `skills/governance/` 不存在（專案未安裝 ZenOS skills），
+agent 應跳過治理流程，不報錯。這樣同一份 agent 設定可以用在有 ZenOS 和沒有 ZenOS 的專案。
+
+**原則 3：角色 skill 也需要更新（如適用）**
+
+如果當前平台支援角色 skill（如 Claude Code 的 `~/.claude/skills/`），
+角色的 skill 定義中也應加入治理載入表。參考設定見 `skills/agents/`。
+
+各角色建議的治理載入：
+
+| 角色 | 建議能力 |
+|------|---------|
+| Architect | A（完整） |
+| PM | B（文件 + Task） |
+| Developer | C（Task） |
+| QA | C（Task） |
+| Designer | 文件治理（寫正式設計文件時） |
+| Marketing | 文件治理（寫正式行銷文件時） |
+
+### 3c. 平台特定的 slash command / 快捷指令（如適用）
+
+某些平台支援 slash command 或快捷指令（如 Claude Code 的 `/zenos-capture`）。
+若當前平台支援，應建立對應的指令入口，指向 `skills/workflows/` 的 SSOT 檔案：
+
+| 指令 | SSOT |
+|------|------|
+| `/zenos-capture` | `skills/workflows/knowledge-capture.md` |
+| `/zenos-sync` | `skills/workflows/knowledge-sync.md` |
+| `/zenos-setup` | `skills/workflows/setup.md` |
+| `/zenos-governance` | `skills/workflows/governance-loop.md` |
+
+指令入口應為薄殼——只指向 SSOT 路徑，不包含實際邏輯。
+
+**不支援 slash command 的平台**：跳過此步驟。用戶直接對 agent 說「同步 ontology」等關鍵字即可觸發。
 
 ---
 
 ## Step 4：驗證
 
-**若 MCP 已通（Step 0 通過或 Step 1 設定後重啟）：**
+### MCP 連線驗證
 
-```
-設定完成！來快速驗證一下：
-
-1. 搜尋 ontology 確認連線...
-```
-
-執行：
 ```
 mcp__zenos__search(query="ZenOS", collection="entities")
 ```
 
-若有回應：
-```
-✅ 一切正常！
+### 治理 skill 安裝驗證
 
-  MCP 連線：✅
-  Skills 安裝：✅（{N} 個 governance + {N} 個 workflow）
-  Agent Prompt：✅（已加入 / 請手動加入）
+確認 `skills/governance/` 和 `skills/workflows/` 下的檔案數量正確。
 
-你可以開始使用了：
-  /zenos-capture               ← 從當前對話捕獲知識
-  /zenos-capture /path/to/dir  ← 掃描專案目錄建構 ontology
-  /zenos-sync                  ← 同步 git 變更到 ontology
-```
+### Agent 設定驗證
 
-**若 MCP 未通（Step 1 剛設定，還沒重啟）：**
+確認當前平台的 agent 設定中已包含治理載入指示。
+
+### 輸出
 
 ```
-MCP 設定已寫入，但需要重啟 Claude Code 才能生效。
+✅ ZenOS Setup 完成
 
-  1. 重啟 Claude Code（Cmd+R 或關掉重開）
-  2. 重啟後再執行 /zenos-setup 驗證連線
+  MCP 連線：{✅ 已通 / ⏳ 需重啟後驗證}
+  Skills：{N} 個治理 + {N} 個 workflow
+  治理能力：{用戶選擇的組合}
+  Agent 設定：{✅ 已更新 / 📝 請手動更新}
+
+可以開始使用了：
+  捕獲知識    → 告訴 agent「capture 這段對話」或「掃描這個專案」
+  同步變更    → 告訴 agent「同步 ontology」或「掃 git 變更」
+  治理巡檢    → 告訴 agent「治理掃描」
 ```
 
 ---
 
 ## 注意事項
 
-- **token 不進 git**：`.claude/mcp.json` 應在 `.gitignore` 中（如果用戶有 git repo）
-- **token 安全**：token 只存在本機的 mcp.json，不會傳到其他地方
-- **多專案**：每個 Claude Code 專案可以有自己的 `.claude/mcp.json`，token 各自獨立
-- **全域設定**：如果要在所有專案都能用，把 mcp.json 放到 `~/.claude/mcp.json`
-- **skills 更新**：`skills/` 目錄從 ZenOS repo 拉取，重跑 Step 2 的 curl 指令即可更新到最新版
-- **冪等安全**：本 skill 可重複執行。MCP 已通時自動跳過設定，skills 拉取為覆蓋更新，prompt 已存在時不重複加入
+- **Token 安全**：MCP token 只存在本機設定檔，不可進 git
+- **冪等安全**：本 skill 可重複執行——MCP 已通跳過、skills 覆蓋更新、設定已存在不重複加入
+- **多專案**：每個專案獨立的 MCP 設定和 skills 目錄
+- **更新頻率**：ZenOS 治理規則更新時，重跑 Step 2 的 curl 即可拉到最新版
+- **離線可用**：skills 拉到本地後不依賴網路（MCP 操作除外）

@@ -98,6 +98,83 @@ Agent 遇到這些意圖時，應主動載入對應 skill：
 
 ---
 
+## agents/（角色參考設定）
+
+`skills/agents/` 存放角色 skill 的參考版本。這些**不是 SSOT**——SSOT 是你家目錄 `~/.claude/skills/` 的實際檔案。此處僅供備查和新機器初始化參考。
+
+| 檔案 | 角色 | 治理載入 |
+|------|------|---------|
+| `architect.md` | 技術架構 + subagent 調度 | document + task + l2 |
+| `pm.md` | 需求定義 + Feature Spec | document + task |
+| `developer.md` | 實作 + 測試 | task |
+| `qa.md` | 驗收 + QA Verdict | task |
+| `designer.md` | UI/UX 設計 | document（寫正式設計文件時） |
+| `marketing.md` | 行銷內容 | document（寫正式行銷文件時） |
+
+---
+
+## 讓你的 Agent 遵守 ZenOS 治理
+
+### 原理
+
+ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 agent 只要能讀到 `skills/governance/` 的檔案，就能遵守治理規則。
+
+啟用治理有三層機制，越多層越強：
+
+| 層級 | 機制 | 覆蓋範圍 | 設定方式 |
+|------|------|---------|---------|
+| ① 角色 skill | 角色 SKILL.md 開頭的「ZenOS 治理」表 | 該角色啟動時 | 在家目錄 `~/.claude/skills/` 的角色 SKILL.md 加入治理表（見 `agents/` 參考） |
+| ② 專案 prompt | CLAUDE.md / AGENTS.md / system prompt | 所有對話，不限角色 | 在專案設定加入載入指示（見下方） |
+| ③ 治理 skill 本身 | `skills/governance/*.md` 開頭的「適用場景」 | agent 讀到 skill 時 | 由 `/zenos-setup` 自動安裝 |
+
+**建議至少啟用①+②**。只有②也能運作，但角色 skill 提供更精準的觸發時機。
+
+### 對 Claude Code 用戶的完整設定步驟
+
+```
+1. 執行 /zenos-setup
+   → MCP 連線（或跳過已通）
+   → 拉最新 skills/
+   → 生成 .claude/skills/ 薄殼
+   → 加入 CLAUDE.md 載入指示
+
+2. 確認家目錄角色有治理表
+   → 檢查 ~/.claude/skills/architect/SKILL.md 開頭有 「ZenOS 治理」段落
+   → 沒有就參考 skills/agents/architect.md 補上
+
+3. 完成。之後更新只需重跑 /zenos-setup
+```
+
+### 對其他平台（Codex / ChatGPT / Gemini / 自建 agent）
+
+```
+1. 拉 skills：
+   curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
+     tar -xz --strip-components=1 "zenos-main/skills/"
+
+2. 在 agent 的 system prompt / Instructions 加入：
+
+   ## ZenOS 治理技能
+   寫文件前讀：skills/governance/document-governance.md
+   操作 L2 節點前讀：skills/governance/l2-knowledge-governance.md
+   建票/管票前讀：skills/governance/task-governance.md
+
+3. 設定 MCP（若需要連 ontology）：見 skills/workflows/setup.md
+```
+
+### 條件式啟動
+
+角色 skill 中的治理表使用**條件式**設計：
+
+```
+若當前專案有 skills/governance/ 目錄 → 載入治理規則
+若沒有 → 跳過，正常工作
+```
+
+這表示同一個角色 skill 可以用在「有 ZenOS」和「沒有 ZenOS」的專案，不會因為找不到治理檔案而報錯。
+
+---
+
 ## Skill vs Spec
 
 | | Spec（`docs/specs/`） | Skill（`skills/`） |
