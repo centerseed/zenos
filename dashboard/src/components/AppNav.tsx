@@ -6,9 +6,10 @@ import { useAuth } from "@/lib/auth";
 import { useMemo, useState } from "react";
 
 const BASE_NAV_ITEMS = [
-  { href: "/knowledge-map", label: "Knowledge Map" },
-  { href: "/projects", label: "Projects" },
-  { href: "/tasks", label: "Tasks" },
+  { href: "/knowledge-map", label: "知識地圖" },
+  { href: "/projects", label: "專案" },
+  { href: "/tasks", label: "任務" },
+  { href: "/clients", label: "客戶" },
 ];
 
 const ADMIN_NAV_ITEMS = [{ href: "/team", label: "Team" }];

@@ -18,6 +18,8 @@ class EntityType(str, Enum):
     ROLE = "role"
     PROJECT = "project"
     DOCUMENT = "document"
+    COMPANY = "company"
+    PERSON = "person"
 
 
 class EntityStatus(str, Enum):
