@@ -16,6 +16,7 @@ from collections import Counter
 logger = logging.getLogger(__name__)
 
 from zenos.domain.governance import apply_tag_confidence, check_split_criteria, find_tech_terms_in_summary
+from zenos.domain.source_uri_validator import validate_source_uri
 from zenos.domain.models import (
     Blindspot,
     Document,
@@ -1310,6 +1311,17 @@ class OntologyService:
                     f"Invalid source type '{source_type}'. "
                     f"Must be one of: {', '.join(valid_source_types)}"
                 )
+            # Validate source_uri format when creating or updating with a new URI.
+            # Skip validation if no URI is provided (allows pure summary/status updates).
+            if source_type and source_uri:
+                is_new_doc = not data.get("id") and existing is None
+                is_updating_uri = bool(existing) and source_data.get("uri")
+                if is_new_doc or is_updating_uri:
+                    is_valid, error_msg = validate_source_uri(source_type, source_uri)
+                    if not is_valid:
+                        raise ValueError(
+                            f"Invalid source URI for type '{source_type}': {error_msg}"
+                        )
 
         # Server-side idempotency: dedup by source URI for document entities.
         if source_uri and not data.get("id"):
@@ -1360,6 +1372,7 @@ class OntologyService:
                 "uri": source_data.get("uri", existing_source.get("uri", "")),
                 "label": source_data.get("adapter", existing_source.get("label", "")),
                 "type": source_data.get("type", existing_source.get("type", "")),
+                "status": "valid",
             }
             sources = [merged_source]
 

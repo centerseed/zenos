@@ -50,6 +50,7 @@ class SourceType(str, Enum):
     GDRIVE = "gdrive"
     NOTION = "notion"
     UPLOAD = "upload"
+    WIKI = "wiki"
 
 
 class DocumentStatus(str, Enum):

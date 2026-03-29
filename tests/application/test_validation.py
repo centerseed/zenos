@@ -610,7 +610,11 @@ class TestUpsertDocumentValidation:
         with pytest.raises(ValueError, match="not found"):
             await svc.upsert_document({
                 "title": "Doc",
-                "source": {"type": "github", "uri": "/x", "adapter": "git"},
+                "source": {
+                    "type": "github",
+                    "uri": "https://github.com/owner/repo/blob/main/doc.md",
+                    "adapter": "git",
+                },
                 "tags": {"what": ["x"], "why": "y", "how": "z", "who": ["a"]},
                 "summary": "test",
                 "linked_entity_ids": ["nonexistent"],
@@ -620,7 +624,11 @@ class TestUpsertDocumentValidation:
         svc = _make_service()
         result = await svc.upsert_document({
             "title": "API Spec",
-            "source": {"type": "github", "uri": "/x", "adapter": "git"},
+            "source": {
+                "type": "github",
+                "uri": "https://github.com/owner/repo/blob/main/api-spec.md",
+                "adapter": "git",
+            },
             "tags": {"what": ["api"], "why": "ref", "how": "REST", "who": ["dev"]},
             "summary": "API spec doc",
         })
