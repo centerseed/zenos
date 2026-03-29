@@ -73,7 +73,7 @@ class _StubEntityRepo:
         self.archived_ids.append(entity_id)
         entity = self._by_id.get(entity_id)
         if entity:
-            entity.status = "stale"
+            entity.status = "archived"
 
 
 class _StubSourceAdapter:

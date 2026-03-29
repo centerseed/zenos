@@ -272,12 +272,17 @@ class SqlEntityRepository:
             )
 
     async def archive_entity(self, entity_id: str) -> None:
-        """Archive an entity by setting its status to 'stale' (exits search space)."""
+        """Archive an entity by setting its status to 'archived' (exits search space).
+
+        Used for dead-link document entities that cannot be recovered. Unlike 'stale',
+        'archived' unambiguously marks the entity as intentionally removed from the
+        search space due to an unresolvable source link.
+        """
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             await conn.execute(
                 f"""UPDATE {SCHEMA}.entities
-                    SET status = 'stale',
+                    SET status = 'archived',
                         updated_at = now()
                     WHERE id = $1 AND partner_id = $2""",
                 entity_id, pid,

@@ -579,14 +579,14 @@ class OntologyService:
     async def search(self, query: str) -> list[SearchResult]:
         """Keyword search across entities, documents, and protocols.
 
-        Stale document entities (dead links that have been archived) are excluded
+        Archived document entities (dead links confirmed unresolvable) are excluded
         from the default search space per the source governance spec.
         """
         all_entities = await self._entities.list_all()
-        # Exclude stale document entities — they have been archived due to dead links
+        # Exclude archived document entities — they have been removed due to unresolvable dead links
         entities = [
             e for e in all_entities
-            if not (e.type == "document" and e.status == "stale")
+            if not (e.type == "document" and e.status == "archived")
         ]
         # Document entities are included in entities list (type="document")
         # Also fetch legacy documents for backward compat
