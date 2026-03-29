@@ -248,7 +248,7 @@ function Step({
       </div>
       <div>
         <h4 className="font-medium text-white">{title}</h4>
-        <p className="text-sm text-muted-foreground mt-1">{description}</p>
+        <div className="text-sm text-muted-foreground mt-1">{description}</div>
       </div>
     </li>
   );
