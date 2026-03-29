@@ -77,6 +77,87 @@ updated: 2026-03-27
 
 ---
 
+## 3.5) Entry 飽和壓縮 Workflow
+
+當 `analyze(check_type="quality")` 回傳 `entry_saturation` 非空時，必須走以下標準流程執行壓縮。
+**嚴禁直接 archive 再 write 的反向順序。**
+
+### 觸發條件
+
+`analyze` 回傳包含 `entry_saturation` 欄位且非空（entity 的 active entries >= 20）。
+
+### 標準執行流程（順序是死的）
+
+**Step 1：呈現 Proposal**
+
+讀取 `entry_saturation` 的 `consolidation_proposal`，以可讀格式顯示：
+- 每組合併計畫：哪些 entries 會被合併 → 合併後的新內容摘要
+- 保留項目：哪些 entries 維持不動
+
+**Step 2：取得用戶確認**
+
+明確詢問用戶是否執行。**未取得確認前不執行任何 write/archive 操作。**
+
+**Step 3：逐組執行合併（每組獨立，有 error handling）**
+
+對每個合併組：
+1. 呼叫 `write(collection="entries", ...)` 建立新的 merged entry
+2. 若 write **成功**：逐一呼叫 `write(collection="entries", id=<old_id>, status="archived", archive_reason="merged")` archive 所有舊 entries
+3. 若 write **失敗**：跳過本組，保留所有舊 entries 不動，回報錯誤
+
+**Step 4：驗證結果**
+
+呼叫 `get(id=<entity_id>, expand_linked=True)` 確認 active entries 數量 < 20。
+輸出執行摘要：合併前 entry count、合併後 entry count、失敗組數（如有）。
+
+### MCP 呼叫範例
+
+```python
+# Step 1: 取得 analyze 結果（含 entry_saturation）
+result = mcp__zenos__analyze(entity_id="<entity_id>", check_type="quality")
+saturation = result.get("entry_saturation")
+
+# Step 2: 若有飽和，呈現 proposal 並取得確認
+# [向用戶展示 saturation["consolidation_proposal"] 的內容]
+# [等待用戶確認]
+
+# Step 3: 逐組執行（以下為單組範例，實際需迴圈）
+for group in saturation["consolidation_proposal"]["merge_groups"]:
+    # 先 write 新 entry
+    new_entry = mcp__zenos__write(
+        collection="entries",
+        entity_id="<entity_id>",
+        content=group["merged_content"],
+        entry_type=group["entry_type"]
+    )
+    if new_entry.get("id"):
+        # write 成功才 archive 舊 entries
+        for old_id in group["source_entry_ids"]:
+            mcp__zenos__write(
+                collection="entries",
+                id=old_id,
+                status="archived",
+                archive_reason="merged"
+            )
+    else:
+        # write 失敗：跳過本組，回報錯誤，不 archive
+        report_error(group)
+
+# Step 4: 驗證
+entity_state = mcp__zenos__get(id="<entity_id>", expand_linked=True)
+active_count = count_active_entries(entity_state)
+assert active_count < 20, f"壓縮後仍有 {active_count} 筆 active entries"
+```
+
+### 防呆規則
+
+- **禁止** archive 舊 entries 後才 write 新 entry
+- **禁止** 在未取得用戶確認前執行任何 write/archive
+- write 失敗時本組所有舊 entries 維持 active
+- 整批完成後必須執行 get 驗證
+
+---
+
 ## 4) 二次治理迭代（掃描結果不滿意時）
 
 ### 4.1 固定順序
