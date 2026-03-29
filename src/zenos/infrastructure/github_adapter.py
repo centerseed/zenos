@@ -155,7 +155,7 @@ class GitHubAdapter:
 
             if resp.status_code == 404:
                 raise FileNotFoundError(
-                    f"Not found: {owner}/{repo}/{path} (ref={ref})"
+                    f"GitHub 404: path='{path}' not found in repo='{owner}/{repo}' (ref={ref})"
                 )
 
             resp.raise_for_status()
@@ -225,7 +225,7 @@ class GitHubAdapter:
 
             if not found:
                 raise FileNotFoundError(
-                    f"Path segment '{part}' not found in {owner}/{repo}/{'/'.join(parts[:i])}"
+                    f"GitHub 404: path segment '{part}' not found in repo='{owner}/{repo}', traversed='{'/'.join(parts[:i])}'"
                 )
 
         # Step 3: Fetch the blob
