@@ -179,3 +179,47 @@ def test_consolidate_entries_returns_none_for_empty_entries():
     )
 
     assert result is None
+
+
+# ===================================================================
+# LLM failure tests for infer_all, infer_doc_entities, infer_task_links
+# ===================================================================
+
+
+def test_infer_all_returns_none_on_llm_failure():
+    """infer_all returns None (not crashes) when LLM fails."""
+    ai = GovernanceAI(_FailingLLM())
+
+    result = ai.infer_all(
+        entity_data={"name": "計費模型", "summary": "定義方案與升降級規則"},
+        existing_entities=[{"id": "m1", "name": "支付流程", "type": "module"}],
+        unlinked_docs=[],
+    )
+
+    assert result is None
+
+
+def test_infer_doc_entities_returns_empty_on_llm_failure():
+    """infer_doc_entities returns [] (not crashes) when LLM fails."""
+    ai = GovernanceAI(_FailingLLM())
+
+    result = ai.infer_doc_entities(
+        doc_title="pricing-rules.md",
+        doc_summary="方案切換與升降級條件",
+        existing_entities=[{"id": "m1", "name": "支付流程", "type": "module"}],
+    )
+
+    assert result == []
+
+
+def test_infer_task_links_returns_empty_on_llm_failure():
+    """infer_task_links returns [] (not crashes) when LLM fails."""
+    ai = GovernanceAI(_FailingLLM())
+
+    result = ai.infer_task_links(
+        title="修復金流扣款失敗問題",
+        description="扣款重試邏輯異常，需要修正",
+        existing_entities=[{"id": "m1", "name": "支付流程", "type": "module"}],
+    )
+
+    assert result == []

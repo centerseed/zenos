@@ -474,9 +474,9 @@ class OntologyService:
         """
         entity_map = {e.id: e for e in all_entities if e.id}
         doc_entities = [e for e in all_entities if e.type == EntityType.DOCUMENT and e.id]
-        non_doc_entities = [
+        skeleton_entities = [
             e for e in all_entities
-            if e.type != EntityType.DOCUMENT and e.id and e.id != exclude_entity_id
+            if e.type in (EntityType.PRODUCT, EntityType.MODULE) and e.id and e.id != exclude_entity_id
         ]
         relationships = await self._load_relationship_snapshot(all_entities)
 
@@ -503,7 +503,7 @@ class OntologyService:
             )
 
         entity_dicts: list[dict] = []
-        for ent in non_doc_entities:
+        for ent in skeleton_entities:
             base = self._entity_to_dict(ent)
             doc_hints = [
                 f"{d.name}: {d.summary}"

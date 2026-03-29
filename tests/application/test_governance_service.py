@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 from zenos.application.governance_service import GovernanceService
+from zenos.application.ontology_service import OntologyService
 from zenos.domain.models import Entity, Relationship, RelationshipType, Tags
 
 
@@ -139,4 +141,77 @@ async def test_run_staleness_check_returns_dict_with_consistency_warnings():
     assert "document_consistency_warnings" in result
     assert isinstance(result["warnings"], list)
     assert isinstance(result["document_consistency_warnings"], list)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# _build_infer_all_inputs: entity_dicts must only contain PRODUCT + MODULE
+# ──────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_build_infer_all_inputs_entity_dicts_only_skeleton_types():
+    """entity_dicts must only contain PRODUCT and MODULE entities, not DOCUMENT/GOAL/ROLE."""
+    product = _entity(id="prod-1", name="ZenOS", type="product")
+    module = _entity(id="mod-1", name="Ontology Engine", type="module", parent_id="prod-1")
+    goal = _entity(id="goal-1", name="Revenue Goal", type="goal")
+    role = _entity(id="role-1", name="PM", type="role")
+    doc = _entity(
+        id="doc-1",
+        name="spec.md",
+        type="document",
+        parent_id="mod-1",
+        sources=[{"uri": "docs/spec.md"}],
+    )
+
+    relationship_repo = AsyncMock()
+    relationship_repo.list_by_entity = AsyncMock(return_value=[])
+
+    service = OntologyService(
+        entity_repo=AsyncMock(),
+        relationship_repo=relationship_repo,
+        document_repo=AsyncMock(),
+        protocol_repo=AsyncMock(),
+        blindspot_repo=AsyncMock(),
+    )
+
+    entity_dicts, unlinked_dicts = await service._build_infer_all_inputs(
+        all_entities=[product, module, goal, role, doc]
+    )
+
+    entity_ids = {d["id"] for d in entity_dicts}
+    assert "prod-1" in entity_ids, "PRODUCT must be in entity_dicts"
+    assert "mod-1" in entity_ids, "MODULE must be in entity_dicts"
+    assert "goal-1" not in entity_ids, "GOAL must not be in entity_dicts"
+    assert "role-1" not in entity_ids, "ROLE must not be in entity_dicts"
+    assert "doc-1" not in entity_ids, "DOCUMENT must not be in entity_dicts"
+
+    # DOCUMENT should still appear in unlinked_dicts (the doc_entities path)
+    unlinked_ids = {d["id"] for d in unlinked_dicts}
+    assert "doc-1" in unlinked_ids, "DOCUMENT must still appear in unlinked_dicts"
+
+
+@pytest.mark.asyncio
+async def test_build_infer_all_inputs_excludes_given_entity_id():
+    """exclude_entity_id must remove that entity from entity_dicts."""
+    product = _entity(id="prod-1", name="ZenOS", type="product")
+    module = _entity(id="mod-1", name="Engine", type="module", parent_id="prod-1")
+
+    relationship_repo = AsyncMock()
+    relationship_repo.list_by_entity = AsyncMock(return_value=[])
+
+    service = OntologyService(
+        entity_repo=AsyncMock(),
+        relationship_repo=relationship_repo,
+        document_repo=AsyncMock(),
+        protocol_repo=AsyncMock(),
+        blindspot_repo=AsyncMock(),
+    )
+
+    entity_dicts, _ = await service._build_infer_all_inputs(
+        all_entities=[product, module],
+        exclude_entity_id="mod-1",
+    )
+
+    entity_ids = {d["id"] for d in entity_dicts}
+    assert "prod-1" in entity_ids
+    assert "mod-1" not in entity_ids
 

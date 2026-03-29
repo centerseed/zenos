@@ -66,6 +66,7 @@ class LLMClient:
                 "type": "json_object",
                 "schema": schema,
             }
+            messages = self._inject_schema_into_system_prompt(messages, schema)
 
         params: dict[str, Any] = {
             "model": self.model,
@@ -90,6 +91,28 @@ class LLMClient:
             raise ValueError("LLM returned empty choices list")
         content = response.choices[0].message.content
         return self._parse_structured_content(content, response_schema)
+
+    @staticmethod
+    def _inject_schema_into_system_prompt(
+        messages: list[dict[str, str]],
+        schema: dict,
+    ) -> list[dict[str, str]]:
+        """Return a copy of messages with the JSON schema appended to the system prompt.
+
+        If no system message exists, one is inserted at the front.
+        The original messages list is never mutated.
+        """
+        schema_suffix = (
+            "\n\nOutput must be valid JSON matching this schema:\n"
+            + json.dumps(schema, ensure_ascii=False)
+        )
+        messages = list(messages)
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                messages[i] = {**msg, "content": msg["content"] + schema_suffix}
+                return messages
+        messages.insert(0, {"role": "system", "content": schema_suffix.lstrip()})
+        return messages
 
     @staticmethod
     def _parse_structured_content(content: Any, response_schema: type[BaseModel]) -> BaseModel:
