@@ -402,6 +402,8 @@ async def search(
         elif col == "documents":
             # Query document entities (type="document") from entities collection
             doc_entities = await ontology_service._entities.list_all(type_filter="document")
+            # Exclude archived document entities (dead links confirmed unresolvable)
+            doc_entities = [d for d in doc_entities if d.status != "archived"]
             if query.strip():
                 q = query.lower().strip()
                 filtered = []
