@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY pyproject.toml .
 COPY src/ src/
+COPY skills/ skills/
 RUN pip install --no-cache-dir .
 
 # Cloud Run 用 PORT 環境變數
