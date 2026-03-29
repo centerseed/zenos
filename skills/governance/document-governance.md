@@ -607,3 +607,164 @@ mcp__zenos__write(
 - **task-governance**：Task 治理。Task 完成後若產出文件，該文件必須走本 skill 合規流程。
 - **knowledge-sync**：增量同步時偵測 Git 與 ontology 不一致，應按本 skill 修正。
 - **SPEC-doc-governance**：本 skill 的唯一規則來源。本 skill 是 how，SPEC 是 what。
+
+---
+
+## 時機三：Refactor（搬移或改名任何受治理文件）
+
+⚠️ **這是強制步驟。** 搬移或改名前必須先執行，不可跳過。
+
+**觸發條件**：Agent 準備執行 `mv`、`cp`（改名）、`git mv`、Edit frontmatter `id`/路徑等操作，涉及任何 `docs/` 或 `skills/` 目錄下的文件。
+
+### 步驟
+
+**步驟 R1：搬移前先查 ontology**
+
+```
+mcp__zenos__search(
+  collection="documents",
+  query="<原始檔名或 source_uri 關鍵字>"
+)
+```
+
+**步驟 R2：根據查詢結果執行對應路徑**
+
+```
+找到 entity？
+├── 是 → 路徑 RB：原子性執行（步驟 R3a + R3b，必須在同一輪操作完成）
+└── 否 → 路徑 RA：正常搬移，無需任何 MCP 操作
+```
+
+**步驟 R3a（路徑 RB）：執行檔案搬移**
+
+```bash
+git mv <舊路徑> <新路徑>
+```
+
+或直接用 Rename/Edit 工具操作。
+
+**步驟 R3b（路徑 RB）：原子性同步更新 ontology**
+
+```python
+mcp__zenos__write(
+    collection="documents",
+    id="<entity id>",
+    data={
+        "source": {
+            "uri": "<新的完整 GitHub URL>",
+            "label": "<新檔名>",
+            "type": "github"
+        }
+    }
+)
+```
+
+**禁止行為**：
+- 先搬移檔案，之後「補」更新 ontology（分批 = 違反原子性）
+- 搬移前跳過步驟 R1（不查 ontology = 產生死連結）
+
+### MCP 呼叫完整範例
+
+```python
+# 案例：docs/specs/SPEC-old-name.md 要改名為 SPEC-new-name.md
+
+# R1：搜尋確認有無 entity
+result = mcp__zenos__search(
+    collection="documents",
+    query="SPEC-old-name"
+)
+# 假設找到 entity id = "abc123"
+
+# R3a：搬移檔案
+# git mv docs/specs/SPEC-old-name.md docs/specs/SPEC-new-name.md
+
+# R3b：同一輪操作，立即更新 ontology
+mcp__zenos__write(
+    collection="documents",
+    id="abc123",
+    data={
+        "source": {
+            "uri": "https://github.com/org/repo/blob/main/docs/specs/SPEC-new-name.md",
+            "label": "SPEC-new-name.md",
+            "type": "github"
+        }
+    }
+)
+```
+
+---
+
+## Sync 修復流程（read_source 回傳死連結時）
+
+當 `read_source` 回傳 `error: "DEAD_LINK"` 或 `error: "ALREADY_UNRESOLVABLE"` 時，執行本修復流程。
+
+### 判斷路徑
+
+```
+read_source 回傳 error？
+├── error: "ALREADY_UNRESOLVABLE"
+│   └── 跳過修復，entity 已標記無法修復，直接開 blindspot（步驟 S4）
+│
+├── error: "DEAD_LINK" + proposed_uri 存在（GitHub 找到替代路徑）
+│   └── 路徑 SC：propose → confirm → write（步驟 S1 → S2 → S3）
+│
+└── error: "DEAD_LINK" + 無 proposed_uri
+    └── 根據 source_status 判斷：
+        ├── stale → 暫時性問題（權限/網路），可等待或手動修復
+        └── unresolvable → 開 blindspot（步驟 S4）
+```
+
+### 步驟 S1：向用戶 propose 替代路徑（限有 proposed_uri 時）
+
+```python
+mcp__zenos__confirm(
+    collection="tasks",
+    id="<相關 task id（如有）>",
+    action="propose",
+    message=f"read_source 發現死連結，找到可能的替代路徑：\n{proposed_uri}\n請確認是否更新。"
+)
+```
+
+若無相關 task，可呼叫 `mcp__zenos__confirm` 的 blindspot 確認流程。
+
+### 步驟 S2：用戶確認後更新 source_uri
+
+```python
+mcp__zenos__write(
+    collection="documents",
+    id="<entity id>",
+    data={
+        "source": {
+            "uri": "<proposed_uri>",
+            "type": "github"
+        }
+    }
+)
+# 成功後 server 端會自動重設 sources[0]["status"] = "valid"
+```
+
+### 步驟 S3：驗證修復成功
+
+```python
+result = mcp__zenos__get(collection="documents", id="<entity id>")
+# 確認 sources[0]["status"] == "valid"
+```
+
+### 步驟 S4：用戶拒絕 propose 或 source_status 已為 unresolvable → 開 blindspot
+
+```python
+mcp__zenos__write(
+    collection="blindspots",
+    data={
+        "description": f"Document entity '{entity_name}' source_uri 死連結無法修復，原始 URI：{original_uri}",
+        "severity": "yellow",
+        "suggested_action": "手動確認文件是否已永久移除，考慮 archive entity",
+        "related_entity_ids": ["<entity id>"]
+    }
+)
+```
+
+### 禁止行為
+
+- **跳過 confirm 直接更新 source_uri**：必須經過 `mcp__zenos__confirm` 確認，不可自動更新
+- **靜默忽略 DEAD_LINK 繼續操作**：死連結 = 知識失效，必須處理或記錄
