@@ -29,6 +29,10 @@ class EntityRepository(TypingProtocol):
 
     async def list_by_parent(self, parent_id: str) -> list[Entity]: ...
 
+    async def update_source_status(self, entity_id: str, new_status: str) -> None: ...
+
+    async def archive_entity(self, entity_id: str) -> None: ...
+
 
 class RelationshipRepository(TypingProtocol):
     """Persistence interface for skeleton-layer relationships."""

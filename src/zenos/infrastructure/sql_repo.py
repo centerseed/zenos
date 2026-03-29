@@ -254,6 +254,35 @@ class SqlEntityRepository:
             )
         return [_row_to_entity(r) for r in rows]
 
+    async def update_source_status(self, entity_id: str, new_status: str) -> None:
+        """Update sources[0].status for a document entity."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""UPDATE {SCHEMA}.entities
+                    SET sources_json = jsonb_set(
+                        sources_json,
+                        '{{0,status}}',
+                        $1::jsonb,
+                        true
+                    ),
+                    updated_at = now()
+                    WHERE id = $2 AND partner_id = $3""",
+                json.dumps(new_status), entity_id, pid,
+            )
+
+    async def archive_entity(self, entity_id: str) -> None:
+        """Archive an entity by setting its status to 'stale' (exits search space)."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""UPDATE {SCHEMA}.entities
+                    SET status = 'stale',
+                        updated_at = now()
+                    WHERE id = $1 AND partner_id = $2""",
+                entity_id, pid,
+            )
+
 
 # ===================================================================
 # Relationship Repository

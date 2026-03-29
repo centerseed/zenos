@@ -243,6 +243,44 @@ class GitHubAdapter:
         raw = base64.b64decode(blob["content"])
         return raw.decode("utf-8")
 
+    async def search_by_filename(
+        self, owner: str, repo: str, ref: str, filename: str
+    ) -> list[str]:
+        """Search for files with matching filename in the repo's file tree.
+
+        Uses the Git Trees API with recursive=1 to fetch the full tree in one
+        request, then filters by path suffix matching the filename.
+
+        Returns a list of full GitHub blob URLs for matching files.
+        Returns an empty list on any error (rate limit, API error, etc.)
+        so callers never need to handle exceptions from this method.
+        """
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                # Get tree SHA for the ref via commits API
+                commit_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/commits/{ref}"
+                resp = await client.get(commit_url, headers=self._headers)
+                if not resp.is_success:
+                    return []
+                tree_sha = resp.json()["commit"]["tree"]["sha"]
+
+                # Fetch full recursive tree
+                tree_url = f"{GITHUB_API_BASE}/repos/{owner}/{repo}/git/trees/{tree_sha}"
+                resp = await client.get(
+                    tree_url, headers=self._headers, params={"recursive": "1"}
+                )
+                if not resp.is_success:
+                    return []
+
+                tree_data = resp.json()
+                return [
+                    f"https://github.com/{owner}/{repo}/blob/{ref}/{item['path']}"
+                    for item in tree_data.get("tree", [])
+                    if item.get("type") == "blob" and item["path"].endswith(filename)
+                ]
+        except Exception:  # noqa: BLE001 — silently return empty on any error
+            return []
+
     def _check_response(self, resp: httpx.Response, context: str) -> None:
         """Raise appropriate errors for non-2xx responses."""
         if resp.status_code == 429:

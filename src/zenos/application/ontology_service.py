@@ -577,8 +577,17 @@ class OntologyService:
         return await self._documents.get_by_id(doc_id)
 
     async def search(self, query: str) -> list[SearchResult]:
-        """Keyword search across entities, documents, and protocols."""
-        entities = await self._entities.list_all()
+        """Keyword search across entities, documents, and protocols.
+
+        Stale document entities (dead links that have been archived) are excluded
+        from the default search space per the source governance spec.
+        """
+        all_entities = await self._entities.list_all()
+        # Exclude stale document entities — they have been archived due to dead links
+        entities = [
+            e for e in all_entities
+            if not (e.type == "document" and e.status == "stale")
+        ]
         # Document entities are included in entities list (type="document")
         # Also fetch legacy documents for backward compat
         documents = await self._documents.list_all()

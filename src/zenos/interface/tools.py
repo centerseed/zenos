@@ -607,14 +607,10 @@ async def read_source(doc_id: str) -> dict:
     """
     await _ensure_services()
     try:
-        content = await source_service.read_source(doc_id)
-        return {"doc_id": doc_id, "content": content}
-    except ValueError as e:
-        return {"error": "NOT_FOUND", "message": str(e)}
-    except FileNotFoundError as e:
-        return {"error": "NOT_FOUND", "message": str(e)}
-    except PermissionError as e:
-        return {"error": "ADAPTER_ERROR", "message": f"Permission denied: {e}"}
+        result = await source_service.read_source_with_recovery(doc_id)
+        if "content" in result:
+            return {"doc_id": doc_id, "content": result["content"]}
+        return result
     except RuntimeError as e:
         return {"error": "ADAPTER_ERROR", "message": str(e)}
 
