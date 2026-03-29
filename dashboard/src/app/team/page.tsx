@@ -110,6 +110,60 @@ function TeamPage() {
     }
   };
 
+  const handleResendInvite = async (targetPartner: Partner) => {
+    if (!user) return;
+    setActionLoading(targetPartner.id);
+    setInviteMessage(null);
+    try {
+      const actionCodeSettings = {
+        url: `${window.location.origin}/login`,
+        handleCodeInApp: true,
+      };
+      await sendSignInLinkToEmail(
+        getAuthInstance(),
+        targetPartner.email,
+        actionCodeSettings
+      );
+      setInviteMessage({ type: "success", text: `已重新寄送邀請信至 ${targetPartner.email}` });
+    } catch (err) {
+      console.error("Resend invite failed:", err);
+      setInviteMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "重新寄送失敗，請稍後再試",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteInvite = async (targetPartner: Partner) => {
+    if (!user) return;
+    if (!window.confirm(`確定要刪除 ${targetPartner.email} 的邀請嗎？`)) return;
+    setActionLoading(targetPartner.id);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`${API_URL}/api/partners/${targetPartner.id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({ message: "Unknown error" }));
+        throw new Error(body.message || body.detail || `Failed: ${res.status}`);
+      }
+      await fetchPartners();
+    } catch (err) {
+      console.error("Delete invite failed:", err);
+      setInviteMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "刪除邀請失敗，請稍後再試",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   const handleRoleChange = async (targetPartner: Partner, isAdmin: boolean) => {
     if (!user) return;
     setActionLoading(targetPartner.id);
@@ -311,6 +365,26 @@ function TeamPage() {
                               >
                                 Reactivate
                               </button>
+                            )}
+                            {p.status === "invited" && (
+                              <>
+                                <button
+                                  onClick={() => handleResendInvite(p)}
+                                  aria-label={`Resend invite to ${p.email}`}
+                                  disabled={isLoading}
+                                  className="text-xs text-muted-foreground hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  Resend
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteInvite(p)}
+                                  aria-label={`Delete invite for ${p.email}`}
+                                  disabled={isLoading}
+                                  className="text-xs text-red-400 hover:text-red-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  Delete
+                                </button>
+                              </>
                             )}
                           </div>
                         )}

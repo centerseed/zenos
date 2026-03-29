@@ -570,6 +570,198 @@ class TestActivatePartner:
             assert resp.status_code == 401
 
 
+class TestDeletePartner:
+    """Tests for DELETE /api/partners/{id}."""
+
+    def _make_invited_row(self, partner_id: str = "partner-invited", email: str = "invited@test.com") -> MagicMock:
+        from datetime import datetime, timezone
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda self, k: {
+            "id": partner_id,
+            "email": email,
+            "status": "invited",
+            "shared_partner_id": "p1",
+            "is_admin": False,
+        }[k]
+        return mock_row
+
+    async def test_delete_invited_success(self):
+        from zenos.interface.admin_api import delete_partner
+
+        request = _mock_request(
+            method="DELETE",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "partner-invited"},
+        )
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=self._make_invited_row())
+        mock_pool = MagicMock()
+
+        class _ACM:
+            async def __aenter__(self): return mock_conn
+            async def __aexit__(self, *a): pass
+
+        mock_pool.acquire = MagicMock(return_value=_ACM())
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+
+            resp = await delete_partner(request)
+
+            assert resp.status_code == 204
+            mock_conn.execute.assert_called_once()
+            # Verify DELETE SQL was called with correct partner_id
+            call_args = mock_conn.execute.call_args
+            assert "DELETE" in call_args[0][0]
+            assert "partner-invited" in call_args[0]
+
+    async def test_delete_requires_admin(self):
+        from zenos.interface.admin_api import delete_partner
+
+        request = _mock_request(
+            method="DELETE",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "partner-invited"},
+        )
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "user@test.com", "isAdmin": False})):
+
+            resp = await delete_partner(request)
+
+            assert resp.status_code == 403
+
+    async def test_delete_active_partner_forbidden(self):
+        from zenos.interface.admin_api import delete_partner
+
+        request = _mock_request(
+            method="DELETE",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "partner-active"},
+        )
+
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda self, k: {
+            "id": "partner-active",
+            "email": "active@test.com",
+            "status": "active",
+            "shared_partner_id": "p1",
+            "is_admin": False,
+        }[k]
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
+        mock_pool = MagicMock()
+
+        class _ACM:
+            async def __aenter__(self): return mock_conn
+            async def __aexit__(self, *a): pass
+
+        mock_pool.acquire = MagicMock(return_value=_ACM())
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+
+            resp = await delete_partner(request)
+
+            assert resp.status_code == 403
+            import json
+            body = json.loads(resp.body)
+            assert "invited" in body["message"]
+
+    async def test_delete_self_forbidden(self):
+        from zenos.interface.admin_api import delete_partner
+
+        request = _mock_request(
+            method="DELETE",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "p1"},  # same as caller
+        )
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})):
+
+            resp = await delete_partner(request)
+
+            assert resp.status_code == 403
+
+    async def test_delete_requires_auth(self):
+        from zenos.interface.admin_api import delete_partner
+
+        request = _mock_request(method="DELETE", path_params={"id": "partner-invited"})
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=None):
+            resp = await delete_partner(request)
+
+            assert resp.status_code == 401
+
+    async def test_delete_not_found(self):
+        from zenos.interface.admin_api import delete_partner
+
+        request = _mock_request(
+            method="DELETE",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "nonexistent"},
+        )
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=None)
+        mock_pool = MagicMock()
+
+        class _ACM:
+            async def __aenter__(self): return mock_conn
+            async def __aexit__(self, *a): pass
+
+        mock_pool.acquire = MagicMock(return_value=_ACM())
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+
+            resp = await delete_partner(request)
+
+            assert resp.status_code == 404
+
+    async def test_delete_suspended_partner_forbidden(self):
+        from zenos.interface.admin_api import delete_partner
+
+        request = _mock_request(
+            method="DELETE",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "partner-suspended"},
+        )
+
+        mock_row = MagicMock()
+        mock_row.__getitem__ = lambda self, k: {
+            "id": "partner-suspended",
+            "email": "suspended@test.com",
+            "status": "suspended",
+            "shared_partner_id": "p1",
+            "is_admin": False,
+        }[k]
+
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
+        mock_pool = MagicMock()
+
+        class _ACM:
+            async def __aenter__(self): return mock_conn
+            async def __aexit__(self, *a): pass
+
+        mock_pool.acquire = MagicMock(return_value=_ACM())
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool):
+
+            resp = await delete_partner(request)
+
+            assert resp.status_code == 403
+
+
 class TestCorsHandling:
     """Tests for CORS preflight handling."""
 

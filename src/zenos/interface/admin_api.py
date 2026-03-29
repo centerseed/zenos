@@ -1,11 +1,12 @@
 """Admin REST API — Firebase ID token auth for Dashboard operations.
 
 Endpoints:
-  GET  /api/partners            — list partners in same tenant (sanitized)
-  POST /api/partners/invite     — invite a new partner (admin only)
-  PUT  /api/partners/{id}/role  — change partner isAdmin (admin only)
-  PUT  /api/partners/{id}/status — change partner status (admin only)
-  POST /api/partners/activate   — first-login activation (self-service)
+  GET    /api/partners            — list partners in same tenant (sanitized)
+  POST   /api/partners/invite     — invite a new partner (admin only)
+  DELETE /api/partners/{id}       — delete an invited partner (admin only)
+  PUT    /api/partners/{id}/role  — change partner isAdmin (admin only)
+  PUT    /api/partners/{id}/status — change partner status (admin only)
+  POST   /api/partners/activate   — first-login activation (self-service)
 
 Auth: all endpoints verify Firebase ID token via firebase_admin.auth.
 Admin endpoints additionally check that the caller has isAdmin=True.
@@ -62,7 +63,7 @@ def _cors_headers(request: Request) -> dict[str, str]:
     if origin in ALLOWED_ORIGINS:
         return {
             "access-control-allow-origin": origin,
-            "access-control-allow-methods": "GET, POST, PUT, OPTIONS",
+            "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
             "access-control-allow-headers": "Authorization, Content-Type",
             "access-control-max-age": "86400",
         }
@@ -330,6 +331,76 @@ async def invite_partner(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Endpoint: DELETE /api/partners/{id}
+# ──────────────────────────────────────────────
+
+
+async def delete_partner(request: Request) -> Response:
+    """Delete an invited partner. Admin only. Only invited status allowed."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller or not caller.get("isAdmin"):
+        return _error_response("FORBIDDEN", "Admin access required", 403, request=request)
+
+    partner_id = request.path_params.get("id")
+    if not partner_id:
+        return _error_response("INVALID_INPUT", "Partner ID required", 400, request=request)
+
+    # Cannot delete self
+    if partner_id == caller_id:
+        return _error_response("FORBIDDEN", "Cannot delete yourself", 403, request=request)
+
+    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""SELECT id, email, status, shared_partner_id, is_admin
+                FROM {SCHEMA}.partners WHERE id = $1""",
+            partner_id,
+        )
+    if not row:
+        return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
+
+    target = {"sharedPartnerId": row["shared_partner_id"], "isAdmin": row["is_admin"]}
+    if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
+        return _error_response("FORBIDDEN", "Cross-tenant delete is not allowed", 403, request=request)
+
+    if row["status"] != "invited":
+        return _error_response(
+            "FORBIDDEN",
+            f"Only invited partners can be deleted (current status: {row['status']})",
+            403,
+            request=request,
+        )
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"DELETE FROM {SCHEMA}.partners WHERE id = $1",
+            partner_id,
+        )
+
+    logger.info(
+        "audit",
+        extra={
+            "action": "partner_delete",
+            "caller_email": caller.get("email", ""),
+            "target_email": row["email"],
+            "target_partner_id": partner_id,
+            "result": "success",
+            "detail": "status=invited",
+        },
+    )
+
+    return Response(status_code=204, headers=_cors_headers(request))
+
+
+# ──────────────────────────────────────────────
 # Endpoint: PUT /api/partners/{id}/role
 # ──────────────────────────────────────────────
 
@@ -571,7 +642,8 @@ async def activate_partner(request: Request) -> Response:
 admin_routes = [
     Route("/api/partners", list_partners, methods=["GET", "OPTIONS"]),
     Route("/api/partners/invite", invite_partner, methods=["POST", "OPTIONS"]),
+    Route("/api/partners/activate", activate_partner, methods=["POST", "OPTIONS"]),
+    Route("/api/partners/{id}", delete_partner, methods=["DELETE", "OPTIONS"]),
     Route("/api/partners/{id}/role", update_partner_role, methods=["PUT", "OPTIONS"]),
     Route("/api/partners/{id}/status", update_partner_status, methods=["PUT", "OPTIONS"]),
-    Route("/api/partners/activate", activate_partner, methods=["POST", "OPTIONS"]),
 ]
