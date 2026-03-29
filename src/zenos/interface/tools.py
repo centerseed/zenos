@@ -103,7 +103,7 @@ class ApiKeyMiddleware:
             if partner is not None:
                 from zenos.infrastructure.context import current_partner_id
                 token = _current_partner.set(partner)
-                token_pid = current_partner_id.set(partner.get("id", ""))
+                token_pid = current_partner_id.set(partner.get("sharedPartnerId") or partner.get("id", ""))
                 try:
                     return await self.app(scope, receive, send)
                 finally:
