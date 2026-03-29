@@ -199,14 +199,37 @@ Entry 不是額外的文件撰寫負擔，而是工作的副產品：
 | 一條 entry 一個 entity | L2 語意切割明確，同一件事對不同 L2 一定有完全不同的角度來寫 |
 | 沒有 confirmed_by_user | entry 是低成本記錄，不走 draft→confirmed 流程 |
 | status: active / superseded / archived | superseded 時必須指向取代它的新 entry，確保決策演化鏈可追蹤 |
+| 每個 L2 上限 20 條 active entries | 超過代表概念太大應拆分，或需要歸納壓縮 |
+| archived 必須帶 archive_reason | merged / manual，確保歸檔原因可追蹤 |
+
+#### Entry 生命週期
+
+```
+active
+  ├─ 被新知識明確取代 → superseded (superseded_by = new_entry_id)
+  ├─ 歸納合併        → archived (archive_reason = 'merged')
+  └─ 用戶手動清理    → archived (archive_reason = 'manual')
+```
+
+**歸納機制（Consolidation）**：當某個 L2 的 active entries 達到 20 條上限時觸發。
+
+- `analyze` 偵測到 entry 飽和，LLM 分析哪些 entries 可合併（同主題多條 → 一條更完整的）
+- 產出歸納 proposal，列出合併計畫，**必須由人確認**後才執行
+- 確認後：被合併的舊 entries → `archived (reason: merged)`，合併後的新 entry → `active`
+- 不能合併的保留 active
+- 歸納後 active count 必須 < 20
+
+**不丟失原則**：archived entries 永遠留在 DB，只是不再主動呈現給 agent。需要時可用 `search(collection="entries", status="archived")` 找回。
+
+**自然選擇效應**：常被提到的概念會不斷有新 entry 進來，歸納時反覆出現的知識自然留在合併後的 entry 裡，冷門知識逐漸被壓進 archived。不需要額外的冷卻計時器或使用頻率追蹤。
 
 #### 軟性治理（Internal API 自動偵測）
 
 Entry 治理是 server 端 Internal 治理 API 的核心場景：
 
+- **飽和偵測**：同一 entity 下 active entries >= 20 → 觸發歸納 proposal
 - **重複偵測**：同一 entity 下 content 相似度高的 entries → 建議合併
 - **矛盾偵測**：decision A 和 decision B 衝突 → 建議將舊的標記 superseded
-- **壓縮**：同 type 的 active entries 超過閾值 → 建議合併為更精練的條目
 - **summary 漂移**：entries 方向跟 summary 不一致 → 提示 review
 - **拆分信號**：entries 明顯分成兩群不相關主題 → 建議拆分 L2
 

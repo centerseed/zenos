@@ -46,20 +46,29 @@ CREATE TABLE zenos.entity_entries (
   content         text        NOT NULL,
   context         text,
   author          text,
+  department      text,
   source_task_id  text,
   status          text        NOT NULL DEFAULT 'active',
   superseded_by   text,
+  archive_reason  text,
   created_at      timestamptz NOT NULL DEFAULT now(),
 
   UNIQUE (partner_id, id),
   FOREIGN KEY (partner_id, entity_id) REFERENCES zenos.entities(partner_id, id),
   FOREIGN KEY (partner_id, superseded_by) REFERENCES zenos.entity_entries(partner_id, id),
   CONSTRAINT chk_entry_type CHECK (type IN ('decision', 'insight', 'limitation', 'change', 'context')),
+  CONSTRAINT chk_entry_department_length CHECK (department IS NULL OR char_length(department) <= 50),
   CONSTRAINT chk_entry_status CHECK (status IN ('active', 'superseded', 'archived')),
   CONSTRAINT chk_entry_content_length CHECK (char_length(content) BETWEEN 1 AND 200),
   CONSTRAINT chk_entry_context_length CHECK (context IS NULL OR char_length(context) <= 200),
   CONSTRAINT chk_entry_superseded_consistency CHECK (
     (status != 'superseded') OR (superseded_by IS NOT NULL)
+  ),
+  CONSTRAINT chk_entry_archive_reason CHECK (
+    archive_reason IS NULL OR archive_reason IN ('merged', 'manual')
+  ),
+  CONSTRAINT chk_entry_archived_has_reason CHECK (
+    (status != 'archived') OR (archive_reason IS NOT NULL)
   )
 );
 
@@ -82,14 +91,47 @@ CREATE INDEX idx_entries_partner_created ON zenos.entity_entries(partner_id, cre
 | status = superseded 時必填 superseded_by | CHECK constraint | 確保 supersede 鏈可追蹤 |
 | 一條 entry 一個 entity | FK to entities，無 join table | L2 語意切割明確，同一件事對不同 L2 一定有不同角度 |
 | 沒有 confirmed_by_user | — | entry 是低成本記錄，不走 draft→confirmed 流程 |
+| 每個 L2 上限 20 條 active entries | Application 層檢查（**per department**） | 超過代表概念太大應拆分，或需要歸納壓縮 |
+| archived 必須帶 archive_reason | `merged` / `manual` | 確保歸檔原因可追蹤 |
+| department 來自用戶 profile，不由 agent 判斷 | MCP server 從 partner context 注入 | 防止 agent 填錯或偽造部門；null = 通用知識，所有部門可見 |
+| 壓縮只在同 department 內發生 | Application 層 + consolidation prompt | 防止跨部門合併導致少數部門知識被稀釋 |
+
+#### Entry 生命週期
+
+```
+active
+  ├─ 被新知識明確取代 → superseded (superseded_by = new_entry_id)
+  ├─ 歸納合併        → archived (archive_reason = 'merged')
+  └─ 用戶手動清理    → archived (archive_reason = 'manual')
+```
+
+**歸納機制（Consolidation）**：
+
+當某個 L2 的 active entries 達到 20 條上限時，`analyze` 偵測到飽和：
+
+1. LLM 分析哪些 entries 可合併（同主題多條 → 一條更完整的）
+2. 產出歸納 proposal，**必須由人確認**後才執行
+3. 被合併的舊 entries → `archived (archive_reason = 'merged')`，新 entry → `active`
+4. 歸納後 active count 必須 < 20
+
+**不丟失原則**：archived entries 永遠留在 DB，可用 `search(collection="entries", status="archived")` 找回。
+
+**自然選擇效應**：常被提到的概念不斷有新 entry 進來，歸納時反覆出現的知識自然留在合併後的 entry 裡，冷門知識逐漸壓進 archived。不需要冷卻計時器或使用頻率追蹤。
+
+**設計決策：不做自動 archive**
+
+曾考慮根據「使用頻率」自動 archive 長期未被引用的 entries。否決原因：
+- Agent 每次讀 L2 會撈回所有 active entries，無法區分「真的用到」vs「只是讀到」
+- 人也無法判斷哪些 entries 被最常使用
+- 唯一可靠的淘汰機制是「空間滿了 + 人為判斷」
 
 #### Internal 治理 API（server 端自動偵測）
 
 | 偵測項目 | 觸發條件 | 建議動作 |
 |---------|---------|---------|
+| 飽和偵測 | 同一 entity 下 active entries >= 20 | 觸發歸納 proposal，人確認後合併 |
 | 重複偵測 | 同一 entity 下兩條 entry content 相似度 > 閾值 | 建議合併或 archive 較舊的 |
 | 矛盾偵測 | 同一 entity 下 decision A 和 decision B 描述相反 | 建議將舊 decision 標記 superseded |
-| 壓縮 | 同一 entity 下同 type 的 active entries 超過 N 條 | 建議合併為更精練的條目 |
 | summary 漂移 | entries 描述的方向跟 L2 summary 不一致 | 提示 review summary |
 | 拆分信號 | 同一 entity 的 entries 明顯分成不相關的兩群 | 建議拆分 L2 |
 
@@ -173,6 +215,23 @@ Entry 治理是 server 端 Internal 治理的核心場景：
 - **Capture skill**：需要在知識分析時識別 entry 候選
 - **Migration**：需要新增 entity_entries 表
 - **Dashboard**：entity 詳情面板需要展示 entries 時間軸
+
+## 依賴與降級行為
+
+### User Profile 依賴
+
+`department` 欄位的值來源是 user profile 的部門欄位（尚未實作）。降級行為：
+
+- User profile 尚未有 `department` 欄位 → MCP server join 不到值 → `department = null`
+- `department = null` 的 entry 對所有部門可見，行為與原始設計相同
+- 因此 User Profile 功能上線前，系統完全向下相容，不需要 migration
+
+### 完整啟用條件
+
+1. User profile 新增 `department` 欄位
+2. MCP server 在 entry create 時從 partner context 自動注入 `department`
+3. Setup skill 確認 local agent context 帶有用戶部門資訊
+4. 壓縮演算法（`consolidate_entries`）依 department 分組後各自壓縮
 
 ## 相關文件
 

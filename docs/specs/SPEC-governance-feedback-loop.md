@@ -4,7 +4,7 @@ id: SPEC-governance-feedback-loop
 status: Draft
 ontology_entity: TBD
 created: 2026-03-28
-updated: 2026-03-28
+updated: 2026-03-29
 ---
 
 # Feature Spec: 治理品質回饋迴路
@@ -220,6 +220,24 @@ agent 承認：如果用戶只說「把這份 ERP 整合研究報告更新到 Ze
   - Given 標記為可能過時的文件，When 用戶確認確實過時，Then 文件走 archive/supersede 流程
 
 ### P2（可以有）— 深度語意治理
+
+#### P1-4：Entry 飽和壓縮執行 Workflow
+
+- **描述**：`analyze` 偵測到 entry 飽和並產出 consolidation proposal 後，client agent 必須走標準 workflow 執行壓縮。目前沒有定義執行路徑，agent 各自解讀，容易踩到「先 archive 再 write，write 失敗 → 知識消失」的坑。
+- **解決的風險**：entry 飽和時 `write` 被阻擋，但 agent 不知道標準處置步驟
+- **為什麼是 P1**：detection 已存在（analyze 已輸出 proposal），缺的是標準執行路徑。不定義就是讓每個 agent 自行猜。
+- **執行順序（硬規則）**：
+  1. 呈現 proposal 給用戶（顯示合併計畫 + 保留項目）
+  2. 取得明確人工確認才執行
+  3. 每組合併：先 `write` 新 merged entry → 成功後才 archive 舊 entries（`archive_reason="merged"`）
+  4. 若 write 失敗，跳過本組、不 archive 舊 entries
+  5. 全部完成後 `get` 驗證 active entries < 20
+- **為什麼先 write 再 archive**：若順序反過來，archive 成功但 write 失敗 → 舊 entries 消失，知識不可逆損失
+- **Acceptance Criteria**：
+  - Given `analyze` 回傳 `entry_saturation` 非空，When agent 執行壓縮，Then 必須先呈現 proposal 取得確認才執行任何 write/archive
+  - Given 用戶確認執行，When 執行每組合併，Then 順序為：write 新 entry → archive 舊 entries，兩步均有 error handling
+  - Given write 新 entry 失敗，Then 本組所有舊 entries 保持 active，回報錯誤，不 archive
+  - Given 全部執行完，Then `get` 驗證 active entries < 20；若仍 >= 20 回報未完成項目
 
 #### P2-1：Agent 使用信號追蹤
 
