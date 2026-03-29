@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 import json
 import uuid
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime
+from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
 from starlette.responses import JSONResponse
@@ -130,11 +132,48 @@ class ApiKeyMiddleware:
         if x_api_key:
             return x_api_key
 
-        from urllib.parse import parse_qs
-
         qs = parse_qs(scope.get("query_string", b"").decode())
         keys = qs.get("api_key", [])
         return keys[0] if keys else None
+
+
+class SseApiKeyPropagator:
+    """Inject api_key into the SSE endpoint event so clients preserve auth.
+
+    FastMCP SSE sends: data: /messages/?session_id=<uuid>
+    We patch it to:   data: /messages/?session_id=<uuid>&api_key=<key>
+
+    Only activates when api_key is present in the original query string.
+    Header-based auth clients are unaffected (pass-through).
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+
+        qs = parse_qs(scope.get("query_string", b"").decode())
+        api_key = qs.get("api_key", [None])[0]
+
+        if not api_key:
+            return await self.app(scope, receive, send)
+
+        async def patched_send(event):
+            if event["type"] == "http.response.body":
+                body = event.get("body", b"")
+                if body:
+                    text = body.decode("utf-8", errors="replace")
+                    text = re.sub(
+                        r"(data: /messages/\?session_id=[^\s&]+)",
+                        lambda m: m.group(0) + f"&api_key={api_key}",
+                        text,
+                    )
+                    event = {**event, "body": text.encode("utf-8")}
+            await send(event)
+
+        await self.app(scope, receive, patched_send)
 
 
 # ──────────────────────────────────────────────
@@ -1657,7 +1696,7 @@ if __name__ == "__main__":
                 path="/mcp",
                 stateless_http=True,
             )
-            sse_http_app = mcp.http_app(transport="sse", path="/sse")
+            sse_http_app = SseApiKeyPropagator(mcp.http_app(transport="sse", path="/sse"))
 
             class _PathTransportRouter:
                 def __init__(self, stream_app, sse_app):
@@ -1677,7 +1716,7 @@ if __name__ == "__main__":
             mcp_routes = [Mount("/", app=ApiKeyMiddleware(routed_mcp_app))]
             lifespan_app = stream_http_app
         elif transport == "sse":
-            http_app = mcp.http_app(transport="sse", path="/sse")
+            http_app = SseApiKeyPropagator(mcp.http_app(transport="sse", path="/sse"))
             mcp_routes = [Mount("/", app=ApiKeyMiddleware(http_app))]
             lifespan_app = http_app
         else:
