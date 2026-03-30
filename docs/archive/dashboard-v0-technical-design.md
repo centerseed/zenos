@@ -33,7 +33,7 @@
 | Vercel | Next.js 原生支援、preview deploy | 多一個服務商、免費方案有限制 | ❌ |
 | Cloud Run | 已經跑 MCP server | 需要自己管 Docker，過重 | ❌ |
 
-部署指令：`cd /Users/wubaizong/接案/ZenOS && firebase deploy --only hosting`
+部署指令：`cd /Users/wubaizong/clients/ZenOS && firebase deploy --only hosting`
 Next.js config：`output: "export"`，靜態輸出到 `dashboard/out/`
 
 ### 3. API key 管理

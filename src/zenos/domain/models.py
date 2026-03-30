@@ -124,7 +124,10 @@ class Entity:
     confirmed_by_user: bool = False
     owner: str | None = None  # Phase 0: simple name string (e.g. "Barry")
     sources: list[dict] = field(default_factory=list)  # [{uri, label, type}]
-    visibility: str = "public"  # "public" | "restricted"
+    visibility: str = "public"  # "public" | "restricted" | "role-restricted" | "confidential"
+    visible_to_roles: list[str] = field(default_factory=list)
+    visible_to_members: list[str] = field(default_factory=list)
+    visible_to_departments: list[str] = field(default_factory=list)
     last_reviewed_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
@@ -294,6 +297,7 @@ class Task:
     linked_protocol: str | None = None
     linked_blindspot: str | None = None
     source_type: str = ""
+    source_metadata: dict[str, object] = field(default_factory=dict)
     context_summary: str = ""
     due_date: datetime | None = None
     assignee_role_id: str | None = None

@@ -87,16 +87,33 @@ def _row_to_deal(row: asyncpg.Record) -> Deal:
     raw_stage = row["funnel_stage"]
     raw_type = row["deal_type"]
     raw_source = row["source_type"]
+
+    # Robust Enum conversion to prevent 500 on bad data
+    try:
+        funnel_stage = FunnelStage(raw_stage) if raw_stage else FunnelStage.PROSPECT
+    except ValueError:
+        funnel_stage = FunnelStage.PROSPECT
+
+    try:
+        deal_type = DealType(raw_type) if raw_type else None
+    except ValueError:
+        deal_type = None
+
+    try:
+        source_type = DealSource(raw_source) if raw_source else None
+    except ValueError:
+        source_type = None
+
     return Deal(
         id=row["id"],
         partner_id=row["partner_id"],
         title=row["title"],
         company_id=row["company_id"],
         owner_partner_id=row["owner_partner_id"],
-        funnel_stage=FunnelStage(raw_stage) if raw_stage else FunnelStage.PROSPECT,
+        funnel_stage=funnel_stage,
         amount_twd=row["amount_twd"],
-        deal_type=DealType(raw_type) if raw_type else None,
-        source_type=DealSource(raw_source) if raw_source else None,
+        deal_type=deal_type,
+        source_type=source_type,
         referrer=row["referrer"],
         expected_close_date=_to_date(row["expected_close_date"]),
         signed_date=_to_date(row["signed_date"]),

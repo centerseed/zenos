@@ -64,19 +64,13 @@ class TestInvitePartnerAudit:
             body={"email": "new@test.com"},
         )
 
-        mock_conn = AsyncMock()
-        mock_pool = MagicMock()
-
-        class _ACM:
-            async def __aenter__(self): return mock_conn
-            async def __aexit__(self, *a): pass
-
-        mock_pool.acquire = MagicMock(return_value=_ACM())
+        mock_repo = AsyncMock()
+        mock_repo.create = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
-             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "authorizedEntityIds": []})), \
              patch("zenos.interface.admin_api._get_partner_by_email", return_value=(None, None)), \
-             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
             resp = await invite_partner(request)
@@ -120,18 +114,12 @@ class TestActivatePartnerAudit:
             headers={"authorization": "Bearer fake-token"},
         )
 
-        mock_conn = AsyncMock()
-        mock_pool = MagicMock()
-
-        class _ACM:
-            async def __aenter__(self): return mock_conn
-            async def __aexit__(self, *a): pass
-
-        mock_pool.acquire = MagicMock(return_value=_ACM())
+        mock_repo = AsyncMock()
+        mock_repo.update_fields = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token(email="new@test.com", name="New User")), \
              patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p-new", {"email": "new@test.com", "status": "invited"})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
             resp = await activate_partner(request)
@@ -177,26 +165,18 @@ class TestUpdatePartnerRoleAudit:
             path_params={"id": "partner-2"},
         )
 
-        mock_row = MagicMock()
-        mock_row.__getitem__ = lambda self, k: {
-            "id": "partner-2", "email": "user@test.com", "display_name": "User",
-            "is_admin": False, "status": "active", "shared_partner_id": "p1",
-            "invited_by": None, "created_at": datetime(2026,1,1,tzinfo=timezone.utc),
-            "updated_at": datetime(2026,1,1,tzinfo=timezone.utc),
-        }[k]
-        mock_conn = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
-        mock_pool = MagicMock()
-
-        class _ACM:
-            async def __aenter__(self): return mock_conn
-            async def __aexit__(self, *a): pass
-
-        mock_pool.acquire = MagicMock(return_value=_ACM())
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2", "email": "user@test.com", "displayName": "User",
+            "isAdmin": False, "status": "active", "sharedPartnerId": "p1",
+            "invitedBy": None, "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "updatedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        })
+        mock_repo.update_fields = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
-             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
             resp = await update_partner_role(request)
@@ -218,19 +198,12 @@ class TestUpdatePartnerRoleAudit:
             path_params={"id": "nonexistent"},
         )
 
-        mock_conn = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value=None)
-        mock_pool = MagicMock()
-
-        class _ACM:
-            async def __aenter__(self): return mock_conn
-            async def __aexit__(self, *a): pass
-
-        mock_pool.acquire = MagicMock(return_value=_ACM())
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
             resp = await update_partner_role(request)
@@ -254,26 +227,18 @@ class TestUpdatePartnerStatusAudit:
             path_params={"id": "partner-2"},
         )
 
-        mock_row = MagicMock()
-        mock_row.__getitem__ = lambda self, k: {
-            "id": "partner-2", "email": "user@test.com", "display_name": "User",
-            "is_admin": False, "status": "active", "shared_partner_id": "p1",
-            "invited_by": None, "created_at": datetime(2026,1,1,tzinfo=timezone.utc),
-            "updated_at": datetime(2026,1,1,tzinfo=timezone.utc),
-        }[k]
-        mock_conn = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value=mock_row)
-        mock_pool = MagicMock()
-
-        class _ACM:
-            async def __aenter__(self): return mock_conn
-            async def __aexit__(self, *a): pass
-
-        mock_pool.acquire = MagicMock(return_value=_ACM())
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2", "email": "user@test.com", "displayName": "User",
+            "isAdmin": False, "status": "active", "sharedPartnerId": "p1",
+            "invitedBy": None, "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "updatedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        })
+        mock_repo.update_fields = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
-             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
             resp = await update_partner_status(request)
@@ -295,19 +260,12 @@ class TestUpdatePartnerStatusAudit:
             path_params={"id": "nonexistent"},
         )
 
-        mock_conn = AsyncMock()
-        mock_conn.fetchrow = AsyncMock(return_value=None)
-        mock_pool = MagicMock()
-
-        class _ACM:
-            async def __aenter__(self): return mock_conn
-            async def __aexit__(self, *a): pass
-
-        mock_pool.acquire = MagicMock(return_value=_ACM())
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
             resp = await update_partner_status(request)
@@ -329,18 +287,12 @@ class TestAuditLogNoPii:
             headers={"authorization": "Bearer fake-token"},
         )
 
-        mock_conn = AsyncMock()
-        mock_pool = MagicMock()
-
-        class _ACM:
-            async def __aenter__(self): return mock_conn
-            async def __aexit__(self, *a): pass
-
-        mock_pool.acquire = MagicMock(return_value=_ACM())
+        mock_repo = AsyncMock()
+        mock_repo.update_fields = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token(email="user@test.com")), \
              patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p1", {"email": "user@test.com", "status": "invited"})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", new_callable=AsyncMock, return_value=mock_pool), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
             await activate_partner(request)

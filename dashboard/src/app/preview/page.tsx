@@ -209,6 +209,7 @@ export default function PreviewPage() {
         relationships={MOCK_RELATIONSHIPS}
         blindspots={selectedEntityBlindspots}
         entities={MOCK_ENTITIES}
+        tasks={[]}
         onClose={() => setSelectedEntity(null)}
       />
     </div>

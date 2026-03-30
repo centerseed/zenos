@@ -7,6 +7,16 @@
     "public": "dashboard/out",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "cleanUrls": true,
-    "trailingSlash": false
+    "trailingSlash": false,
+    "rewrites": [
+      {
+        "source": "/clients/deals/**",
+        "destination": "/clients/deals/_.html"
+      },
+      {
+        "source": "/clients/companies/**",
+        "destination": "/clients/companies/_.html"
+      }
+    ]
   }
 }

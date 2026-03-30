@@ -61,6 +61,7 @@ def patch_skills_root(skills_root: Path):
     import zenos.interface.setup_content as sc
 
     # Clear caches before patching
+    sc.resolve_skills_root.cache_clear()
     sc.get_manifest.cache_clear()
     sc.get_bundle_version.cache_clear()
     sc._get_skill_files_cached.cache_clear()
@@ -69,6 +70,7 @@ def patch_skills_root(skills_root: Path):
         yield
 
     # Clear caches after test to avoid pollution
+    sc.resolve_skills_root.cache_clear()
     sc.get_manifest.cache_clear()
     sc.get_bundle_version.cache_clear()
     sc._get_skill_files_cached.cache_clear()
@@ -87,6 +89,44 @@ class TestGetBundleVersion:
     def test_returns_string(self):
         from zenos.interface.setup_content import get_bundle_version
         assert isinstance(get_bundle_version(), str)
+
+
+class TestResolveSkillsRoot:
+    def test_prefers_env_override(self, monkeypatch, tmp_path: Path):
+        import zenos.interface.setup_content as sc
+
+        custom_root = tmp_path / "custom-skills"
+        release = custom_root / "release"
+        governance = custom_root / "governance"
+        workflows = custom_root / "workflows"
+        release.mkdir(parents=True)
+        governance.mkdir()
+        workflows.mkdir()
+        (release / "manifest.json").write_text('{"skills":[{"name":"zenos-setup","version":"1.0.0","path":"zenos-setup","files":["SKILL.md"]}]}', encoding="utf-8")
+
+        monkeypatch.setenv("ZENOS_SKILLS_ROOT", str(custom_root))
+        with patch.object(sc, "_SKILLS_ROOT", tmp_path / "missing-skills"):
+            sc.resolve_skills_root.cache_clear()
+            assert sc.resolve_skills_root() == custom_root.resolve()
+
+    def test_falls_back_to_cwd_skills(self, monkeypatch, tmp_path: Path):
+        import zenos.interface.setup_content as sc
+
+        project_root = tmp_path / "project"
+        skills = project_root / "skills"
+        release = skills / "release"
+        governance = skills / "governance"
+        workflows = skills / "workflows"
+        release.mkdir(parents=True)
+        governance.mkdir()
+        workflows.mkdir()
+        (release / "manifest.json").write_text('{"skills":[{"name":"zenos-setup","version":"1.0.0","path":"zenos-setup","files":["SKILL.md"]}]}', encoding="utf-8")
+
+        monkeypatch.delenv("ZENOS_SKILLS_ROOT", raising=False)
+        monkeypatch.chdir(project_root)
+        with patch.object(sc, "_SKILLS_ROOT", tmp_path / "missing-skills"):
+            sc.resolve_skills_root.cache_clear()
+            assert sc.resolve_skills_root() == skills.resolve()
 
 
 class TestGetSkillFiles:

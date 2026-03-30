@@ -162,3 +162,41 @@ export async function getPartnerMe(token: string): Promise<Partner> {
   const res = await apiFetch<{ partner: Partner }>("/api/partner/me", token);
   return res.partner;
 }
+
+export async function updatePartnerScope(
+  token: string,
+  partnerId: string,
+  data: { roles: string[]; department: string }
+): Promise<Partner> {
+  const res = await fetch(`${API_BASE}/api/partners/${partnerId}/scope`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`API /api/partners/${partnerId}/scope: ${res.status}`);
+  return hydrateDates(await res.json()) as Partner;
+}
+
+export async function updateEntityVisibility(
+  token: string,
+  entityId: string,
+  data: {
+    visibility: Entity["visibility"];
+    visible_to_roles?: string[];
+    visible_to_members?: string[];
+    visible_to_departments?: string[];
+  }
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/entities/${entityId}/visibility`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`API /api/entities/${entityId}/visibility: ${res.status}`);
+}

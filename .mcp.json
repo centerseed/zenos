@@ -2,23 +2,14 @@
   "mcpServers": {
     "zenos": {
       "type": "http",
-      "url": "https://zenos-mcp-165893875709.asia-east1.run.app/mcp?api_key=bd48388e-a7b0-403c-b825-a64c13f6fc70"
+      "url": "https://zenos-mcp-165893875709.asia-east1.run.app/mcp/",
+      "headers": {
+        "Authorization": "Bearer bd48388e-a7b0-403c-b825-a64c13f6fc70"
+      }
     },
     "zentropy": {
-      "type": "streamable-http",
-      "url": "https://api.zentropy.cc/mcp",
-      "oauth": {
-        "authorizationUrl": "https://api.zentropy.cc/api/oauth/mcp/authorize",
-        "tokenUrl": "https://api.zentropy.cc/api/oauth/mcp/token",
-        "clientId": "claude-code",
-        "scopes": [
-          "read:tasks",
-          "write:inbox",
-          "read:knowledge",
-          "write:knowledge",
-          "read:profile"
-        ]
-      }
+      "type": "http",
+      "url": "https://api.zentropy.cc/mcp"
     }
   }
 }

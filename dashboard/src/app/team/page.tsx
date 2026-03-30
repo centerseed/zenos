@@ -5,12 +5,23 @@ import { useRouter } from "next/navigation";
 import { sendSignInLinkToEmail } from "firebase/auth";
 import { useAuth } from "@/lib/auth";
 import { getAuthInstance } from "@/lib/firebase";
+import { updatePartnerScope } from "@/lib/api";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
 import { LoadingState } from "@/components/LoadingState";
 import type { Partner } from "@/types";
 
 const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
+const DEFAULT_ROLE_OPTIONS = [
+  "engineering",
+  "marketing",
+  "product",
+  "sales",
+  "finance",
+  "hr",
+  "ops",
+];
+const DEFAULT_DEPARTMENT_OPTIONS = ["all", ...DEFAULT_ROLE_OPTIONS];
 
 function TeamPage() {
   const { user, partner } = useAuth();
@@ -24,6 +35,14 @@ function TeamPage() {
     text: string;
   } | null>(null);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [scopeEditor, setScopeEditor] = useState<{
+    partnerId: string;
+    email: string;
+    roles: string[];
+    department: string;
+    customRole: string;
+    customDepartment: string;
+  } | null>(null);
 
   // Admin guard: redirect non-admin users
   useEffect(() => {
@@ -220,6 +239,39 @@ function TeamPage() {
     }
   };
 
+  const handleScopeSave = async (targetPartner: Partner, data: { roles: string[]; department: string }) => {
+    if (!user) return;
+    setActionLoading(targetPartner.id);
+    try {
+      const token = await user.getIdToken();
+      await updatePartnerScope(token, targetPartner.id, {
+        roles: data.roles,
+        department: data.department || "all",
+      });
+      await fetchPartners();
+      setScopeEditor(null);
+    } catch (err) {
+      console.error("Scope change failed:", err);
+      setInviteMessage({
+        type: "error",
+        text: err instanceof Error ? err.message : "更新 scope 失敗",
+      });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const openScopeEditor = (p: Partner) => {
+    setScopeEditor({
+      partnerId: p.id,
+      email: p.email,
+      roles: [...(p.roles || [])],
+      department: p.department || "all",
+      customRole: "",
+      customDepartment: "",
+    });
+  };
+
   if (!partner?.isAdmin) return null;
 
   const activeCount = partners.filter((p) => p.status === "active").length;
@@ -292,7 +344,7 @@ function TeamPage() {
                     Name
                   </th>
                   <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
-                    Role
+                    Access Scope
                   </th>
                   <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
                     Status
@@ -318,15 +370,38 @@ function TeamPage() {
                         {p.displayName || "--"}
                       </td>
                       <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                            p.isAdmin
-                              ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                              : "bg-secondary text-muted-foreground border border-border"
-                          }`}
-                        >
-                          {p.isAdmin ? "Admin" : "Member"}
-                        </span>
+                        <div className="space-y-2 min-w-[220px]">
+                          <span
+                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
+                              p.isAdmin
+                                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                                : "bg-secondary text-muted-foreground border border-border"
+                            }`}
+                          >
+                            {p.isAdmin ? "Admin" : "Member"}
+                          </span>
+                          {!p.isAdmin && (
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap gap-1">
+                                {(p.roles || []).length === 0 ? (
+                                  <span className="text-[11px] text-muted-foreground">roles: (none)</span>
+                                ) : (
+                                  (p.roles || []).map((r) => (
+                                    <span
+                                      key={`${p.id}-${r}`}
+                                      className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-blue-500/10 text-blue-300 border border-blue-500/20"
+                                    >
+                                      {r}
+                                    </span>
+                                  ))
+                                )}
+                              </div>
+                              <div className="text-[11px] text-muted-foreground">
+                                dept: <span className="text-foreground">{p.department || "all"}</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4">
                         <StatusBadge status={p.status} />
@@ -344,6 +419,16 @@ function TeamPage() {
                                 className="text-xs text-muted-foreground hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 {p.isAdmin ? "Set Member" : "Set Admin"}
+                              </button>
+                            )}
+                            {!p.isAdmin && p.status !== "invited" && (
+                              <button
+                                onClick={() => openScopeEditor(p)}
+                                aria-label={`Save scope for ${p.email}`}
+                                disabled={isLoading}
+                                className="text-xs text-blue-400 hover:text-blue-300 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                Edit Scope
                               </button>
                             )}
                             {p.status === "active" && (
@@ -397,6 +482,132 @@ function TeamPage() {
           </div>
         )}
       </main>
+
+      {scopeEditor && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="w-full max-w-lg rounded-xl border border-border bg-card p-5 space-y-4">
+            <div>
+              <h3 className="text-base font-semibold text-white">Edit Access Scope</h3>
+              <p className="text-xs text-muted-foreground mt-1">{scopeEditor.email}</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground uppercase tracking-wide">Roles</label>
+              <div className="grid grid-cols-2 gap-2">
+                {DEFAULT_ROLE_OPTIONS.map((role) => {
+                  const checked = scopeEditor.roles.includes(role);
+                  return (
+                    <label key={role} className="flex items-center gap-2 text-sm text-foreground">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          setScopeEditor((prev) => {
+                            if (!prev) return prev;
+                            const next = new Set(prev.roles);
+                            if (e.target.checked) next.add(role);
+                            else next.delete(role);
+                            return { ...prev, roles: Array.from(next).sort() };
+                          });
+                        }}
+                      />
+                      {role}
+                    </label>
+                  );
+                })}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={scopeEditor.customRole}
+                  onChange={(e) =>
+                    setScopeEditor((prev) => (prev ? { ...prev, customRole: e.target.value } : prev))
+                  }
+                  placeholder="Add custom role"
+                  className="flex-1 bg-background border border-border rounded px-3 py-1.5 text-sm text-white"
+                />
+                <button
+                  className="text-xs px-3 py-1.5 rounded bg-secondary text-foreground"
+                  onClick={() =>
+                    setScopeEditor((prev) => {
+                      if (!prev) return prev;
+                      const v = prev.customRole.trim();
+                      if (!v) return prev;
+                      const next = new Set(prev.roles);
+                      next.add(v);
+                      return { ...prev, roles: Array.from(next).sort(), customRole: "" };
+                    })
+                  }
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs text-muted-foreground uppercase tracking-wide">Department</label>
+              <select
+                value={scopeEditor.department}
+                onChange={(e) =>
+                  setScopeEditor((prev) => (prev ? { ...prev, department: e.target.value } : prev))
+                }
+                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-white"
+              >
+                {DEFAULT_DEPARTMENT_OPTIONS.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+              <div className="flex items-center gap-2">
+                <input
+                  value={scopeEditor.customDepartment}
+                  onChange={(e) =>
+                    setScopeEditor((prev) => (prev ? { ...prev, customDepartment: e.target.value } : prev))
+                  }
+                  placeholder="Custom department (optional)"
+                  className="flex-1 bg-background border border-border rounded px-3 py-1.5 text-sm text-white"
+                />
+                <button
+                  className="text-xs px-3 py-1.5 rounded bg-secondary text-foreground"
+                  onClick={() =>
+                    setScopeEditor((prev) => {
+                      if (!prev) return prev;
+                      const v = prev.customDepartment.trim();
+                      if (!v) return prev;
+                      return { ...prev, department: v, customDepartment: "" };
+                    })
+                  }
+                >
+                  Use
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                className="text-sm px-3 py-2 rounded bg-secondary text-foreground"
+                onClick={() => setScopeEditor(null)}
+              >
+                Cancel
+              </button>
+              <button
+                className="text-sm px-3 py-2 rounded bg-primary text-primary-foreground disabled:opacity-50"
+                disabled={actionLoading === scopeEditor.partnerId}
+                onClick={() => {
+                  const target = partners.find((p) => p.id === scopeEditor.partnerId);
+                  if (!target) return;
+                  handleScopeSave(target, {
+                    roles: scopeEditor.roles,
+                    department: scopeEditor.department || "all",
+                  });
+                }}
+              >
+                {actionLoading === scopeEditor.partnerId ? "Saving..." : "Save Scope"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

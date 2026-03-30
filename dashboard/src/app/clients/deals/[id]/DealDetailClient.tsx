@@ -168,7 +168,24 @@ function NewActivityForm({ dealId, token, recordedBy, onCreated }: NewActivityFo
 function DealDetailPage() {
   const { user, partner } = useAuth();
   const params = useParams();
-  const dealId = params.id as string;
+  const [dealId, setDealId] = useState<string>("");
+
+  useEffect(() => {
+    const rawParam = params.id;
+    const paramId = Array.isArray(rawParam) ? rawParam[0] : rawParam;
+    if (paramId && paramId !== "_") {
+      setDealId(paramId);
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      const segments = window.location.pathname.split("/").filter(Boolean);
+      const fallbackId = segments[segments.length - 1];
+      if (fallbackId && fallbackId !== "_") {
+        setDealId(fallbackId);
+      }
+    }
+  }, [params]);
 
   const [deal, setDeal] = useState<Deal | null>(null);
   const [activities, setActivities] = useState<Activity[]>([]);
@@ -177,7 +194,7 @@ function DealDetailPage() {
   const [stageUpdating, setStageUpdating] = useState(false);
 
   useEffect(() => {
-    if (!user || !partner) return;
+    if (!user || !partner || !dealId) return;
 
     async function load() {
       const t = await user!.getIdToken();

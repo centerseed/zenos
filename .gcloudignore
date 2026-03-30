@@ -2,9 +2,11 @@
 .github
 .claude
 .firebase
+dashboard
 dashboard/node_modules
 dashboard/.next
 dashboard/out
+.venv
 docs
 threads-*
 *.md

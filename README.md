@@ -41,7 +41,7 @@ ZenOS 是一個把「知識治理（Ontology）」和「行動治理（Task Acti
 }
 ```
 
-本 repo 內已有範例設定檔：[.mcp.json](/Users/wubaizong/接案/ZenOS/.mcp.json)。
+本 repo 內已有範例設定檔：[.mcp.json](/Users/wubaizong/clients/ZenOS/.mcp.json)。
 
 ### 3) 連線驗證
 
@@ -52,7 +52,7 @@ ZenOS 是一個把「知識治理（Ontology）」和「行動治理（Task Acti
 
 ## Skill 更新（給使用者）
 
-ZenOS skills 的官方發佈來源是 [`skills/release/manifest.json`](/Users/wubaizong/接案/ZenOS/skills/release/manifest.json)，
+ZenOS skills 的官方發佈來源是 [`skills/release/manifest.json`](/Users/wubaizong/clients/ZenOS/skills/release/manifest.json)，
 安裝與升級入口統一為 `zenos-skills setup`。
 
 ### 1) 安裝 CLI 入口
@@ -83,13 +83,13 @@ zenos-skills setup --skills-dir ~/.codex/skills
 若你在維護 ZenOS repo，想先用本地 manifest 驗證：
 
 ```bash
-zenos-skills setup --source /Users/wubaizong/接案/ZenOS --skills-dir ~/.codex/skills
+zenos-skills setup --source /Users/wubaizong/clients/ZenOS --skills-dir ~/.codex/skills
 ```
 
 若要把同一份 release 同步到本機兩個 host 目錄（`.claude` + `.codex`）：
 
 ```bash
-python /Users/wubaizong/接案/ZenOS/scripts/sync_skills_from_release.py
+python /Users/wubaizong/clients/ZenOS/scripts/sync_skills_from_release.py
 ```
 
 ### 4) 實際升級範例
@@ -128,7 +128,7 @@ pip install -e ".[dev]"
 
 ### 3) 設定環境變數
 
-可參考 [.env.example](/Users/wubaizong/接案/ZenOS/.env.example) 並至少補齊：
+可參考 [.env.example](/Users/wubaizong/clients/ZenOS/.env.example) 並至少補齊：
 
 ```bash
 export DATABASE_URL='postgresql://<user>:<pass>@<host>:5432/<db>'
@@ -150,8 +150,8 @@ MCP_TRANSPORT=sse PORT=8080 python -m zenos.interface.tools
 
 ## 部署
 
-- Cloud Run MCP 部署腳本：[scripts/deploy_mcp.sh](/Users/wubaizong/接案/ZenOS/scripts/deploy_mcp.sh)
-- 全站部署（測試 + dashboard + firebase）：[scripts/deploy.sh](/Users/wubaizong/接案/ZenOS/scripts/deploy.sh)
+- Cloud Run MCP 部署腳本：[scripts/deploy_mcp.sh](/Users/wubaizong/clients/ZenOS/scripts/deploy_mcp.sh)
+- 全站部署（測試 + dashboard + firebase）：[scripts/deploy.sh](/Users/wubaizong/clients/ZenOS/scripts/deploy.sh)
 
 ## 最小可用流程（建議）
 

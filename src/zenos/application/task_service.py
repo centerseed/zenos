@@ -164,6 +164,7 @@ class TaskService:
             linked_protocol=data.get("linked_protocol"),
             linked_blindspot=linked_blindspot_id,
             source_type=data.get("source_type", ""),
+            source_metadata=data.get("source_metadata", {}) or {},
             context_summary=context_summary,
             due_date=due_date,
             blocked_by=blocked_by,
@@ -218,7 +219,7 @@ class TaskService:
         for field in (
             "assignee", "priority", "description", "blocked_reason",
             "due_date", "result", "acceptance_criteria", "blocked_by",
-            "plan_id", "plan_order", "depends_on_task_ids",
+            "plan_id", "plan_order", "depends_on_task_ids", "source_metadata",
         ):
             if field in updates:
                 setattr(task, field, updates[field])

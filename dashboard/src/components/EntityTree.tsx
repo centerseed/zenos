@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { Entity, Relationship } from "@/types";
-import { getRelationships } from "@/lib/api";
+import { getRelationships, updateEntityVisibility } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { LoadingState } from "@/components/LoadingState";
 
@@ -27,10 +27,17 @@ const statusColors: Record<string, string> = {
 };
 
 function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Entity[] }) {
-  const { user } = useAuth();
+  const { user, partner } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [loadingRels, setLoadingRels] = useState(false);
+  const [savingVisibility, setSavingVisibility] = useState(false);
+  const [visibility, setVisibility] = useState<Entity["visibility"]>(entity.visibility);
+  const [visibleToRoles, setVisibleToRoles] = useState((entity.visibleToRoles || []).join(", "));
+  const [visibleToDepartments, setVisibleToDepartments] = useState(
+    (entity.visibleToDepartments || []).join(", ")
+  );
+  const [visibleToMembers, setVisibleToMembers] = useState((entity.visibleToMembers || []).join(", "));
 
   const handleToggle = async () => {
     if (!expanded && relationships.length === 0 && user) {
@@ -45,6 +52,24 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
 
   const getEntityName = (id: string) =>
     allEntities.find((e) => e.id === id)?.name ?? id;
+
+  const handleSaveVisibility = async () => {
+    if (!user || !partner?.isAdmin) return;
+    setSavingVisibility(true);
+    try {
+      const token = await user.getIdToken();
+      await updateEntityVisibility(token, entity.id, {
+        visibility,
+        visible_to_roles: visibleToRoles.split(",").map((v) => v.trim()).filter(Boolean),
+        visible_to_departments: visibleToDepartments.split(",").map((v) => v.trim()).filter(Boolean),
+        visible_to_members: visibleToMembers.split(",").map((v) => v.trim()).filter(Boolean),
+      });
+    } catch (err) {
+      console.error("Failed to save visibility:", err);
+    } finally {
+      setSavingVisibility(false);
+    }
+  };
 
   return (
     <div className="border border-border rounded-lg bg-card">
@@ -76,6 +101,52 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
 
       {expanded && (
         <div className="border-t border-border p-4 bg-background">
+          {partner?.isAdmin && (
+            <div className="mb-4 rounded-md border border-border p-3">
+              <div className="text-xs text-muted-foreground mb-2">Permission</div>
+              <div className="grid gap-2">
+                <select
+                  aria-label={`Visibility for ${entity.name}`}
+                  value={visibility}
+                  onChange={(e) => setVisibility(e.target.value as Entity["visibility"])}
+                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                >
+                  <option value="public">public</option>
+                  <option value="restricted">restricted</option>
+                  <option value="role-restricted">role-restricted</option>
+                  <option value="confidential">confidential</option>
+                </select>
+                <input
+                  aria-label={`Visible roles for ${entity.name}`}
+                  value={visibleToRoles}
+                  onChange={(e) => setVisibleToRoles(e.target.value)}
+                  placeholder="visible roles (comma-separated)"
+                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                />
+                <input
+                  aria-label={`Visible departments for ${entity.name}`}
+                  value={visibleToDepartments}
+                  onChange={(e) => setVisibleToDepartments(e.target.value)}
+                  placeholder="visible departments (comma-separated)"
+                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                />
+                <input
+                  aria-label={`Visible members for ${entity.name}`}
+                  value={visibleToMembers}
+                  onChange={(e) => setVisibleToMembers(e.target.value)}
+                  placeholder="visible members (partner ids, comma-separated)"
+                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                />
+                <button
+                  onClick={handleSaveVisibility}
+                  disabled={savingVisibility}
+                  className="justify-self-start text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
+                >
+                  {savingVisibility ? "Saving..." : "Save Permission"}
+                </button>
+              </div>
+            </div>
+          )}
           {loadingRels ? (
             <LoadingState label="Loading relationships..." />
           ) : relationships.length === 0 ? (

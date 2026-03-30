@@ -141,6 +141,33 @@ AC-R6:
    When 載入 `/tasks`  
    Then 顯示錯誤文案與重試入口；重試成功後回復正常顯示。
 
+### P0-4（R7）Kanban 卡片資訊乘載力擴充 (Rich Kanban Card)
+
+- 任務的 `description` 與 `result` 欄位必須完整支援 **Markdown 渲染**，包含表格、清單與超連結，做為跨部門（如業務與行銷）溝通的資訊載體。
+- 若 `description` 中包含圖片連結（例如 `![Image](URL)`），Kanban 卡片（Card）與抽屜式詳情（Drawer）必須直接渲染圖片縮圖，不須點開即可預覽（如設計物、截圖）。
+- 卡面必須借鑒 Jira/Kanban 的資訊密度，直覺呈現：`linked_entities`（以 Tag 顯示）、`priority`（Icon）、`assignee`（Avatar）。
+
+AC-R7:
+1. Given task description 包含 Markdown 表格與圖片  
+   When 在 UI 開啟 task 詳情  
+   Then 必須正確渲染出表格結構與實體圖片。
+2. Given task 包含圖片連結  
+   When 查看 Kanban 視圖  
+   Then 該卡片上方或內部必須顯示該圖片的縮圖 (Cover/Thumbnail)。
+3. Given task 具備 linked_entities 與 assignee  
+   When 查看 Kanban 視圖  
+   Then 必須在卡面上直接看到對應的 L2 Tag 與人員頭像。
+
+### P1-3（R8）自動化建票行為與 UI 連動 (Conversational Intake / Rich Creation)
+
+- 為減少反覆輸入，Agent 在接收需求建票時，必須將非結構化的對話/文字，自動結構化為 Markdown 格式寫入 `description`。
+- Agent 建票時，若發現缺少關鍵資訊（基於掛載的 L2 Protocol），應在前端介面/對話中引導補完，並於建票後直接顯示 Kanban 卡片預覽。
+
+AC-R8:
+1. Given 業務提供未格式化的需求文字  
+   When Agent 執行 `mcp_zenos_task`  
+   Then 寫入的 description 必須是排版整齊的 Markdown（含重點清單與粗體）。
+
 ## 技術約束（給 Architect）
 
 - 本 spec 不新增 task 狀態值，僅使用既有狀態集合。

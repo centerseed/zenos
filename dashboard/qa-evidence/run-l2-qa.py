@@ -4,14 +4,14 @@ import time
 import os
 import sys
 
-EVIDENCE_DIR = '/Users/wubaizong/接案/ZenOS/dashboard/qa-evidence'
+EVIDENCE_DIR = '/Users/wubaizong/clients/ZenOS/dashboard/qa-evidence'
 os.makedirs(EVIDENCE_DIR, exist_ok=True)
 
 # Generate token
 token_result = subprocess.run(
     ['node', 'scripts/gen-test-token.js'],
     capture_output=True, text=True,
-    cwd='/Users/wubaizong/接案/ZenOS/dashboard'
+    cwd='/Users/wubaizong/clients/ZenOS/dashboard'
 )
 TEST_TOKEN = token_result.stdout.strip()
 print(f'Token (first 50): {TEST_TOKEN[:50]}...')

@@ -13,7 +13,70 @@ const CRM_DATE_FIELDS = new Set([
   "expectedCloseDate",
   "signedDate",
   "activityAt",
+  "lastActivityAt",
 ]);
+
+function serializeBody<T>(body: T): string {
+  return JSON.stringify(body, (_key, value) =>
+    value instanceof Date ? value.toISOString() : value
+  );
+}
+
+function normalizeCompanyInput(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    name: data.name,
+    industry: data.industry,
+    size_range: data.size_range ?? data.sizeRange,
+    region: data.region,
+    notes: data.notes,
+  };
+}
+
+function normalizeContactInput(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    company_id: data.company_id ?? data.companyId,
+    name: data.name,
+    title: data.title,
+    email: data.email,
+    phone: data.phone,
+    notes: data.notes,
+  };
+}
+
+function normalizeDealInput(data: Record<string, unknown>): Record<string, unknown> {
+  return {
+    title: data.title,
+    company_id: data.company_id ?? data.companyId,
+    owner_partner_id: data.owner_partner_id ?? data.ownerPartnerId,
+    funnel_stage: data.funnel_stage ?? data.funnelStage,
+    amount_twd: data.amount_twd ?? data.amountTwd,
+    deal_type: data.deal_type ?? data.dealType,
+    source_type: data.source_type ?? data.sourceType,
+    referrer: data.referrer,
+    expected_close_date: data.expected_close_date ?? data.expectedCloseDate,
+    signed_date: data.signed_date ?? data.signedDate,
+    scope_description: data.scope_description ?? data.scopeDescription,
+    deliverables: data.deliverables,
+    notes: data.notes,
+    is_closed_lost: data.is_closed_lost ?? data.isClosedLost,
+    is_on_hold: data.is_on_hold ?? data.isOnHold,
+  };
+}
+
+function normalizeActivityInput(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  return {
+    activity_type: data.activity_type ?? data.activityType,
+    activity_at: data.activity_at ?? data.activityAt,
+    summary: data.summary,
+    recorded_by: data.recorded_by ?? data.recordedBy,
+  };
+}
 
 /** Recursively convert ISO date strings to Date objects */
 function hydrateDates<T>(obj: T): T {
@@ -47,7 +110,22 @@ async function apiFetch<T>(
       ...options?.headers,
     },
   });
-  if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
+
+  if (!res.ok) {
+    let errorDetail = "";
+    try {
+      const body = await res.json();
+      errorDetail = body.message || body.error || JSON.stringify(body);
+    } catch {
+      try {
+        errorDetail = await res.text();
+      } catch {
+        errorDetail = res.statusText;
+      }
+    }
+    throw new Error(`API ${path}: ${res.status}${errorDetail ? ` - ${errorDetail}` : ""}`);
+  }
+
   const data = await res.json();
   return hydrateDates(data) as T;
 }
@@ -109,6 +187,7 @@ export interface Deal {
   scopeDescription?: string;
   deliverables: string[];
   notes?: string;
+  lastActivityAt?: Date | null;
   isClosedLost: boolean;
   isOnHold: boolean;
   createdAt: Date;
@@ -143,7 +222,7 @@ export async function createCompany(
 ): Promise<Company> {
   return apiFetch<Company>("/api/crm/companies", token, {
     method: "POST",
-    body: JSON.stringify(data),
+    body: serializeBody(normalizeCompanyInput(data as Record<string, unknown>)),
   });
 }
 
@@ -158,7 +237,7 @@ export async function updateCompany(
 ): Promise<Company> {
   return apiFetch<Company>(`/api/crm/companies/${id}`, token, {
     method: "PUT",
-    body: JSON.stringify(data),
+    body: serializeBody(normalizeCompanyInput(data as Record<string, unknown>)),
   });
 }
 
@@ -192,7 +271,7 @@ export async function createContact(
 ): Promise<Contact> {
   return apiFetch<Contact>("/api/crm/contacts", token, {
     method: "POST",
-    body: JSON.stringify(data),
+    body: serializeBody(normalizeContactInput(data as Record<string, unknown>)),
   });
 }
 
@@ -210,7 +289,7 @@ export async function updateContact(
 ): Promise<Contact> {
   return apiFetch<Contact>(`/api/crm/contacts/${id}`, token, {
     method: "PUT",
-    body: JSON.stringify(data),
+    body: serializeBody(normalizeContactInput(data as Record<string, unknown>)),
   });
 }
 
@@ -234,7 +313,7 @@ export async function createDeal(
 ): Promise<Deal> {
   return apiFetch<Deal>("/api/crm/deals", token, {
     method: "POST",
-    body: JSON.stringify(data),
+    body: serializeBody(normalizeDealInput(data as Record<string, unknown>)),
   });
 }
 
@@ -249,7 +328,7 @@ export async function patchDealStage(
 ): Promise<Deal> {
   return apiFetch<Deal>(`/api/crm/deals/${id}/stage`, token, {
     method: "PATCH",
-    body: JSON.stringify({ stage }),
+    body: serializeBody({ stage }),
   });
 }
 
@@ -273,6 +352,6 @@ export async function createActivity(
 ): Promise<Activity> {
   return apiFetch<Activity>(`/api/crm/deals/${dealId}/activities`, token, {
     method: "POST",
-    body: JSON.stringify(data),
+    body: serializeBody(normalizeActivityInput(data as Record<string, unknown>)),
   });
 }

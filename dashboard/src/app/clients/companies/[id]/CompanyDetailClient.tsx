@@ -294,7 +294,24 @@ function EditableInfo({ company, token, onUpdated }: EditableInfoProps) {
 function CompanyDetailPage() {
   const { user, partner } = useAuth();
   const params = useParams();
-  const companyId = params.id as string;
+  const [companyId, setCompanyId] = useState<string>("");
+
+  useEffect(() => {
+    const rawParam = params.id;
+    const paramId = Array.isArray(rawParam) ? rawParam[0] : rawParam;
+    if (paramId && paramId !== "_") {
+      setCompanyId(paramId);
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      const segments = window.location.pathname.split("/").filter(Boolean);
+      const fallbackId = segments[segments.length - 1];
+      if (fallbackId && fallbackId !== "_") {
+        setCompanyId(fallbackId);
+      }
+    }
+  }, [params]);
 
   const [company, setCompany] = useState<Company | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -304,7 +321,7 @@ function CompanyDetailPage() {
   const [showContactForm, setShowContactForm] = useState(false);
 
   useEffect(() => {
-    if (!user || !partner) return;
+    if (!user || !partner || !companyId) return;
 
     async function load() {
       const t = await user!.getIdToken();

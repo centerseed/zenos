@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useCallback, useMemo } from "react";
 import type { Entity, Relationship, Blindspot } from "@/types";
 import {
   DEFAULT_NODE_COLOR,
@@ -30,6 +30,8 @@ interface KnowledgeGraphProps {
   relationships: Relationship[];
   blindspotsByEntity: Map<string, Blindspot[]>;
   onNodeClick: (entity: Entity) => void;
+  hoveredSidebarNodeId?: string | null;
+  focusedNodeId?: string | null;
 }
 
 function getTypeColor(type: string): string {
@@ -41,6 +43,8 @@ export default function KnowledgeGraph({
   relationships,
   blindspotsByEntity,
   onNodeClick,
+  hoveredSidebarNodeId,
+  focusedNodeId,
 }: KnowledgeGraphProps) {
   const [mounted, setMounted] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -48,8 +52,28 @@ export default function KnowledgeGraph({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+  const [dimensions, setDimensions] = useState({ width: 0, height: 0 });
+
+  // Read actual container size before first paint so simulation starts with correct dimensions
+  useLayoutEffect(() => {
+    if (!containerRef.current) return;
+    const { width, height } = containerRef.current.getBoundingClientRect();
+    if (width > 0 && height > 0) setDimensions({ width, height });
+  }, []);
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
+  const [, setRenderTrigger] = useState(0);
+
+  // Animation loop for pulse effect
+  useEffect(() => {
+    if (!hoveredSidebarNodeId) return;
+    let animId: number;
+    const animate = () => {
+      setRenderTrigger((prev) => prev + 1);
+      animId = requestAnimationFrame(animate);
+    };
+    animId = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(animId);
+  }, [hoveredSidebarNodeId]);
 
   // Dynamic import for SSR safety
   useEffect(() => {
@@ -59,15 +83,24 @@ export default function KnowledgeGraph({
     });
   }, []);
 
-  // Resize observer
+  // Smooth focus on node
+  useEffect(() => {
+    if (fgRef.current && focusedNodeId) {
+      const node = graphData.nodes.find((n) => n.id === focusedNodeId);
+      if (node && (node as any).x !== undefined) {
+        fgRef.current.centerAt((node as any).x, (node as any).y, 1000);
+        fgRef.current.zoom(2.5, 1000);
+      }
+    }
+  }, [focusedNodeId]);
+
+  // Resize observer — keep canvas in sync when window resizes
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          setDimensions({ width, height });
-        }
+        if (width > 0 && height > 0) setDimensions({ width, height });
       }
     });
     observer.observe(containerRef.current);
@@ -83,7 +116,7 @@ export default function KnowledgeGraph({
     // Increase link distance
     fg.d3Force("link")?.distance(80);
     // Center force
-    fg.d3Force("center")?.strength(0.05);
+    fg.d3Force("center")?.strength(0.03);
   }, [ForceGraph]);
 
   // Build entity lookup for click handler
@@ -95,21 +128,25 @@ export default function KnowledgeGraph({
     return map;
   }, [entities]);
 
-  // Build graph data
+  // Build graph data — ONLY SHOW L1/L2
   const graphData = useMemo(() => {
-    const entityIds = new Set(entities.map((e) => e.id));
+    // Filter out L3 (document/task-like) nodes for structure mode
+    const filteredEntities = entities.filter(
+      (e) => e.type !== "document" && e.type !== "project"
+    );
+    const entityIds = new Set(filteredEntities.map((e) => e.id));
 
-    const nodes: GraphNode[] = entities.map((e) => ({
+    const nodes: GraphNode[] = filteredEntities.map((e) => ({
       id: e.id,
       name: e.name,
       type: e.type,
       status: e.status,
       summary: e.summary,
       hasBlindspot: (blindspotsByEntity.get(e.id)?.length ?? 0) > 0,
-      val: e.type === "product" ? 16 : e.type === "document" ? 6 : e.type === "goal" ? 10 : 8,
+      val: e.type === "product" ? 16 : e.type === "goal" ? 10 : 8,
     }));
 
-    const links: GraphLink[] = relationships
+    const relLinks: GraphLink[] = relationships
       .filter((r) => entityIds.has(r.sourceEntityId) && entityIds.has(r.targetId))
       .map((r) => ({
         source: r.sourceEntityId,
@@ -117,22 +154,40 @@ export default function KnowledgeGraph({
         type: r.type,
       }));
 
+    // Also draw parent→child edges from parentId hierarchy
+    const parentLinks: GraphLink[] = filteredEntities
+      .filter((e) => e.parentId && entityIds.has(e.parentId))
+      .map((e) => ({
+        source: e.parentId!,
+        target: e.id,
+        type: "contains" as Relationship["type"],
+      }));
+
+    // Deduplicate: skip parentId edges that are already covered by a relationship record
+    const relPairs = new Set(relLinks.map((l) => `${l.source}::${l.target}`));
+    const dedupedParentLinks = parentLinks.filter(
+      (l) => !relPairs.has(`${l.source}::${l.target}`) && !relPairs.has(`${l.target}::${l.source}`)
+    );
+
+    const links = [...relLinks, ...dedupedParentLinks];
+
     return { nodes, links };
   }, [entities, relationships, blindspotsByEntity]);
 
   // Connected node IDs for hover highlighting
   const connectedNodes = useMemo(() => {
-    if (!hoveredNode) return new Set<string>();
+    const currentHover = hoveredNode || hoveredSidebarNodeId;
+    if (!currentHover) return new Set<string>();
     const connected = new Set<string>();
-    connected.add(hoveredNode);
+    connected.add(currentHover);
     for (const link of graphData.links) {
       const src = typeof link.source === "string" ? link.source : (link.source as unknown as GraphNode).id;
       const tgt = typeof link.target === "string" ? link.target : (link.target as unknown as GraphNode).id;
-      if (src === hoveredNode) connected.add(tgt);
-      if (tgt === hoveredNode) connected.add(src);
+      if (src === currentHover) connected.add(tgt);
+      if (tgt === currentHover) connected.add(src);
     }
     return connected;
-  }, [hoveredNode, graphData.links]);
+  }, [hoveredNode, hoveredSidebarNodeId, graphData.links]);
 
   // Node canvas renderer
   const nodeCanvasObject = useCallback(
@@ -146,13 +201,30 @@ export default function KnowledgeGraph({
       const hasBlindspot = node.hasBlindspot as boolean;
       const color = getTypeColor(node.type as string);
       const nodeId = node.id as string;
-      const isHovered = hoveredNode === nodeId;
-      const isDimmed = hoveredNode !== null && !connectedNodes.has(nodeId);
+      
+      const isHoveredOnGraph = hoveredNode === nodeId;
+      const isHoveredOnSidebar = hoveredSidebarNodeId === nodeId;
+      const isHovered = isHoveredOnGraph || isHoveredOnSidebar;
+      
+      const activeHoverId = hoveredNode || hoveredSidebarNodeId;
+      const isDimmed = activeHoverId !== null && !connectedNodes.has(nodeId);
 
       ctx.save();
 
       if (isPaused || isDimmed) {
         ctx.globalAlpha = isDimmed ? 0.15 : 0.4;
+      }
+
+      // Pulse Effect for sidebar hover
+      if (isHoveredOnSidebar) {
+        const t = (Date.now() % 2000) / 2000; // 0..1 loop every 2s
+        const pulseR = radius * (1 + t * 2.5);
+        ctx.beginPath();
+        ctx.arc(x, y, pulseR, 0, 2 * Math.PI);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2 / globalScale;
+        ctx.globalAlpha = (1 - t) * 0.6;
+        ctx.stroke();
       }
 
       // Outer glow for hovered node
@@ -202,7 +274,7 @@ export default function KnowledgeGraph({
 
       ctx.restore();
     },
-    [hoveredNode, connectedNodes]
+    [hoveredNode, hoveredSidebarNodeId, connectedNodes]
   );
 
   // Pointer area for click detection
@@ -284,10 +356,6 @@ export default function KnowledgeGraph({
     return `Knowledge graph preview with ${totalNodes} nodes, ${totalLinks} links, and ${blindspotCount} nodes that have blindspots.`;
   }, [graphData]);
 
-  if (!mounted || !ForceGraph) {
-    return <LoadingState variant="graph" label="Loading graph..." />;
-  }
-
   const FG = ForceGraph;
 
   // Legend items
@@ -305,6 +373,10 @@ export default function KnowledgeGraph({
       aria-label={graphA11ySummary}
       aria-describedby="knowledge-graph-preview-summary"
     >
+      {(!mounted || !FG || dimensions.width === 0) && (
+        <LoadingState variant="graph" label="Loading graph..." />
+      )}
+      {mounted && FG && dimensions.width > 0 && (<>
       <p id="knowledge-graph-preview-summary" className="sr-only">
         {graphA11ySummary}
       </p>
@@ -362,6 +434,7 @@ export default function KnowledgeGraph({
           <span className="text-[10px] text-muted-foreground">Has Blindspot</span>
         </div>
       </div>
+      </>)}
     </div>
   );
 }

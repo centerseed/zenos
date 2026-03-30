@@ -3,21 +3,19 @@
 從 skills/ 目錄讀取 skill 文件，lru_cache 緩存。
 Cloud Run instance 只在啟動後第一次呼叫時執行 I/O，後續 request 命中 cache。
 
-路徑規則：
-  開發環境：{repo_root}/skills/   (Path(__file__).parent * 4 levels up / skills)
-  Cloud Run：/app/skills/          (Dockerfile COPY skills/ skills/ 後的位置)
-
-兩者路徑相同，因為 WORKDIR /app 且 COPY src/ src/ 後 __file__ 為 /app/src/zenos/interface/setup_content.py，
-四層 parent 正好回到 /app，再加 skills/ = /app/skills/。
+支援多種部署型態：
+- repo 直接執行：<repo>/skills
+- Cloud Run container：/app/skills
+- 以 pip 安裝後執行：可透過 ZENOS_SKILLS_ROOT 指向外部 skills bundle
 """
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 
-# 開發環境：<repo>/src/zenos/interface/setup_content.py → 4 parents up = <repo>
-# Cloud Run：/app/src/zenos/interface/setup_content.py → 4 parents up = /app
-_SKILLS_ROOT: Path = Path(__file__).parent.parent.parent.parent / "skills"
+# 測試可 patch 此值；正式環境優先用 resolve_skills_root() 探測。
+_SKILLS_ROOT: Path | None = Path(__file__).resolve().parents[3] / "skills"
 
 # governance skill 的選取清單（依 selection）
 _GOVERNANCE_FILES: dict[str, list[str]] = {
@@ -43,10 +41,61 @@ _SLASH_COMMAND_SSOT: dict[str, str] = {
 }
 
 
+def _is_valid_skills_root(path: Path) -> bool:
+    return (
+        (path / "release" / "manifest.json").exists()
+        and (path / "governance").is_dir()
+        and (path / "workflows").is_dir()
+    )
+
+
+@lru_cache(maxsize=1)
+def resolve_skills_root() -> Path:
+    """回傳目前可用的 skills 根目錄。
+
+    搜尋順序：
+    1. `ZENOS_SKILLS_ROOT`
+    2. 測試或本地 override 的 `_SKILLS_ROOT`
+    3. 目前工作目錄下的 `skills/`
+    4. Cloud Run 慣例路徑 `/app/skills`
+    """
+    candidates: list[Path] = []
+
+    env_root = os.getenv("ZENOS_SKILLS_ROOT")
+    if env_root:
+        candidates.append(Path(env_root).expanduser())
+
+    if _SKILLS_ROOT is not None:
+        candidates.append(Path(_SKILLS_ROOT).expanduser())
+
+    candidates.append(Path.cwd() / "skills")
+    candidates.append(Path("/app/skills"))
+
+    seen: set[Path] = set()
+    checked: list[str] = []
+    for candidate in candidates:
+        try:
+            normalized = candidate.resolve()
+        except FileNotFoundError:
+            normalized = candidate.expanduser().absolute()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        checked.append(str(normalized))
+        if _is_valid_skills_root(normalized):
+            return normalized
+
+    checked_list = ", ".join(checked) if checked else "<none>"
+    raise FileNotFoundError(
+        "ZenOS skills bundle not found. Checked: "
+        f"{checked_list}. Set ZENOS_SKILLS_ROOT or ensure skills/ is mounted."
+    )
+
+
 @lru_cache(maxsize=None)
 def get_manifest() -> dict:
     """讀取 skills/release/manifest.json，取得版本資訊。"""
-    manifest_path = _SKILLS_ROOT / "release" / "manifest.json"
+    manifest_path = resolve_skills_root() / "release" / "manifest.json"
     return json.loads(manifest_path.read_text(encoding="utf-8"))
 
 
@@ -70,13 +119,14 @@ def get_bundle_version() -> str:
 def _get_skill_files_cached(selection: str) -> dict[str, str]:
     """Internal cached loader — returns the canonical dict, do NOT mutate."""
     governance_files = _GOVERNANCE_FILES.get(selection, _GOVERNANCE_FILES["full"])
+    skills_root = resolve_skills_root()
 
     result: dict[str, str] = {}
     for filename in governance_files:
-        path = _SKILLS_ROOT / "governance" / filename
+        path = skills_root / "governance" / filename
         result[f"skills/governance/{filename}"] = path.read_text(encoding="utf-8")
     for filename in _WORKFLOW_FILES:
-        path = _SKILLS_ROOT / "workflows" / filename
+        path = skills_root / "workflows" / filename
         result[f"skills/workflows/{filename}"] = path.read_text(encoding="utf-8")
     return result
 

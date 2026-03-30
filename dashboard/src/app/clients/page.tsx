@@ -10,6 +10,8 @@ import {
   getDeals,
   patchDealStage,
   getCompanies,
+  createDeal,
+  createCompany,
 } from "@/lib/crm-api";
 import type { Deal, FunnelStage, Company } from "@/lib/crm-api";
 import {
@@ -164,6 +166,241 @@ function KanbanColumn({ stage, deals, companiesMap, lastActivityMap }: KanbanCol
   );
 }
 
+// ─── NewDealModal ─────────────────────────────────────────────────────────────
+
+interface NewDealModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  companies: Company[];
+  onCreated: (deal: Deal, newCompany?: Company) => void;
+  user: any;
+  userId: string;
+}
+
+function NewDealModal({
+  isOpen,
+  onClose,
+  companies,
+  onCreated,
+  user,
+  userId,
+}: NewDealModalProps) {
+  const [title, setTitle] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [newCompanyName, setNewCompanyName] = useState("");
+  const [stage, setStage] = useState<FunnelStage>("潛在客戶");
+  const [amount, setAmount] = useState<string>("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  const isNewCompany = companyId === "NEW_COMPANY";
+
+  if (!isOpen) return null;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitError(null);
+    
+    // Manual validation
+    const newErrors: Record<string, boolean> = {
+      title: !title.trim(),
+      companyId: !companyId,
+      newCompanyName: isNewCompany && !newCompanyName.trim(),
+    };
+    setErrors(newErrors);
+
+    if (newErrors.title || newErrors.companyId || newErrors.newCompanyName || !user) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const token = await user.getIdToken();
+      
+      let finalCompanyId = companyId;
+      let createdCompany: Company | undefined;
+
+      // Create company first if needed
+      if (isNewCompany) {
+        // MATCH SNAKE_CASE expected by Python backend
+        const companyPayload = {
+          name: newCompanyName.trim(),
+          industry: undefined,
+          size_range: undefined,
+          region: undefined,
+          notes: undefined,
+        };
+        
+        console.log("Creating company with payload:", companyPayload);
+        createdCompany = await createCompany(token, companyPayload as any);
+        finalCompanyId = createdCompany.id;
+      }
+
+      const dealPayload = {
+        title: title.trim(),
+        company_id: finalCompanyId, 
+        funnel_stage: stage,
+        amount_twd: amount ? parseInt(amount, 10) : undefined,
+        owner_partner_id: userId,
+        deliverables: [],
+        is_closed_lost: false,
+        is_on_hold: false,
+        notes: "", // Added notes field
+      };
+
+      console.log("Creating deal with payload:", dealPayload);
+      const newDeal = await createDeal(token, dealPayload as any);
+
+      onCreated(newDeal, createdCompany);
+      
+      // Reset all
+      setTitle("");
+      setCompanyId("");
+      setNewCompanyName("");
+      setStage("潛在客戶");
+      setAmount("");
+      setErrors({});
+      setSubmitError(null);
+      onClose();
+    } catch (err) {
+      console.error("Failed to create deal/company:", err);
+      setSubmitError(err instanceof Error ? err.message : "建立失敗，請檢查網路或聯絡系統管理員");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <h3 className="font-semibold text-foreground">新增商機</h3>
+          <button
+            onClick={onClose}
+            disabled={isSubmitting}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
+            ✕
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} noValidate className="p-4 space-y-4">
+          {submitError && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
+              {submitError}
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">
+              商機標題 <span className="text-red-500">*</span>
+            </label>
+            <input
+              autoFocus
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (errors.title) setErrors(prev => ({ ...prev, title: false }));
+              }}
+              className={`w-full bg-secondary border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
+                errors.title ? "border-red-500" : "border-border"
+              }`}
+              placeholder="例如：AI 顧問專案"
+            />
+            {errors.title && <p className="text-[10px] text-red-500">請輸入商機標題</p>}
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-sm font-medium text-foreground">
+              所屬公司 <span className="text-red-500">*</span>
+            </label>
+            <select
+              value={companyId}
+              onChange={(e) => {
+                setCompanyId(e.target.value);
+                if (errors.companyId) setErrors(prev => ({ ...prev, companyId: false }));
+              }}
+              className={`w-full bg-secondary border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
+                errors.companyId ? "border-red-500" : "border-border"
+              }`}
+            >
+              <option value="">請選擇公司...</option>
+              <option value="NEW_COMPANY" className="text-primary font-medium text-blue-400">+ 新增新公司...</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            {errors.companyId && <p className="text-[10px] text-red-500">請選擇所屬公司</p>}
+          </div>
+
+          {isNewCompany && (
+            <div className="space-y-1.5 animate-in fade-in slide-in-from-top-2 duration-200">
+              <label className="text-sm font-medium text-foreground">
+                新公司名稱 <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={newCompanyName}
+                onChange={(e) => {
+                  setNewCompanyName(e.target.value);
+                  if (errors.newCompanyName) setErrors(prev => ({ ...prev, newCompanyName: false }));
+                }}
+                className={`w-full bg-secondary border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
+                  errors.newCompanyName ? "border-red-500" : "border-border"
+                }`}
+                placeholder="輸入公司全名"
+              />
+              {errors.newCompanyName && <p className="text-[10px] text-red-500">請輸入新公司名稱</p>}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">漏斗階段</label>
+              <select
+                value={stage}
+                onChange={(e) => setStage(e.target.value as FunnelStage)}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              >
+                {FUNNEL_STAGES.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium text-foreground">金額 (TWD)</label>
+              <input
+                type="number"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                placeholder="選填"
+              />
+            </div>
+          </div>
+          <div className="pt-2 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm text-foreground hover:bg-secondary rounded transition-colors"
+            >
+              取消
+            </button>
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            >
+              {isSubmitting ? "建立中..." : "建立商機"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── ClientsPage ─────────────────────────────────────────────────────────────
 
 function ClientsPage() {
@@ -173,6 +410,7 @@ function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [showInactive, setShowInactive] = useState(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -206,7 +444,6 @@ function ClientsPage() {
     companies.map((c) => [c.id, c.name])
   );
 
-  // Active deals only (not closed-lost, not on-hold) unless showInactive
   const visibleDeals = showInactive
     ? deals
     : deals.filter((d) => !d.isClosedLost && !d.isOnHold);
@@ -218,10 +455,9 @@ function ClientsPage() {
     ])
   ) as Record<FunnelStage, Deal[]>;
 
-  // Summary stats
-  const activeDeals = deals.filter((d) => !d.isClosedLost && !d.isOnHold);
+  const activeDealsCount = deals.filter((d) => !d.isClosedLost && !d.isOnHold).length;
   const thisMonth = new Date();
-  const newThisMonth = deals.filter((d) => {
+  const newThisMonthCount = deals.filter((d) => {
     const created = d.createdAt;
     return (
       created.getFullYear() === thisMonth.getFullYear() &&
@@ -246,7 +482,6 @@ function ClientsPage() {
     const deal = deals.find((d) => d.id === dealId);
     if (!deal || deal.funnelStage === newStage) return;
 
-    // Optimistic update
     setDeals((prev) =>
       prev.map((d) => (d.id === dealId ? { ...d, funnelStage: newStage } : d))
     );
@@ -256,7 +491,6 @@ function ClientsPage() {
       await patchDealStage(token, dealId, newStage);
     } catch (err) {
       console.error("Failed to update deal stage:", err);
-      // Rollback on failure
       setDeals((prev) =>
         prev.map((d) =>
           d.id === dealId ? { ...d, funnelStage: deal.funnelStage } : d
@@ -277,6 +511,12 @@ function ClientsPage() {
         <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
           <h2 className="text-lg font-semibold text-foreground">客戶</h2>
           <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            >
+              + 新增商機
+            </button>
             <Link
               href="/clients/companies"
               className="px-3 py-1.5 text-sm rounded bg-secondary text-foreground hover:bg-secondary/80 transition-colors"
@@ -295,15 +535,15 @@ function ClientsPage() {
           </div>
         </div>
 
-        {/* Summary stats (P1) */}
+        {/* Summary stats */}
         {!loading && (
           <div className="grid grid-cols-3 gap-3 mb-6 max-w-xl">
             <div className="bg-card border border-border rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-foreground">{activeDeals.length}</p>
+              <p className="text-2xl font-bold text-foreground">{activeDealsCount}</p>
               <p className="text-xs text-muted-foreground mt-0.5">進行中商機</p>
             </div>
             <div className="bg-card border border-border rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-foreground">{newThisMonth}</p>
+              <p className="text-2xl font-bold text-foreground">{newThisMonthCount}</p>
               <p className="text-xs text-muted-foreground mt-0.5">本月新增</p>
             </div>
             <div className="bg-card border border-border rounded-lg p-3 text-center">
@@ -333,7 +573,9 @@ function ClientsPage() {
                   stage={stage}
                   deals={dealsByStage[stage]}
                   companiesMap={companiesMap}
-                  lastActivityMap={{}}
+                  lastActivityMap={Object.fromEntries(
+                    deals.map((d) => [d.id, d.lastActivityAt ?? undefined])
+                  )}
                 />
               ))}
             </div>
@@ -349,6 +591,21 @@ function ClientsPage() {
             </DragOverlay>
           </DndContext>
         )}
+
+        {/* Modal */}
+        <NewDealModal
+          isOpen={isModalOpen}
+          onClose={() => setIsModalOpen(false)}
+          companies={companies}
+          onCreated={(newDeal, newCompany) => {
+            if (newCompany) {
+              setCompanies((prev) => [...prev, newCompany]);
+            }
+            setDeals((prev) => [newDeal, ...prev]);
+          }}
+          user={user}
+          userId={partner?.id ?? ""}
+        />
       </main>
     </div>
   );

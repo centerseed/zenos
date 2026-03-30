@@ -161,20 +161,71 @@ async def run_fix(
         return summary
 
     # Live execution — single transaction.
-    # Composite self-referencing FKs on entities(partner_id, parent_id/project_id)
-    # are immediate (non-deferrable), but PostgreSQL checks them at statement-end.
-    # The bulk UPDATE moves ALL non-admin rows to admin_id in one statement, so
-    # every FK reference resolves once the statement completes.
+    # Cross-table FKs (e.g. relationships → entities) are IMMEDIATE, so updating
+    # entities first causes a FK violation from the still-old relationships rows.
+    # Fix: drop inter-entity FK constraints within the transaction, update all
+    # tables, then re-add the constraints (which validates the final state).
+    fk_constraints = [
+        # → entities
+        ("relationships",      "fk_relationships_source",
+         "FOREIGN KEY (partner_id, source_entity_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE CASCADE"),
+        ("relationships",      "fk_relationships_target",
+         "FOREIGN KEY (partner_id, target_entity_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE CASCADE"),
+        ("document_entities",  "fk_document_entities_entity",
+         "FOREIGN KEY (partner_id, entity_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE CASCADE"),
+        ("protocols",          "fk_protocols_entity",
+         "FOREIGN KEY (partner_id, entity_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE CASCADE"),
+        ("blindspot_entities", "fk_blindspot_entities_entity",
+         "FOREIGN KEY (partner_id, entity_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE CASCADE"),
+        ("tasks",              "fk_tasks_assignee_role",
+         "FOREIGN KEY (partner_id, assignee_role_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE SET NULL"),
+        ("tasks",              "fk_tasks_project",
+         "FOREIGN KEY (partner_id, project_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE SET NULL"),
+        ("task_entities",      "fk_task_entities_entity",
+         "FOREIGN KEY (partner_id, entity_id) REFERENCES {schema}.entities(partner_id, id) ON DELETE CASCADE"),
+        # → documents
+        ("document_entities",  "fk_document_entities_document",
+         "FOREIGN KEY (partner_id, document_id) REFERENCES {schema}.documents(partner_id, id) ON DELETE CASCADE"),
+        # → protocols
+        ("tasks",              "fk_tasks_linked_protocol",
+         "FOREIGN KEY (partner_id, linked_protocol) REFERENCES {schema}.protocols(partner_id, id) ON DELETE SET NULL"),
+        # → blindspots
+        ("blindspot_entities", "fk_blindspot_entities_blindspot",
+         "FOREIGN KEY (partner_id, blindspot_id) REFERENCES {schema}.blindspots(partner_id, id) ON DELETE CASCADE"),
+        ("tasks",              "fk_tasks_linked_blindspot",
+         "FOREIGN KEY (partner_id, linked_blindspot) REFERENCES {schema}.blindspots(partner_id, id) ON DELETE SET NULL"),
+        # → tasks
+        ("task_blockers",      "fk_task_blockers_task",
+         "FOREIGN KEY (partner_id, task_id) REFERENCES {schema}.tasks(partner_id, id) ON DELETE CASCADE"),
+        ("task_blockers",      "fk_task_blockers_blocker",
+         "FOREIGN KEY (partner_id, blocker_task_id) REFERENCES {schema}.tasks(partner_id, id) ON DELETE CASCADE"),
+        ("task_entities",      "fk_task_entities_task",
+         "FOREIGN KEY (partner_id, task_id) REFERENCES {schema}.tasks(partner_id, id) ON DELETE CASCADE"),
+    ]
+
     async with conn.transaction():
+        # Step 1: drop cross-entity FKs to unblock the bulk UPDATE
+        for table, constraint, _ in fk_constraints:
+            await conn.execute(
+                f"ALTER TABLE {SCHEMA}.{table} DROP CONSTRAINT IF EXISTS {constraint}"
+            )
+
+        # Step 2: update all tables
         for table in PARTNER_ID_TABLES:
             result = await conn.execute(
                 f"UPDATE {SCHEMA}.{table} SET partner_id = $1 WHERE partner_id <> $1",
                 admin_id,
             )
-            # asyncpg returns a string like "UPDATE 42"
             count = _parse_command_tag_count(result)
             summary.record(table, count)
             logger.info("Updated %d rows in %s", count, table)
+
+        # Step 3: re-add FK constraints (validates final data state)
+        for table, constraint, fk_def in fk_constraints:
+            await conn.execute(
+                f"ALTER TABLE {SCHEMA}.{table} ADD CONSTRAINT {constraint} "
+                + fk_def.format(schema=SCHEMA)
+            )
 
     return summary
 

@@ -94,6 +94,7 @@ class Deal:
     notes: Optional[str] = None
     is_closed_lost: bool = False
     is_on_hold: bool = False
+    last_activity_at: Optional[datetime] = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 

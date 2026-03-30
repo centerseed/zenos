@@ -1,134 +1,170 @@
 "use client";
 
-import { useState } from "react";
 import type { Task } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { extractFirstImage } from "./MarkdownRenderer";
+import {
+  AlertTriangle,
+  ArrowUp,
+  Minus,
+  ArrowDown,
+} from "lucide-react";
 
 interface TaskCardProps {
   task: Task;
+  onSelect?: (task: Task) => void;
+  entityNames?: Record<string, string>;
 }
 
-const priorityColors: Record<string, string> = {
-  critical: "bg-red-900/50 text-red-400",
-  high: "bg-orange-900/50 text-orange-400",
-  medium: "bg-blue-900/50 text-blue-400",
-  low: "bg-secondary text-muted-foreground",
+const priorityIcons: Record<string, React.ReactNode> = {
+  critical: <AlertTriangle className="w-3.5 h-3.5 text-red-400" />,
+  high: <ArrowUp className="w-3.5 h-3.5 text-orange-400" />,
+  medium: <Minus className="w-3.5 h-3.5 text-blue-400" />,
+  low: <ArrowDown className="w-3.5 h-3.5 text-muted-foreground" />,
+};
+
+const priorityBg: Record<string, string> = {
+  critical: "bg-red-900/40",
+  high: "bg-orange-900/40",
+  medium: "bg-blue-900/40",
+  low: "bg-secondary",
 };
 
 function formatDate(date: Date | null): string | null {
   if (!date) return null;
-  return date.toLocaleDateString("zh-TW");
+  return date.toLocaleDateString("zh-TW", { month: "short", day: "numeric" });
 }
 
-function isOverdue(date: Date | null): boolean {
-  if (!date) return false;
-  return date.getTime() < Date.now();
+function isOverdue(task: Task): boolean {
+  if (!task.dueDate) return false;
+  if (["done", "cancelled", "archived"].includes(task.status)) return false;
+  return task.dueDate.getTime() < Date.now();
 }
 
-export function TaskCard({ task }: TaskCardProps) {
-  const [expanded, setExpanded] = useState(false);
-
+export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
+  const thumbnail = task.description ? extractFirstImage(task.description) : null;
+  const overdue = isOverdue(task);
   const dueDateStr = formatDate(task.dueDate);
-  const overdue = task.status !== "done" && task.status !== "cancelled" && isOverdue(task.dueDate);
+
+  // Extract first ~80 chars of description for preview (strip markdown)
+  const descPreview = task.description
+    ? task.description
+        .replace(/!\[.*?\]\(.*?\)/g, "") // remove images
+        .replace(/\[([^\]]+)\]\(.*?\)/g, "$1") // simplify links
+        .replace(/[#*_~`>|]/g, "") // remove markdown chars
+        .replace(/\n+/g, " ")
+        .trim()
+        .slice(0, 100)
+    : null;
 
   return (
-    <Card className="ring-1 ring-border/80 hover:ring-border transition-colors">
-      <CardHeader className="pb-2">
+    <Card
+      className={`ring-1 ring-border/80 hover:ring-blue-500/50 transition-all duration-200 cursor-pointer group ${
+        overdue ? "ring-red-500/30" : ""
+      }`}
+      onClick={() => onSelect?.(task)}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open task: ${task.title}`}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.(task);
+        }
+      }}
+    >
+      {/* Cover/Thumbnail Image */}
+      {thumbnail && (
+        <div className="relative w-full h-32 overflow-hidden rounded-t-lg">
+          <img
+            src={thumbnail}
+            alt="Task attachment"
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            loading="lazy"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-card/80 to-transparent" />
+        </div>
+      )}
+
+      <CardHeader className="pb-2 pt-3">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-sm font-medium text-foreground leading-tight">
+          <CardTitle className="text-sm font-medium text-foreground leading-tight group-hover:text-blue-300 transition-colors line-clamp-2">
             {task.title}
           </CardTitle>
+
+          {/* Priority Icon */}
           <span
-            className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${priorityColors[task.priority] ?? "bg-secondary text-muted-foreground"}`}
+            className={`flex-shrink-0 p-1 rounded ${priorityBg[task.priority] ?? "bg-secondary"}`}
+            title={task.priority}
           >
-            {task.priority}
+            {priorityIcons[task.priority] ?? (
+              <Minus className="w-3.5 h-3.5 text-muted-foreground" />
+            )}
           </span>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-          {task.assignee && <span>@{task.assignee}</span>}
-          {dueDateStr && (
-            <span className={overdue ? "text-red-400 font-medium" : ""}>
-              Due {dueDateStr}
-            </span>
-          )}
-          {task.linkedEntities.length > 0 && (
-            <span>{task.linkedEntities.length} linked</span>
-          )}
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="ml-auto"
-            onClick={() => setExpanded((prev) => !prev)}
-            aria-label={expanded ? `Collapse task ${task.title}` : `Expand task ${task.title}`}
-          >
-            {expanded ? "Collapse" : "Expand"}
-          </Button>
-        </div>
+
+        {/* Description Preview */}
+        {descPreview && (
+          <p className="text-xs text-muted-foreground mt-1.5 line-clamp-2 leading-relaxed">
+            {descPreview}
+          </p>
+        )}
       </CardHeader>
 
-      {expanded && (
-        <CardContent className="pt-2 border-t border-border space-y-3 text-sm">
-          {task.description && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Description</p>
-              <p className="text-foreground">{task.description}</p>
-            </div>
-          )}
-
-          {task.contextSummary && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Context</p>
-              <p className="text-foreground">{task.contextSummary}</p>
-            </div>
-          )}
-
-          {task.acceptanceCriteria.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Acceptance Criteria</p>
-              <ul className="list-disc list-inside text-foreground space-y-0.5">
-                {task.acceptanceCriteria.map((ac, i) => (
-                  <li key={i}>{ac}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {task.blockedBy.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Blocked By</p>
-              <p className="text-foreground">{task.blockedBy.join(", ")}</p>
-            </div>
-          )}
-
-          {task.blockedReason && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Blocked Reason</p>
-              <p className="text-foreground">{task.blockedReason}</p>
-            </div>
-          )}
-
-          {task.result && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Result</p>
-              <p className="text-foreground">{task.result}</p>
-            </div>
-          )}
-
-          {task.rejectionReason && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-1">Rejection Reason</p>
-              <p className="text-red-400">{task.rejectionReason}</p>
-            </div>
-          )}
-
-          <div className="flex gap-4 text-xs text-muted-foreground pt-1">
-            <span>Created by {task.createdBy}</span>
-            <span>Updated {formatDate(task.updatedAt)}</span>
+      <CardContent className="pt-0 pb-3 space-y-2.5">
+        {/* Linked Entities Tags */}
+        {task.linkedEntities.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {task.linkedEntities.slice(0, 3).map((id) => (
+              <span
+                key={id}
+                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-900/25 text-blue-300 border border-blue-800/40"
+              >
+                <span className="w-1 h-1 rounded-full bg-blue-400" />
+                {entityNames[id] ?? id.slice(0, 6)}
+              </span>
+            ))}
+            {task.linkedEntities.length > 3 && (
+              <span className="text-[10px] px-1.5 py-0.5 text-muted-foreground">
+                +{task.linkedEntities.length - 3}
+              </span>
+            )}
           </div>
-        </CardContent>
-      )}
+        )}
+
+        {/* Footer Row: Assignee, Due Date, Project */}
+        <div className="flex items-center justify-between text-xs text-muted-foreground">
+          <div className="flex items-center gap-2">
+            {/* Assignee Avatar */}
+            {task.assignee && (
+              <span
+                className="inline-flex items-center gap-1"
+                title={`Assignee: ${task.assignee}`}
+              >
+                <span className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                  {task.assignee[0]}
+                </span>
+              </span>
+            )}
+
+            {/* Due Date */}
+            {dueDateStr && (
+              <span
+                className={`${overdue ? "text-red-400 font-medium" : ""}`}
+              >
+                {dueDateStr}
+              </span>
+            )}
+          </div>
+
+          {/* Project label */}
+          {task.project && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground truncate max-w-[80px]">
+              {task.project}
+            </span>
+          )}
+        </div>
+      </CardContent>
     </Card>
   );
 }

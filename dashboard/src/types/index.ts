@@ -9,6 +9,8 @@ export interface Partner {
   sharedPartnerId?: string | null;
   isAdmin: boolean;
   status: "active" | "suspended" | "invited";
+  roles?: string[];
+  department?: string;
   invitedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -34,12 +36,16 @@ export interface Entity {
   summary: string;
   tags: Tags;
   status: "active" | "paused" | "completed" | "planned" | "current" | "stale" | "draft" | "conflict";
+  level?: number | null;
   parentId: string | null;
   details: Record<string, unknown> | null;
   confirmedByUser: boolean;
   owner: string | null;
   sources: Source[];
-  visibility: "public" | "restricted";
+  visibility: "public" | "restricted" | "role-restricted" | "confidential";
+  visibleToRoles?: string[];
+  visibleToMembers?: string[];
+  visibleToDepartments?: string[];
   lastReviewedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
@@ -85,6 +91,18 @@ export interface Task {
   linkedProtocol: string | null;
   linkedBlindspot: string | null;
   sourceType: string;
+  sourceMetadata?: {
+    provenance?: Array<{
+      type?: string;
+      label?: string;
+      snippet?: string;
+      image_url?: string;
+      sheet_ref?: string;
+      url?: string;
+    }>;
+    sync_sources?: string[];
+    [key: string]: unknown;
+  };
   contextSummary: string;
   dueDate: Date | null;
   blockedBy: string[];

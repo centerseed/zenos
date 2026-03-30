@@ -270,6 +270,7 @@ class Deal:
     notes: Optional[str] = None
     is_closed_lost: bool = False
     is_on_hold: bool = False
+    last_activity_at: Optional[datetime] = None  # New: Derived from activities
     created_at: datetime = field(default_factory=lambda: datetime.now())
     updated_at: datetime = field(default_factory=lambda: datetime.now())
 

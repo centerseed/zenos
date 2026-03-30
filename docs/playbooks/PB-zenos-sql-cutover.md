@@ -28,7 +28,7 @@ Complete all items before scheduling a cutover window.
   ```
 - [ ] Integration tests all pass
   ```bash
-  cd /Users/wubaizong/接案/ZenOS/src
+  cd /Users/wubaizong/clients/ZenOS/src
   ../.venv/bin/python -m pytest ../tests/integration/ -v
   ```
 - [ ] Firestore residual audit clean (no runtime Firestore imports in non-backup code)
@@ -38,7 +38,7 @@ Complete all items before scheduling a cutover window.
   ```
 - [ ] Dashboard build succeeds
   ```bash
-  cd /Users/wubaizong/接案/ZenOS/dashboard && npm run build
+  cd /Users/wubaizong/clients/ZenOS/dashboard && npm run build
   ```
 - [ ] `scripts/import_firestore_to_sql.py` is executable and dry-run passes
   ```bash
@@ -68,7 +68,7 @@ Complete all items before scheduling a cutover window.
 
 1. Run the import script for a final full sync:
    ```bash
-   python /Users/wubaizong/接案/ZenOS/scripts/import_firestore_to_sql.py
+   python /Users/wubaizong/clients/ZenOS/scripts/import_firestore_to_sql.py
    ```
 2. Verify row counts match between Firestore and SQL:
    ```bash
@@ -103,7 +103,7 @@ Confirm the latest revision shows `ACTIVE` and traffic is routed to it.
 
 **3.2 Deploy Dashboard + Firestore rules**
 ```bash
-cd /Users/wubaizong/接案/ZenOS/dashboard && npm run build && firebase deploy --only hosting
+cd /Users/wubaizong/clients/ZenOS/dashboard && npm run build && firebase deploy --only hosting
 firebase deploy --only firestore:rules
 ```
 

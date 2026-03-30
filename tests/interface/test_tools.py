@@ -35,6 +35,7 @@ from zenos.domain.models import (
     Tags,
     Task,
 )
+from zenos.infrastructure.context import current_partner_department, current_partner_roles
 
 
 # ---------------------------------------------------------------------------
@@ -243,6 +244,70 @@ class TestSearchTool:
             result = await search(collection="entities", limit=3)
 
             assert len(result["entities"]) == 3
+
+    async def test_entities_role_restricted_hidden_without_role_match(self):
+        from zenos.interface.tools import search, _current_partner
+
+        restricted = _make_entity(
+            id="ent-r",
+            visibility="role-restricted",
+            visible_to_roles=["engineering"],
+        )
+        token_partner = _current_partner.set({"id": "p-marketing", "isAdmin": False})
+        token_roles = current_partner_roles.set(["marketing"])
+        token_dept = current_partner_department.set("marketing")
+        try:
+            with patch("zenos.interface.tools.ontology_service") as mock_os:
+                mock_os.list_entities = AsyncMock(return_value=[restricted])
+                result = await search(collection="entities")
+            assert result["entities"] == []
+        finally:
+            current_partner_department.reset(token_dept)
+            current_partner_roles.reset(token_roles)
+            _current_partner.reset(token_partner)
+
+    async def test_entities_department_filter_blocks_other_department(self):
+        from zenos.interface.tools import search, _current_partner
+
+        restricted = _make_entity(
+            id="ent-d",
+            visibility="public",
+            visible_to_departments=["finance"],
+        )
+        token_partner = _current_partner.set({"id": "p-eng", "isAdmin": False})
+        token_roles = current_partner_roles.set(["engineering"])
+        token_dept = current_partner_department.set("engineering")
+        try:
+            with patch("zenos.interface.tools.ontology_service") as mock_os:
+                mock_os.list_entities = AsyncMock(return_value=[restricted])
+                result = await search(collection="entities")
+            assert result["entities"] == []
+        finally:
+            current_partner_department.reset(token_dept)
+            current_partner_roles.reset(token_roles)
+            _current_partner.reset(token_partner)
+
+    async def test_entities_admin_can_see_confidential(self):
+        from zenos.interface.tools import search, _current_partner
+
+        confidential = _make_entity(
+            id="ent-c",
+            visibility="confidential",
+            visible_to_members=["p-admin"],
+        )
+        token_partner = _current_partner.set({"id": "p-admin", "isAdmin": True})
+        token_roles = current_partner_roles.set([])
+        token_dept = current_partner_department.set("all")
+        try:
+            with patch("zenos.interface.tools.ontology_service") as mock_os:
+                mock_os.list_entities = AsyncMock(return_value=[confidential])
+                result = await search(collection="entities")
+            assert len(result["entities"]) == 1
+            assert result["entities"][0]["id"] == "ent-c"
+        finally:
+            current_partner_department.reset(token_dept)
+            current_partner_roles.reset(token_roles)
+            _current_partner.reset(token_partner)
 
     async def test_documents_collection_query_filters_by_source_uri(self):
         from zenos.interface.tools import search
@@ -770,6 +835,74 @@ class TestTaskTool:
 
         assert result["error"] == "INVALID_INPUT"
         assert "due_date" in result["message"]
+
+    async def test_create_task_plain_description_auto_formats_to_markdown(self):
+        from zenos.interface.tools import task
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task()
+        create_result = TaskResult(task=t, cascade_updates=[])
+        raw = "業務要做母親節檔期素材，需符合品牌語氣\n主視覺要有 CTA\n本週五前交付"
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+
+            await task(
+                action="create",
+                title="整理母親節素材需求",
+                created_by="amy",
+                description=raw,
+            )
+
+            payload = mock_ts.create_task.call_args.args[0]
+            assert payload["description"].startswith("**需求摘要**：")
+            assert "**補充資訊**" in payload["description"]
+            assert "- 主視覺要有 CTA" in payload["description"]
+
+    async def test_create_task_markdown_description_keeps_original(self):
+        from zenos.interface.tools import task
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task()
+        create_result = TaskResult(task=t, cascade_updates=[])
+        markdown = "**需求摘要**：整理母親節素材\n\n- 完成主視覺\n- 完成投放尺寸"
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+
+            await task(
+                action="create",
+                title="整理母親節素材需求",
+                created_by="amy",
+                description=markdown,
+            )
+
+            payload = mock_ts.create_task.call_args.args[0]
+            assert payload["description"] == markdown
+
+    async def test_create_task_passes_source_metadata(self):
+        from zenos.interface.tools import task
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task()
+        create_result = TaskResult(task=t, cascade_updates=[])
+        metadata = {
+            "sync_sources": ["Google Sheets - Banila Co #L15"],
+            "provenance": [{"type": "sheet", "sheet_ref": "BanilaCo!L15"}],
+        }
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+
+            await task(
+                action="create",
+                title="整理來源追溯資料",
+                created_by="amy",
+                source_metadata=metadata,
+            )
+
+            payload = mock_ts.create_task.call_args.args[0]
+            assert payload["source_metadata"] == metadata
 
     async def test_update_task_success(self):
         from zenos.interface.tools import task

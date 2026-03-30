@@ -4,6 +4,8 @@ import {
   patchDealStage,
   getCompanies,
   createCompany,
+  updateCompany,
+  createContact,
   getDealActivities,
   createActivity,
 } from "@/lib/crm-api";
@@ -209,6 +211,84 @@ describe("createCompany", () => {
     expect(options.method).toBe("POST");
     expect(JSON.parse(options.body as string)).toEqual(newCompany);
   });
+
+  it("normalizes camelCase company fields to snake_case", async () => {
+    const fakeFetch = mockFetch({
+      id: "c-new",
+      name: "新創公司",
+      sizeRange: "1-10",
+      partnerId: "p-1",
+      createdAt: "2026-03-01T00:00:00Z",
+      updatedAt: "2026-03-01T00:00:00Z",
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await createCompany(FAKE_TOKEN, { name: "新創公司", sizeRange: "1-10" } as any);
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      name: "新創公司",
+      industry: undefined,
+      size_range: "1-10",
+      region: undefined,
+      notes: undefined,
+    });
+  });
+});
+
+describe("updateCompany", () => {
+  it("normalizes camelCase update payload to snake_case", async () => {
+    const fakeFetch = mockFetch({
+      id: "c-1",
+      name: "台灣科技公司",
+      sizeRange: "11-50",
+      partnerId: "p-1",
+      createdAt: "2026-03-01T00:00:00Z",
+      updatedAt: "2026-03-02T00:00:00Z",
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await updateCompany(FAKE_TOKEN, "c-1", { sizeRange: "11-50" } as any);
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      name: undefined,
+      industry: undefined,
+      size_range: "11-50",
+      region: undefined,
+      notes: undefined,
+    });
+  });
+});
+
+describe("createContact", () => {
+  it("normalizes camelCase contact fields to snake_case", async () => {
+    const fakeFetch = mockFetch({
+      id: "ct-1",
+      companyId: "c-1",
+      name: "王小明",
+      partnerId: "p-1",
+      createdAt: "2026-03-01T00:00:00Z",
+      updatedAt: "2026-03-01T00:00:00Z",
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await createContact(FAKE_TOKEN, {
+      companyId: "c-1",
+      name: "王小明",
+      email: "wang@example.com",
+    } as any);
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({
+      company_id: "c-1",
+      name: "王小明",
+      title: undefined,
+      email: "wang@example.com",
+      phone: undefined,
+      notes: undefined,
+    });
+  });
 });
 
 // ─── getDealActivities ────────────────────────────────────────────────────────
@@ -265,5 +345,11 @@ describe("createActivity", () => {
     const [url, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
     expect(url).toBe(`${API_BASE}/api/crm/deals/d-1/activities`);
     expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body as string)).toEqual({
+      activity_type: "電話",
+      activity_at: "2026-03-15T10:00:00.000Z",
+      summary: "電話確認需求",
+      recorded_by: "partner-id",
+    });
   });
 });

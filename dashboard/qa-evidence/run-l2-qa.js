@@ -4,10 +4,10 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 
 // Generate token
-const token = execSync('node /Users/wubaizong/接案/ZenOS/dashboard/scripts/gen-test-token.js').toString().trim();
+const token = execSync('node /Users/wubaizong/clients/ZenOS/dashboard/scripts/gen-test-token.js').toString().trim();
 console.log('Token generated (first 50 chars):', token.substring(0, 50) + '...');
 
-const EVIDENCE_DIR = '/Users/wubaizong/接案/ZenOS/dashboard/qa-evidence';
+const EVIDENCE_DIR = '/Users/wubaizong/clients/ZenOS/dashboard/qa-evidence';
 
 async function screenshot(page, name) {
   const fp = path.join(EVIDENCE_DIR, `${name}.png`);
