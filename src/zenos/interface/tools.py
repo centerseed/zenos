@@ -30,6 +30,7 @@ import re
 import time
 import json
 import uuid
+import inspect
 from contextvars import ContextVar
 from dataclasses import asdict
 from datetime import datetime
@@ -60,9 +61,15 @@ from zenos.infrastructure.sql_repo import (
     SqlProtocolRepository,
     SqlRelationshipRepository,
     SqlTaskRepository,
+    SqlUsageLogRepository,
     get_pool,
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
+from zenos.infrastructure.context import (
+    current_partner_department,
+    current_partner_is_admin,
+    current_partner_roles,
+)
 from zenos.interface.governance_rules import GOVERNANCE_RULES
 
 # ──────────────────────────────────────────────
@@ -106,11 +113,17 @@ class ApiKeyMiddleware:
                 from zenos.infrastructure.context import current_partner_id
                 token = _current_partner.set(partner)
                 token_pid = current_partner_id.set(partner.get("sharedPartnerId") or partner.get("id", ""))
+                token_roles = current_partner_roles.set(list(partner.get("roles") or []))
+                token_department = current_partner_department.set(str(partner.get("department") or "all"))
+                token_admin = current_partner_is_admin.set(bool(partner.get("isAdmin", False)))
                 try:
                     return await self.app(scope, receive, send)
                 finally:
                     _current_partner.reset(token)
                     current_partner_id.reset(token_pid)
+                    current_partner_roles.reset(token_roles)
+                    current_partner_department.reset(token_department)
+                    current_partner_is_admin.reset(token_admin)
             logger.warning(
                 "Auth rejected: key=%.8s... path=%s cache_size=%d",
                 key, path, len(_partner_validator._cache),
@@ -219,12 +232,27 @@ source_adapter = GitHubAdapter()
 
 # GovernanceAI: LLM-based auto-inference (optional, depends on env config)
 _governance_ai: GovernanceAI | None = None
-try:
-    _llm_client = create_llm_client()
-    _governance_ai = GovernanceAI(_llm_client)
-    logger.info("GovernanceAI initialized with model: %s", _llm_client.model)
-except Exception:
-    logger.warning("GovernanceAI disabled: LLM client initialization failed", exc_info=True)
+_usage_log_repo: SqlUsageLogRepository | None = None
+
+
+async def _ensure_governance_ai() -> None:
+    """Wire GovernanceAI with SqlUsageLogRepository after pool is available."""
+    global _governance_ai, _usage_log_repo
+    if _governance_ai is not None:
+        return
+    try:
+        pool = await get_pool()
+        _usage_log_repo = SqlUsageLogRepository(pool)
+        llm_client = create_llm_client()
+        from zenos.infrastructure.context import current_partner_id as _ctx_partner_id
+        _governance_ai = GovernanceAI(
+            llm_client,
+            usage_log_repo=_usage_log_repo,
+            get_partner_id=_ctx_partner_id.get,
+        )
+        logger.info("GovernanceAI initialized with model: %s", llm_client.model)
+    except Exception:
+        logger.warning("GovernanceAI disabled: LLM client initialization failed", exc_info=True)
 
 # Services are wired lazily after _ensure_repos() runs.
 ontology_service: OntologyService | None = None
@@ -237,6 +265,7 @@ async def _ensure_services() -> None:
     """Wire services once repos are ready."""
     global ontology_service, governance_service, source_service, task_service
     await _ensure_repos()
+    await _ensure_governance_ai()
     if ontology_service is None:
         ontology_service = OntologyService(
             entity_repo=entity_repo,
@@ -307,6 +336,37 @@ def _convert_datetimes(data: dict) -> dict:
 def _new_id() -> str:
     """Generate a short unique ID (32-char hex UUID4)."""
     return uuid.uuid4().hex
+
+
+def _is_entity_visible(entity: object) -> bool:
+    """Centralized server-side visibility check for read paths."""
+    partner = _current_partner.get() or {}
+    partner_id = str(partner.get("id") or "")
+    is_admin = bool(partner.get("isAdmin", False))
+    if is_admin:
+        return True
+
+    visibility = str(getattr(entity, "visibility", "public") or "public")
+    visible_to_roles = set(getattr(entity, "visible_to_roles", []) or [])
+    visible_to_members = set(getattr(entity, "visible_to_members", []) or [])
+    visible_to_departments = set(getattr(entity, "visible_to_departments", []) or [])
+    partner_roles = set(current_partner_roles.get() or [])
+    partner_department = str(current_partner_department.get() or "all")
+
+    if visible_to_departments and partner_department not in visible_to_departments and "all" not in visible_to_departments:
+        return False
+
+    if visibility == "confidential":
+        return partner_id in visible_to_members
+
+    if visibility in {"restricted", "role-restricted"}:
+        if partner_id in visible_to_members:
+            return True
+        if visible_to_roles:
+            return bool(partner_roles & visible_to_roles)
+        return False
+
+    return True
 
 
 def _audit_log(
@@ -391,7 +451,8 @@ async def search(
     # Keyword search mode (cross-collection)
     if query.strip() and collection == "all":
         search_results = await ontology_service.search(query)
-        results["results"] = [_serialize(r) for r in search_results[:limit]]
+        visible_results = [r for r in search_results if (r.type != "entity" or _is_entity_visible(r))]
+        results["results"] = [_serialize(r) for r in visible_results[:limit]]
         results["count"] = len(results["results"])
 
         # Also search tasks by title/description keyword
@@ -430,6 +491,7 @@ async def search(
                 "product", "module", "goal", "role", "project"
             ) else None
             entities = await ontology_service.list_entities(type_filter=type_filter)
+            entities = [e for e in entities if _is_entity_visible(e)]
             if confirmed_only is not None:
                 entities = [
                     e for e in entities
@@ -441,6 +503,7 @@ async def search(
         elif col == "documents":
             # Query document entities (type="document") from entities collection
             doc_entities = await ontology_service._entities.list_all(type_filter="document")
+            doc_entities = [d for d in doc_entities if _is_entity_visible(d)]
             # Exclude archived document entities (dead links confirmed unresolvable)
             doc_entities = [d for d in doc_entities if d.status != "archived"]
             if query.strip():
@@ -558,6 +621,8 @@ async def get(
             result = None
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Entity not found"}
+        if not _is_entity_visible(result.entity):
+            return {"error": "NOT_FOUND", "message": "Entity not found"}
         response = _serialize(result)
         # Attach active entries so callers see the entity as a knowledge container
         eid = result.entity.id
@@ -587,6 +652,8 @@ async def get(
         # Try entity(type=document) first, then legacy documents
         result = await ontology_service.get_document(doc_id)
         if result is None:
+            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+        if not _is_entity_visible(result):
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
         return _serialize(result)
 
@@ -648,10 +715,26 @@ async def read_source(doc_id: str) -> dict:
     """
     await _ensure_services()
     try:
-        result = await source_service.read_source_with_recovery(doc_id)
+        doc_entity = await entity_repo.get_by_id(doc_id)
+        if doc_entity and not _is_entity_visible(doc_entity):
+            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+        result = None
+        reader = getattr(source_service, "read_source_with_recovery", None)
+        if reader is not None:
+            maybe = reader(doc_id)
+            if inspect.isawaitable(maybe):
+                result = await maybe
+        if result is None:
+            result = await source_service.read_source(doc_id)
+        if isinstance(result, str):
+            return {"doc_id": doc_id, "content": result}
         if "content" in result:
             return {"doc_id": doc_id, "content": result["content"]}
         return result
+    except (ValueError, FileNotFoundError):
+        return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+    except PermissionError:
+        return {"error": "ADAPTER_ERROR", "message": "Permission denied while reading source"}
     except RuntimeError as e:
         return {"error": "ADAPTER_ERROR", "message": str(e)}
 
@@ -699,6 +782,16 @@ async def write(
               選填：force（true 時可覆寫已確認 entity 的非空欄位）
               選填：layer_decision({q1_persistent, q2_cross_role, q3_company_consensus, impacts_draft})
                     — 新建 L2（type=module）時必填，除非 force=True
+                    — 型別必須是 object（dict），不可傳 JSON 字串
+                    — 正確：
+                      layer_decision={
+                        "q1_persistent": true,
+                        "q2_cross_role": true,
+                        "q3_company_consensus": true,
+                        "impacts_draft": "A 改了什麼→B 的什麼要跟著看"
+                      }
+                    — 錯誤（不要這樣傳）：
+                      layer_decision="{\"q1_persistent\":true,...}"
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary。更新語意為 merge update（未提供欄位不清空）。
                linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
@@ -1024,6 +1117,7 @@ async def _task_handler(
     linked_protocol: str | None = None,
     linked_blindspot: str | None = None,
     source_type: str | None = None,
+    source_metadata: dict | None = None,
     due_date: str | None = None,
     blocked_by: list[str] | None = None,
     blocked_reason: str | None = None,
@@ -1040,6 +1134,36 @@ async def _task_handler(
     Called by the ``task`` MCP tool wrapper. Tests import this function
     directly to avoid calling a ``FunctionTool`` object.
     """
+    def _looks_like_markdown(text: str) -> bool:
+        markers = ("# ", "## ", "- ", "* ", "1. ", "|", "```", "**", "[", "](")
+        return any(m in text for m in markers)
+
+    def _normalize_description_to_markdown(raw: str | None) -> str:
+        text = (raw or "").strip()
+        if not text:
+            return ""
+        if _looks_like_markdown(text):
+            return text
+
+        lines = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n") if ln.strip()]
+        if not lines:
+            return ""
+
+        title = lines[0]
+        details = lines[1:]
+        if not details and len(title) > 24:
+            chunks = [seg.strip() for seg in re.split(r"[。；;]\s*", title) if seg.strip()]
+            if len(chunks) > 1:
+                title = chunks[0]
+                details = chunks[1:]
+
+        md_lines = [f"**需求摘要**：{title}"]
+        if details:
+            md_lines.append("")
+            md_lines.append("**補充資訊**")
+            md_lines.extend(f"- {d}" for d in details)
+        return "\n".join(md_lines)
+
     try:
         # Resolve partner context once — used for auto-filling created_by and project
         partner = _current_partner.get()
@@ -1066,10 +1190,12 @@ async def _task_handler(
                 except (ValueError, TypeError):
                     return {"error": "INVALID_INPUT", "message": f"Invalid due_date format: {due_date}"}
 
+            normalized_description = _normalize_description_to_markdown(description)
+
             data = {
                 "title": title,
                 "created_by": created_by,
-                "description": description or "",
+                "description": normalized_description,
                 "assignee": assignee,
                 "priority": priority,
                 "status": status or "backlog",
@@ -1077,6 +1203,7 @@ async def _task_handler(
                 "linked_protocol": linked_protocol,
                 "linked_blindspot": linked_blindspot,
                 "source_type": source_type or "",
+                "source_metadata": source_metadata or {},
                 "due_date": parsed_due,
                 "blocked_by": blocked_by or [],
                 "blocked_reason": blocked_reason,
@@ -1117,6 +1244,8 @@ async def _task_handler(
                 updates["result"] = result
             if blocked_by is not None:
                 updates["blocked_by"] = blocked_by
+            if source_metadata is not None:
+                updates["source_metadata"] = source_metadata
             if acceptance_criteria is not None:
                 updates["acceptance_criteria"] = acceptance_criteria
             if due_date is not None:
@@ -1172,6 +1301,7 @@ async def task(
     linked_protocol: str | None = None,
     linked_blindspot: str | None = None,
     source_type: str | None = None,
+    source_metadata: dict | None = None,
     due_date: str | None = None,
     blocked_by: list[str] | None = None,
     blocked_reason: str | None = None,
@@ -1220,6 +1350,21 @@ async def task(
         linked_entities: 關聯的 entity IDs
         linked_protocol: 關聯的 Protocol ID
         linked_blindspot: 觸發的 blindspot ID
+        source_metadata: 來源追溯與外部同步資訊（可選，dict）。
+            推薦結構：
+            {
+              "provenance": [
+                {
+                  "type": "chat|doc|repo",
+                  "label": "來源標題",
+                  "snippet": "對話或代碼原文片段",
+                  "url": "外部連結 (可選)",
+                  "imageUrl": "圖片連結 (可選)",
+                  "sheetRef": "Sheet 座標 (可選)"
+                }
+              ],
+              "syncSources": ["github", "linear", "slack"]
+            }
         due_date: 到期日 ISO-8601（如 "2026-03-29"）
         blocked_by: 阻塞此任務的 task IDs
         blocked_reason: status=blocked 時必填；create 若 blocked_by 讓任務進入 blocked 也必填
@@ -1245,6 +1390,7 @@ async def task(
         linked_protocol=linked_protocol,
         linked_blindspot=linked_blindspot,
         source_type=source_type,
+        source_metadata=source_metadata,
         due_date=due_date,
         blocked_by=blocked_by,
         blocked_reason=blocked_reason,
