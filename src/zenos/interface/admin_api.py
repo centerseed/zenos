@@ -27,7 +27,21 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from zenos.infrastructure.sql_repo import SqlPartnerRepository  # composition root
+
 logger = logging.getLogger(__name__)
+
+# Lazily initialized partner repository (shared across request handlers)
+_partner_repo: SqlPartnerRepository | None = None
+
+
+async def _ensure_partner_repo() -> SqlPartnerRepository:
+    global _partner_repo  # noqa: PLW0603
+    if _partner_repo is None:
+        from zenos.infrastructure.sql_repo import get_pool  # lazy import — interface must not import infra at module level
+        pool = await get_pool()
+        _partner_repo = SqlPartnerRepository(pool)
+    return _partner_repo
 
 # ──────────────────────────────────────────────
 # Firebase Admin SDK initialization
@@ -53,6 +67,7 @@ def _ensure_firebase():
 
 ALLOWED_ORIGINS = {
     "https://zenos-naruvia.web.app",
+    "https://zenos-naruvia.firebaseapp.com",
     "http://localhost:3000",
 }
 
@@ -63,7 +78,7 @@ def _cors_headers(request: Request) -> dict[str, str]:
     if origin in ALLOWED_ORIGINS:
         return {
             "access-control-allow-origin": origin,
-            "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
             "access-control-allow-headers": "Authorization, Content-Type",
             "access-control-max-age": "86400",
         }
@@ -127,32 +142,12 @@ async def _verify_firebase_token(request: Request) -> dict | None:
 
 async def _get_partner_by_email(email: str) -> tuple[str | None, dict | None]:
     """Find a partner by email in SQL. Returns (partner_id, data_dict) or (None, None)."""
-    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"""SELECT id, email, display_name, api_key, authorized_entity_ids,
-                       status, is_admin, shared_partner_id, default_project, invited_by,
-                       created_at, updated_at
-                FROM {SCHEMA}.partners WHERE email = $1 LIMIT 1""",
-            email,
-        )
-    if not row:
+    repo = await _ensure_partner_repo()
+    data = await repo.get_by_email(email)
+    if not data:
         return None, None
-    data = {
-        "email": row["email"],
-        "displayName": row["display_name"],
-        "apiKey": row["api_key"],
-        "authorizedEntityIds": list(row["authorized_entity_ids"] or []),
-        "status": row["status"],
-        "isAdmin": row["is_admin"],
-        "sharedPartnerId": row["shared_partner_id"],
-        "defaultProject": row["default_project"],
-        "invitedBy": row["invited_by"],
-        "createdAt": row["created_at"],
-        "updatedAt": row["updated_at"],
-    }
-    return row["id"], data
+    partner_id = data.pop("id")
+    return partner_id, data
 
 
 async def _get_caller_partner(decoded_token: dict) -> tuple[str | None, dict | None]:
@@ -188,6 +183,8 @@ def _sanitize_partner_for_admin_view(partner_id: str, data: dict) -> dict:
         "displayName": data.get("displayName", ""),
         "isAdmin": bool(data.get("isAdmin", False)),
         "status": data.get("status", "active"),
+        "roles": list(data.get("roles", []) or []),
+        "department": data.get("department", "all"),
         "invitedBy": data.get("invitedBy"),
         "createdAt": data.get("createdAt"),
         "updatedAt": data.get("updatedAt"),
@@ -214,34 +211,13 @@ async def list_partners(request: Request) -> Response:
     if not caller:
         return _error_response("FORBIDDEN", "Partner profile not found", 403, request=request)
 
-    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
+    repo = await _ensure_partner_repo()
     caller_tenant = _same_tenant_id(caller_id, caller)
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            f"""SELECT id, email, display_name, api_key, authorized_entity_ids,
-                       status, is_admin, shared_partner_id, default_project, invited_by,
-                       created_at, updated_at
-                FROM {SCHEMA}.partners"""
-        )
-    partners: list[dict] = []
-    for row in rows:
-        row_data = {
-            "sharedPartnerId": row["shared_partner_id"],
-            "isAdmin": row["is_admin"],
-        }
-        if _same_tenant_id(row["id"], row_data) != caller_tenant:
-            continue
-        partners.append(_sanitize_partner_for_admin_view(row["id"], {
-            "email": row["email"],
-            "displayName": row["display_name"],
-            "isAdmin": row["is_admin"],
-            "status": row["status"],
-            "invitedBy": row["invited_by"],
-            "createdAt": row["created_at"],
-            "updatedAt": row["updated_at"],
-            "sharedPartnerId": row["shared_partner_id"],
-        }))
+    all_partners = await repo.list_all_in_tenant(caller_tenant)
+    partners = [
+        _sanitize_partner_for_admin_view(p["id"], p)
+        for p in all_partners
+    ]
 
     return _json_response({"partners": partners}, request=request)
 
@@ -283,24 +259,25 @@ async def invite_partner(request: Request) -> Response:
             request=request,
         )
 
-    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
     now = datetime.now(timezone.utc)
     shared_partner_id = caller.get("sharedPartnerId") or caller_id
     new_id = uuid.uuid4().hex
     authorized_entity_ids = caller.get("authorizedEntityIds", [])
 
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            f"""INSERT INTO {SCHEMA}.partners (
-                    id, email, display_name, api_key, authorized_entity_ids,
-                    status, is_admin, shared_partner_id, invited_by,
-                    created_at, updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
-            new_id, email, email, "", authorized_entity_ids,
-            "invited", False, shared_partner_id, caller.get("email", ""),
-            now, now,
-        )
+    repo = await _ensure_partner_repo()
+    await repo.create({
+        "id": new_id,
+        "email": email,
+        "displayName": email,
+        "apiKey": "",
+        "authorizedEntityIds": authorized_entity_ids,
+        "status": "invited",
+        "isAdmin": False,
+        "sharedPartnerId": shared_partner_id,
+        "invitedBy": caller.get("email", ""),
+        "createdAt": now,
+        "updatedAt": now,
+    })
 
     logger.info(
         "audit",
@@ -356,41 +333,30 @@ async def delete_partner(request: Request) -> Response:
     if partner_id == caller_id:
         return _error_response("FORBIDDEN", "Cannot delete yourself", 403, request=request)
 
-    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"""SELECT id, email, status, shared_partner_id, is_admin
-                FROM {SCHEMA}.partners WHERE id = $1""",
-            partner_id,
-        )
-    if not row:
+    repo = await _ensure_partner_repo()
+    target = await repo.get_by_id(partner_id)
+    if not target:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
 
-    target = {"sharedPartnerId": row["shared_partner_id"], "isAdmin": row["is_admin"]}
     if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant delete is not allowed", 403, request=request)
 
-    if row["status"] != "invited":
+    if target.get("status") != "invited":
         return _error_response(
             "FORBIDDEN",
-            f"Only invited partners can be deleted (current status: {row['status']})",
+            f"Only invited partners can be deleted (current status: {target.get('status')})",
             403,
             request=request,
         )
 
-    async with pool.acquire() as conn:
-        await conn.execute(
-            f"DELETE FROM {SCHEMA}.partners WHERE id = $1",
-            partner_id,
-        )
+    await repo.delete(partner_id)
 
     logger.info(
         "audit",
         extra={
             "action": "partner_delete",
             "caller_email": caller.get("email", ""),
-            "target_email": row["email"],
+            "target_email": target.get("email", ""),
             "target_partner_id": partner_id,
             "result": "success",
             "detail": "status=invited",
@@ -431,35 +397,23 @@ async def update_partner_role(request: Request) -> Response:
     if not isinstance(is_admin, bool):
         return _error_response("INVALID_INPUT", "isAdmin must be a boolean", 400, request=request)
 
-    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"""SELECT id, email, display_name, is_admin, status, shared_partner_id,
-                       invited_by, created_at, updated_at
-                FROM {SCHEMA}.partners WHERE id = $1""",
-            partner_id,
-        )
-    if not row:
+    repo = await _ensure_partner_repo()
+    target = await repo.get_by_id(partner_id)
+    if not target:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
-    target = {"sharedPartnerId": row["shared_partner_id"], "isAdmin": row["is_admin"]}
 
     if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant role change is not allowed", 403, request=request)
 
     now = datetime.now(timezone.utc)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            f"UPDATE {SCHEMA}.partners SET is_admin = $1, updated_at = $2 WHERE id = $3",
-            is_admin, now, partner_id,
-        )
+    await repo.update_fields(partner_id, {"isAdmin": is_admin, "updatedAt": now})
 
     logger.info(
         "audit",
         extra={
             "action": "partner_role_change",
             "caller_email": caller.get("email", ""),
-            "target_email": row["email"],
+            "target_email": target.get("email", ""),
             "target_partner_id": partner_id,
             "result": "success",
             "detail": f"is_admin={is_admin}",
@@ -468,14 +422,14 @@ async def update_partner_role(request: Request) -> Response:
 
     return _json_response({
         "id": partner_id,
-        "email": row["email"],
-        "displayName": row["display_name"],
+        "email": target["email"],
+        "displayName": target["displayName"],
         "isAdmin": is_admin,
-        "status": row["status"],
-        "invitedBy": row["invited_by"],
-        "createdAt": row["created_at"],
+        "status": target["status"],
+        "invitedBy": target.get("invitedBy"),
+        "createdAt": target.get("createdAt"),
         "updatedAt": now,
-        "sharedPartnerId": row["shared_partner_id"],
+        "sharedPartnerId": target.get("sharedPartnerId"),
     }, request=request)
 
 
@@ -519,35 +473,23 @@ async def update_partner_status(request: Request) -> Response:
             request=request,
         )
 
-    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"""SELECT id, email, display_name, is_admin, status, shared_partner_id,
-                       invited_by, created_at, updated_at
-                FROM {SCHEMA}.partners WHERE id = $1""",
-            partner_id,
-        )
-    if not row:
+    repo = await _ensure_partner_repo()
+    target = await repo.get_by_id(partner_id)
+    if not target:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
-    target = {"sharedPartnerId": row["shared_partner_id"], "isAdmin": row["is_admin"]}
 
     if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant status change is not allowed", 403, request=request)
 
     now = datetime.now(timezone.utc)
-    async with pool.acquire() as conn:
-        await conn.execute(
-            f"UPDATE {SCHEMA}.partners SET status = $1, updated_at = $2 WHERE id = $3",
-            new_status, now, partner_id,
-        )
+    await repo.update_fields(partner_id, {"status": new_status, "updatedAt": now})
 
     logger.info(
         "audit",
         extra={
             "action": "partner_status_change",
             "caller_email": caller.get("email", ""),
-            "target_email": row["email"],
+            "target_email": target.get("email", ""),
             "target_partner_id": partner_id,
             "result": "success",
             "detail": f"status={new_status}",
@@ -556,15 +498,146 @@ async def update_partner_status(request: Request) -> Response:
 
     return _json_response({
         "id": partner_id,
-        "email": row["email"],
-        "displayName": row["display_name"],
-        "isAdmin": row["is_admin"],
+        "email": target["email"],
+        "displayName": target["displayName"],
+        "isAdmin": target["isAdmin"],
         "status": new_status,
-        "invitedBy": row["invited_by"],
-        "createdAt": row["created_at"],
+        "invitedBy": target.get("invitedBy"),
+        "createdAt": target.get("createdAt"),
         "updatedAt": now,
-        "sharedPartnerId": row["shared_partner_id"],
+        "sharedPartnerId": target.get("sharedPartnerId"),
     }, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: PUT /api/partners/{id}/scope
+# ──────────────────────────────────────────────
+
+
+async def update_partner_scope(request: Request) -> Response:
+    """Update partner roles/department. Admin only."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller or not caller.get("isAdmin"):
+        return _error_response("FORBIDDEN", "Admin access required", 403, request=request)
+
+    partner_id = request.path_params.get("id")
+    if not partner_id:
+        return _error_response("INVALID_INPUT", "Partner ID required", 400, request=request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    roles_raw = body.get("roles", [])
+    department_raw = body.get("department", "all")
+    if not isinstance(roles_raw, list) or any(not isinstance(r, str) for r in roles_raw):
+        return _error_response("INVALID_INPUT", "roles must be string[]", 400, request=request)
+    if not isinstance(department_raw, str) or not department_raw.strip():
+        return _error_response("INVALID_INPUT", "department must be non-empty string", 400, request=request)
+
+    roles = sorted({r.strip() for r in roles_raw if r.strip()})
+    department = department_raw.strip()
+
+    repo = await _ensure_partner_repo()
+    target = await repo.get_by_id(partner_id)
+    if not target:
+        return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
+
+    if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
+        return _error_response("FORBIDDEN", "Cross-tenant scope change is not allowed", 403, request=request)
+
+    now = datetime.now(timezone.utc)
+    await repo.update_fields(partner_id, {"roles": roles, "department": department, "updatedAt": now})
+
+    return _json_response({
+        "id": partner_id,
+        "email": target["email"],
+        "displayName": target["displayName"],
+        "isAdmin": target["isAdmin"],
+        "status": target["status"],
+        "roles": roles,
+        "department": department,
+        "invitedBy": target.get("invitedBy"),
+        "createdAt": target.get("createdAt"),
+        "updatedAt": now,
+        "sharedPartnerId": target.get("sharedPartnerId"),
+    }, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: PUT /api/entities/{id}/visibility
+# ──────────────────────────────────────────────
+
+
+async def update_entity_visibility(request: Request) -> Response:
+    """Update entity visibility + visibility scopes. Admin only."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller or not caller.get("isAdmin"):
+        return _error_response("FORBIDDEN", "Admin access required", 403, request=request)
+
+    entity_id = request.path_params.get("id")
+    if not entity_id:
+        return _error_response("INVALID_INPUT", "Entity ID required", 400, request=request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    visibility = str(body.get("visibility", "public"))
+    valid = {"public", "restricted", "role-restricted", "confidential"}
+    if visibility not in valid:
+        return _error_response("INVALID_INPUT", f"visibility must be one of {sorted(valid)}", 400, request=request)
+
+    def _norm_list(v: object) -> list[str]:
+        if not isinstance(v, list):
+            return []
+        return sorted({str(x).strip() for x in v if str(x).strip()})
+
+    visible_to_roles = _norm_list(body.get("visible_to_roles", []))
+    visible_to_members = _norm_list(body.get("visible_to_members", []))
+    visible_to_departments = _norm_list(body.get("visible_to_departments", []))
+
+    repo = await _ensure_partner_repo()
+    caller_tenant = _same_tenant_id(caller_id, caller)
+    entity_tenant = await repo.get_entity_tenant(entity_id)
+    if not entity_tenant:
+        return _error_response("NOT_FOUND", f"Entity {entity_id} not found", 404, request=request)
+    target_tenant = entity_tenant["shared_partner_id"] or entity_tenant["partner_id"]
+    if caller_tenant != target_tenant:
+        return _error_response("FORBIDDEN", "Cross-tenant entity update is not allowed", 403, request=request)
+
+    now = datetime.now(timezone.utc)
+    await repo.update_entity_visibility(
+        entity_id, visibility, visible_to_roles, visible_to_members, visible_to_departments
+    )
+
+    return _json_response(
+        {
+            "id": entity_id,
+            "visibility": visibility,
+            "visibleToRoles": visible_to_roles,
+            "visibleToMembers": visible_to_members,
+            "visibleToDepartments": visible_to_departments,
+            "updatedAt": now,
+        },
+        request=request,
+    )
 
 
 # ──────────────────────────────────────────────
@@ -601,19 +674,17 @@ async def activate_partner(request: Request) -> Response:
             request=request,
         )
 
-    from zenos.infrastructure.sql_repo import SCHEMA, get_pool
     api_key = str(uuid.uuid4())
     display_name = decoded.get("name") or decoded.get("email", "")
     now = datetime.now(timezone.utc)
 
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        await conn.execute(
-            f"""UPDATE {SCHEMA}.partners
-                SET status = 'active', api_key = $1, display_name = $2, updated_at = $3
-                WHERE id = $4""",
-            api_key, display_name, now, partner_id,
-        )
+    repo = await _ensure_partner_repo()
+    await repo.update_fields(partner_id, {
+        "status": "active",
+        "apiKey": api_key,
+        "displayName": display_name,
+        "updatedAt": now,
+    })
 
     partner["status"] = "active"
     partner["apiKey"] = api_key
@@ -646,4 +717,6 @@ admin_routes = [
     Route("/api/partners/{id}", delete_partner, methods=["DELETE", "OPTIONS"]),
     Route("/api/partners/{id}/role", update_partner_role, methods=["PUT", "OPTIONS"]),
     Route("/api/partners/{id}/status", update_partner_status, methods=["PUT", "OPTIONS"]),
+    Route("/api/partners/{id}/scope", update_partner_scope, methods=["PUT", "OPTIONS"]),
+    Route("/api/entities/{id}/visibility", update_entity_visibility, methods=["PUT", "OPTIONS"]),
 ]

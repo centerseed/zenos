@@ -89,6 +89,8 @@ _PARTNER = {
     "sharedPartnerId": None,
     "defaultProject": None,
     "invitedBy": None,
+    "roles": ["marketing"],
+    "department": "marketing",
 }
 
 
@@ -207,6 +209,29 @@ class TestListEntities:
 
         assert resp.status_code == 401
 
+    async def test_hides_role_restricted_entity_without_matching_role(self):
+        from zenos.interface.dashboard_api import list_entities
+
+        request = _make_request(headers={"authorization": "Bearer fake-token"})
+        hidden = _make_entity("e-hidden")
+        hidden.visibility = "role-restricted"
+        hidden.visible_to_roles = ["engineering"]
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._entity_repo") as mock_repo, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_repo.list_all = AsyncMock(return_value=[hidden])
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await list_entities(request)
+
+        import json
+        body = json.loads(resp.body)
+        assert body["entities"] == []
+
 
 # ---------------------------------------------------------------------------
 # C. GET /api/data/entities/{id}
@@ -238,6 +263,30 @@ class TestGetEntity:
         import json
         body = json.loads(resp.body)
         assert body["entity"]["id"] == "e1"
+
+    async def test_returns_404_for_confidential_entity_without_membership(self):
+        from zenos.interface.dashboard_api import get_entity
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "secret-1"},
+        )
+        confidential = _make_entity("secret-1")
+        confidential.visibility = "confidential"
+        confidential.visible_to_members = ["p-admin"]
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._entity_repo") as mock_repo, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_repo.get_by_id = AsyncMock(return_value=confidential)
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await get_entity(request)
+
+        assert resp.status_code == 404
 
     async def test_returns_404_when_not_found(self):
         from zenos.interface.dashboard_api import get_entity

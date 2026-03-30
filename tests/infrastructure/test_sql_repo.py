@@ -105,6 +105,9 @@ class TestSqlEntityRepository:
             "owner": "Alice",
             "sources_json": json.dumps([{"uri": "https://example.com", "label": "link", "type": "github"}]),
             "visibility": "public",
+            "visible_to_roles": ["engineering"],
+            "visible_to_members": ["p-admin"],
+            "visible_to_departments": ["engineering"],
             "last_reviewed_at": None,
             "created_at": NOW,
             "updated_at": NOW,
@@ -129,6 +132,9 @@ class TestSqlEntityRepository:
         assert entity.tags.why == "because"
         assert entity.owner == "Alice"
         assert entity.confirmed_by_user is False
+        assert entity.visible_to_roles == ["engineering"]
+        assert entity.visible_to_members == ["p-admin"]
+        assert entity.visible_to_departments == ["engineering"]
         # Verify partner_id scoping in SQL
         call_sql = conn.fetchrow.call_args[0][0]
         assert "partner_id" in call_sql
@@ -1126,3 +1132,313 @@ class TestSqlEntityEntryRepository:
         assert "JOIN" in sql
         assert "LOWER" in sql
         assert "partner_id" in sql
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SqlUsageLogRepository
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestSqlUsageLogRepository:
+    """Unit tests for SqlUsageLogRepository.write_usage_log."""
+
+    def test_writes_usage_log_row(self):
+        """write_usage_log executes INSERT with correct column mapping."""
+        from zenos.infrastructure.sql_repo import SqlUsageLogRepository
+        import asyncio
+
+        pool, conn = _make_pool(execute="INSERT 0 1")
+        repo = SqlUsageLogRepository(pool)
+        asyncio.get_event_loop().run_until_complete(
+            repo.write_usage_log(
+                partner_id="p1",
+                tool_name="query_memory",
+                entity_count=3,
+                token_count=500,
+                model="gpt-4o",
+            )
+        )
+
+        conn.execute.assert_called_once()
+        sql, *args = conn.execute.call_args[0]
+        assert "INSERT" in sql
+        assert "usage_logs" in sql
+        assert args[0] == "p1"        # partner_id
+        assert args[1] == "gpt-4o"   # model
+        assert args[2] == 500         # tokens_in
+        assert args[3] == 0           # tokens_out
+
+    def test_skips_insert_for_empty_partner_id(self):
+        """write_usage_log silently returns without querying when partner_id is empty."""
+        from zenos.infrastructure.sql_repo import SqlUsageLogRepository
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlUsageLogRepository(pool)
+        asyncio.get_event_loop().run_until_complete(
+            repo.write_usage_log(
+                partner_id="",
+                tool_name="query_memory",
+                entity_count=0,
+                token_count=100,
+                model="gpt-4o",
+            )
+        )
+
+        conn.execute.assert_not_called()
+
+    def test_skips_insert_for_none_partner_id(self):
+        """write_usage_log treats None as empty and skips the INSERT."""
+        from zenos.infrastructure.sql_repo import SqlUsageLogRepository
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlUsageLogRepository(pool)
+        asyncio.get_event_loop().run_until_complete(
+            repo.write_usage_log(
+                partner_id=None,
+                tool_name="query_memory",
+                entity_count=0,
+                token_count=100,
+                model="gpt-4o",
+            )
+        )
+
+        conn.execute.assert_not_called()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SqlPartnerRepository
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_partner_row(**overrides) -> MagicMock:
+    """Build a mock asyncpg.Record for a partners table row."""
+    defaults = {
+        "id": "p1",
+        "email": "user@test.com",
+        "display_name": "Test User",
+        "api_key": "key-abc",  # pragma: allowlist secret
+        "authorized_entity_ids": [],
+        "status": "active",
+        "is_admin": False,
+        "shared_partner_id": None,
+        "default_project": None,
+        "roles": [],
+        "department": "all",
+        "invited_by": "",
+        "created_at": NOW,
+        "updated_at": NOW,
+    }
+    defaults.update(overrides)
+    return _make_row(**defaults)
+
+
+class TestSqlPartnerRepository:
+    """Unit tests for SqlPartnerRepository."""
+
+    def test_get_by_email_returns_partner_dict(self):
+        """get_by_email fetches by email and maps row to standardized dict."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        row = _make_partner_row(email="alice@test.com", id="p-alice")
+        pool, conn = _make_pool(fetchrow=row)
+        repo = SqlPartnerRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            repo.get_by_email("alice@test.com")
+        )
+
+        assert result is not None
+        assert result["email"] == "alice@test.com"
+        assert result["id"] == "p-alice"
+        sql = conn.fetchrow.call_args[0][0]
+        assert "partners" in sql
+        assert "email" in sql
+
+    def test_get_by_email_returns_none_when_missing(self):
+        """get_by_email returns None when no partner matches."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, conn = _make_pool(fetchrow=None)
+        repo = SqlPartnerRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            repo.get_by_email("nobody@test.com")
+        )
+
+        assert result is None
+
+    def test_get_by_id_returns_partner_dict(self):
+        """get_by_id fetches by ID and maps row to standardized dict."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        row = _make_partner_row(id="p2", email="bob@test.com", is_admin=True)
+        pool, conn = _make_pool(fetchrow=row)
+        repo = SqlPartnerRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(repo.get_by_id("p2"))
+
+        assert result is not None
+        assert result["id"] == "p2"
+        assert result["isAdmin"] is True
+        sql = conn.fetchrow.call_args[0][0]
+        assert "partners" in sql
+
+    def test_get_by_id_returns_none_when_missing(self):
+        """get_by_id returns None when partner not found."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, _ = _make_pool(fetchrow=None)
+        repo = SqlPartnerRepository(pool)
+        result = asyncio.get_event_loop().run_until_complete(repo.get_by_id("nope"))
+        assert result is None
+
+    def test_list_all_in_tenant_filters_by_tenant_key(self):
+        """list_all_in_tenant returns only partners whose tenant key matches."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        # p1 is the admin (no shared_partner_id → tenant key == id == "p1")
+        row_admin = _make_partner_row(id="p1", shared_partner_id=None, is_admin=True)
+        # p2 shares tenant "p1"
+        row_member = _make_partner_row(id="p2", shared_partner_id="p1")
+        # p3 belongs to a different tenant
+        row_other = _make_partner_row(id="p3", shared_partner_id="other-tenant")
+        pool, conn = _make_pool(fetch=[row_admin, row_member, row_other])
+        repo = SqlPartnerRepository(pool)
+
+        results = asyncio.get_event_loop().run_until_complete(
+            repo.list_all_in_tenant("p1")
+        )
+
+        ids = {r["id"] for r in results}
+        assert ids == {"p1", "p2"}
+        assert "p3" not in ids
+
+    def test_create_inserts_partner_row(self):
+        """create executes INSERT with all required fields."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, conn = _make_pool(execute="INSERT 0 1")
+        repo = SqlPartnerRepository(pool)
+        data = {
+            "id": "p-new",
+            "email": "new@test.com",
+            "displayName": "New User",
+            "apiKey": "key-new",  # pragma: allowlist secret
+            "authorizedEntityIds": [],
+            "status": "invited",
+            "isAdmin": False,
+            "sharedPartnerId": "p1",
+            "invitedBy": "admin@test.com",
+            "createdAt": NOW,
+            "updatedAt": NOW,
+        }
+        asyncio.get_event_loop().run_until_complete(repo.create(data))
+
+        conn.execute.assert_called_once()
+        sql = conn.execute.call_args[0][0]
+        assert "INSERT" in sql
+        assert "partners" in sql
+
+    def test_update_fields_builds_correct_set_clause(self):
+        """update_fields generates SET clause only for provided keys."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, conn = _make_pool(execute="UPDATE 1")
+        repo = SqlPartnerRepository(pool)
+        asyncio.get_event_loop().run_until_complete(
+            repo.update_fields("p1", {"status": "suspended", "updatedAt": NOW})
+        )
+
+        conn.execute.assert_called_once()
+        sql, *params = conn.execute.call_args[0]
+        assert "UPDATE" in sql
+        assert "partners" in sql
+        assert "status" in sql
+        assert "suspended" in params
+
+    def test_update_fields_skips_empty_dict(self):
+        """update_fields is a no-op when fields dict is empty."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlPartnerRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.update_fields("p1", {}))
+        conn.execute.assert_not_called()
+
+    def test_delete_executes_delete_sql(self):
+        """delete removes partner by ID."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, conn = _make_pool(execute="DELETE 1")
+        repo = SqlPartnerRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.delete("p1"))
+
+        conn.execute.assert_called_once()
+        sql = conn.execute.call_args[0][0]
+        assert "DELETE" in sql
+        assert "partners" in sql
+
+    def test_get_entity_tenant_returns_partner_info(self):
+        """get_entity_tenant JOINs entities+partners and returns tenant data."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        row = _make_row(partner_id="p1", shared_partner_id=None)
+        pool, conn = _make_pool(fetchrow=row)
+        repo = SqlPartnerRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            repo.get_entity_tenant("entity-1")
+        )
+
+        assert result == {"partner_id": "p1", "shared_partner_id": None}
+        sql = conn.fetchrow.call_args[0][0]
+        assert "entities" in sql
+        assert "partners" in sql
+        assert "JOIN" in sql
+
+    def test_get_entity_tenant_returns_none_when_not_found(self):
+        """get_entity_tenant returns None when entity does not exist."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, _ = _make_pool(fetchrow=None)
+        repo = SqlPartnerRepository(pool)
+        result = asyncio.get_event_loop().run_until_complete(
+            repo.get_entity_tenant("missing")
+        )
+        assert result is None
+
+    def test_update_entity_visibility_executes_update(self):
+        """update_entity_visibility issues UPDATE on entities table."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        pool, conn = _make_pool(execute="UPDATE 1")
+        repo = SqlPartnerRepository(pool)
+        asyncio.get_event_loop().run_until_complete(
+            repo.update_entity_visibility(
+                entity_id="e1",
+                visibility="restricted",
+                visible_to_roles=["admin"],
+                visible_to_members=["alice@test.com"],
+                visible_to_departments=["eng"],
+            )
+        )
+
+        conn.execute.assert_called_once()
+        sql = conn.execute.call_args[0][0]
+        assert "UPDATE" in sql
+        assert "entities" in sql
+        assert "visibility" in sql

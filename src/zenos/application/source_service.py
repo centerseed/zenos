@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from zenos.domain.models import SourceType
 from zenos.domain.repositories import EntityRepository, SourceAdapter
-from zenos.infrastructure.github_adapter import GitHubAdapter, parse_github_url
 
 
 class SourceService:
@@ -155,17 +154,10 @@ class SourceService:
         """Handle GitHub 404: search same repo for same-named file."""
         proposed_uri: str | None = None
 
-        if isinstance(self._adapter, GitHubAdapter):
-            try:
-                owner, repo, path, ref = parse_github_url(uri)
-                filename = path.split("/")[-1]
-                candidates = await self._adapter.search_by_filename(
-                    owner, repo, ref, filename
-                )
-                if candidates:
-                    proposed_uri = candidates[0]
-            except Exception:  # noqa: BLE001 — silently skip unparseable URIs
-                pass
+        if self._adapter is not None:
+            candidates = await self._adapter.search_alternatives_for_uri(uri)
+            if candidates:
+                proposed_uri = candidates[0]
 
         if proposed_uri is not None:
             await self._entities.update_source_status(entity_id, "stale")

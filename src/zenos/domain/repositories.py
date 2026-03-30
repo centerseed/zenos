@@ -125,3 +125,95 @@ class SourceAdapter(TypingProtocol):
     """Read-only access to external document content."""
 
     async def read_content(self, uri: str) -> str: ...
+
+    async def search_by_filename(
+        self, owner: str, repo: str, ref: str, filename: str
+    ) -> list[str]:
+        """Search for files with matching filename. Returns list of URIs."""
+        ...
+
+    async def search_alternatives_for_uri(self, uri: str) -> list[str]:
+        """Given a source URI, attempt to find alternative file locations.
+
+        Returns a list of candidate URIs in the same repository.
+        Returns an empty list if the adapter does not support this or encounters an error.
+        """
+        ...
+
+
+class UsageLogRepository(TypingProtocol):
+    """Persistence interface for LLM usage logging."""
+
+    async def write_usage_log(
+        self,
+        partner_id: str,
+        tool_name: str,
+        entity_count: int,
+        token_count: int,
+        model: str,
+    ) -> None: ...
+
+
+class PartnerRepository(TypingProtocol):
+    """Persistence interface for partner lookups."""
+
+    async def get_by_email(self, email: str) -> dict | None: ...
+
+    async def get_by_id(self, partner_id: str) -> dict | None: ...
+
+    async def list_all_in_tenant(self, tenant_id: str) -> list[dict]: ...
+
+    async def create(self, data: dict) -> None: ...
+
+    async def update_fields(self, partner_id: str, fields: dict) -> None: ...
+
+    async def delete(self, partner_id: str) -> None: ...
+
+    async def get_entity_tenant(self, entity_id: str) -> dict | None:
+        """Return entity tenant info: {partner_id, shared_partner_id}."""
+        ...
+
+    async def update_entity_visibility(
+        self,
+        entity_id: str,
+        visibility: str,
+        visible_to_roles: list[str],
+        visible_to_members: list[str],
+        visible_to_departments: list[str],
+    ) -> None: ...
+
+
+class CrmRepository(TypingProtocol):
+    """Persistence interface for CRM operations."""
+
+    async def create_company(self, company: object) -> object: ...
+
+    async def update_company(self, company: object) -> object: ...
+
+    async def get_company(self, partner_id: str, company_id: str) -> object | None: ...
+
+    async def list_companies(self, partner_id: str) -> list: ...
+
+    async def create_contact(self, contact: object) -> object: ...
+
+    async def update_contact(self, contact: object) -> object: ...
+
+    async def get_contact(self, partner_id: str, contact_id: str) -> object | None: ...
+
+    async def list_contacts(
+        self, partner_id: str, company_id: str | None = None
+    ) -> list: ...
+
+    async def create_deal(self, deal: object) -> object: ...
+
+    async def update_deal(self, deal: object) -> object: ...
+
+    async def get_deal(self, partner_id: str, deal_id: str) -> object | None: ...
+
+    async def list_deals(
+        self, partner_id: str, include_inactive: bool = False
+    ) -> list: ...
+
+    async def create_activity(self, activity: object) -> object: ...
+
+    async def list_activities(self, partner_id: str, deal_id: str) -> list: ...

@@ -281,6 +281,19 @@ class GitHubAdapter:
         except Exception:  # noqa: BLE001 — silently return empty on any error
             return []
 
+    async def search_alternatives_for_uri(self, uri: str) -> list[str]:
+        """Search same repo for same-named file as the given URI.
+
+        Implements the SourceAdapter.search_alternatives_for_uri Protocol method.
+        Returns list of candidate URIs, or empty list on any failure.
+        """
+        try:
+            owner, repo, path, ref = parse_github_url(uri)
+            filename = path.split("/")[-1]
+            return await self.search_by_filename(owner, repo, ref, filename)
+        except Exception:  # noqa: BLE001
+            return []
+
     def _check_response(self, resp: httpx.Response, context: str) -> None:
         """Raise appropriate errors for non-2xx responses."""
         if resp.status_code == 429:

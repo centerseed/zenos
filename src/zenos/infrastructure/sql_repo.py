@@ -145,6 +145,9 @@ def _row_to_entity(row: asyncpg.Record) -> Entity:
         owner=row["owner"],
         sources=_json_loads_safe(row["sources_json"]) or [],
         visibility=row["visibility"],
+        visible_to_roles=list(row["visible_to_roles"] or []) if "visible_to_roles" in row else [],
+        visible_to_members=list(row["visible_to_members"] or []) if "visible_to_members" in row else [],
+        visible_to_departments=list(row["visible_to_departments"] or []) if "visible_to_departments" in row else [],
         last_reviewed_at=_to_dt(row["last_reviewed_at"]),
         created_at=_to_dt(row["created_at"]) or _now(),
         updated_at=_to_dt(row["updated_at"]) or _now(),
@@ -211,8 +214,9 @@ class SqlEntityRepository:
                 INSERT INTO {SCHEMA}.entities (
                     id, partner_id, name, type, level, parent_id, status, summary,
                     tags_json, details_json, confirmed_by_user, owner, sources_json,
-                    visibility, last_reviewed_at, created_at, updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17)
+                    visibility, visible_to_roles, visible_to_members,
+                    visible_to_departments, last_reviewed_at, created_at, updated_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, type=EXCLUDED.type, level=EXCLUDED.level,
                     parent_id=EXCLUDED.parent_id, status=EXCLUDED.status,
@@ -221,6 +225,9 @@ class SqlEntityRepository:
                     confirmed_by_user=EXCLUDED.confirmed_by_user,
                     owner=EXCLUDED.owner, sources_json=EXCLUDED.sources_json,
                     visibility=EXCLUDED.visibility,
+                    visible_to_roles=EXCLUDED.visible_to_roles,
+                    visible_to_members=EXCLUDED.visible_to_members,
+                    visible_to_departments=EXCLUDED.visible_to_departments,
                     last_reviewed_at=EXCLUDED.last_reviewed_at,
                     updated_at=EXCLUDED.updated_at
                 WHERE entities.partner_id = EXCLUDED.partner_id
@@ -231,7 +238,9 @@ class SqlEntityRepository:
                 _dumps(entity.details) if entity.details is not None else None,
                 entity.confirmed_by_user, entity.owner,
                 _dumps(entity.sources),
-                entity.visibility, entity.last_reviewed_at,
+                entity.visibility, entity.visible_to_roles,
+                entity.visible_to_members, entity.visible_to_departments,
+                entity.last_reviewed_at,
                 entity.created_at, entity.updated_at,
             )
         return entity
@@ -817,6 +826,7 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
     plan_id = row["plan_id"] if "plan_id" in row else None
     plan_order = row["plan_order"] if "plan_order" in row else None
     depends_json = row["depends_on_task_ids_json"] if "depends_on_task_ids_json" in row else None
+    source_metadata_json = row["source_metadata_json"] if "source_metadata_json" in row else None
     return Task(
         id=row["id"],
         title=row["title"],
@@ -834,6 +844,7 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         linked_protocol=row["linked_protocol"],
         linked_blindspot=row["linked_blindspot"],
         source_type=row["source_type"],
+        source_metadata=_json_loads_safe(source_metadata_json) or {},
         context_summary=row["context_summary"],
         due_date=_to_dt(row["due_date"]),
         blocked_by=blocked_by,
@@ -932,13 +943,13 @@ class SqlTaskRepository:
                     id, partner_id, title, description, status, priority,
                     priority_reason, assignee, assignee_role_id, created_by,
                     plan_id, plan_order, depends_on_task_ids_json,
-                    linked_protocol, linked_blindspot, source_type, context_summary,
+                    linked_protocol, linked_blindspot, source_type, source_metadata_json, context_summary,
                     due_date, blocked_reason, acceptance_criteria_json, completed_by,
                     confirmed_by_creator, rejection_reason, result, project,
                     created_at, updated_at, completed_at
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                    $11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22,$23,$24,$25,$26,$27,$28
+                    $11,$12,$13::jsonb,$14,$15,$16,$17::jsonb,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     title=EXCLUDED.title, description=EXCLUDED.description,
@@ -952,6 +963,7 @@ class SqlTaskRepository:
                     linked_protocol=EXCLUDED.linked_protocol,
                     linked_blindspot=EXCLUDED.linked_blindspot,
                     source_type=EXCLUDED.source_type,
+                    source_metadata_json=EXCLUDED.source_metadata_json,
                     context_summary=EXCLUDED.context_summary,
                     due_date=EXCLUDED.due_date,
                     blocked_reason=EXCLUDED.blocked_reason,
@@ -969,7 +981,7 @@ class SqlTaskRepository:
                     task.assignee_role_id, task.created_by,
                     task.plan_id, task.plan_order, _dumps(task.depends_on_task_ids),
                     task.linked_protocol, task.linked_blindspot,
-                    task.source_type, task.context_summary, task.due_date,
+                    task.source_type, _dumps(task.source_metadata), task.context_summary, task.due_date,
                     task.blocked_reason, _dumps(task.acceptance_criteria),
                     task.completed_by, task.confirmed_by_creator,
                     task.rejection_reason, task.result, task.project,
@@ -1131,7 +1143,7 @@ class SqlPartnerKeyValidator:
                 rows = await conn.fetch(
                     f"""SELECT id, email, display_name, api_key,
                                authorized_entity_ids, status, is_admin,
-                               shared_partner_id, default_project
+                               shared_partner_id, default_project, roles, department
                         FROM {SCHEMA}.partners WHERE status = 'active'"""
                 )
             new_cache: dict[str, dict] = {}
@@ -1148,6 +1160,8 @@ class SqlPartnerKeyValidator:
                         "isAdmin": row["is_admin"],
                         "sharedPartnerId": row["shared_partner_id"],
                         "defaultProject": row["default_project"] or "",
+                        "roles": list(row["roles"] or []) if "roles" in row else [],
+                        "department": (row["department"] or "all") if "department" in row else "all",
                     }
             self._cache = new_cache
             self._cache_ts = time.time()
@@ -1321,3 +1335,220 @@ class SqlEntityEntryRepository:
                 "entity_name": row["entity_name"],
             })
         return results
+
+
+# ===================================================================
+# UsageLog Repository
+# ===================================================================
+
+
+class SqlUsageLogRepository:
+    """PostgreSQL-backed UsageLogRepository.
+
+    Writes LLM usage records to the usage_logs table.
+    This class has no partner_id context dependency; the partner_id is
+    passed explicitly so it can be called from background tasks.
+    """
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def write_usage_log(
+        self,
+        partner_id: str,
+        tool_name: str,
+        entity_count: int,
+        token_count: int,
+        model: str,
+    ) -> None:
+        """Insert a usage log row. Silently ignores empty partner_id."""
+        if not partner_id:
+            return
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""INSERT INTO {SCHEMA}.usage_logs (partner_id, model, tokens_in, tokens_out)
+                    VALUES ($1, $2, $3, $4)""",
+                partner_id,
+                model,
+                token_count,
+                0,
+            )
+
+
+# ===================================================================
+# Partner Repository
+# ===================================================================
+
+
+def _row_to_partner_dict(row: asyncpg.Record) -> dict:
+    """Convert a partners table row to a standardized partner dict."""
+    return {
+        "id": row["id"],
+        "email": row["email"],
+        "displayName": row["display_name"],
+        "apiKey": row["api_key"],
+        "authorizedEntityIds": list(row["authorized_entity_ids"] or []),
+        "status": row["status"],
+        "isAdmin": row["is_admin"],
+        "sharedPartnerId": row["shared_partner_id"],
+        "defaultProject": row["default_project"],
+        "roles": list(row["roles"] or []) if "roles" in row else [],
+        "department": (row["department"] or "all") if "department" in row else "all",
+        "invitedBy": row["invited_by"],
+        "createdAt": row["created_at"] if "created_at" in row else None,
+        "updatedAt": row["updated_at"] if "updated_at" in row else None,
+    }
+
+
+_PARTNER_SELECT_COLS = """id, email, display_name, api_key, authorized_entity_ids,
+                       status, is_admin, shared_partner_id, default_project, invited_by,
+                       roles, department, created_at, updated_at"""
+
+
+class SqlPartnerRepository:
+    """PostgreSQL-backed PartnerRepository."""
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def get_by_email(self, email: str) -> dict | None:
+        """Fetch partner by email. Returns standardized dict or None."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT {_PARTNER_SELECT_COLS} FROM {SCHEMA}.partners WHERE email = $1 LIMIT 1",
+                email,
+            )
+        return _row_to_partner_dict(row) if row else None
+
+    async def get_by_id(self, partner_id: str) -> dict | None:
+        """Fetch partner by ID. Returns standardized dict or None."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT {_PARTNER_SELECT_COLS} FROM {SCHEMA}.partners WHERE id = $1 LIMIT 1",
+                partner_id,
+            )
+        return _row_to_partner_dict(row) if row else None
+
+    async def list_all_in_tenant(self, tenant_id: str) -> list[dict]:
+        """Fetch all partners whose tenant key matches tenant_id.
+
+        Tenant key = shared_partner_id if set, else id.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT {_PARTNER_SELECT_COLS} FROM {SCHEMA}.partners"
+            )
+        results = []
+        for row in rows:
+            d = _row_to_partner_dict(row)
+            row_tenant = d.get("sharedPartnerId") or d["id"]
+            if row_tenant == tenant_id:
+                results.append(d)
+        return results
+
+    async def create(self, data: dict) -> None:
+        """Insert a new partner row."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""INSERT INTO {SCHEMA}.partners (
+                        id, email, display_name, api_key, authorized_entity_ids,
+                        status, is_admin, shared_partner_id, invited_by,
+                        created_at, updated_at
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+                data["id"],
+                data["email"],
+                data["displayName"],
+                data.get("apiKey", ""),
+                data.get("authorizedEntityIds", []),
+                data.get("status", "invited"),
+                data.get("isAdmin", False),
+                data.get("sharedPartnerId"),
+                data.get("invitedBy", ""),
+                data["createdAt"],
+                data["updatedAt"],
+            )
+
+    async def update_fields(self, partner_id: str, fields: dict) -> None:
+        """Update arbitrary partner fields by building a SET clause.
+
+        Only keys present in ``fields`` are updated. ``updated_at`` is always
+        refreshed to ``fields['updatedAt']`` if provided, else kept unchanged.
+        """
+        if not fields:
+            return
+        # Build parameterized SET clause
+        col_map = {
+            "status": "status",
+            "isAdmin": "is_admin",
+            "apiKey": "api_key",  # pragma: allowlist secret
+            "displayName": "display_name",
+            "roles": "roles",
+            "department": "department",
+            "updatedAt": "updated_at",
+        }
+        sets = []
+        params: list = []
+        idx = 1
+        for key, col in col_map.items():
+            if key in fields:
+                sets.append(f"{col} = ${idx}")
+                params.append(fields[key])
+                idx += 1
+        if not sets:
+            return
+        params.append(partner_id)
+        sql = f"UPDATE {SCHEMA}.partners SET {', '.join(sets)} WHERE id = ${idx}"
+        async with self._pool.acquire() as conn:
+            await conn.execute(sql, *params)
+
+    async def delete(self, partner_id: str) -> None:
+        """Delete partner by ID."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"DELETE FROM {SCHEMA}.partners WHERE id = $1",
+                partner_id,
+            )
+
+    async def get_entity_tenant(self, entity_id: str) -> dict | None:
+        """Return {partner_id, shared_partner_id} for the entity's owner partner."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""SELECT e.partner_id, p.shared_partner_id
+                    FROM {SCHEMA}.entities e
+                    JOIN {SCHEMA}.partners p ON p.id = e.partner_id
+                    WHERE e.id = $1
+                    LIMIT 1""",
+                entity_id,
+            )
+        if not row:
+            return None
+        return {
+            "partner_id": row["partner_id"],
+            "shared_partner_id": row["shared_partner_id"],
+        }
+
+    async def update_entity_visibility(
+        self,
+        entity_id: str,
+        visibility: str,
+        visible_to_roles: list[str],
+        visible_to_members: list[str],
+        visible_to_departments: list[str],
+    ) -> None:
+        """Update entity visibility fields."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""UPDATE {SCHEMA}.entities
+                    SET visibility = $1,
+                        visible_to_roles = $2,
+                        visible_to_members = $3,
+                        visible_to_departments = $4,
+                        updated_at = $5
+                    WHERE id = $6""",
+                visibility,
+                visible_to_roles,
+                visible_to_members,
+                visible_to_departments,
+                _now(),
+                entity_id,
+            )

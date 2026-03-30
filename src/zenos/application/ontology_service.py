@@ -119,6 +119,111 @@ class OntologyService:
             return bool(left.strip()) and bool(right.strip())
         return False
 
+    @staticmethod
+    def _coerce_bool_like(value: object, field_name: str) -> bool:
+        """Coerce common bool-like payloads into bool, else raise clear error."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1"}:
+                return True
+            if normalized in {"false", "0"}:
+                return False
+        raise ValueError(
+            f"layer_decision.{field_name} must be boolean "
+            "(accepted: true/false, 1/0, 'true'/'false', '1'/'0')."
+        )
+
+    @staticmethod
+    def is_entity_visible_for_partner(entity: Entity, partner: dict) -> bool:
+        """Determine if a partner can see a given entity based on visibility rules.
+
+        Args:
+            entity: The entity to check visibility for.
+            partner: Partner dict with keys: isAdmin, id, roles, department.
+
+        Returns:
+            True if the partner has access, False otherwise.
+        """
+        if partner.get("isAdmin"):
+            return True
+
+        partner_id = str(partner.get("id") or "")
+        partner_roles = set(partner.get("roles") or [])
+        partner_department = str(partner.get("department") or "all")
+        visible_to_roles = set(entity.visible_to_roles or [])
+        visible_to_members = set(entity.visible_to_members or [])
+        visible_to_departments = set(entity.visible_to_departments or [])
+
+        if (
+            visible_to_departments
+            and partner_department not in visible_to_departments
+            and "all" not in visible_to_departments
+        ):
+            return False
+
+        if entity.visibility == "confidential":
+            return partner_id in visible_to_members
+
+        if entity.visibility in {"restricted", "role-restricted"}:
+            if partner_id in visible_to_members:
+                return True
+            if visible_to_roles:
+                return bool(partner_roles & visible_to_roles)
+            return False
+
+        return True
+
+    @classmethod
+    def _normalize_layer_decision(cls, layer_decision: object) -> dict:
+        """Normalize layer_decision payload into canonical dict with bool flags."""
+        if isinstance(layer_decision, str):
+            try:
+                layer_decision = json.loads(layer_decision)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    "layer_decision must be an object; JSON string provided but parse failed."
+                ) from exc
+
+        if not isinstance(layer_decision, dict):
+            raise ValueError(
+                f"layer_decision must be an object, got {type(layer_decision).__name__}."
+            )
+
+        required_keys = (
+            "q1_persistent",
+            "q2_cross_role",
+            "q3_company_consensus",
+        )
+        missing = [k for k in required_keys if k not in layer_decision]
+        if missing:
+            raise ValueError(
+                f"layer_decision missing required fields: {', '.join(missing)}."
+            )
+
+        normalized = dict(layer_decision)
+        normalized["q1_persistent"] = cls._coerce_bool_like(
+            layer_decision.get("q1_persistent"), "q1_persistent"
+        )
+        normalized["q2_cross_role"] = cls._coerce_bool_like(
+            layer_decision.get("q2_cross_role"), "q2_cross_role"
+        )
+        normalized["q3_company_consensus"] = cls._coerce_bool_like(
+            layer_decision.get("q3_company_consensus"), "q3_company_consensus"
+        )
+
+        impacts_draft = layer_decision.get("impacts_draft")
+        if impacts_draft is None:
+            normalized["impacts_draft"] = ""
+        elif isinstance(impacts_draft, str):
+            normalized["impacts_draft"] = impacts_draft
+        else:
+            normalized["impacts_draft"] = str(impacts_draft)
+        return normalized
+
     async def _infer_module_parent(self, entity_data: dict) -> str | None:
         """For L3 entities, if parent_id points to a Product or is null,
         try to find the best matching Module by comparing tags.what overlap.
@@ -278,7 +383,17 @@ class OntologyService:
                 what = tags.what if isinstance(tags.what, list) else [tags.what]
                 who = tags.who if isinstance(tags.who, list) else [tags.who]
                 text_parts.extend([*(w for w in what if w), *(w for w in who if w), tags.why or "", tags.how or ""])
-            terms = set(cls._tokenize_semantic_text(" ".join(text_parts)))
+            # Defensive normalization: legacy/dirty tag payloads may include non-str items
+            # (e.g. nested list values), which would break " ".join(...).
+            normalized_parts: list[str] = []
+            for part in text_parts:
+                if not part:
+                    continue
+                if isinstance(part, list):
+                    normalized_parts.extend(str(item) for item in part if item)
+                else:
+                    normalized_parts.append(str(part))
+            terms = set(cls._tokenize_semantic_text(" ".join(normalized_parts)))
             recurring_terms_counter.update(terms)
 
         recurring_terms = [
@@ -332,6 +447,10 @@ class OntologyService:
             "status": entity.status,
             "level": entity.level,
             "tags": tags_dict,
+            "visibility": entity.visibility,
+            "visible_to_roles": list(entity.visible_to_roles),
+            "visible_to_members": list(entity.visible_to_members),
+            "visible_to_departments": list(entity.visible_to_departments),
         }
 
     @staticmethod
@@ -754,6 +873,9 @@ class OntologyService:
             merged_data.setdefault("owner", existing.owner)
             merged_data.setdefault("sources", list(existing.sources))
             merged_data.setdefault("visibility", existing.visibility)
+            merged_data.setdefault("visible_to_roles", list(existing.visible_to_roles))
+            merged_data.setdefault("visible_to_members", list(existing.visible_to_members))
+            merged_data.setdefault("visible_to_departments", list(existing.visible_to_departments))
             merged_data.setdefault("confirmed_by_user", existing.confirmed_by_user)
             merged_data.setdefault("last_reviewed_at", existing.last_reviewed_at)
 
@@ -870,9 +992,11 @@ class OntologyService:
                     "若三問未全通過，建議降級：q1=False→document+sources, q2=False→L3, q3=False→document"
                 )
             if not force and layer_decision is not None:
-                q1 = bool(layer_decision.get("q1_persistent"))
-                q2 = bool(layer_decision.get("q2_cross_role"))
-                q3 = bool(layer_decision.get("q3_company_consensus"))
+                layer_decision = self._normalize_layer_decision(layer_decision)
+                merged_data["layer_decision"] = layer_decision
+                q1 = layer_decision.get("q1_persistent")
+                q2 = layer_decision.get("q2_cross_role")
+                q3 = layer_decision.get("q3_company_consensus")
                 if not (q1 and q2 and q3):
                     downgrade_hints = []
                     if not q1:
@@ -1110,6 +1234,11 @@ class OntologyService:
             entity.owner = merged_data.get("owner")
             entity.sources = sources
             entity.visibility = merged_data.get("visibility", existing.visibility)
+            entity.visible_to_roles = list(merged_data.get("visible_to_roles", existing.visible_to_roles))
+            entity.visible_to_members = list(merged_data.get("visible_to_members", existing.visible_to_members))
+            entity.visible_to_departments = list(
+                merged_data.get("visible_to_departments", existing.visible_to_departments)
+            )
             entity.last_reviewed_at = merged_data.get(
                 "last_reviewed_at", existing.last_reviewed_at
             )
@@ -1128,6 +1257,9 @@ class OntologyService:
                 owner=merged_data.get("owner"),
                 sources=sources,
                 visibility=merged_data.get("visibility", "public"),
+                visible_to_roles=list(merged_data.get("visible_to_roles", [])),
+                visible_to_members=list(merged_data.get("visible_to_members", [])),
+                visible_to_departments=list(merged_data.get("visible_to_departments", [])),
             )
         entity.updated_at = datetime.now(timezone.utc)
 

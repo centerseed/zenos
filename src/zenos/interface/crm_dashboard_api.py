@@ -30,7 +30,7 @@ from starlette.routing import Route
 
 from zenos.domain.crm_models import Activity, Company, Contact, Deal
 from zenos.infrastructure.context import current_partner_id
-from zenos.infrastructure.sql_repo import (
+from zenos.infrastructure.sql_repo import (  # composition root — wiring only
     SqlEntityRepository,
     SqlRelationshipRepository,
     get_pool,
@@ -167,6 +167,11 @@ async def _crm_auth(request: Request) -> tuple[str | None, str | None]:
     return effective_id, actor_id
 
 
+def _internal_error_response(request: Request, action: str, exc: Exception):
+    logger.error("%s error: %s", action, exc, exc_info=True)
+    return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+
+
 # ── Company endpoints ──────────────────────────────────────────────────
 
 
@@ -186,6 +191,8 @@ async def list_companies(request: Request):
             {"companies": [_company_to_dict(c) for c in companies]},
             request=request,
         )
+    except Exception as exc:
+        return _internal_error_response(request, "list_companies", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -208,8 +215,7 @@ async def create_company(request: Request):
         company = await svc.create_company(effective_id, body)
         return _json_response(_company_to_dict(company), status_code=201, request=request)
     except Exception as exc:
-        logger.error("create_company error: %s", exc, exc_info=True)
-        return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+        return _internal_error_response(request, "create_company", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -230,6 +236,8 @@ async def get_company(request: Request):
         if company is None:
             return _error_response("NOT_FOUND", "Company not found", 404, request=request)
         return _json_response(_company_to_dict(company), request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "get_company", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -252,8 +260,7 @@ async def update_company(request: Request):
     except ValueError as exc:
         return _error_response("NOT_FOUND", str(exc), 404, request=request)
     except Exception as exc:
-        logger.error("update_company error: %s", exc, exc_info=True)
-        return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+        return _internal_error_response(request, "update_company", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -275,6 +282,8 @@ async def list_company_contacts(request: Request):
             {"contacts": [_contact_to_dict(c) for c in contacts]},
             request=request,
         )
+    except Exception as exc:
+        return _internal_error_response(request, "list_company_contacts", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -298,6 +307,8 @@ async def list_company_deals(request: Request):
             {"deals": [_deal_to_dict(d) for d in company_deals]},
             request=request,
         )
+    except Exception as exc:
+        return _internal_error_response(request, "list_company_deals", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -324,8 +335,7 @@ async def create_contact(request: Request):
         contact = await svc.create_contact(effective_id, body)
         return _json_response(_contact_to_dict(contact), status_code=201, request=request)
     except Exception as exc:
-        logger.error("create_contact error: %s", exc, exc_info=True)
-        return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+        return _internal_error_response(request, "create_contact", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -346,6 +356,8 @@ async def get_contact(request: Request):
         if contact is None:
             return _error_response("NOT_FOUND", "Contact not found", 404, request=request)
         return _json_response(_contact_to_dict(contact), request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "get_contact", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -368,8 +380,7 @@ async def update_contact(request: Request):
     except ValueError as exc:
         return _error_response("NOT_FOUND", str(exc), 404, request=request)
     except Exception as exc:
-        logger.error("update_contact error: %s", exc, exc_info=True)
-        return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+        return _internal_error_response(request, "update_contact", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -394,6 +405,8 @@ async def list_deals(request: Request):
             {"deals": [_deal_to_dict(d) for d in deals]},
             request=request,
         )
+    except Exception as exc:
+        return _internal_error_response(request, "list_deals", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -420,8 +433,7 @@ async def create_deal(request: Request):
         deal = await svc.create_deal(effective_id, body)
         return _json_response(_deal_to_dict(deal), status_code=201, request=request)
     except Exception as exc:
-        logger.error("create_deal error: %s", exc, exc_info=True)
-        return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+        return _internal_error_response(request, "create_deal", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -442,6 +454,8 @@ async def get_deal(request: Request):
         if deal is None:
             return _error_response("NOT_FOUND", "Deal not found", 404, request=request)
         return _json_response(_deal_to_dict(deal), request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "get_deal", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -470,8 +484,7 @@ async def patch_deal_stage(request: Request):
     except ValueError as exc:
         return _error_response("NOT_FOUND", str(exc), 404, request=request)
     except Exception as exc:
-        logger.error("patch_deal_stage error: %s", exc, exc_info=True)
-        return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+        return _internal_error_response(request, "patch_deal_stage", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -496,6 +509,8 @@ async def list_deal_activities(request: Request):
             {"activities": [_activity_to_dict(a) for a in activities]},
             request=request,
         )
+    except Exception as exc:
+        return _internal_error_response(request, "list_deal_activities", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -521,8 +536,7 @@ async def create_deal_activity(request: Request):
         activity = await svc.create_activity(effective_id, deal_id, body)
         return _json_response(_activity_to_dict(activity), status_code=201, request=request)
     except Exception as exc:
-        logger.error("create_deal_activity error: %s", exc, exc_info=True)
-        return _error_response("INTERNAL_ERROR", str(exc), 500, request=request)
+        return _internal_error_response(request, "create_deal_activity", exc)
     finally:
         current_partner_id.reset(token)
 

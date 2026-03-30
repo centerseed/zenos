@@ -23,11 +23,13 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from zenos.application.ontology_service import OntologyService
 from zenos.domain.models import Blindspot, Entity, Relationship, Task
 from zenos.infrastructure.context import current_partner_id
-from zenos.infrastructure.sql_repo import (
+from zenos.infrastructure.sql_repo import (  # composition root
     SqlBlindspotRepository,
     SqlEntityRepository,
+    SqlPartnerRepository,
     SqlRelationshipRepository,
     SqlTaskRepository,
     get_pool,
@@ -52,10 +54,11 @@ _entity_repo: SqlEntityRepository | None = None
 _relationship_repo: SqlRelationshipRepository | None = None
 _blindspot_repo: SqlBlindspotRepository | None = None
 _task_repo: SqlTaskRepository | None = None
+_partner_repo: SqlPartnerRepository | None = None
 
 
 async def _ensure_repos() -> None:
-    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo
+    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo, _partner_repo
     if _repos_ready:
         return
     pool = await get_pool()
@@ -63,6 +66,7 @@ async def _ensure_repos() -> None:
     _relationship_repo = SqlRelationshipRepository(pool)
     _blindspot_repo = SqlBlindspotRepository(pool)
     _task_repo = SqlTaskRepository(pool)
+    _partner_repo = SqlPartnerRepository(pool)
     _repos_ready = True
 
 
@@ -73,29 +77,8 @@ async def _ensure_repos() -> None:
 
 async def _get_partner_by_email_sql(email: str) -> dict | None:
     """Query SQL partners table by email. Returns partner dict or None."""
-    from zenos.infrastructure.sql_repo import SCHEMA
-    pool = await get_pool()
-    async with pool.acquire() as conn:
-        row = await conn.fetchrow(
-            f"""SELECT id, email, display_name, api_key, authorized_entity_ids,
-                       status, is_admin, shared_partner_id, default_project, invited_by
-                FROM {SCHEMA}.partners WHERE email = $1 LIMIT 1""",
-            email,
-        )
-    if not row:
-        return None
-    return {
-        "id": row["id"],
-        "email": row["email"],
-        "displayName": row["display_name"],
-        "apiKey": row["api_key"],
-        "authorizedEntityIds": list(row["authorized_entity_ids"] or []),
-        "status": row["status"],
-        "isAdmin": row["is_admin"],
-        "sharedPartnerId": row["shared_partner_id"],
-        "defaultProject": row["default_project"],
-        "invitedBy": row["invited_by"],
-    }
+    await _ensure_repos()
+    return await _partner_repo.get_by_email(email)
 
 
 # ──────────────────────────────────────────────
@@ -143,6 +126,9 @@ def _entity_to_dict(e: Entity) -> dict:
         "owner": e.owner,
         "sources": e.sources,
         "visibility": e.visibility,
+        "visibleToRoles": e.visible_to_roles,
+        "visibleToMembers": e.visible_to_members,
+        "visibleToDepartments": e.visible_to_departments,
         "lastReviewedAt": e.last_reviewed_at,
         "createdAt": e.created_at,
         "updatedAt": e.updated_at,
@@ -191,6 +177,7 @@ def _task_to_dict(t: Task) -> dict:
         "linkedProtocol": t.linked_protocol,
         "linkedBlindspot": t.linked_blindspot,
         "sourceType": t.source_type,
+        "sourceMetadata": t.source_metadata,
         "contextSummary": t.context_summary,
         "dueDate": t.due_date,
         "blockedBy": t.blocked_by,
@@ -251,6 +238,7 @@ async def list_entities(request: Request) -> Response:
         entities = await _entity_repo.list_all(type_filter=type_filter)
     finally:
         current_partner_id.reset(token)
+    entities = [e for e in entities if OntologyService.is_entity_visible_for_partner(e, partner)]
 
     return _json_response({"entities": [_entity_to_dict(e) for e in entities]}, request=request)
 
@@ -278,6 +266,8 @@ async def get_entity(request: Request) -> Response:
 
     if not entity:
         return _error_response("NOT_FOUND", f"Entity {entity_id} not found", 404, request=request)
+    if not OntologyService.is_entity_visible_for_partner(entity, partner):
+        return _error_response("NOT_FOUND", f"Entity {entity_id} not found", 404, request=request)
 
     return _json_response({"entity": _entity_to_dict(entity)}, request=request)
 
@@ -302,6 +292,7 @@ async def get_entity_children(request: Request) -> Response:
         children = await _entity_repo.list_by_parent(entity_id)
     finally:
         current_partner_id.reset(token)
+    children = [e for e in children if OntologyService.is_entity_visible_for_partner(e, partner)]
 
     return _json_response(
         {"entities": [_entity_to_dict(e) for e in children], "count": len(children)},

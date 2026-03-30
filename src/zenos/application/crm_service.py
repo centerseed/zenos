@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from typing import Any
 
 from zenos.domain.crm_models import (
     Activity,
@@ -20,6 +19,7 @@ from zenos.domain.crm_models import (
     FunnelStage,
 )
 from zenos.domain.models import Entity, Relationship, Tags
+from zenos.domain.repositories import CrmRepository, EntityRepository, RelationshipRepository
 
 
 def _new_id() -> str:
@@ -38,7 +38,12 @@ class CrmService:
     handle the ZenOS knowledge graph bridge.
     """
 
-    def __init__(self, crm_repo: Any, entity_repo: Any, relationship_repo: Any) -> None:
+    def __init__(
+        self,
+        crm_repo: CrmRepository,
+        entity_repo: EntityRepository,
+        relationship_repo: RelationshipRepository,
+    ) -> None:
         self._crm = crm_repo
         self._entities = entity_repo
         self._relationships = relationship_repo

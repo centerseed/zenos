@@ -14,13 +14,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel
-from zenos.infrastructure.context import current_partner_id
-from zenos.infrastructure.sql_repo import SCHEMA, get_pool
+from zenos.domain.repositories import UsageLogRepository
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +83,15 @@ class ConsolidationProposal(BaseModel):
 class GovernanceAI:
     """LLM-based governance inference for the ZenOS write path."""
 
-    def __init__(self, llm_client: Any) -> None:
+    def __init__(
+        self,
+        llm_client: Any,
+        usage_log_repo: UsageLogRepository | None = None,
+        get_partner_id: Callable[[], str | None] | None = None,
+    ) -> None:
         self._llm = llm_client
+        self._usage_log_repo = usage_log_repo
+        self._get_partner_id = get_partner_id
 
     @staticmethod
     def _compact_text(value: Any, limit: int = 180) -> str:
@@ -207,21 +212,20 @@ class GovernanceAI:
         return "\n".join(lines)
 
     async def _write_usage_log(self, payload: dict[str, Any]) -> None:
-        """Persist LLM usage metadata to SQL usage_logs."""
-        partner_id = current_partner_id.get()
+        """Persist LLM usage metadata via UsageLogRepository."""
+        if self._usage_log_repo is None:
+            return
+        partner_id = payload.get("partner_id")
         if not partner_id:
             return
         try:
-            pool = await get_pool()
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    f"""INSERT INTO {SCHEMA}.usage_logs (partner_id, model, tokens_in, tokens_out)
-                        VALUES ($1, $2, $3, $4)""",
-                    partner_id,
-                    str(payload.get("model", "")),
-                    int(payload.get("tokens_in", 0)),
-                    int(payload.get("tokens_out", 0)),
-                )
+            await self._usage_log_repo.write_usage_log(
+                partner_id=str(partner_id),
+                tool_name=str(payload.get("feature", "")),
+                entity_count=0,
+                token_count=int(payload.get("tokens_in", 0)),
+                model=str(payload.get("model", "")),
+            )
         except Exception:
             logger.warning("GovernanceAI usage logging failed", exc_info=True)
 
@@ -244,7 +248,7 @@ class GovernanceAI:
             "model": str(usage.get("model", getattr(self._llm, "model", ""))),
             "tokens_in": int(usage.get("tokens_in", 0)),
             "tokens_out": int(usage.get("tokens_out", 0)),
-            "partner_id": current_partner_id.get(),
+            "partner_id": self._get_partner_id() if self._get_partner_id else None,
         }
         loop.create_task(self._write_usage_log(payload))
 
