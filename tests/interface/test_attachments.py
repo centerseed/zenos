@@ -549,3 +549,110 @@ class TestGetAttachmentGcsNotFound:
         finally:
             api_module._repos_ready = original_repos_ready
             api_module._task_repo = original_task_repo
+
+
+# ─────────────────────────────────────────────────
+# GCS client: generate_signed_put_url with compute credentials
+# ─────────────────────────────────────────────────
+
+
+class TestGenerateSignedPutUrlComputeCredentials:
+    """Tests for generate_signed_put_url behaviour under Cloud Run compute credentials."""
+
+    def test_uses_iam_signing_when_sa_email_env_set(self):
+        """When GOOGLE_SERVICE_ACCOUNT_EMAIL is set, credentials are refreshed
+        before the token is read and passed to generate_signed_url."""
+        from unittest.mock import MagicMock, patch
+        from zenos.infrastructure.gcs_client import generate_signed_put_url
+
+        mock_creds = MagicMock()
+        mock_creds.token = "fresh-token-123"
+
+        mock_blob = MagicMock()
+        mock_blob.generate_signed_url.return_value = "https://storage.googleapis.com/signed"
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+        mock_client = MagicMock()
+        mock_client.bucket.return_value = mock_bucket
+        mock_auth_request = MagicMock()
+
+        with (
+            patch("zenos.infrastructure.gcs_client._get_client", return_value=mock_client),
+            patch.dict("os.environ", {"GOOGLE_SERVICE_ACCOUNT_EMAIL": "sa@project.iam.gserviceaccount.com"}),
+            patch("google.auth.default", return_value=(mock_creds, "project")),
+            patch("google.auth.transport.requests.Request", return_value=mock_auth_request),
+        ):
+            url = generate_signed_put_url("my-bucket", "tasks/t1/att/f.png", "image/png")
+
+        assert url == "https://storage.googleapis.com/signed"
+        # credentials.refresh must be called before reading .token
+        mock_creds.refresh.assert_called_once_with(mock_auth_request)
+        signed_kwargs = mock_blob.generate_signed_url.call_args.kwargs
+        assert signed_kwargs["service_account_email"] == "sa@project.iam.gserviceaccount.com"
+        assert signed_kwargs["access_token"] == "fresh-token-123"
+
+    def test_skips_iam_signing_when_no_sa_email(self):
+        """When no SA email is resolvable, generate_signed_url is called without
+        service_account_email / access_token (local dev path)."""
+        from unittest.mock import MagicMock, patch
+        from zenos.infrastructure.gcs_client import generate_signed_put_url
+
+        mock_creds = MagicMock(spec=[])  # no service_account_email attribute
+        mock_blob = MagicMock()
+        mock_blob.generate_signed_url.return_value = "https://storage.googleapis.com/local"
+        mock_bucket = MagicMock()
+        mock_bucket.blob.return_value = mock_blob
+        mock_client = MagicMock()
+        mock_client.bucket.return_value = mock_bucket
+
+        with (
+            patch("zenos.infrastructure.gcs_client._get_client", return_value=mock_client),
+            patch.dict("os.environ", {}, clear=True),
+            patch("google.auth.default", return_value=(mock_creds, "project")),
+        ):
+            url = generate_signed_put_url("my-bucket", "tasks/t1/att/f.png", "image/png")
+
+        assert url == "https://storage.googleapis.com/local"
+        signed_kwargs = mock_blob.generate_signed_url.call_args.kwargs
+        assert "service_account_email" not in signed_kwargs
+        assert "access_token" not in signed_kwargs
+
+    def test_gcs_error_propagates_to_upload_endpoint(self):
+        """When generate_signed_put_url raises, upload_task_attachment returns 500."""
+        from starlette.testclient import TestClient
+        from starlette.applications import Starlette
+        from starlette.routing import Route
+        from zenos.interface.dashboard_api import upload_task_attachment
+        import zenos.interface.dashboard_api as api_module
+
+        task_obj = _make_task(attachments=[])
+        mock_task_repo = AsyncMock()
+        mock_task_repo.get_by_id = AsyncMock(return_value=task_obj)
+
+        original_repos_ready = api_module._repos_ready
+        original_task_repo = api_module._task_repo
+
+        api_module._repos_ready = True
+        api_module._task_repo = mock_task_repo
+
+        try:
+            with (
+                patch("zenos.interface.dashboard_api._verify_firebase_token", new=AsyncMock(return_value={"email": "u@x.com"})),
+                patch("zenos.interface.dashboard_api._get_partner_by_email_sql", new=AsyncMock(return_value={"id": "p1", "sharedPartnerId": None})),
+                patch(
+                    "zenos.infrastructure.gcs_client.generate_signed_put_url",
+                    side_effect=AttributeError("you need a private key to sign credentials"),
+                ),
+            ):
+                app = Starlette(routes=[Route("/api/data/tasks/{taskId}/attachments", upload_task_attachment, methods=["POST"])])
+                client = TestClient(app, raise_server_exceptions=False)
+                resp = client.post(
+                    "/api/data/tasks/task-1/attachments",
+                    json={"type": "file", "filename": "photo.jpg", "content_type": "image/jpeg"},
+                    headers={"Authorization": "Bearer test-token"},
+                )
+                assert resp.status_code == 500
+                assert resp.json()["error"] == "GCS_ERROR"
+        finally:
+            api_module._repos_ready = original_repos_ready
+            api_module._task_repo = original_task_repo

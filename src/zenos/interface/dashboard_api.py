@@ -586,12 +586,15 @@ async def upload_task_attachment(request: Request) -> Response:
         if not task_obj:
             return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
 
-        from zenos.infrastructure.gcs_client import generate_signed_put_url, get_default_bucket
-
-        attachment_id = uuid.uuid4().hex
-        bucket_name = get_default_bucket()
-        gcs_path = f"tasks/{task_id}/attachments/{attachment_id}/{filename}"
-        signed_put_url = generate_signed_put_url(bucket_name, gcs_path, content_type)
+        try:
+            from zenos.infrastructure.gcs_client import generate_signed_put_url, get_default_bucket
+            attachment_id = uuid.uuid4().hex
+            bucket_name = get_default_bucket()
+            gcs_path = f"tasks/{task_id}/attachments/{attachment_id}/{filename}"
+            signed_put_url = generate_signed_put_url(bucket_name, gcs_path, content_type)
+        except Exception:
+            logger.exception("Failed to generate signed URL for task %s", task_id)
+            return _error_response("GCS_ERROR", "Failed to generate upload URL", 500, request=request)
 
         attachment = {
             "id": attachment_id,

@@ -51,22 +51,12 @@ def generate_signed_put_url(
     """Generate a signed PUT URL for direct client upload.
 
     In Cloud Run (no key file), uses IAM signBlob via the compute SA.
+    Requires the SA to have the iam.serviceAccountTokenCreator role.
     Locally, falls back to Application Default Credentials.
     """
     client = _get_client()
     bucket = client.bucket(bucket_name)
     blob = bucket.blob(gcs_path)
-
-    # Cloud Run has no key file — use IAM signBlob via the SA email
-    sa_email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL")
-    if not sa_email:
-        # Try to get from compute metadata
-        try:
-            import google.auth  # type: ignore[import-untyped]
-            credentials, _ = google.auth.default()
-            sa_email = getattr(credentials, "service_account_email", None)
-        except Exception:
-            pass
 
     kwargs: dict = {
         "version": "v4",
@@ -75,23 +65,35 @@ def generate_signed_put_url(
         "content_type": content_type,
     }
 
+    # Resolve the service account email: env var takes precedence,
+    # then we fall back to the credential's own service_account_email.
+    sa_email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL")
+    if not sa_email:
+        try:
+            import google.auth  # type: ignore[import-untyped]
+            creds, _ = google.auth.default()
+            sa_email = getattr(creds, "service_account_email", None)
+        except Exception:
+            pass
+
     if sa_email and not sa_email.startswith("default"):
-        # Cloud Run path: use IAM-based signing
+        # Cloud Run path: compute credentials have no private key.
+        # Pass service_account_email + a fresh access_token so the library
+        # uses the IAM signBlob API instead of local signing.
+        import google.auth  # type: ignore[import-untyped]
         import google.auth.transport.requests  # type: ignore[import-untyped]
+
+        credentials, _ = google.auth.default()
         auth_request = google.auth.transport.requests.Request()
+        # Refresh must happen before reading .token — token may be None or
+        # expired, which causes the "you need a private key" error.
+        credentials.refresh(auth_request)
+
         kwargs["service_account_email"] = sa_email
-        kwargs["access_token"] = _get_access_token(auth_request)
+        kwargs["access_token"] = credentials.token
 
     url: str = blob.generate_signed_url(**kwargs)
     return url
-
-
-def _get_access_token(auth_request: object) -> str:
-    """Get an access token for IAM signBlob."""
-    import google.auth  # type: ignore[import-untyped]
-    credentials, _ = google.auth.default()
-    credentials.refresh(auth_request)  # type: ignore[attr-defined]
-    return credentials.token  # type: ignore[attr-defined]
 
 
 def download_blob(bucket_name: str, gcs_path: str) -> tuple[bytes, str]:
