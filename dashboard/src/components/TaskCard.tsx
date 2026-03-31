@@ -45,6 +45,13 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
   const thumbnail = task.description ? extractFirstImage(task.description) : null;
   const overdue = isOverdue(task);
   const dueDateStr = formatDate(task.dueDate);
+  const creatorLabel = task.creatorName || task.createdBy;
+  const actorType = task.sourceMetadata?.actor_type;
+  const actorName = task.sourceMetadata?.actor_name;
+  const creatorViaLabel =
+    actorType === "agent"
+      ? `${creatorLabel}${actorName ? ` (via ${actorName})` : " (via agent)"}`
+      : creatorLabel;
 
   // Extract first ~80 chars of description for preview (strip markdown)
   const descPreview = task.description
@@ -132,28 +139,26 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
           </div>
         )}
 
-        {/* Footer Row: Assignee, Due Date, Project */}
+        {/* Footer Row: Assignee/Creator, Due Date, Project */}
         <div className="flex items-center justify-between text-[10px] text-muted-foreground">
           <div className="flex items-center gap-2">
-            {/* Assignee Avatar & Name */}
-            {(task.assignee || task.assigneeName) && (
-              <span
-                className="inline-flex items-center gap-1"
-                title={`Assignee: ${task.assigneeName || task.assignee}`}
-              >
-                <span className="w-4 h-4 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[8px] font-bold text-white uppercase">
-                  {(task.assigneeName || task.assignee || "?")[0]}
+            {/* Avatar (Assignee, falls back to Creator) */}
+            <span
+              className="inline-flex items-center gap-1.5"
+              title={task.assigneeName || task.assignee ? `Assignee: ${task.assigneeName || task.assignee}` : `Created by: ${task.creatorName || task.createdBy}`}
+            >
+              <span className="w-4 h-4 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[8px] font-bold text-white uppercase flex-shrink-0">
+                {(task.assigneeName || task.assignee || task.creatorName || task.createdBy || "?")[0]}
+              </span>
+              <span className="truncate max-w-[80px] font-medium text-foreground/80">
+                {task.assigneeName || task.assignee || creatorViaLabel}
+              </span>
+              {task.assignee && task.creatorName && (
+                <span className="text-muted-foreground/50 text-[9px]">
+                  (by {creatorViaLabel})
                 </span>
-                <span className="truncate max-w-[60px]">{task.assigneeName || "Unknown"}</span>
-              </span>
-            )}
-
-            {/* Creator Name (Small) */}
-            {task.creatorName && (
-              <span className="text-muted-foreground/60 border-l border-border pl-2">
-                by {task.creatorName}
-              </span>
-            )}
+              )}
+            </span>
           </div>
 
           <div className="flex items-center gap-2">

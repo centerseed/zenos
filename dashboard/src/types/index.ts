@@ -94,6 +94,10 @@ export interface Task {
   linkedBlindspot: string | null;
   sourceType: string;
   sourceMetadata?: {
+    actor_type?: "human" | "agent" | string;
+    actor_name?: string;
+    actor_session?: string;
+    actor_partner_id?: string;
     provenance?: Array<{
       type?: string;
       label?: string;

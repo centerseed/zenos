@@ -904,6 +904,11 @@ async def write(
                 auto_task_data = {
                     "title": f"處理盲點：{result.description[:30]}",
                     "source_type": "blindspot",
+                    "source_metadata": {
+                        "actor_type": "agent",
+                        "actor_name": "system-auto",
+                        "actor_partner_id": creator_id,
+                    },
                     "linked_blindspot": result.id,
                     "linked_entities": result.related_entity_ids or [],
                     "status": "backlog",
@@ -1111,6 +1116,9 @@ async def _task_handler(
     linked_blindspot: str | None = None,
     source_type: str | None = None,
     source_metadata: dict | None = None,
+    actor_type: str | None = None,
+    actor_name: str | None = None,
+    actor_session: str | None = None,
     due_date: str | None = None,
     blocked_by: list[str] | None = None,
     blocked_reason: str | None = None,
@@ -1157,6 +1165,26 @@ async def _task_handler(
             md_lines.extend(f"- {d}" for d in details)
         return "\n".join(md_lines)
 
+    def _merge_actor_metadata(meta: dict | None, partner_ctx: dict | None) -> dict:
+        merged = dict(meta or {})
+        if actor_type:
+            merged["actor_type"] = actor_type
+        elif "actor_type" not in merged:
+            merged["actor_type"] = "agent"
+
+        if actor_name:
+            merged["actor_name"] = actor_name
+        elif "actor_name" not in merged:
+            default_name = (partner_ctx or {}).get("displayName")
+            if default_name:
+                merged["actor_name"] = default_name
+
+        if actor_session:
+            merged["actor_session"] = actor_session
+        if partner_ctx and partner_ctx.get("id"):
+            merged["actor_partner_id"] = partner_ctx["id"]
+        return merged
+
     try:
         # Resolve partner context once — used for auto-filling created_by and project
         partner = _current_partner.get()
@@ -1199,7 +1227,7 @@ async def _task_handler(
                 "linked_protocol": linked_protocol,
                 "linked_blindspot": linked_blindspot,
                 "source_type": source_type or "",
-                "source_metadata": source_metadata or {},
+                "source_metadata": _merge_actor_metadata(source_metadata, partner),
                 "due_date": parsed_due,
                 "blocked_by": blocked_by or [],
                 "blocked_reason": blocked_reason,
@@ -1298,6 +1326,9 @@ async def task(
     linked_blindspot: str | None = None,
     source_type: str | None = None,
     source_metadata: dict | None = None,
+    actor_type: str | None = None,
+    actor_name: str | None = None,
+    actor_session: str | None = None,
     due_date: str | None = None,
     blocked_by: list[str] | None = None,
     blocked_reason: str | None = None,
@@ -1361,6 +1392,9 @@ async def task(
               ],
               "syncSources": ["github", "linear", "slack"]
             }
+        actor_type: 執行者類型（"human" | "agent"）。未傳時預設為 "agent"（MCP 路徑）。
+        actor_name: 執行者名稱（如 "architect-agent"、"Barry"）。
+        actor_session: 執行會話識別（可選，供 trace）。
         due_date: 到期日 ISO-8601（如 "2026-03-29"）
         blocked_by: 阻塞此任務的 task IDs
         blocked_reason: status=blocked 時必填；create 若 blocked_by 讓任務進入 blocked 也必填
@@ -1387,6 +1421,9 @@ async def task(
         linked_blindspot=linked_blindspot,
         source_type=source_type,
         source_metadata=source_metadata,
+        actor_type=actor_type,
+        actor_name=actor_name,
+        actor_session=actor_session,
         due_date=due_date,
         blocked_by=blocked_by,
         blocked_reason=blocked_reason,

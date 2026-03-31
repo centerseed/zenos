@@ -100,6 +100,13 @@ export function TaskDetailDrawer({
   const syncSources = Array.isArray(task.sourceMetadata?.sync_sources)
     ? task.sourceMetadata?.sync_sources
     : [];
+  const actorType = task.sourceMetadata?.actor_type;
+  const actorName = task.sourceMetadata?.actor_name;
+  const creatorLabel = task.creatorName || task.createdBy;
+  const creatorViaLabel =
+    actorType === "agent"
+      ? `${creatorLabel}${actorName ? ` (via ${actorName})` : " (via agent)"}`
+      : creatorLabel;
 
   return (
     <>
@@ -372,7 +379,7 @@ export function TaskDetailDrawer({
           <div className="border-t border-border pt-4 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
             <div>
               <span className="block text-muted-foreground/70">Created by</span>
-              <span className="text-foreground">{task.creatorName || task.createdBy}</span>
+              <span className="text-foreground">{creatorViaLabel}</span>
             </div>
             <div>
               <span className="block text-muted-foreground/70">Project</span>
