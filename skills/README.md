@@ -98,18 +98,29 @@ Agent 遇到這些意圖時，應主動載入對應 skill：
 
 ---
 
-## agents/（角色參考設定）
+## release/（所有 skill 的 SSOT）
 
-`skills/agents/` 存放角色 skill 的參考版本。這些**不是 SSOT**——SSOT 是你家目錄 `~/.claude/skills/` 的實際檔案。此處僅供備查和新機器初始化參考。
+`skills/release/` 是所有 skill 的唯一真相來源。**永遠在這裡修改，不要直接改 `~/.claude/skills/`**。
 
-| 檔案 | 角色 | 治理載入 |
-|------|------|---------|
-| `architect.md` | 技術架構 + subagent 調度 | document + task + l2 |
-| `pm.md` | 需求定義 + Feature Spec | document + task |
-| `developer.md` | 實作 + 測試 | task |
-| `qa.md` | 驗收 + QA Verdict | task |
-| `designer.md` | UI/UX 設計 | document（寫正式設計文件時） |
-| `marketing.md` | 行銷內容 | document（寫正式行銷文件時） |
+修改後執行同步：
+```bash
+python3 scripts/sync_skills_from_release.py
+```
+
+| 目錄 | 角色 | 類型 |
+|------|------|------|
+| `release/zenos-setup/` | ZenOS 初始化設定 | Platform |
+| `release/zenos-capture/` | 知識擷取 | Platform |
+| `release/zenos-sync/` | 知識同步 | Platform |
+| `release/zenos-governance/` | 治理總控 | Platform |
+| `release/architect/` | 技術架構 + subagent 調度 | Agent role |
+| `release/pm/` | 需求定義 + Feature Spec | Agent role |
+| `release/developer/` | 實作 + 測試 | Agent role |
+| `release/qa/` | 驗收 + QA Verdict | Agent role |
+| `release/designer/` | UI/UX 設計 | Agent role |
+| `release/marketing/` | 行銷內容 | Agent role |
+
+> `skills/agents/` 已 deprecated，內容已移至 `skills/release/`，保留僅供歷史參考。
 
 ---
 
@@ -123,7 +134,7 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
 
 | 層級 | 機制 | 覆蓋範圍 | 設定方式 |
 |------|------|---------|---------|
-| ① 角色 skill | 角色 SKILL.md 開頭的「ZenOS 治理」表 | 該角色啟動時 | 在家目錄 `~/.claude/skills/` 的角色 SKILL.md 加入治理表（見 `agents/` 參考） |
+| ① 角色 skill | 角色 SKILL.md 開頭的「ZenOS 治理」表 | 該角色啟動時 | 修改 `skills/release/{role}/SKILL.md`，跑 sync script |
 | ② 專案 prompt | CLAUDE.md / AGENTS.md / system prompt | 所有對話，不限角色 | 在專案設定加入載入指示（見下方） |
 | ③ 治理 skill 本身 | `skills/governance/*.md` 開頭的「適用場景」 | agent 讀到 skill 時 | 由 `/zenos-setup` 自動安裝 |
 
@@ -140,9 +151,9 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
 
 2. 確認家目錄角色有治理表
    → 檢查 ~/.claude/skills/architect/SKILL.md 開頭有 「ZenOS 治理」段落
-   → 沒有就參考 skills/agents/architect.md 補上
+   → 沒有就修改 skills/release/architect/SKILL.md 補上，跑 sync
 
-3. 完成。之後更新只需重跑 /zenos-setup
+3. 完成。之後更新：修改 skills/release/ → python3 scripts/sync_skills_from_release.py
 ```
 
 ### 對其他平台（Codex / ChatGPT / Gemini / 自建 agent）

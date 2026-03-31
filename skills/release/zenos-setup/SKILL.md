@@ -3,8 +3,9 @@ name: zenos-setup
 description: >
   ZenOS 初始化設定——引導用戶輸入 API token，自動寫入 MCP 設定檔，
   完成後即可使用 /zenos-capture 和 /zenos-sync。
-  當使用者說「設定 ZenOS」「初始化 ZenOS」「setup ZenOS」「/zenos-setup」
-  或「我要開始用 ZenOS」「怎麼設定 MCP」「幫我設定 ontology 工具」時使用。
+  僅在使用者明確說「/zenos-setup」「初次設定 ZenOS」「我還沒設定 MCP token」
+  「幫我連接 ZenOS 服務」時使用。
+  注意：「更新 skill」「同步 skill」「修改 skill」不應觸發此 skill。
 version: 1.0.0
 ---
 

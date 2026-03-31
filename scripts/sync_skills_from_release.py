@@ -7,10 +7,18 @@ from pathlib import Path
 
 RELEASE_ROOT = Path(__file__).resolve().parents[1] / "skills" / "release"
 SKILLS = (
+    # ZenOS platform skills
     "zenos-setup",
     "zenos-capture",
     "zenos-sync",
     "zenos-governance",
+    # Agent role skills
+    "architect",
+    "designer",
+    "developer",
+    "marketing",
+    "pm",
+    "qa",
 )
 
 
@@ -28,7 +36,7 @@ def main() -> int:
     home = Path.home()
     sync_to(home / ".claude" / "skills")
     sync_to(home / ".codex" / "skills")
-    print("Synced skills/release -> ~/.claude/skills and ~/.codex/skills")
+    print(f"Synced {len(SKILLS)} skills: skills/release -> ~/.claude/skills and ~/.codex/skills")
     return 0
 
 
