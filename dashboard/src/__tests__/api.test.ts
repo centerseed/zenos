@@ -12,6 +12,10 @@ import {
   getTasks,
   getTasksByEntity,
   getPartnerMe,
+  uploadTaskAttachment,
+  uploadToSignedUrl,
+  deleteTaskAttachment,
+  addLinkAttachment,
 } from "@/lib/api";
 
 const FAKE_TOKEN = "fake-token-abc";
@@ -355,6 +359,138 @@ describe("getPartnerMe", () => {
 
     const result = await getPartnerMe(FAKE_TOKEN);
     expect(result).toEqual(partner);
+  });
+});
+
+// ─── uploadTaskAttachment ───
+
+describe("uploadTaskAttachment", () => {
+  it("calls POST /api/data/tasks/{taskId}/attachments with correct body", async () => {
+    const responseData = {
+      attachment_id: "att-1",
+      proxy_url: "/attachments/att-1",
+      signed_put_url: "https://storage.googleapis.com/signed",
+    };
+    const fakeFetch = mockFetch(responseData);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const result = await uploadTaskAttachment(FAKE_TOKEN, "task-123", {
+      filename: "photo.png",
+      content_type: "image/png",
+    });
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/data/tasks/task-123/attachments`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: `Bearer ${FAKE_TOKEN}`,
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    expect(result).toEqual(responseData);
+  });
+
+  it("throws when API returns non-ok status", async () => {
+    vi.stubGlobal("fetch", mockFetch({}, false, 404));
+    await expect(
+      uploadTaskAttachment(FAKE_TOKEN, "task-123", {
+        filename: "file.pdf",
+        content_type: "application/pdf",
+      })
+    ).rejects.toThrow("404");
+  });
+});
+
+// ─── uploadToSignedUrl ───
+
+describe("uploadToSignedUrl", () => {
+  it("calls PUT on signed URL with file body", async () => {
+    const fakeFetch = mockFetch({});
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const file = new File(["test"], "test.txt", { type: "text/plain" });
+    await uploadToSignedUrl("https://storage.googleapis.com/signed", file);
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      "https://storage.googleapis.com/signed",
+      expect.objectContaining({
+        method: "PUT",
+        headers: { "Content-Type": "text/plain" },
+        body: file,
+      })
+    );
+  });
+
+  it("throws when GCS returns non-ok status", async () => {
+    vi.stubGlobal("fetch", mockFetch({}, false, 403));
+    const file = new File(["test"], "test.txt", { type: "text/plain" });
+    await expect(
+      uploadToSignedUrl("https://storage.googleapis.com/signed", file)
+    ).rejects.toThrow("403");
+  });
+});
+
+// ─── deleteTaskAttachment ───
+
+describe("deleteTaskAttachment", () => {
+  it("calls DELETE /api/data/tasks/{taskId}/attachments/{attachmentId}", async () => {
+    const fakeFetch = mockFetch({ ok: true });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await deleteTaskAttachment(FAKE_TOKEN, "task-123", "att-1");
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/data/tasks/task-123/attachments/att-1`,
+      expect.objectContaining({
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${FAKE_TOKEN}` },
+      })
+    );
+  });
+
+  it("throws when API returns non-ok status", async () => {
+    vi.stubGlobal("fetch", mockFetch({}, false, 500));
+    await expect(
+      deleteTaskAttachment(FAKE_TOKEN, "task-123", "att-1")
+    ).rejects.toThrow("500");
+  });
+});
+
+// ─── addLinkAttachment ───
+
+describe("addLinkAttachment", () => {
+  it("calls POST /api/data/tasks/{taskId}/attachments with type:link and url", async () => {
+    const responseData = { attachment_id: "att-link-1" };
+    const fakeFetch = mockFetch(responseData);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const result = await addLinkAttachment(FAKE_TOKEN, "task-123", {
+      url: "https://example.com/doc",
+    });
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/data/tasks/task-123/attachments`,
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({
+          Authorization: `Bearer ${FAKE_TOKEN}`,
+          "Content-Type": "application/json",
+        }),
+      })
+    );
+    const body = JSON.parse((fakeFetch.mock.calls[0][1] as RequestInit).body as string);
+    expect(body.type).toBe("link");
+    expect(body.url).toBe("https://example.com/doc");
+    expect(result).toEqual(responseData);
+  });
+
+  it("throws when API returns non-ok status", async () => {
+    vi.stubGlobal("fetch", mockFetch({}, false, 400));
+    await expect(
+      addLinkAttachment(FAKE_TOKEN, "task-123", { url: "" })
+    ).rejects.toThrow("400");
   });
 });
 

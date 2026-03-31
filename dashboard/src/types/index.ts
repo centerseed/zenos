@@ -121,6 +121,17 @@ export interface Task {
   rejectionReason: string | null;
   result: string | null;
   completedBy: string | null;
+  attachments?: Array<{
+    id: string;
+    type?: "image" | "file" | "link";
+    filename?: string;
+    content_type?: string;
+    url?: string;
+    description?: string;
+    proxy_url?: string;
+    uploaded_by?: string;
+    created_at?: string;
+  }>;
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;

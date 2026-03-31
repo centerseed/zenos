@@ -1,15 +1,18 @@
 """Dashboard REST API — Firebase ID token auth for data access endpoints.
 
 Endpoints:
-  GET /api/partner/me                     — current partner info
-  GET /api/data/entities                  — list entities
-  GET /api/data/entities/{id}             — get single entity
-  GET /api/data/entities/{id}/children    — get child entities
-  GET /api/data/entities/{id}/relationships — get entity relationships
-  GET /api/data/relationships             — list all relationships
-  GET /api/data/blindspots               — list blindspots
-  GET /api/data/tasks                     — list tasks
-  GET /api/data/tasks/by-entity/{entityId} — tasks by entity
+  GET  /api/partner/me                     — current partner info
+  GET  /api/data/entities                  — list entities
+  GET  /api/data/entities/{id}             — get single entity
+  GET  /api/data/entities/{id}/children    — get child entities
+  GET  /api/data/entities/{id}/relationships — get entity relationships
+  GET  /api/data/relationships             — list all relationships
+  GET  /api/data/blindspots               — list blindspots
+  GET  /api/data/tasks                     — list tasks
+  GET  /api/data/tasks/by-entity/{entityId} — tasks by entity
+  POST /api/data/tasks/{taskId}/attachments — upload attachment (returns signed URL)
+  DELETE /api/data/tasks/{taskId}/attachments/{attachmentId} — delete attachment
+  GET  /attachments/{attachment_id}        — proxy-stream attachment file
 
 Auth: Firebase ID token → email → SQL partners table → partner scope.
 CORS: allows requests from the Dashboard origin.
@@ -18,6 +21,8 @@ CORS: allows requests from the Dashboard origin.
 from __future__ import annotations
 
 import logging
+import uuid
+from datetime import datetime, timezone
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -196,10 +201,22 @@ def _task_to_dict(t: Task) -> dict:
         "rejectionReason": t.rejection_reason,
         "result": t.result,
         "project": t.project,
+        "attachments": _attachments_with_proxy_url(t.attachments),
         "createdAt": t.created_at,
         "updatedAt": t.updated_at,
         "completedAt": t.completed_at,
     }
+
+
+def _attachments_with_proxy_url(attachments: list[dict]) -> list[dict]:
+    """Add proxy_url to attachment items that have a gcs_path."""
+    result = []
+    for att in attachments:
+        att_copy = dict(att)
+        if att_copy.get("gcs_path"):
+            att_copy["proxy_url"] = f"/attachments/{att_copy['id']}"
+        result.append(att_copy)
+    return result
 
 
 # ──────────────────────────────────────────────
@@ -409,7 +426,7 @@ async def list_tasks(request: Request) -> Response:
     await _ensure_repos()
     token = current_partner_id.set(effective_id)
     try:
-        tasks = await _task_repo.list_all(status=status_list, assignee=assignee, created_by=created_by)
+        tasks = await _task_repo.list_all(status=status_list, assignee=assignee, created_by=created_by, limit=500)
     finally:
         current_partner_id.reset(token)
 
@@ -441,6 +458,216 @@ async def list_tasks_by_entity(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Endpoint: GET /attachments/{attachment_id}
+# ──────────────────────────────────────────────
+
+
+async def get_attachment(request: Request) -> Response:
+    """Proxy-stream an attachment file from GCS with auth verification."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    attachment_id = request.path_params.get("attachment_id")
+    if not attachment_id:
+        return _error_response("INVALID_INPUT", "attachment_id required", 400, request=request)
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_obj = await _task_repo.find_task_by_attachment_id(attachment_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not task_obj:
+        return _error_response("NOT_FOUND", "Attachment not found", 404, request=request)
+
+    # Find the specific attachment metadata
+    att_meta = None
+    for att in task_obj.attachments:
+        if att.get("id") == attachment_id:
+            att_meta = att
+            break
+
+    if not att_meta or not att_meta.get("gcs_path"):
+        return _error_response("NOT_FOUND", "Attachment has no file data", 404, request=request)
+
+    try:
+        from google.cloud.exceptions import NotFound as GcsNotFound  # type: ignore[import-untyped]
+        from zenos.infrastructure.gcs_client import download_blob, get_default_bucket
+        data, file_content_type = download_blob(get_default_bucket(), att_meta["gcs_path"])
+    except GcsNotFound:
+        logger.warning("GCS object not found for attachment %s", attachment_id)
+        return _error_response("NOT_FOUND", "Attachment file not found", 404, request=request)
+    except Exception:
+        logger.exception("Failed to download attachment %s from GCS", attachment_id)
+        return _error_response("INTERNAL_ERROR", "Failed to retrieve attachment", 500, request=request)
+
+    # Determine Content-Disposition
+    filename = att_meta.get("filename", "attachment")
+    is_image = file_content_type.startswith("image/")
+    disposition = "inline" if is_image else f'attachment; filename="{filename}"'
+
+    headers = {
+        **_cors_headers(request),
+        "Content-Disposition": disposition,
+        "Cache-Control": "private, max-age=3600",
+    }
+
+    return Response(content=data, media_type=file_content_type, headers=headers)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: POST /api/data/tasks/{taskId}/attachments
+# ──────────────────────────────────────────────
+
+
+async def upload_task_attachment(request: Request) -> Response:
+    """Request a signed PUT URL for uploading an attachment to a task."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    attachment_type = body.get("type", "file")
+
+    # Handle link attachment (no GCS upload required)
+    if attachment_type == "link":
+        url = body.get("url", "").strip()
+        if not url:
+            return _error_response("INVALID_INPUT", "url required for link attachments", 400, request=request)
+
+        await _ensure_repos()
+        token = current_partner_id.set(effective_id)
+        try:
+            task_obj = await _task_repo.get_by_id(task_id)
+            if not task_obj:
+                return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+            attachment_id = uuid.uuid4().hex
+            attachment = {
+                "id": attachment_id,
+                "type": "link",
+                "url": url,
+                "filename": body.get("filename", url),
+                "description": body.get("description", ""),
+                "uploaded_by": effective_id,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+            task_obj.attachments.append(attachment)
+            await _task_repo.upsert(task_obj)
+
+            logger.info("Created link attachment %s for task %s", attachment_id, task_id)
+            return _json_response({"attachment_id": attachment_id}, request=request)
+        finally:
+            current_partner_id.reset(token)
+
+    # Handle file attachment (GCS signed URL upload)
+    filename = body.get("filename")
+    content_type = body.get("content_type")
+    if not filename or not content_type:
+        return _error_response("INVALID_INPUT", "filename and content_type required", 400, request=request)
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_obj = await _task_repo.get_by_id(task_id)
+        if not task_obj:
+            return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+        from zenos.infrastructure.gcs_client import generate_signed_put_url, get_default_bucket
+
+        attachment_id = uuid.uuid4().hex
+        bucket_name = get_default_bucket()
+        gcs_path = f"tasks/{task_id}/attachments/{attachment_id}/{filename}"
+        signed_put_url = generate_signed_put_url(bucket_name, gcs_path, content_type)
+
+        attachment = {
+            "id": attachment_id,
+            "filename": filename,
+            "content_type": content_type,
+            "gcs_path": gcs_path,
+            "uploaded_by": effective_id,
+            "uploaded": False,
+            "description": body.get("description", ""),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        task_obj.attachments.append(attachment)
+        await _task_repo.upsert(task_obj)
+
+        logger.info("Created attachment %s for task %s", attachment_id, task_id)
+        return _json_response({
+            "attachment_id": attachment_id,
+            "proxy_url": f"/attachments/{attachment_id}",
+            "signed_put_url": signed_put_url,
+        }, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: DELETE /api/data/tasks/{taskId}/attachments/{attachmentId}
+# ──────────────────────────────────────────────
+
+
+async def delete_task_attachment(request: Request) -> Response:
+    """Remove an attachment from a task and best-effort delete the GCS blob."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    attachment_id = request.path_params.get("attachmentId")
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_obj = await _task_repo.get_by_id(task_id)
+        if not task_obj:
+            return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+        att_to_remove = None
+        for att in task_obj.attachments:
+            if att.get("id") == attachment_id:
+                att_to_remove = att
+                break
+
+        if not att_to_remove:
+            return _error_response("NOT_FOUND", "Attachment not found", 404, request=request)
+
+        task_obj.attachments.remove(att_to_remove)
+        await _task_repo.upsert(task_obj)
+
+        # Best-effort GCS cleanup
+        gcs_path = att_to_remove.get("gcs_path")
+        if gcs_path:
+            try:
+                from zenos.infrastructure.gcs_client import delete_blob, get_default_bucket
+                delete_blob(get_default_bucket(), gcs_path)
+            except Exception:
+                logger.warning("Failed to delete GCS blob %s", gcs_path)
+
+        logger.info("Deleted attachment %s from task %s", attachment_id, task_id)
+        return _json_response({"ok": True}, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+
+# ──────────────────────────────────────────────
 # Route table
 # ──────────────────────────────────────────────
 
@@ -453,5 +680,8 @@ dashboard_routes = [
     Route("/api/data/relationships", list_relationships, methods=["GET", "OPTIONS"]),
     Route("/api/data/blindspots", list_blindspots, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/by-entity/{entityId}", list_tasks_by_entity, methods=["GET", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}/attachments/{attachmentId}", delete_task_attachment, methods=["DELETE", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}/attachments", upload_task_attachment, methods=["POST", "OPTIONS"]),
     Route("/api/data/tasks", list_tasks, methods=["GET", "OPTIONS"]),
+    Route("/attachments/{attachment_id}", get_attachment, methods=["GET", "OPTIONS"]),
 ]

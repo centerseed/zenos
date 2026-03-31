@@ -1,0 +1,121 @@
+"""GCS helpers for task attachment storage.
+
+Provides upload, download, delete, and signed-URL generation for the
+attachments bucket. Uses Application Default Credentials (auto-discovered
+in Cloud Run).
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from datetime import timedelta
+
+from google.cloud import storage  # type: ignore[import-untyped]
+
+logger = logging.getLogger(__name__)
+
+_BUCKET_NAME = os.environ.get("GCS_ATTACHMENTS_BUCKET", "zenos-naruvia-attachments")
+
+# Module-level lazy singleton
+_client: storage.Client | None = None
+
+
+def _get_client() -> storage.Client:
+    global _client  # noqa: PLW0603
+    if _client is None:
+        _client = storage.Client()
+    return _client
+
+
+def upload_blob(
+    bucket_name: str,
+    gcs_path: str,
+    data: bytes,
+    content_type: str,
+) -> None:
+    """Upload bytes to a GCS blob."""
+    client = _get_client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(gcs_path)
+    blob.upload_from_string(data, content_type=content_type)
+    logger.info("Uploaded %d bytes to gs://%s/%s", len(data), bucket_name, gcs_path)
+
+
+def generate_signed_put_url(
+    bucket_name: str,
+    gcs_path: str,
+    content_type: str,
+    expiry_minutes: int = 15,
+) -> str:
+    """Generate a signed PUT URL for direct client upload.
+
+    In Cloud Run (no key file), uses IAM signBlob via the compute SA.
+    Locally, falls back to Application Default Credentials.
+    """
+    client = _get_client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(gcs_path)
+
+    # Cloud Run has no key file — use IAM signBlob via the SA email
+    sa_email = os.environ.get("GOOGLE_SERVICE_ACCOUNT_EMAIL")
+    if not sa_email:
+        # Try to get from compute metadata
+        try:
+            import google.auth  # type: ignore[import-untyped]
+            credentials, _ = google.auth.default()
+            sa_email = getattr(credentials, "service_account_email", None)
+        except Exception:
+            pass
+
+    kwargs: dict = {
+        "version": "v4",
+        "expiration": timedelta(minutes=expiry_minutes),
+        "method": "PUT",
+        "content_type": content_type,
+    }
+
+    if sa_email and not sa_email.startswith("default"):
+        # Cloud Run path: use IAM-based signing
+        import google.auth.transport.requests  # type: ignore[import-untyped]
+        auth_request = google.auth.transport.requests.Request()
+        kwargs["service_account_email"] = sa_email
+        kwargs["access_token"] = _get_access_token(auth_request)
+
+    url: str = blob.generate_signed_url(**kwargs)
+    return url
+
+
+def _get_access_token(auth_request: object) -> str:
+    """Get an access token for IAM signBlob."""
+    import google.auth  # type: ignore[import-untyped]
+    credentials, _ = google.auth.default()
+    credentials.refresh(auth_request)  # type: ignore[attr-defined]
+    return credentials.token  # type: ignore[attr-defined]
+
+
+def download_blob(bucket_name: str, gcs_path: str) -> tuple[bytes, str]:
+    """Download a blob and return (data, content_type)."""
+    client = _get_client()
+    bucket = client.bucket(bucket_name)
+    blob = bucket.blob(gcs_path)
+    blob.reload()  # fetch metadata
+    data = blob.download_as_bytes()
+    return data, blob.content_type or "application/octet-stream"
+
+
+def delete_blob(bucket_name: str, gcs_path: str) -> None:
+    """Delete a blob. Best-effort — logs errors but does not raise."""
+    try:
+        client = _get_client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(gcs_path)
+        blob.delete()
+        logger.info("Deleted gs://%s/%s", bucket_name, gcs_path)
+    except Exception:
+        logger.warning("Failed to delete gs://%s/%s", bucket_name, gcs_path, exc_info=True)
+
+
+def get_default_bucket() -> str:
+    """Return the configured attachments bucket name."""
+    return _BUCKET_NAME

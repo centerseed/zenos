@@ -2,7 +2,7 @@
 
 ## 文件的定位
 L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
-文件不是 L2（文件是 L2 概念的具體體現），不是 task（文件沒有 owner 和 AC）。
+文件不是 L2（文件是 L2 概念的具體體現），不是task（文件沒有 owner 和 AC）。
 
 ## 各文件類型完整範例 Frontmatter
 

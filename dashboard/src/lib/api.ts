@@ -4,7 +4,7 @@
  */
 import type { Entity, Relationship, Blindspot, Task, Partner } from "@/types";
 
-const API_BASE =
+export const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
   "https://zenos-mcp-165893875709.asia-east1.run.app";
 
@@ -199,4 +199,69 @@ export async function updateEntityVisibility(
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(`API /api/entities/${entityId}/visibility: ${res.status}`);
+}
+
+/** Request a signed upload URL for a task attachment */
+export async function uploadTaskAttachment(
+  token: string,
+  taskId: string,
+  data: { filename: string; content_type: string; description?: string }
+): Promise<{ attachment_id: string; proxy_url: string; signed_put_url: string }> {
+  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Upload attachment failed: ${res.status}`);
+  return res.json();
+}
+
+/** Upload file directly to GCS using a signed PUT URL */
+export async function uploadToSignedUrl(
+  signedUrl: string,
+  file: File
+): Promise<void> {
+  const res = await fetch(signedUrl, {
+    method: "PUT",
+    headers: { "Content-Type": file.type },
+    body: file,
+  });
+  if (!res.ok) throw new Error(`GCS upload failed: ${res.status}`);
+}
+
+/** Add a link attachment to a task */
+export async function addLinkAttachment(
+  token: string,
+  taskId: string,
+  data: { url: string; filename?: string; description?: string }
+): Promise<{ attachment_id: string }> {
+  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/attachments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ type: "link", ...data }),
+  });
+  if (!res.ok) throw new Error(`Add link attachment failed: ${res.status}`);
+  return res.json();
+}
+
+/** Delete a task attachment */
+export async function deleteTaskAttachment(
+  token: string,
+  taskId: string,
+  attachmentId: string
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE}/api/data/tasks/${taskId}/attachments/${attachmentId}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  if (!res.ok) throw new Error(`Delete attachment failed: ${res.status}`);
 }

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
 import type { Entity, Task } from "@/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
+import { TaskAttachments } from "./TaskAttachments";
+import { useAuth } from "@/lib/auth";
 import {
   AlertTriangle,
   ArrowUp,
@@ -26,6 +28,7 @@ interface TaskDetailDrawerProps {
   onClose: () => void;
   entityNames?: Record<string, string>;
   entitiesById?: Record<string, Entity>;
+  onTaskUpdated?: () => void;
 }
 
 const priorityIcons: Record<string, React.ReactNode> = {
@@ -117,9 +120,37 @@ export function TaskDetailDrawer({
   onClose,
   entityNames = {},
   entitiesById = {},
+  onTaskUpdated,
 }: TaskDetailDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
+  const [localTask, setLocalTask] = useState<Task | null>(task);
+  const { user } = useAuth();
+  const [authToken, setAuthToken] = useState<string | null>(null);
+
+  // Sync localTask when task prop changes
+  useEffect(() => {
+    setLocalTask(task);
+  }, [task]);
+
+  // Get auth token
+  useEffect(() => {
+    if (user) {
+      user.getIdToken().then(setAuthToken).catch(() => setAuthToken(null));
+    } else {
+      setAuthToken(null);
+    }
+  }, [user]);
+
+  const handleAttachmentsChanged = useCallback(
+    (attachments: Task["attachments"]) => {
+      if (localTask) {
+        setLocalTask({ ...localTask, attachments });
+      }
+      onTaskUpdated?.();
+    },
+    [localTask, onTaskUpdated]
+  );
 
   useEffect(() => {
     if (task) {
@@ -269,6 +300,17 @@ export function TaskDetailDrawer({
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Attachments */}
+            {localTask && authToken && (
+              <div className="space-y-4">
+                <TaskAttachments
+                  task={localTask}
+                  token={authToken}
+                  onAttachmentsChanged={handleAttachmentsChanged}
+                />
               </div>
             )}
 

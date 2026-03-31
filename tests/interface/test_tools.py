@@ -196,6 +196,7 @@ class TestSearchTool:
                 status=None,
                 limit=50,
                 project=None,
+                plan_id=None,
             )
             assert "tasks" in result
 
@@ -213,6 +214,7 @@ class TestSearchTool:
                 status=["todo", "in_progress"],
                 limit=50,
                 project=None,
+                plan_id=None,
             )
 
     async def test_empty_keyword_search(self):

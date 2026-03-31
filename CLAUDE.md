@@ -41,8 +41,8 @@ Phase 0 概念驗證 → 已進入開發。Backend: Python + PostgreSQL + MCP。
 ## 常用指令
 
 ```bash
-# Backend
-cd src && python -m pytest tests/ -x
+# Backend（必須用 .venv，系統 Python 缺少依賴）
+.venv/bin/pytest tests/ -x
 python -m zenos.interface.tools  # 啟動 MCP server
 
 # Frontend

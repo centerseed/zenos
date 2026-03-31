@@ -881,6 +881,7 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         result=row["result"],
         project=row["project"],
         project_id=row["project_id"] if "project_id" in row else None,
+        attachments=_json_loads_safe(row["attachments"] if "attachments" in row else None) or [],
         created_at=_to_dt(row["created_at"]) or _now(),
         updated_at=_to_dt(row["updated_at"]) or _now(),
         completed_at=_to_dt(row["completed_at"]),
@@ -978,10 +979,13 @@ class SqlTaskRepository:
                     linked_protocol, linked_blindspot, source_type, source_metadata_json, context_summary,
                     due_date, blocked_reason, acceptance_criteria_json, completed_by,
                     confirmed_by_creator, rejection_reason, result, project, project_id,
+                    attachments,
                     created_at, updated_at, completed_at
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
-                    $12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19,$20,$21,$22::jsonb,$23,$24,$25,$26,$27,$28,$29,$30,$31
+                    $12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19,$20,$21,$22::jsonb,$23,$24,$25,$26,$27,$28,
+                    $29::jsonb,
+                    $30,$31,$32
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     title=EXCLUDED.title, description=EXCLUDED.description,
@@ -1006,6 +1010,7 @@ class SqlTaskRepository:
                     rejection_reason=EXCLUDED.rejection_reason,
                     result=EXCLUDED.result, project=EXCLUDED.project,
                     project_id=EXCLUDED.project_id,
+                    attachments=EXCLUDED.attachments,
                     updated_at=EXCLUDED.updated_at,
                     completed_at=EXCLUDED.completed_at
                 WHERE tasks.partner_id = EXCLUDED.partner_id
@@ -1019,6 +1024,7 @@ class SqlTaskRepository:
                     task.blocked_reason, _dumps(task.acceptance_criteria),
                     task.completed_by, task.confirmed_by_creator,
                     task.rejection_reason, task.result, task.project, task.project_id,
+                    _dumps(task.attachments),
                     task.created_at, task.updated_at, task.completed_at,
                 )
                 # Sync task_entities join table
@@ -1045,6 +1051,26 @@ class SqlTaskRepository:
                     )
         return task
 
+    async def find_task_by_attachment_id(self, attachment_id: str) -> Task | None:
+        """Find a task containing an attachment with the given ID."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""SELECT t.*,
+                           COALESCE(NULLIF(NULLIF(p1.display_name, ''), 'Unknown'), p1.email, p1.id, t.created_by) as creator_name,
+                           COALESCE(NULLIF(NULLIF(p2.display_name, ''), 'Unknown'), p2.email, p2.id, t.assignee) as assignee_name
+                    FROM {SCHEMA}.tasks t
+                    LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id
+                    LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id
+                    WHERE t.partner_id = $1
+                      AND t.attachments @> $2::jsonb""",
+                pid, json.dumps([{"id": attachment_id}]),
+            )
+            if not row:
+                return None
+            linked_entities, blocked_by = await self._fetch_task_relations(conn, row["id"], pid)
+        return _row_to_task(row, linked_entities, blocked_by)
+
     async def list_all(
         self,
         *,
@@ -1056,6 +1082,7 @@ class SqlTaskRepository:
         include_archived: bool = False,
         limit: int = 50,
         project: str | None = None,
+        plan_id: str | None = None,
     ) -> list[Task]:
         pid = _get_partner_id()
 
@@ -1078,6 +1105,10 @@ class SqlTaskRepository:
         if project is not None:
             conditions.append(f"t.project = ${idx}")
             params.append(project)
+            idx += 1
+        if plan_id is not None:
+            conditions.append(f"t.plan_id = ${idx}")
+            params.append(plan_id)
             idx += 1
         if status is not None:
             normalized = []
@@ -1110,7 +1141,7 @@ class SqlTaskRepository:
             f"{join_clause} "
             f"LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id "
             f"LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id "
-            f"WHERE {where_clause} LIMIT ${idx}"
+            f"WHERE {where_clause} ORDER BY t.created_at DESC LIMIT ${idx}"
         )
         params.append(limit)
 

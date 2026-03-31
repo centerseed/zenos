@@ -318,6 +318,9 @@ def _serialize(obj: object) -> dict:
             "blocked": "in_progress",
             "archived": "done",
         }.get(data["status"], data["status"])
+        # Add proxy_url to attachments that have gcs_path
+        if "attachments" in data and data["attachments"]:
+            data["attachments"] = _add_proxy_urls(data["attachments"])
     return data
 
 
@@ -421,6 +424,7 @@ async def search(
     confirmed_only: bool | None = None,
     limit: int = 50,
     project: str | None = None,
+    plan_id: str | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -432,6 +436,7 @@ async def search(
     - 列出某類東西 → collection="entities"，可加 status 過濾
     - 看待確認項目 → confirmed_only=False
     - 查任務 → collection="tasks"，可加 assignee/created_by 過濾
+    - 查同一 plan 的所有任務 → collection="tasks"，plan_id="my-plan-id"
 
     不要用這個工具的情境：
     - 已知確切名稱要看完整資料 → 用 get
@@ -452,6 +457,7 @@ async def search(
         limit: 回傳上限，預設 50
         project: 按專案過濾 tasks（如 "zenos"、"paceriz"）。
             未傳時自動使用 partner 的 default_project，確保跨專案隔離。
+        plan_id: 按 plan 過濾 tasks（精確找同一 plan 的所有票）。
     """
     await _ensure_services()
     results: dict = {}
@@ -563,6 +569,7 @@ async def search(
                 status=status_list,
                 limit=limit,
                 project=effective_project or None,
+                plan_id=plan_id,
             )
             results["tasks"] = [_serialize(t) for t in tasks]
 
@@ -1112,6 +1119,81 @@ async def confirm(
 
 
 # ===================================================================
+# Attachment helpers
+# ===================================================================
+
+_VALID_ATTACHMENT_TYPES = {"image", "file", "link"}
+
+
+def _validate_attachments(
+    attachments: list[dict], partner_id: str | None,
+) -> list[dict] | dict:
+    """Validate and normalize attachment items.
+
+    Returns a list of validated attachments, or an error dict.
+    """
+    validated = []
+    for att in attachments:
+        att_type = att.get("type", "file")
+        if att_type not in _VALID_ATTACHMENT_TYPES:
+            return {
+                "error": "INVALID_INPUT",
+                "message": f"Invalid attachment type '{att_type}'. Must be one of: {', '.join(_VALID_ATTACHMENT_TYPES)}",
+            }
+        if att_type == "link":
+            if not att.get("url"):
+                return {"error": "INVALID_INPUT", "message": "Link attachment requires 'url' field"}
+            item = {
+                "id": att.get("id") or uuid.uuid4().hex,
+                "type": "link",
+                "url": att["url"],
+                "filename": att.get("filename", att["url"]),
+                "description": att.get("description", ""),
+                "uploaded_by": partner_id or "",
+                "created_at": att.get("created_at") or datetime.now(timezone.utc).isoformat(),
+            }
+        else:
+            # image or file: must have attachment_id from prior upload
+            if not att.get("attachment_id") and not att.get("id"):
+                return {
+                    "error": "INVALID_INPUT",
+                    "message": f"'{att_type}' attachment requires 'attachment_id' (from upload_attachment)",
+                }
+            # Preserve existing attachment data (already in DB from upload_attachment)
+            item = dict(att)
+            if "attachment_id" in item and "id" not in item:
+                item["id"] = item.pop("attachment_id")
+            item["uploaded_by"] = partner_id or item.get("uploaded_by", "")
+        validated.append(item)
+    return validated
+
+
+def _cleanup_removed_attachments(
+    old_attachments: list[dict], new_attachments: list[dict],
+) -> None:
+    """Delete GCS blobs for attachments removed during update (best-effort)."""
+    new_ids = {a.get("id") for a in new_attachments}
+    for old in old_attachments:
+        if old.get("id") not in new_ids and old.get("gcs_path"):
+            try:
+                from zenos.infrastructure.gcs_client import delete_blob, get_default_bucket
+                delete_blob(get_default_bucket(), old["gcs_path"])
+            except Exception:
+                logger.warning("Failed to cleanup attachment %s", old.get("id"), exc_info=True)
+
+
+def _add_proxy_urls(attachments: list[dict]) -> list[dict]:
+    """Add proxy_url to attachment items that have a gcs_path."""
+    result = []
+    for att in attachments:
+        att_copy = dict(att)
+        if att_copy.get("gcs_path"):
+            att_copy["proxy_url"] = f"/attachments/{att_copy['id']}"
+        result.append(att_copy)
+    return result
+
+
+# ===================================================================
 # Tool 6: task — create, update, and list action items
 # ===================================================================
 
@@ -1142,6 +1224,7 @@ async def _task_handler(
     plan_id: str | None = None,
     plan_order: int | None = None,
     depends_on_task_ids: list[str] | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """Core task handler logic — extracted for testability.
 
@@ -1244,6 +1327,14 @@ async def _task_handler(
                 "plan_order": plan_order,
                 "depends_on_task_ids": depends_on_task_ids or [],
             }
+
+            # Validate and process attachments
+            if attachments:
+                validated = _validate_attachments(attachments, (partner or {}).get("id"))
+                if isinstance(validated, dict) and "error" in validated:
+                    return validated
+                data["attachments"] = validated
+
             if task_service is None:
                 await _ensure_services()
             task_result = await task_service.create_task(data)
@@ -1292,6 +1383,20 @@ async def _task_handler(
                 updates["plan_order"] = plan_order
             if depends_on_task_ids is not None:
                 updates["depends_on_task_ids"] = depends_on_task_ids
+
+            # Attachments: full replacement with GCS cleanup for removed items
+            if attachments is not None:
+                validated = _validate_attachments(attachments, (partner or {}).get("id"))
+                if isinstance(validated, dict) and "error" in validated:
+                    return validated
+                updates["attachments"] = validated
+
+                # Best-effort cleanup of removed GCS blobs
+                if task_service is None:
+                    await _ensure_services()
+                old_task = await task_service._tasks.get_by_id(id)
+                if old_task:
+                    _cleanup_removed_attachments(old_task.attachments, validated)
 
             if task_service is None:
                 await _ensure_services()
@@ -1347,6 +1452,7 @@ async def task(
     plan_id: str | None = None,
     plan_order: int | None = None,
     depends_on_task_ids: list[str] | None = None,
+    attachments: list[dict] | None = None,
 ) -> dict:
     """管理知識驅動的行動項目（Action Layer）。
 
@@ -1386,19 +1492,16 @@ async def task(
         linked_protocol: 關聯的 Protocol ID
         linked_blindspot: 觸發的 blindspot ID
         source_metadata: 來源追溯與外部同步資訊（可選，dict）。
+            ⚠️ 這是「來源追溯」用途，不是放附件的地方。附件請用 attachments 參數。
             推薦結構：
             {
               "provenance": [
                 {
                   "type": "chat|doc|repo",
                   "label": "來源標題",
-                  "snippet": "對話或代碼原文片段",
-                  "url": "外部連結 (可選)",
-                  "imageUrl": "圖片連結 (可選)",
-                  "sheetRef": "Sheet 座標 (可選)"
+                  "snippet": "對話或代碼原文片段"
                 }
-              ],
-              "syncSources": ["github", "linear", "slack"]
+              ]
             }
         created_via_agent: 是否由 agent 建立。預設 true（MCP 路徑）。
         agent_name: agent 名稱（如 "architect-agent"）。created_via_agent=true 時建議帶入。
@@ -1413,6 +1516,13 @@ async def task(
         plan_id: 任務群組 ID（PLAN 層識別）
         plan_order: 任務在 plan 內順序（>=1）
         depends_on_task_ids: 前置依賴 task IDs（可選）
+        attachments: 附件陣列（可選）。create 時傳入初始附件；update 時為全量覆寫。
+            ⚠️ 附件必須用此參數，不能放在 source_metadata 裡。
+            每個項目需有 type ("image"/"file"/"link")。
+            - link 類型：需有 url 和 title。範例：{"type": "link", "url": "https://...", "title": "蝦皮旗艦館"}
+            - image/file 類型：需有 attachment_id（先呼叫 upload_attachment 取得）。
+              範例：{"type": "image", "id": "<attachment_id>", "filename": "photo.jpg", "mime_type": "image/jpeg"}
+            update 時為全量覆寫——傳入的陣列會取代所有既有附件。
 
     系統欄位：
         updated_by: 不接受 caller 直接傳入；由 server 依當次 actor context 自動寫入
@@ -1443,7 +1553,118 @@ async def task(
         plan_id=plan_id,
         plan_order=plan_order,
         depends_on_task_ids=depends_on_task_ids,
+        attachments=attachments,
     )
+
+
+# ===================================================================
+# Tool 6b: upload_attachment — upload file to task
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"write"},
+)
+async def upload_attachment(
+    task_id: str,
+    filename: str,
+    content_type: str,
+    base64_content: str | None = None,
+    description: str | None = None,
+) -> dict:
+    """上傳附件到任務。
+
+    兩種模式：
+    1. base64_content 有值：server 端直接上傳到 GCS（限制 5MB）
+    2. base64_content 為空：回傳 signed PUT URL 讓 client 直接上傳
+
+    回傳 attachment_id 和 proxy_url，用於後續 task create/update 的 attachments 欄位。
+
+    使用時機：
+    - 要在任務上附加圖片或檔案 → 先呼叫此工具取得 attachment_id
+    - 取得 attachment_id 後，在 task create/update 的 attachments 帶入
+
+    Args:
+        task_id: 目標任務 ID
+        filename: 原始檔名
+        content_type: MIME type（如 "image/png", "application/pdf"）
+        base64_content: Base64 編碼的檔案內容（可選，<=5MB 解碼後）
+        description: 附件描述（可選）
+    """
+    try:
+        partner = _current_partner.get()
+        if not partner or not partner.get("id"):
+            return {"error": "UNAUTHORIZED", "message": "Authentication required"}
+
+        await _ensure_services()
+
+        # Validate task exists and belongs to current partner
+        task_obj = await task_service._tasks.get_by_id(task_id)
+        if task_obj is None:
+            return {"error": "NOT_FOUND", "message": f"Task '{task_id}' not found"}
+
+        import base64 as b64module
+        from zenos.infrastructure.gcs_client import (
+            get_default_bucket,
+            upload_blob,
+            generate_signed_put_url,
+        )
+
+        attachment_id = uuid.uuid4().hex
+        gcs_path = f"tasks/{task_id}/attachments/{attachment_id}/{filename}"
+        bucket_name = get_default_bucket()
+        uploaded = False
+        signed_put_url = None
+
+        if base64_content:
+            # Mode 1: server-side upload
+            try:
+                data = b64module.b64decode(base64_content)
+            except Exception:
+                return {"error": "INVALID_INPUT", "message": "Invalid base64_content"}
+            if len(data) > 5 * 1024 * 1024:
+                return {"error": "INVALID_INPUT", "message": "File exceeds 5MB limit"}
+            upload_blob(bucket_name, gcs_path, data, content_type)
+            uploaded = True
+        else:
+            # Mode 2: return signed PUT URL for client upload
+            signed_put_url = generate_signed_put_url(bucket_name, gcs_path, content_type)
+
+        attachment = {
+            "id": attachment_id,
+            "filename": filename,
+            "content_type": content_type,
+            "gcs_path": gcs_path,
+            "uploaded_by": partner["id"],
+            "uploaded": uploaded,
+            "description": description or "",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        # Append to task's attachments
+        task_obj.attachments.append(attachment)
+        await task_service._tasks.upsert(task_obj)
+
+        result = {
+            "attachment_id": attachment_id,
+            "proxy_url": f"/attachments/{attachment_id}",
+            "uploaded": uploaded,
+        }
+        if signed_put_url:
+            result["signed_put_url"] = signed_put_url
+
+        _audit_log(
+            event_type="attachment.upload",
+            target={"task_id": task_id, "attachment_id": attachment_id},
+            changes={"filename": filename, "content_type": content_type, "mode": "inline" if uploaded else "signed_url"},
+        )
+        return result
+
+    except ValueError as e:
+        return {"error": "INVALID_INPUT", "message": str(e)}
+    except Exception as e:
+        logger.exception("upload_attachment failed")
+        return {"error": "INTERNAL_ERROR", "message": str(e)}
 
 
 # ===================================================================

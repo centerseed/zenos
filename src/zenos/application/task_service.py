@@ -168,6 +168,7 @@ class TaskService:
             blocked_reason=blocked_reason,
             acceptance_criteria=data.get("acceptance_criteria", []),
             project=data.get("project", ""),
+            attachments=data.get("attachments", []),
         )
 
         saved = await self._tasks.upsert(task)
@@ -216,7 +217,7 @@ class TaskService:
             "assignee", "priority", "description", "blocked_reason",
             "due_date", "result", "acceptance_criteria", "blocked_by",
             "plan_id", "plan_order", "depends_on_task_ids", "source_metadata",
-            "updated_by", "project", "linked_entities",
+            "updated_by", "project", "linked_entities", "attachments",
         ):
             if field in updates:
                 setattr(task, field, updates[field])
@@ -316,6 +317,7 @@ class TaskService:
         include_archived: bool = False,
         limit: int = 50,
         project: str | None = None,
+        plan_id: str | None = None,
     ) -> list[Task]:
         """List tasks with filters. Delegates to repository."""
         return await self._tasks.list_all(
@@ -327,6 +329,7 @@ class TaskService:
             include_archived=include_archived,
             limit=limit,
             project=project,
+            plan_id=plan_id,
         )
 
     async def list_pending_review(self) -> list[Task]:
