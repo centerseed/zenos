@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { Entity, Task } from "@/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import {
@@ -52,57 +53,62 @@ function formatDate(date: Date | null): string {
   });
 }
 
-function ContextCard({ entity, name }: { entity?: Entity; name: string }) {
+function ContextCard({ entity }: { entity?: Entity; name: string }) {
   if (!entity) return null;
   
   return (
-    <div className="bg-white/[0.04] border border-white/10 rounded-xl p-4 space-y-3 hover:bg-white/[0.07] transition-colors shadow-sm overflow-hidden group relative">
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30">
-            <Link2 className="w-3.5 h-3.5 text-blue-300" />
+    <Link href={`/knowledge-map?id=${entity.id}`} className="block group">
+      <div className="bg-white/[0.04] border border-white/10 rounded-xl p-4 space-y-3 group-hover:bg-white/[0.08] group-hover:border-blue-500/30 transition-all shadow-sm overflow-hidden relative active:scale-[0.98]">
+        <div className="flex items-start justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30 group-hover:bg-blue-500/30 transition-colors">
+              <Link2 className="w-3.5 h-3.5 text-blue-300" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
+                {entity.name}
+              </h4>
+              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-black">
+                {entity.type}
+              </span>
+            </div>
           </div>
-          <div>
-            <h4 className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
-              {entity.name}
-            </h4>
-            <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-black">
-              {entity.type}
-            </span>
+          <div className="flex items-center gap-2">
+            <div className={`px-2 py-0.5 rounded-full text-[9px] font-black border ${
+              entity.status === 'active' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
+            }`}>
+              {entity.status.toUpperCase()}
+            </div>
+            <ExternalLink className="w-3 h-3 text-white/20 group-hover:text-blue-400 transition-colors" />
           </div>
         </div>
-        <div className={`px-2 py-0.5 rounded-full text-[9px] font-black border ${
-          entity.status === 'active' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-        }`}>
-          {entity.status.toUpperCase()}
-        </div>
-      </div>
 
-      <p className="text-xs text-foreground/90 leading-relaxed line-clamp-3 italic">
-        "{entity.summary}"
-      </p>
+        <p className="text-xs text-foreground/90 leading-relaxed line-clamp-3 italic">
+          "{entity.summary}"
+        </p>
 
-      {entity.tags && (
-        <div className="grid grid-cols-2 gap-4 pt-1 border-t border-white/5 mt-2">
-          {entity.tags.what && (Array.isArray(entity.tags.what) ? entity.tags.what : []).length > 0 && (
-            <div className="space-y-1">
-              <span className="text-[9px] font-black text-blue-400/80 uppercase tracking-widest">What</span>
-              <div className="flex flex-wrap gap-1">
-                {(Array.isArray(entity.tags.what) ? entity.tags.what : []).slice(0, 2).map((t: string, i: number) => (
-                  <span key={i} className="text-[10px] text-foreground font-medium">{t}</span>
-                ))}
+        {entity.tags && (
+          <div className="grid grid-cols-2 gap-4 pt-1 border-t border-white/5 mt-2">
+            {entity.tags.what && (Array.isArray(entity.tags.what) ? entity.tags.what : []).length > 0 && (
+              <div className="space-y-1">
+                <span className="text-[9px] font-black text-blue-400/80 uppercase tracking-widest">What</span>
+                <div className="flex flex-wrap gap-1">
+                  {(Array.isArray(entity.tags.what) ? entity.tags.what : []).slice(0, 2).map((t: string, i: number) => (
+                    <span key={i} className="text-[10px] text-foreground font-medium">{t}</span>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-          {entity.owner && (
-            <div className="space-y-1">
-              <span className="text-[9px] font-black text-indigo-400/80 uppercase tracking-widest">Owner</span>
-              <div className="text-[10px] text-foreground font-medium">{entity.owner}</div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+            )}
+            {entity.owner && (
+              <div className="space-y-1">
+                <span className="text-[9px] font-black text-indigo-400/80 uppercase tracking-widest">Owner</span>
+                <div className="text-[10px] text-foreground font-medium">{entity.owner}</div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </Link>
   );
 }
 

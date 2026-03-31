@@ -7,6 +7,116 @@ created: 2026-03-26
 updated: 2026-03-31
 ---
 
+## 2026-03-31 Task 附件支援（最新增補）
+
+Task 支援在建立與更新時附加三種媒體類型，統一存於 `attachments` 欄位。
+
+### 附件資料模型
+
+每個附件為一個 object，schema 如下：
+
+| 欄位 | 型別 | 必填 | 說明 |
+|------|------|------|------|
+| `id` | string | 系統產生 | 附件唯一識別碼 |
+| `type` | enum | 是 | `"image"` / `"file"` / `"link"` |
+| `name` | string | 是 | 顯示名稱（圖片/檔案用原始檔名，連結用標題） |
+| `gcs_path` | string | `image`/`file` 必填 | GCS object path，格式：`tasks/{task_id}/attachments/{id}/{filename}` |
+| `external_url` | string | `link` 必填 | 外部連結 URL |
+| `mime_type` | string | `image`/`file` 必填 | MIME type（如 `image/png`、`application/pdf`） |
+| `size_bytes` | number | `image`/`file` 選填 | 檔案大小（bytes） |
+| `uploaded_by` | string | 系統產生 | 上傳者 `partner.id`，由 server 從 auth context 覆寫，不信任 caller 傳入 |
+| `created_at` | datetime | 系統產生 | 附件建立時間 |
+
+`attachments` 欄位掛在 task 根層，型別為 `attachment[]`，預設空陣列。
+DB（Cloud SQL）以 **JSONB 欄位**存於 `tasks` table，需補 migration：`ALTER TABLE tasks ADD COLUMN attachments JSONB DEFAULT '[]'`。
+
+### 儲存與存取規則
+
+- `type = "image"` 或 `type = "file"`：DB 存 `gcs_path`（永久有效）。前端**不直接存取 GCS**，一律透過 ZenOS server proxy 取得檔案。
+- `type = "link"`：只存 `external_url` metadata，不存 GCS。
+- **嚴禁**在 DB 存 GCS signed URL。
+
+### 檔案存取：ZenOS Server Proxy
+
+所有 `image` / `file` 類附件的存取統一走 ZenOS proxy endpoint：
+
+```
+GET /attachments/{attachment_id}
+  → server 驗證 caller 對該 task 的讀取權限
+  → 從 GCS 串流回傳檔案內容
+  → URL 永不過期，存取控制完全在 ZenOS 手上
+```
+
+前端顯示圖片時使用 `/attachments/{attachment_id}` 作為 `src`，不使用 GCS URL。
+
+### 上傳路徑
+
+#### `type = "link"`（直接帶入）
+
+`task(action="create/update")` 可直接在 `attachments` 陣列中帶入：
+
+```json
+{ "type": "link", "name": "設計稿參考", "external_url": "https://..." }
+```
+
+#### `type = "image"` / `type = "file"`（兩條路徑）
+
+**路徑一：Agent（MCP inline upload，≤ 5 MB）**
+
+agent 將檔案 base64 編碼後，呼叫 `upload_attachment` MCP tool：
+
+```
+輸入：
+  task_id: string          目標 task ID（必須已存在，不支援 pending）
+  filename: string
+  mime_type: string
+  base64_content: string   原始 binary 的 base64 編碼
+輸出：
+  attachment_id: string
+  proxy_url: string        /attachments/{attachment_id}（永久有效）
+```
+
+server 收到後解碼並上傳至 GCS，回傳 proxy URL。
+
+> 超過 5 MB 的檔案 agent 無法透過 MCP 上傳，需由用戶在 Dashboard UI 操作。
+
+**路徑二：UI（前端直傳 GCS，任意大小）**
+
+Step 1：呼叫 `upload_attachment` MCP tool 或等價 API，不帶 `base64_content`，取得 signed upload URL：
+
+```
+輸入：task_id, filename, mime_type, size_bytes
+輸出：attachment_id, upload_url（GCS signed PUT URL，15 分鐘有效）, proxy_url
+```
+
+Step 2：前端直接 `HTTP PUT` binary 至 `upload_url`（不過 ZenOS server）。
+Step 3：上傳成功後，將 `{ type, name, attachment_id }` 帶入 `task(action="create/update")` 的 `attachments`。
+
+> GCS bucket 須設定 CORS，允許 Dashboard origin 的 PUT 請求。
+
+### 更新與刪除附件
+
+- **更新**：`task(action="update")` 的 `attachments` 採**全量覆寫**語意——傳入陣列完整取代現有內容；需保留舊附件時，caller 必須在陣列中包含舊附件 objects（含原始 `id`）。
+  - **Known limitation（Phase 1）**：並發寫入可能導致後者覆蓋前者。用戶量小可接受，Phase 2 加 patch 語意（`add` / `remove`）。
+- **刪除**：從陣列移除對應 object 後呼叫 update；server 在 update handler 內同步刪除 GCS 物件（失敗只 log warning，不阻擋 task update）。
+
+### UI 行為
+
+1. 建立 task 時，可上傳圖片、上傳檔案、貼入外部連結。
+2. 建立後，task 詳情頁可新增、替換、移除任一附件。
+3. 圖片類附件 inline preview（src 指向 `/attachments/{id}`）；非圖片檔案顯示下載連結；外部連結顯示可點擊標題。
+4. 附件操作（新增 / 移除）須即時反映在 `updated_at`。
+
+### 限制（Phase 1）
+
+- 單一 task 附件數量上限：**20 個**。
+- MCP inline upload 上限：**5 MB**（超過需走 UI 路徑）。
+- 圖片單檔大小上限：**10 MB**。
+- 一般檔案單檔大小上限：**50 MB**。
+- 不支援附件版本歷程（Phase 2 再議）。
+
+---
+
 ## 2026-03-31 狀態模型簡化（最新覆寫）
 
 本節覆寫舊版 `backlog/blocked/archived` 設計，從即日起 task 狀態以以下五態為準：
@@ -58,6 +168,7 @@ updated: 2026-03-31
 | `updated_at` | datetime | 系統產生 | 最後更新時間 | UTC |
 | `updated_by` | string \| null | 否（預留） | 最後更新人 partner.id | 現階段可由 audit log 補足；後續可升級為正式欄位 |
 | `completed_at` | datetime \| null | 否 | 完成時間 | `done` 時應有值 |
+| `attachments` | attachment[] | 否 | 附件列表（圖片 / 檔案 / 連結） | 詳見「Task 附件支援」章節 |
 
 # Feature Spec: ZenOS Task Governance
 

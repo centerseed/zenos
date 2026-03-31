@@ -153,6 +153,28 @@ MCP_TRANSPORT=sse PORT=8080 python -m zenos.interface.tools
 - Cloud Run MCP 部署腳本：[scripts/deploy_mcp.sh](/Users/wubaizong/clients/ZenOS/scripts/deploy_mcp.sh)
 - 全站部署（測試 + dashboard + firebase）：[scripts/deploy.sh](/Users/wubaizong/clients/ZenOS/scripts/deploy.sh)
 
+## SQL Migration（統一入口）
+
+- Migration runner：[scripts/run_sql_migrations.py](/Users/wubaizong/clients/ZenOS/scripts/run_sql_migrations.py)
+- 一鍵入口（自動讀 GCP secret `database-url`）：[scripts/migrate.sh](/Users/wubaizong/clients/ZenOS/scripts/migrate.sh)
+
+常用指令：
+
+```bash
+# 看目前狀態（已套用 / 待套用）
+./scripts/migrate.sh --status
+
+# 只看待套用，不實際執行
+./scripts/migrate.sh --dry-run
+
+# 正式套用全部待套用 migration
+./scripts/migrate.sh
+```
+
+備註：
+- migration 版本紀錄會寫在 `zenos.schema_migrations`
+- 若歷史環境已手動套過 SQL，但沒留下版本紀錄，runner 會在「物件已存在」時自動標記為已套用
+
 ## 最小可用流程（建議）
 
 1. 先用 `zenos-setup` 接上 MCP。

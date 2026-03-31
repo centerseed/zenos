@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
 import { LoadingState } from "@/components/LoadingState";
+import { useSearchParams } from "next/navigation";
 import {
   getAllEntities,
   getAllBlindspots,
@@ -120,8 +121,11 @@ function Sidebar({
 
 // ─── Main Content ───
 
-function KnowledgeMapPage() {
+function KnowledgeMapContent() {
   const { user, partner } = useAuth();
+  const searchParams = useSearchParams();
+  const targetId = searchParams.get("id");
+
   const [entities, setEntities] = useState<Entity[]>([]);
   const [blindspots, setBlindspots] = useState<Blindspot[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
@@ -151,13 +155,22 @@ function KnowledgeMapPage() {
         setBlindspots(fetchedBlindspots);
         setRelationships(fetchedRelationships);
         setTasks(fetchedTasks);
+
+        // Auto-select if id is in URL
+        if (targetId) {
+          const exists = fetchedEntities.some(e => e.id === targetId);
+          if (exists) {
+            setSelectedId(targetId);
+            setFocusedNodeId(targetId);
+          }
+        }
       } catch (err) {
         console.error("Failed to load data:", err);
       }
       setLoading(false);
     }
     load();
-  }, [user, partner]);
+  }, [user, partner, targetId]);
 
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.id, e])), [entities]);
   const blindspotsByEntity = useMemo(() => {
@@ -248,6 +261,14 @@ function KnowledgeMapPage() {
         </div>
       )}
     </div>
+  );
+}
+
+function KnowledgeMapPage() {
+  return (
+    <Suspense fallback={<LoadingState variant="page" label="Loading..." />}>
+      <KnowledgeMapContent />
+    </Suspense>
   );
 }
 

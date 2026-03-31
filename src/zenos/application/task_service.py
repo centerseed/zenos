@@ -216,7 +216,7 @@ class TaskService:
             "assignee", "priority", "description", "blocked_reason",
             "due_date", "result", "acceptance_criteria", "blocked_by",
             "plan_id", "plan_order", "depends_on_task_ids", "source_metadata",
-            "updated_by",
+            "updated_by", "project", "linked_entities",
         ):
             if field in updates:
                 setattr(task, field, updates[field])

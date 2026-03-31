@@ -28,10 +28,10 @@ const priorityIcons: Record<string, React.ReactNode> = {
 };
 
 const priorityBg: Record<string, string> = {
-  critical: "bg-red-500/15 border-red-500/20",
-  high: "bg-orange-500/15 border-orange-500/20",
-  medium: "bg-yellow-500/15 border-yellow-500/20",
-  low: "bg-blue-500/15 border-blue-500/20",
+  critical: "bg-red-500/20 border-red-500/30",
+  high: "bg-orange-500/20 border-orange-500/30",
+  medium: "bg-yellow-500/20 border-yellow-500/30",
+  low: "bg-blue-500/20 border-blue-500/30",
 };
 
 function formatDate(date: Date | null): string {
@@ -53,7 +53,6 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
   const overdue = isOverdue(task);
   const dueDateStr = formatDate(task.dueDate);
   
-  // Clean logic for the card avatar and name
   const isAgentCreated = task.creatorName?.includes("agent") || task.createdBy?.includes("agent");
   const mainName = task.assigneeName || task.assignee || task.creatorName || task.createdBy || "Unassigned";
   const displayName = mainName.replace(/^agent \(by (.*?)\)$/, "$1");
@@ -70,20 +69,20 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
 
   return (
     <Card
-      className={`relative overflow-hidden transition-all duration-300 cursor-pointer group border-border/40 hover:border-blue-500/40 hover:shadow-[0_8px_30px_rgb(0,0,0,0.5)] hover:-translate-y-0.5 ${
-        overdue ? "bg-red-950/5" : "bg-gradient-to-b from-card to-card/95"
+      className={`relative overflow-hidden transition-all duration-300 cursor-pointer group border-white/10 hover:border-blue-500/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.6)] hover:-translate-y-0.5 ${
+        overdue ? "bg-red-950/10" : "bg-[#141414]"
       }`}
       onClick={() => onSelect?.(task)}
     >
       {/* Selection Glow */}
-      <div className="absolute inset-0 bg-blue-500/5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+      <div className="absolute inset-0 bg-blue-500/[0.03] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
 
       {thumbnail && (
-        <div className="relative w-full h-28 overflow-hidden border-b border-border/20">
+        <div className="relative w-full h-28 overflow-hidden border-b border-white/5">
           <img
             src={thumbnail}
             alt=""
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110"
+            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 opacity-80 group-hover:opacity-100"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
         </div>
@@ -91,7 +90,7 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
 
       <CardHeader className="pb-2 pt-3 px-3.5">
         <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-[13px] font-semibold text-foreground/90 leading-snug group-hover:text-blue-300 transition-colors line-clamp-2">
+          <CardTitle className="text-[13px] font-bold text-white leading-snug group-hover:text-blue-300 transition-colors line-clamp-2">
             {task.title}
           </CardTitle>
 
@@ -103,7 +102,7 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
         </div>
 
         {descPreview && (
-          <p className="text-[11px] text-muted-foreground mt-1.5 line-clamp-2 leading-relaxed opacity-70 font-light">
+          <p className="text-[11px] text-gray-300 mt-1.5 line-clamp-2 leading-relaxed font-normal opacity-90">
             {descPreview}
           </p>
         )}
@@ -116,7 +115,7 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
             {task.linkedEntities.slice(0, 2).map((id) => (
               <span
                 key={id}
-                className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/10 font-medium tracking-tight"
+                className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/20 font-bold tracking-tight"
               >
                 {entityNames[id] ?? id.slice(0, 6)}
               </span>
@@ -125,33 +124,33 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between text-[10px] border-t border-border/30 pt-2.5">
+        <div className="flex items-center justify-between text-[10px] border-t border-white/5 pt-2.5">
           <div className="flex items-center gap-2">
             <div className="relative">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-600 to-purple-500 flex items-center justify-center text-[9px] font-bold text-white shadow-sm ring-1 ring-white/10">
+              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-[9px] font-black text-white shadow-md ring-1 ring-white/20">
                 {(displayName || "?")[0].toUpperCase()}
               </div>
               {isAgentCreated && (
-                <div className="absolute -bottom-1 -right-1 bg-background rounded-full p-0.5 ring-1 ring-border shadow-xs">
-                  <Bot className="w-2 h-2 text-blue-400" />
+                <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-0.5 ring-1 ring-white/20 shadow-xs">
+                  <Bot className="w-2.5 h-2.5 text-blue-400" />
                 </div>
               )}
             </div>
-            <span className="truncate max-w-[80px] font-medium text-foreground/80 group-hover:text-foreground">
+            <span className="truncate max-w-[80px] font-bold text-gray-200 group-hover:text-white">
               {displayName}
             </span>
           </div>
 
           <div className="flex items-center gap-2.5">
             {dueDateStr && (
-              <div className={`flex items-center gap-1 ${overdue ? "text-red-400 font-bold" : "text-muted-foreground/60"}`}>
+              <div className={`flex items-center gap-1 font-bold ${overdue ? "text-red-400" : "text-gray-400"}`}>
                 <Calendar className="w-2.5 h-2.5" />
                 <span>{dueDateStr}</span>
               </div>
             )}
             
             {task.project && (
-              <span className="px-1.5 py-0.5 rounded-[4px] bg-white/5 text-[9px] font-black uppercase tracking-widest text-muted-foreground/50 border border-white/5">
+              <span className="px-1.5 py-0.5 rounded-[4px] bg-white/10 text-[9px] font-black uppercase tracking-widest text-gray-400 border border-white/10">
                 {task.project}
               </span>
             )}
