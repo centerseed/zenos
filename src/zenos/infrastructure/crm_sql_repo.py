@@ -122,6 +122,7 @@ def _row_to_deal(row: asyncpg.Record) -> Deal:
         notes=row["notes"],
         is_closed_lost=row["is_closed_lost"],
         is_on_hold=row["is_on_hold"],
+        last_activity_at=_to_dt(row.get("last_activity_at")),
         created_at=_to_dt(row["created_at"]) or _now(),
         updated_at=_to_dt(row["updated_at"]) or _now(),
     )
@@ -338,19 +339,24 @@ class CrmSqlRepository:
     ) -> list[Deal]:
         """List deals. By default, excludes closed-lost and on-hold deals."""
         async with self._pool.acquire() as conn:
+            _join = f"""
+                SELECT d.*, MAX(a.activity_at) AS last_activity_at
+                FROM {CRM_SCHEMA}.deals d
+                LEFT JOIN {CRM_SCHEMA}.activities a
+                  ON a.deal_id = d.id AND a.partner_id = $1
+                WHERE d.partner_id = $1
+            """
             if include_inactive:
                 rows = await conn.fetch(
-                    f"""SELECT * FROM {CRM_SCHEMA}.deals
-                        WHERE partner_id=$1 ORDER BY created_at DESC""",
+                    _join + " GROUP BY d.id ORDER BY d.created_at DESC",
                     partner_id,
                 )
             else:
                 rows = await conn.fetch(
-                    f"""SELECT * FROM {CRM_SCHEMA}.deals
-                        WHERE partner_id=$1
-                          AND is_closed_lost = false
-                          AND is_on_hold = false
-                        ORDER BY created_at DESC""",
+                    _join + """
+                          AND d.is_closed_lost = false
+                          AND d.is_on_hold = false
+                        GROUP BY d.id ORDER BY d.created_at DESC""",
                     partner_id,
                 )
         return [_row_to_deal(r) for r in rows]
