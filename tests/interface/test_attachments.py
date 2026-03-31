@@ -86,6 +86,43 @@ class TestValidateAttachments:
         assert isinstance(result, list)
         assert result[0]["uploaded_by"] == "real-partner"
 
+    def test_validate_attachments_merges_gcs_path_from_existing(self):
+        """Caller passing only id+type gets gcs_path and content_type merged from existing."""
+        from zenos.interface.tools import _validate_attachments
+
+        existing = [
+            {
+                "id": "att-abc",
+                "type": "image",
+                "gcs_path": "tasks/t1/attachments/att-abc/photo.jpg",
+                "content_type": "image/jpeg",
+                "uploaded": True,
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        ]
+        caller_att = [{"type": "image", "id": "att-abc", "filename": "photo.jpg"}]
+        result = _validate_attachments(caller_att, "partner-1", existing_attachments=existing)
+
+        assert isinstance(result, list)
+        item = result[0]
+        assert item["id"] == "att-abc"
+        assert item["gcs_path"] == "tasks/t1/attachments/att-abc/photo.jpg"
+        assert item["content_type"] == "image/jpeg"
+        assert item["uploaded"] is True
+        assert item["created_at"] == "2026-01-01T00:00:00+00:00"
+
+    def test_validate_attachments_normalizes_mime_type_to_content_type(self):
+        """mime_type passed by caller is converted to content_type."""
+        from zenos.interface.tools import _validate_attachments
+
+        caller_att = [{"type": "file", "id": "att-xyz", "filename": "doc.pdf", "mime_type": "application/pdf"}]
+        result = _validate_attachments(caller_att, "partner-1")
+
+        assert isinstance(result, list)
+        item = result[0]
+        assert item["content_type"] == "application/pdf"
+        assert "mime_type" not in item
+
 
 # ─────────────────────────────────────────────────
 # Upload attachment MCP tool

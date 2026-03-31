@@ -1126,11 +1126,21 @@ _VALID_ATTACHMENT_TYPES = {"image", "file", "link"}
 
 
 def _validate_attachments(
-    attachments: list[dict], partner_id: str | None,
+    attachments: list[dict],
+    partner_id: str | None,
+    existing_attachments: list[dict] | None = None,
 ) -> list[dict] | dict:
     """Validate and normalize attachment items.
 
-    Returns a list of validated attachments, or an error dict.
+    Args:
+        attachments: Attachment items from caller.
+        partner_id: Authenticated partner ID for uploaded_by.
+        existing_attachments: Current attachments from DB; server-side fields
+            (gcs_path, content_type, uploaded, created_at) are merged back so
+            callers don't need to round-trip them.
+
+    Returns:
+        A list of validated attachments, or an error dict.
     """
     validated = []
     for att in attachments:
@@ -1159,10 +1169,25 @@ def _validate_attachments(
                     "error": "INVALID_INPUT",
                     "message": f"'{att_type}' attachment requires 'attachment_id' (from upload_attachment)",
                 }
-            # Preserve existing attachment data (already in DB from upload_attachment)
+            # Start from caller's data
             item = dict(att)
             if "attachment_id" in item and "id" not in item:
                 item["id"] = item.pop("attachment_id")
+
+            # Merge back server-side fields from existing attachment
+            if existing_attachments:
+                existing = next(
+                    (a for a in existing_attachments if a.get("id") == item.get("id")), None
+                )
+                if existing:
+                    for key in ("gcs_path", "content_type", "uploaded", "created_at"):
+                        if key not in item and key in existing:
+                            item[key] = existing[key]
+
+            # Normalize: accept mime_type as alias for content_type
+            if "mime_type" in item and "content_type" not in item:
+                item["content_type"] = item.pop("mime_type")
+
             item["uploaded_by"] = partner_id or item.get("uploaded_by", "")
         validated.append(item)
     return validated
@@ -1386,15 +1411,20 @@ async def _task_handler(
 
             # Attachments: full replacement with GCS cleanup for removed items
             if attachments is not None:
-                validated = _validate_attachments(attachments, (partner or {}).get("id"))
+                # Fetch existing task first so we can merge server-side fields
+                if task_service is None:
+                    await _ensure_services()
+                old_task = await task_service._tasks.get_by_id(id)
+                existing_atts = old_task.attachments if old_task else None
+
+                validated = _validate_attachments(
+                    attachments, (partner or {}).get("id"), existing_attachments=existing_atts
+                )
                 if isinstance(validated, dict) and "error" in validated:
                     return validated
                 updates["attachments"] = validated
 
                 # Best-effort cleanup of removed GCS blobs
-                if task_service is None:
-                    await _ensure_services()
-                old_task = await task_service._tasks.get_by_id(id)
                 if old_task:
                     _cleanup_removed_attachments(old_task.attachments, validated)
 
@@ -1521,7 +1551,7 @@ async def task(
             每個項目需有 type ("image"/"file"/"link")。
             - link 類型：需有 url 和 title。範例：{"type": "link", "url": "https://...", "title": "蝦皮旗艦館"}
             - image/file 類型：需有 attachment_id（先呼叫 upload_attachment 取得）。
-              範例：{"type": "image", "id": "<attachment_id>", "filename": "photo.jpg", "mime_type": "image/jpeg"}
+              範例：{"type": "image", "id": "<attachment_id>", "filename": "photo.jpg", "content_type": "image/jpeg"}
             update 時為全量覆寫——傳入的陣列會取代所有既有附件。
 
     系統欄位：
