@@ -74,7 +74,7 @@ _PROJECT_DOCUMENTS_TIP = (
     "- skills/governance/document-governance.md\n"
     "- skills/governance/l2-knowledge-governance.md\n"
     "- skills/governance/task-governance.md\n\n"
-    "從 GitHub 下載：https://github.com/centerseed/zenos/tree/main/skills"
+    "透過 ZenOS MCP setup tool 取得：呼叫 setup(platform='claude_web') 即可取得完整 skill 內容。"
 )
 
 # ──────────────────────────────────────────────
@@ -131,7 +131,7 @@ def _build_agents_md_addition(selection: str) -> str:
         "## ZenOS 治理技能\n\n"
         "執行對應操作前先讀取以下文件：\n\n"
         f"{governance_block}\n\n"
-        "> 若 `skills/governance/` 不存在，請先執行 curl 指令下載 skills/。"
+        "> 若 `skills/governance/` 不存在，請先呼叫 setup(platform='codex') 取得 skill_files 並寫入。"
     )
 
 

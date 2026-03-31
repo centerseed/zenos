@@ -6,16 +6,18 @@ ZenOS 的治理能力與操作流程。任何 AI agent 都可以讀取這些 ski
 
 ## 快速開始（任何專案、任何 agent 平台）
 
-### Step 1：下載 skills 到你的專案
+### Step 1：取得 skills 並寫入你的專案
 
-在專案根目錄執行：
+透過 ZenOS MCP setup tool 取得 skill 內容（依平台不同）：
 
-```bash
-curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
-  tar -xz --strip-components=1 "zenos-main/skills/"
-```
+| 平台 | 呼叫方式 |
+|------|---------|
+| Claude Code | `setup(platform="claude_code")` |
+| Codex | `setup(platform="codex")` |
+| 其他 | `setup(platform="claude_web")` 取得 governance 內容 |
 
-完成後你的專案會多一個 `skills/` 目錄。
+回傳的 `payload.skill_files` 是一個 dict，key 為相對路徑，value 為內容。
+將每個 key-value 寫入專案根目錄對應路徑，完成後你的專案會有 `skills/` 目錄。
 
 ### Step 2：在專案的 agent 設定中加入載入指示
 
@@ -45,7 +47,7 @@ curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
 
 ### 更新 skills
 
-SSOT 有新版時，重跑 Step 1 的 curl 指令即可覆蓋更新。
+SSOT 有新版時，重跑 Step 1 的 setup tool 呼叫，重新寫入 skill_files 即可覆蓋更新。
 
 ---
 
@@ -159,9 +161,9 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
 ### 對其他平台（Codex / ChatGPT / Gemini / 自建 agent）
 
 ```
-1. 拉 skills：
-   curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz | \
-     tar -xz --strip-components=1 "zenos-main/skills/"
+1. 取得 skills：
+   呼叫 setup(platform="codex")，將 payload.skill_files 的每個 key-value
+   寫入專案根目錄對應路徑。
 
 2. 在 agent 的 system prompt / Instructions 加入：
 
