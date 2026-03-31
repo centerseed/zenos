@@ -597,13 +597,15 @@ class TestGenerateSignedPutUrlComputeCredentials:
     """Tests for generate_signed_put_url behaviour under Cloud Run compute credentials."""
 
     def test_uses_iam_signing_when_sa_email_env_set(self):
-        """When GOOGLE_SERVICE_ACCOUNT_EMAIL is set, credentials are refreshed
-        before the token is read and passed to generate_signed_url."""
-        from unittest.mock import MagicMock, patch
+        """When GOOGLE_SERVICE_ACCOUNT_EMAIL is set, an IAM Signer is constructed
+        and wrapped in service_account.Credentials, then passed to generate_signed_url
+        as the 'credentials' kwarg (not service_account_email/access_token)."""
+        from unittest.mock import MagicMock, patch, call
         from zenos.infrastructure.gcs_client import generate_signed_put_url
 
         mock_creds = MagicMock()
-        mock_creds.token = "fresh-token-123"
+        mock_signer = MagicMock()
+        mock_signing_credentials = MagicMock()
 
         mock_blob = MagicMock()
         mock_blob.generate_signed_url.return_value = "https://storage.googleapis.com/signed"
@@ -618,15 +620,31 @@ class TestGenerateSignedPutUrlComputeCredentials:
             patch.dict("os.environ", {"GOOGLE_SERVICE_ACCOUNT_EMAIL": "sa@project.iam.gserviceaccount.com"}),
             patch("google.auth.default", return_value=(mock_creds, "project")),
             patch("google.auth.transport.requests.Request", return_value=mock_auth_request),
+            patch("google.auth.iam.Signer", return_value=mock_signer) as mock_signer_cls,
+            patch("google.oauth2.service_account.Credentials", return_value=mock_signing_credentials) as mock_sa_creds_cls,
         ):
             url = generate_signed_put_url("my-bucket", "tasks/t1/att/f.png", "image/png")
 
         assert url == "https://storage.googleapis.com/signed"
-        # credentials.refresh must be called before reading .token
+        # credentials.refresh must be called once
         mock_creds.refresh.assert_called_once_with(mock_auth_request)
+        # IAM Signer must be constructed with the right SA email
+        mock_signer_cls.assert_called_once_with(
+            request=mock_auth_request,
+            credentials=mock_creds,
+            service_account_email="sa@project.iam.gserviceaccount.com",
+        )
+        # service_account.Credentials must be constructed with the signer
+        mock_sa_creds_cls.assert_called_once_with(
+            signer=mock_signer,
+            service_account_email="sa@project.iam.gserviceaccount.com",
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+        # generate_signed_url must receive signing_credentials, not token/sa_email
         signed_kwargs = mock_blob.generate_signed_url.call_args.kwargs
-        assert signed_kwargs["service_account_email"] == "sa@project.iam.gserviceaccount.com"
-        assert signed_kwargs["access_token"] == "fresh-token-123"
+        assert signed_kwargs["credentials"] is mock_signing_credentials
+        assert "service_account_email" not in signed_kwargs
+        assert "access_token" not in signed_kwargs
 
     def test_skips_iam_signing_when_no_sa_email(self):
         """When no SA email is resolvable, generate_signed_url is called without
@@ -653,6 +671,7 @@ class TestGenerateSignedPutUrlComputeCredentials:
         signed_kwargs = mock_blob.generate_signed_url.call_args.kwargs
         assert "service_account_email" not in signed_kwargs
         assert "access_token" not in signed_kwargs
+        assert "credentials" not in signed_kwargs
 
     def test_gcs_error_propagates_to_upload_endpoint(self):
         """When generate_signed_put_url raises, upload_task_attachment returns 500."""

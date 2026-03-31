@@ -78,19 +78,28 @@ def generate_signed_put_url(
 
     if sa_email and not sa_email.startswith("default"):
         # Cloud Run path: compute credentials have no private key.
-        # Pass service_account_email + a fresh access_token so the library
-        # uses the IAM signBlob API instead of local signing.
+        # Use google.auth.iam.Signer to construct signing-capable credentials
+        # that pass google-cloud-storage>=2.14's ensure_signed_credentials check.
         import google.auth  # type: ignore[import-untyped]
+        import google.auth.iam  # type: ignore[import-untyped]
         import google.auth.transport.requests  # type: ignore[import-untyped]
+        from google.oauth2 import service_account  # type: ignore[import-untyped]
 
         credentials, _ = google.auth.default()
         auth_request = google.auth.transport.requests.Request()
-        # Refresh must happen before reading .token — token may be None or
-        # expired, which causes the "you need a private key" error.
         credentials.refresh(auth_request)
 
-        kwargs["service_account_email"] = sa_email
-        kwargs["access_token"] = credentials.token
+        signer = google.auth.iam.Signer(
+            request=auth_request,
+            credentials=credentials,
+            service_account_email=sa_email,
+        )
+        signing_credentials = service_account.Credentials(
+            signer=signer,
+            service_account_email=sa_email,
+            token_uri="https://oauth2.googleapis.com/token",
+        )
+        kwargs["credentials"] = signing_credentials
 
     url: str = blob.generate_signed_url(**kwargs)
     return url
