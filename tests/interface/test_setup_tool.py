@@ -32,6 +32,7 @@ def skills_root(tmp_path: Path) -> Path:
     release.mkdir()
 
     # governance skills
+    (governance / "capture-governance.md").write_text("# Capture Governance\ncontent here", encoding="utf-8")
     (governance / "document-governance.md").write_text("# Document Governance\ncontent here", encoding="utf-8")
     (governance / "l2-knowledge-governance.md").write_text("# L2 Knowledge\ncontent here", encoding="utf-8")
     (governance / "task-governance.md").write_text("# Task Governance\ncontent here", encoding="utf-8")
@@ -145,10 +146,10 @@ class TestGetSkillFiles:
         assert "skills/workflows/setup.md" in files
         assert "skills/workflows/governance-loop.md" in files
 
-    def test_full_selection_returns_7_files(self):
+    def test_full_selection_returns_8_files(self):
         from zenos.interface.setup_content import get_skill_files
         files = get_skill_files("full")
-        assert len(files) == 7
+        assert len(files) == 8
 
     def test_task_only_excludes_document_governance(self):
         from zenos.interface.setup_content import get_skill_files
@@ -272,7 +273,7 @@ class TestSetupToolClaudeCode:
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code")
         assert "skill_files" in result["payload"]
-        assert len(result["payload"]["skill_files"]) == 7
+        assert len(result["payload"]["skill_files"]) == 8
 
     async def test_payload_has_slash_commands(self):
         from zenos.interface.tools import setup
