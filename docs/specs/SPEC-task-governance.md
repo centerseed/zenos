@@ -4,7 +4,7 @@ id: SPEC-task-governance
 status: Approved
 ontology_entity: action-layer
 created: 2026-03-26
-updated: 2026-03-27
+updated: 2026-03-31
 ---
 
 ## 2026-03-31 狀態模型簡化（最新覆寫）
@@ -28,6 +28,36 @@ updated: 2026-03-27
 - 建票初始狀態只能是 `todo`
 - 驗收通過後進入 `done`
 - `done` / `cancelled` 為終態（需重做請開新票）
+
+## 2026-03-31 Task 欄位定義（最新覆寫）
+
+本節為 Task schema 的欄位權威定義，覆寫本文件其餘舊描述中的衝突內容。
+
+| 欄位 | 型別 | 必填 | 定義 | 備註 |
+|------|------|------|------|------|
+| `id` | string | 系統產生 | task 識別碼 | create 不需傳 |
+| `title` | string | 是 | 任務標題，動詞開頭 | 單一 outcome |
+| `description` | string | 建議 | 背景/問題/期望結果 | 建議 Markdown |
+| `status` | enum | 是 | `todo`/`in_progress`/`review`/`done`/`cancelled` | create 初始只能 `todo` |
+| `priority` | enum | 是 | `critical`/`high`/`medium`/`low` | 不傳由 server 推薦 |
+| `acceptance_criteria` | string[] | 建議 | 驗收條件（2-5 條） | 可觀察、可驗收 |
+| `linked_entities` | string[] | 建議 | ontology 關聯節點 IDs | 建議 1-3 個 |
+| `assignee` | string \| null | 否 | 執行責任人（partner.id） | 可用 `assignee_role_id` 輔助 |
+| `assignee_role_id` | string \| null | 否 | 角色節點 ID | 用於角色責任落點 |
+| `owner` | string | 衍生欄位 | 任務治理 owner | 由 `created_by` 對應，不另存欄位 |
+| `created_by` | string | 是 | 建立者 partner.id（= owner） | MCP 以 API key partner 覆寫 |
+| `source_metadata.created_via_agent` | bool | 建議 | 是否由 agent 代開 | UI 顯示 `agent (by <owner>)` |
+| `source_metadata.agent_name` | string | 建議 | agent 名稱 | `created_via_agent=true` 建議帶入 |
+| `plan_id` | string \| null | 條件必填 | 所屬 plan 識別 | 有 plan task 時必填 |
+| `plan_order` | int \| null | 條件必填 | plan 內順序（>=1） | `plan_id` 存在時必填 |
+| `depends_on_task_ids` | string[] | 否 | 前置依賴 task IDs | 非線性流程用 |
+| `blocked_by` | string[] | 否 | 阻塞來源 task IDs | 阻塞資訊，不是狀態 |
+| `blocked_reason` | string \| null | 否 | 阻塞說明 | 與 `blocked_by` 搭配 |
+| `result` | string \| null | 條件必填 | 完成產出摘要 | 進 `review` 前必填 |
+| `created_at` | datetime | 系統產生 | 建立時間 | UTC |
+| `updated_at` | datetime | 系統產生 | 最後更新時間 | UTC |
+| `updated_by` | string \| null | 否（預留） | 最後更新人 partner.id | 現階段可由 audit log 補足；後續可升級為正式欄位 |
+| `completed_at` | datetime \| null | 否 | 完成時間 | `done` 時應有值 |
 
 # Feature Spec: ZenOS Task Governance
 
@@ -175,52 +205,33 @@ Plan 強制規則：
 
 | 狀態 | 意義 | 是否可接受為初始狀態 |
 |------|------|---------------------|
-| `backlog` | 已識別但尚未排入執行 | ✅ |
 | `todo` | 已排入執行，等待認領 | ✅ |
 | `in_progress` | 有人正在執行 | ❌（不得在建票時直接設定） |
 | `review` | 執行完成，等待驗收 | ❌ |
-| `blocked` | 執行受阻，等待外部條件 | ❌ |
 | `done` | 驗收通過，工作完成 | ❌ |
 | `cancelled` | 不再需要執行 | ❌ |
-| `archived` | 歷史保留，不再活躍 | ❌ |
 
 ### 合法轉換與治理條件
 
 ```
-                    認領 / 指派
-  backlog → todo ──────────────→ in_progress
-    │                                │
-    │  不再需要                       ├─→ blocked（外部依賴未滿足）
-    ↓                                │      │
-  cancelled                          │      └─→ in_progress（依賴解除）
-                                     ↓
-                                   review
-                                     │
-                          ┌──────────┼──────────┐
-                          ↓          ↓          ↓
-                        done    in_progress  cancelled
-                          │    （退回修正）
-                          ↓
-                       archived
+  todo ──────────────→ in_progress ──────────────→ review
+   │                      │                           │
+   │                      └─────────────→ cancelled   ├────────→ done
+   └────────────────────────────────────→ cancelled   └────────→ in_progress（退回修正）
 ```
 
 | 轉換 | 治理條件 |
 |------|---------|
-| `backlog → todo` | 確認不是重複票（去重規則通過） |
 | `todo → in_progress` | 有明確 assignee |
 | `in_progress → review` | `result` 或 `Result:` 區塊已填寫完成輸出 |
-| `in_progress → blocked` | description 或 comment 記錄阻塞原因與等待條件 |
-| `blocked → in_progress` | 阻塞條件已解除，有紀錄 |
 | `review → done` | AC 逐條驗收通過 + 知識反饋已完成（若適用） |
 | `review → in_progress` | 驗收未通過，退回修正，記錄退回原因 |
-| `done → archived` | 歷史保留，無治理條件限制 |
 | 任何活躍狀態 → `cancelled` | 記錄取消原因；若有替代票，標記 `[Superseded by: TASK-XXX]` |
 
 ### 終態
 
-- `done`：工作完成且驗收通過。可進一步轉 `archived`。
+- `done`：工作完成且驗收通過。
 - `cancelled`：不再執行。不可復活，若需重做應開新票。
-- `archived`：歷史保留。不可復活。
 
 ---
 
@@ -434,16 +445,12 @@ caller 不應預設會是固定值（如永遠 `medium`）。
 
 ### 6. status
 
-建票時只應使用：
-
-- `backlog`
-- `todo`
+建票時只應使用：`todo`
 
 Agent 不應在 create 時直接假設：
 
 - `in_progress`
 - `review`
-- `blocked`
 - `done`
 
 除非是工具在合法規則下自動推導。
@@ -494,7 +501,7 @@ Agent 不應在 create 時直接假設：
 所有 agent 開票前，必須遵循這個順序：
 
 1. 先查是否已有同類 open task
-   用 `search(collection="tasks", status="backlog,todo,in_progress,review,blocked")` 避免重複票（排除 cancelled / done）。
+   用 `search(collection="tasks", status="todo,in_progress,review")` 避免重複票（排除 cancelled / done）。
 
 2. 確認這件事是 task，不是 spec / blindspot / doc update
 
@@ -642,7 +649,7 @@ Type A / B 的判斷原則：
 
 ## 去重規則
 
-`search(collection="tasks", status="backlog,todo,in_progress,review,blocked")` 不是形式上的前置步驟，應至少檢查以下三個面向（搜尋範圍排除 cancelled / done）：
+`search(collection="tasks", status="todo,in_progress,review")` 不是形式上的前置步驟，應至少檢查以下三個面向（搜尋範圍排除 `cancelled` / `done`）：
 
 1. `title` 是否描述同一主要 outcome
 2. `description` 是否在處理同一問題邊界
@@ -710,11 +717,11 @@ Task 治理不是單向派工。以下情境完成後，應觸發知識層反饋
 
 | 規則 | 原因 |
 |------|------|
-| 建票初始狀態只能是 `backlog` 或 `todo` | 防止 agent 跳過排程直接推進狀態 |
+| 建票初始狀態只能是 `todo` | 防止 agent 跳過排程直接推進狀態 |
 | `linked_entities` 至少 1 個 | 確保 task 有 ontology context，priority recommendation 才有輸入 |
 | 去重搜尋為建票前必要步驟 | 防止 backlog 重複膨脹；search 由 caller 執行，server 提供 API |
 | `review → done` 需 AC 逐條通過 | 驗收是治理閉環的最小保證 |
-| 終態（`done` / `cancelled` / `archived`）不可復活 | 需重做應開新票，保留歷史完整性 |
+| 終態（`done` / `cancelled`）不可復活 | 需重做應開新票，保留歷史完整性 |
 | Plan 不可直接派工，Task 是唯一可 claim 的執行單位 | 派工粒度必須可驗收 |
 
 ### 用戶可客製（建議範圍）
@@ -771,7 +778,7 @@ Task 治理不是單向派工。以下情境完成後，應觸發知識層反饋
 
 3. 邊界規則可被 reviewer 直接判斷
    - reviewer 能依本 spec 的 8 題 checklist，判定至少一張候選項目應開 task，且至少一張候選項目不應直接開 task（應先走 spec / blindspot / doc update）。
-   - 「候選項目」來源必須明示：至少 1 項來自 `search(collection="tasks", status="backlog,todo")` 的現有任務候選，且至少 1 項來自當次需求中的非 task 候選（spec / blindspot / doc update）。
+   - 「候選項目」來源必須明示：至少 1 項來自 `search(collection="tasks", status="todo,in_progress,review")` 的現有任務候選，且至少 1 項來自當次需求中的非 task 候選（spec / blindspot / doc update）。
 
 4. action -> knowledge 反饋有落地證據
    - 至少一張完成任務在 `result` 或關聯文件中明確記錄知識反饋結果（document / blindspot / entity 至少其一），且驗收者據此通過。

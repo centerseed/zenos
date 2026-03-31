@@ -156,6 +156,7 @@ class TaskService:
             plan_order=int(plan_order) if plan_order is not None else None,
             depends_on_task_ids=depends_on_task_ids,
             created_by=data["created_by"],
+            updated_by=data.get("updated_by") or data["created_by"],
             linked_entities=linked_entity_ids,
             linked_protocol=data.get("linked_protocol"),
             linked_blindspot=linked_blindspot_id,
@@ -215,6 +216,7 @@ class TaskService:
             "assignee", "priority", "description", "blocked_reason",
             "due_date", "result", "acceptance_criteria", "blocked_by",
             "plan_id", "plan_order", "depends_on_task_ids", "source_metadata",
+            "updated_by",
         ):
             if field in updates:
                 setattr(task, field, updates[field])
@@ -239,6 +241,7 @@ class TaskService:
         rejection_reason: str | None = None,
         mark_stale_entity_ids: list[str] | None = None,
         new_blindspot: dict | None = None,
+        updated_by: str | None = None,
     ) -> TaskResult:
         """Accept or reject a task in review status."""
         task = await self._tasks.get_by_id(task_id)
@@ -293,6 +296,8 @@ class TaskService:
             task.rejection_reason = rejection_reason
 
         task.updated_at = datetime.utcnow()
+        if updated_by:
+            task.updated_by = updated_by
         saved = await self._tasks.upsert(task)
         return TaskResult(task=saved, cascade_updates=cascades)
 

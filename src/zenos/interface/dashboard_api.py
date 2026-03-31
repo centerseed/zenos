@@ -179,6 +179,7 @@ def _task_to_dict(t: Task) -> dict:
         "planOrder": t.plan_order,
         "dependsOnTaskIds": t.depends_on_task_ids,
         "createdBy": t.created_by,
+        "updatedBy": t.updated_by,
         "creatorName": t.creator_name,
         "linkedEntities": t.linked_entities,
         "linkedProtocol": t.linked_protocol,

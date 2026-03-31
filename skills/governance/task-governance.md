@@ -95,6 +95,8 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 ## 建立者顯示規則（強制簡化）
 
 - `created_by` 必須是 owner 的 `partner.id`（不是 `architect`/`pm` 這類角色字串）。
+- `updated_by` 必須是最後一次更新該 task 的 `partner.id`（create 時預設等於 `created_by`）。
+- `assignee` 應填實際執行者的 `partner.id`；若暫時未知，需在 `description` 明確寫出預期 owner 與指派條件。
 - 若任務是 agent 代開，寫入：
   - `source_metadata.created_via_agent = true`
   - `source_metadata.agent_name = "<agent-name>"`

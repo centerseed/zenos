@@ -287,6 +287,7 @@ class Task:
     status: str  # TaskStatus value
     priority: str  # TaskPriority value
     created_by: str
+    updated_by: str | None = None
     id: str | None = None
     description: str = ""
     priority_reason: str = ""

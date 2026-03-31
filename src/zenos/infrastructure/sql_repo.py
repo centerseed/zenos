@@ -862,6 +862,7 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         plan_order=plan_order,
         depends_on_task_ids=_json_loads_safe(depends_json) or [],
         created_by=row["created_by"],
+        updated_by=row["updated_by"] if "updated_by" in row else None,
         linked_entities=linked_entities,
         linked_protocol=row["linked_protocol"],
         linked_blindspot=row["linked_blindspot"],
@@ -971,15 +972,15 @@ class SqlTaskRepository:
                     f"""
                 INSERT INTO {SCHEMA}.tasks (
                     id, partner_id, title, description, status, priority,
-                    priority_reason, assignee, assignee_role_id, created_by,
+                    priority_reason, assignee, assignee_role_id, created_by, updated_by,
                     plan_id, plan_order, depends_on_task_ids_json,
                     linked_protocol, linked_blindspot, source_type, source_metadata_json, context_summary,
                     due_date, blocked_reason, acceptance_criteria_json, completed_by,
                     confirmed_by_creator, rejection_reason, result, project,
                     created_at, updated_at, completed_at
                 ) VALUES (
-                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,
-                    $11,$12,$13::jsonb,$14,$15,$16,$17::jsonb,$18,$19,$20,$21::jsonb,$22,$23,$24,$25,$26,$27,$28,$29
+                    $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
+                    $12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19,$20,$21,$22::jsonb,$23,$24,$25,$26,$27,$28,$29,$30
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     title=EXCLUDED.title, description=EXCLUDED.description,
@@ -987,6 +988,7 @@ class SqlTaskRepository:
                     priority_reason=EXCLUDED.priority_reason,
                     assignee=EXCLUDED.assignee,
                     assignee_role_id=EXCLUDED.assignee_role_id,
+                    updated_by=EXCLUDED.updated_by,
                     plan_id=EXCLUDED.plan_id,
                     plan_order=EXCLUDED.plan_order,
                     depends_on_task_ids_json=EXCLUDED.depends_on_task_ids_json,
@@ -1008,7 +1010,7 @@ class SqlTaskRepository:
                 """,
                     task.id, pid, task.title, task.description, task.status,
                     task.priority, task.priority_reason, task.assignee,
-                    task.assignee_role_id, task.created_by,
+                    task.assignee_role_id, task.created_by, task.updated_by,
                     task.plan_id, task.plan_order, _dumps(task.depends_on_task_ids),
                     task.linked_protocol, task.linked_blindspot,
                     task.source_type, _dumps(task.source_metadata), task.context_summary, task.due_date,

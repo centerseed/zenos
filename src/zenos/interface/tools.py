@@ -905,7 +905,11 @@ async def write(
                 for eid in (result.related_entity_ids or []):
                     entity = await entity_repo.get_by_id(eid)
                     if entity and entity.tags.who:
-                        assignee = entity.tags.who
+                        who = entity.tags.who
+                        if isinstance(who, list):
+                            assignee = who[0] if who else None
+                        else:
+                            assignee = who
                         break
 
                 creator_id = (_partner_ctx or {}).get("id") or "system"
@@ -921,6 +925,7 @@ async def write(
                     "linked_entities": result.related_entity_ids or [],
                     "status": "todo",
                     "created_by": creator_id,
+                    "updated_by": creator_id,
                     "assignee": assignee,
                 }
                 auto_task_result = await task_service.create_task(auto_task_data)
@@ -1072,6 +1077,7 @@ async def confirm(
                 rejection_reason=rejection_reason,
                 mark_stale_entity_ids=mark_stale_entity_ids,
                 new_blindspot=new_blindspot,
+                updated_by=((_current_partner.get() or {}).get("id")),
             )
             response = _serialize(result.task)
             if result.cascade_updates:
@@ -1218,6 +1224,7 @@ async def _task_handler(
             data = {
                 "title": title,
                 "created_by": created_by,
+                "updated_by": created_by,
                 "description": normalized_description,
                 "assignee": assignee,
                 "priority": priority,
@@ -1255,6 +1262,9 @@ async def _task_handler(
             updates: dict = {}
             if status is not None:
                 updates["status"] = status
+            actor_id = (partner or {}).get("id")
+            if actor_id:
+                updates["updated_by"] = actor_id
             if assignee is not None:
                 updates["assignee"] = assignee
             if priority is not None:
@@ -1345,7 +1355,7 @@ async def task(
     讓收到任務的人/agent 自動獲得相關 context。
 
     使用時機：
-    - 建任務 → action="create"（必填：title, created_by）
+    - 建任務 → action="create"（必填：title；created_by 由 server 依 API key context 寫入）
     - 改狀態 → action="update"（必填：id。改 status/assignee/priority 等）
     - 列任務 → 不要用這個，用 search(collection="tasks") 更靈活
 
@@ -1403,6 +1413,9 @@ async def task(
         plan_id: 任務群組 ID（PLAN 層識別）
         plan_order: 任務在 plan 內順序（>=1）
         depends_on_task_ids: 前置依賴 task IDs（可選）
+
+    系統欄位：
+        updated_by: 不接受 caller 直接傳入；由 server 依當次 actor context 自動寫入
     """
     return await _task_handler(
         action=action,
