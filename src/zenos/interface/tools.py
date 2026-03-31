@@ -33,7 +33,7 @@ import uuid
 import inspect
 from contextvars import ContextVar
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import parse_qs
 
 from dotenv import load_dotenv
@@ -379,7 +379,7 @@ def _audit_log(
     partner = _current_partner.get() or {}
     payload = {
         "event_type": event_type,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "partner_id": partner.get("id", ""),
         "actor": {
             "id": partner.get("id", ""),
@@ -527,18 +527,10 @@ async def search(
             results["documents"] = [_serialize(d) for d in doc_entities[:limit]]
 
         elif col == "protocols":
-            # Protocols don't have list_all, collect via entities
             if confirmed_only is False:
                 protos = await ontology_service._protocols.list_unconfirmed()
             else:
-                entities = await ontology_service.list_entities()
-                protos = []
-                for e in entities:
-                    if e.id:
-                        p = await ontology_service._protocols.get_by_entity(e.id)
-                        if p:
-                            if confirmed_only is None or p.confirmed_by_user == confirmed_only:
-                                protos.append(p)
+                protos = await ontology_service._protocols.list_all(confirmed_only=confirmed_only)
             results["protocols"] = [_serialize(p) for p in protos[:limit]]
 
         elif col == "blindspots":

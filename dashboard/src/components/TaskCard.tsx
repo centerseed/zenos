@@ -133,20 +133,30 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
         )}
 
         {/* Footer Row: Assignee, Due Date, Project */}
-        <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <div className="flex items-center justify-between text-[10px] text-muted-foreground">
           <div className="flex items-center gap-2">
-            {/* Assignee Avatar */}
-            {task.assignee && (
+            {/* Assignee Avatar & Name */}
+            {(task.assignee || task.assigneeName) && (
               <span
                 className="inline-flex items-center gap-1"
-                title={`Assignee: ${task.assignee}`}
+                title={`Assignee: ${task.assigneeName || task.assignee}`}
               >
-                <span className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
-                  {task.assignee[0]}
+                <span className="w-4 h-4 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[8px] font-bold text-white uppercase">
+                  {(task.assigneeName || task.assignee || "?")[0]}
                 </span>
+                <span className="truncate max-w-[60px]">{task.assigneeName || "Unknown"}</span>
               </span>
             )}
 
+            {/* Creator Name (Small) */}
+            {task.creatorName && (
+              <span className="text-muted-foreground/60 border-l border-border pl-2">
+                by {task.creatorName}
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
             {/* Due Date */}
             {dueDateStr && (
               <span
@@ -155,14 +165,14 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
                 {dueDateStr}
               </span>
             )}
+            
+            {/* Project label */}
+            {task.project && (
+              <span className="px-1 py-0.5 rounded bg-secondary text-muted-foreground truncate max-w-[60px]">
+                {task.project}
+              </span>
+            )}
           </div>
-
-          {/* Project label */}
-          {task.project && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded bg-secondary text-muted-foreground truncate max-w-[80px]">
-              {task.project}
-            </span>
-          )}
         </div>
       </CardContent>
     </Card>

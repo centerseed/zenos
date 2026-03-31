@@ -86,7 +86,9 @@ export interface Task {
   project: string;
   priorityReason: string;
   assignee: string | null;
+  assigneeName?: string | null;
   createdBy: string;
+  creatorName?: string | null;
   linkedEntities: string[];
   linkedProtocol: string | null;
   linkedBlindspot: string | null;

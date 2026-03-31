@@ -143,12 +143,12 @@ export function TaskDetailDrawer({
                 )}
 
                 {/* Assignee */}
-                {task.assignee && (
+                {(task.assignee || task.assigneeName) && (
                   <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                     <span className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
-                      {task.assignee[0]}
+                      {(task.assigneeName || task.assignee || "?")[0]}
                     </span>
-                    @{task.assignee}
+                    {task.assigneeName || task.assignee}
                   </span>
                 )}
 
@@ -372,7 +372,7 @@ export function TaskDetailDrawer({
           <div className="border-t border-border pt-4 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
             <div>
               <span className="block text-muted-foreground/70">Created by</span>
-              <span className="text-foreground">{task.createdBy}</span>
+              <span className="text-foreground">{task.creatorName || task.createdBy}</span>
             </div>
             <div>
               <span className="block text-muted-foreground/70">Project</span>

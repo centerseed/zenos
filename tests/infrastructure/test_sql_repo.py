@@ -512,6 +512,59 @@ class TestSqlProtocolRepository:
         result = asyncio.get_event_loop().run_until_complete(repo.upsert(proto))
         assert result.id is not None
 
+    def test_list_all_confirmed_only_none_fetches_all(self):
+        """list_all(confirmed_only=None) queries without confirmed_by_user filter."""
+        from zenos.infrastructure.sql_repo import SqlProtocolRepository
+        import asyncio
+
+        row = _make_row(**self._proto_row("proto1"))
+        pool, conn = _make_pool(fetch=[row])
+        repo = SqlProtocolRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(repo.list_all(confirmed_only=None))
+
+        assert len(result) == 1
+        assert result[0].id == "proto1"
+        sql = conn.fetch.call_args[0][0]
+        assert "partner_id" in sql
+        assert "confirmed_by_user" not in sql
+        assert conn.fetch.call_args[0][1] == PARTNER_ID
+
+    def test_list_all_confirmed_only_true_filters_confirmed(self):
+        """list_all(confirmed_only=True) adds confirmed_by_user = true filter."""
+        from zenos.infrastructure.sql_repo import SqlProtocolRepository
+        import asyncio
+
+        confirmed_row = {**self._proto_row("proto-confirmed"), "confirmed_by_user": True}
+        pool, conn = _make_pool(fetch=[_make_row(**confirmed_row)])
+        repo = SqlProtocolRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(repo.list_all(confirmed_only=True))
+
+        assert len(result) == 1
+        sql = conn.fetch.call_args[0][0]
+        assert "confirmed_by_user" in sql
+        args = conn.fetch.call_args[0]
+        assert PARTNER_ID in args
+        assert True in args
+
+    def test_list_all_confirmed_only_false_filters_unconfirmed(self):
+        """list_all(confirmed_only=False) adds confirmed_by_user = false filter."""
+        from zenos.infrastructure.sql_repo import SqlProtocolRepository
+        import asyncio
+
+        pool, conn = _make_pool(fetch=[_make_row(**self._proto_row("proto-unconfirmed"))])
+        repo = SqlProtocolRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(repo.list_all(confirmed_only=False))
+
+        assert len(result) == 1
+        sql = conn.fetch.call_args[0][0]
+        assert "confirmed_by_user" in sql
+        args = conn.fetch.call_args[0]
+        assert PARTNER_ID in args
+        assert False in args
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SqlBlindspotRepository

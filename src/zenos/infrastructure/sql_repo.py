@@ -668,6 +668,28 @@ class SqlProtocolRepository:
             )
         return [_row_to_protocol(r) for r in rows]
 
+    async def list_all(self, confirmed_only: bool | None = None) -> list[OntologyProtocol]:
+        """Fetch all protocols for the current partner in a single query.
+
+        Args:
+            confirmed_only: If True, return only confirmed protocols.
+                            If False, return only unconfirmed protocols.
+                            If None, return all protocols.
+        """
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            if confirmed_only is None:
+                rows = await conn.fetch(
+                    f"SELECT * FROM {SCHEMA}.protocols WHERE partner_id = $1",
+                    pid,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"SELECT * FROM {SCHEMA}.protocols WHERE partner_id = $1 AND confirmed_by_user = $2",
+                    pid, confirmed_only,
+                )
+        return [_row_to_protocol(r) for r in rows]
+
 
 # ===================================================================
 # Blindspot Repository
@@ -851,6 +873,8 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         blocked_reason=row["blocked_reason"],
         acceptance_criteria=_json_loads_safe(row["acceptance_criteria_json"]) or [],
         completed_by=row["completed_by"],
+        creator_name=row["creator_name"] if "creator_name" in row else None,
+        assignee_name=row["assignee_name"] if "assignee_name" in row else None,
         confirmed_by_creator=row["confirmed_by_creator"],
         rejection_reason=row["rejection_reason"],
         result=row["result"],
@@ -919,7 +943,11 @@ class SqlTaskRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT * FROM {SCHEMA}.tasks WHERE id = $1 AND partner_id = $2",
+                f"""SELECT t.*, p1.display_name as creator_name, p2.display_name as assignee_name
+                    FROM {SCHEMA}.tasks t
+                    LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id
+                    LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id
+                    WHERE t.id = $1 AND t.partner_id = $2""",
                 task_id, pid,
             )
             if not row:
@@ -1063,8 +1091,12 @@ class SqlTaskRepository:
             join_clause = ""
 
         sql = (
-            f"SELECT DISTINCT t.* FROM {SCHEMA}.tasks t {join_clause}"
-            f" WHERE {where_clause} LIMIT ${idx}"
+            f"SELECT DISTINCT t.*, p1.display_name as creator_name, p2.display_name as assignee_name "
+            f"FROM {SCHEMA}.tasks t "
+            f"{join_clause} "
+            f"LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id "
+            f"LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id "
+            f"WHERE {where_clause} LIMIT ${idx}"
         )
         params.append(limit)
 

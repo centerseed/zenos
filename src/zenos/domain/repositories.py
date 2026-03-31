@@ -75,6 +75,8 @@ class ProtocolRepository(TypingProtocol):
 
     async def list_unconfirmed(self) -> list[Protocol]: ...
 
+    async def list_all(self, confirmed_only: bool | None = None) -> list[Protocol]: ...
+
 
 class BlindspotRepository(TypingProtocol):
     """Persistence interface for governance blindspot findings."""

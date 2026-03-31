@@ -308,6 +308,8 @@ class Task:
     blocked_reason: str | None = None
     acceptance_criteria: list[str] = field(default_factory=list)
     completed_by: str | None = None
+    creator_name: str | None = None
+    assignee_name: str | None = None
     confirmed_by_creator: bool = False
     rejection_reason: str | None = None
     result: str | None = None
