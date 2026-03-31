@@ -1,49 +1,93 @@
-# Task 治理規則 v1.0（完整版）
+# Task 治理規則 v1.0（含完整範例）
 
 ## Task 的定位
 Task 不是 entity，是 ontology 的 output path——從知識洞察產生的具體行動。
-每個 task 必須連結回 ontology（linked_entities），讓執行者自動獲得相關 context。
 
-## 建票最小規範
-- title: 動詞開頭（「實作 X」「設計 Y」「修復 Z」）
-- description: 包含背景、問題、期望結果三段
-- acceptance_criteria: 2-5 條，每條可獨立驗收
-- linked_entities: 1-3 個相關 entity（最重要的 L2 必須在其中）
-- plan_id + plan_order: 如果屬於某個計畫，必填
+## 建票範例：好 vs 不好的對比
 
-## plan_id / plan_order 規則
-- plan_id：所屬計畫的 ID。一個計畫通常對應一個 milestone 或 sprint
-- plan_order：此 task 在計畫中的執行順序（整數，從 1 開始）
-- 沒有 plan 的 task 可以省略，但有 plan_id 時 plan_order 必填
-- plan_order 決定 Kanban 的排列順序，也是 AI 優先級推薦的參考
+### 不好的建票
+```
+title: auth 修改
+description: 改一下 auth 相關的東西
+acceptance_criteria: 完成
+linked_entities: []
+```
+問題：title 沒動詞、description 缺三段結構、AC 不可驗收、linked_entities 空
 
-## 狀態流
-backlog → todo → in_progress → review → done → archived
-任何狀態 → cancelled
-blocked（需填 blocked_reason）
+### 好的建票
+```
+title: 實作 JWT refresh token 自動輪換
+description: |
+  背景：目前 JWT token 有效期 24 小時，用戶需要頻繁重新登入。
+  問題：長期有效的 token 如果被竊取，攻擊視窗過大。
+  期望結果：access token 有效期縮短為 1 小時，refresh token 自動輪換，
+           用戶體驗不受影響。
+acceptance_criteria:
+  - access token 有效期為 1 小時，超過後自動使用 refresh token 換新
+  - refresh token 使用後立即失效（one-time use）
+  - 前端無感刷新（用戶不需要重新登入）
+  - 所有 token 輪換操作有 audit log
+linked_entities: ["用戶認證架構", "資安合規要求"]
+plan_id: "plan-q1-security"
+plan_order: 3
+```
 
-### Blocked 狀態細節
-- blocked_reason 必填：說明被什麼阻塞（依賴項/外部因素/等待決策）
-- blocked 不是最終狀態，必須有後續行動（建立 dependency task 或等待解除）
-- blocked 解除後應恢復到 in_progress 或 todo
+## 知識反饋範例（從 result 萃取 entry 的流程）
 
-## 驗收規則
-- status=review 時 result 必填
-- result 格式：描述做了什麼、驗證了什麼、遇到什麼問題
-- done 狀態只能透過 confirm 工具達成（不能直接 write status=done）
-- confirm 時 QA/reviewer 必須確認每條 acceptance_criteria 都已達成
+完成後的 result：
+```
+實作了 JWT refresh token 輪換。遇到問題：Redis 在 Cloud Run 無狀態環境下
+需要特別處理 token 黑名單。最終採用 short-lived token + DB 記錄已用 token 方案。
+性能影響：每次 refresh 多一次 DB 查詢，p99 增加 20ms，可接受。
+```
 
-## 知識反饋閉環
-Task 完成後的知識應流回 ontology：
-1. 萃取 insight：從 result 中找出值得記錄的技術洞察
-2. 寫回 entity entry：write(collection=\"entity_entries\", data={type=\"insight\", ...})
-3. 記錄 blindspot：如果過程中發現未知的未知，建 blindspot entity
-4. 更新相關 L2：如果 task 改變了某個概念的語意，更新 entity summary
+從 result 萃取並寫回 ontology：
 
-## AI 優先級推薦邏輯
-系統根據以下因素自動推薦任務優先順序：
-- plan_order（計畫中的順序）
-- 與 blocked task 的依賴關係
-- linked_entities 的 staleness（對應 L2 是否過時）
-- 上次更新時間（越久未動越往前排）
-推薦結果僅供參考，人類可覆蓋。
+insight entry：
+```
+write(
+  collection="entity_entries",
+  data={
+    "entity_name": "用戶認證架構",
+    "type": "insight",
+    "content": "Cloud Run 無狀態環境不適合 Redis token 黑名單，改用 DB 記錄已用 token，p99 增加 20ms"
+  }
+)
+```
+
+limitation entry：
+```
+write(
+  collection="entity_entries",
+  data={
+    "entity_name": "用戶認證架構",
+    "type": "limitation",
+    "content": "每次 token refresh 需 DB 查詢，高頻刷新場景需要監控"
+  }
+)
+```
+
+## Plan 結構範例
+
+計畫通常對應一個 milestone，tasks 按 plan_order 排序：
+
+```
+plan_id: "plan-q1-security"
+plan_name: Q1 資安強化
+
+plan_order 1: 審查現有 auth 流程（linked: 用戶認證架構）
+plan_order 2: 建立資安 checklist（linked: 資安合規要求）
+plan_order 3: 實作 JWT refresh token 輪換（linked: 用戶認證架構, 資安合規要求）
+plan_order 4: 滲透測試與修復（linked: 資安合規要求）
+plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
+```
+
+## 禁止行為（含說明）
+
+| 禁止行為 | 原因 |
+|---------|------|
+| title 不動詞開頭 | 無法快速判斷要做什麼 |
+| description 缺三段結構 | 執行者缺少背景，容易做錯方向 |
+| linked_entities 為空 | 切斷 task 與知識層的連結，失去 ontology 價值 |
+| 完成後不更新 result | 知識無法流回 ontology，形成知識黑洞 |
+| 直接 write status=done | 繞過驗收流程，AC 可能未達成 |

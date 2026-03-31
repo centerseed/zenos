@@ -19,7 +19,7 @@ _SKILLS_ROOT: Path | None = Path(__file__).resolve().parents[3] / "skills"
 
 # governance skill 的選取清單（依 selection）
 _GOVERNANCE_FILES: dict[str, list[str]] = {
-    "full": ["document-governance.md", "l2-knowledge-governance.md", "task-governance.md"],
+    "full": ["capture-governance.md", "document-governance.md", "l2-knowledge-governance.md", "task-governance.md"],
     "doc_task": ["document-governance.md", "task-governance.md"],
     "task_only": ["task-governance.md"],
 }
