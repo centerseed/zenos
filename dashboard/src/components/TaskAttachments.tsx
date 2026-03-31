@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Image,
   FileText,
@@ -40,27 +40,77 @@ function isImageType(contentType?: string): boolean {
   return !!contentType && contentType.startsWith("image/");
 }
 
+/** Fetch an attachment via the proxy endpoint (with auth) and return a blob URL. */
+function useAuthBlobUrl(proxyUrl: string | undefined, token: string) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!proxyUrl || !token) return;
+    let revoked = false;
+    fetch(`${API_BASE}${proxyUrl}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (blob && !revoked) setBlobUrl(URL.createObjectURL(blob));
+      })
+      .catch(() => {});
+    return () => {
+      revoked = true;
+      setBlobUrl((prev) => { if (prev) URL.revokeObjectURL(prev); return null; });
+    };
+  }, [proxyUrl, token]);
+  return blobUrl;
+}
+
 function AttachmentItem({
   att,
   onDelete,
   deleting,
+  token,
 }: {
   att: Attachment;
   onDelete: () => void;
   deleting: boolean;
+  token: string;
 }) {
   const type = att.type ?? (isImageType(att.content_type) ? "image" : "file");
+  const blobUrl = useAuthBlobUrl(
+    type === "image" || att.proxy_url ? att.proxy_url : undefined,
+    token,
+  );
+
+  const handleDownload = useCallback(() => {
+    if (!att.proxy_url || !token) return;
+    fetch(`${API_BASE}${att.proxy_url}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (!blob) return;
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = att.filename || "attachment";
+        a.click();
+        URL.revokeObjectURL(url);
+      })
+      .catch(() => {});
+  }, [att.proxy_url, att.filename, token]);
 
   return (
     <div className="group relative flex items-start gap-3 bg-white/[0.04] border border-white/10 rounded-xl p-3 hover:bg-white/[0.06] transition-colors">
-      {type === "image" && att.proxy_url ? (
+      {type === "image" && blobUrl ? (
         <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-white/[0.06] border border-white/10">
           <img
-            src={`${API_BASE}${att.proxy_url}`}
+            src={blobUrl}
             alt={att.filename || "image"}
             className="w-full h-full object-cover"
             loading="lazy"
           />
+        </div>
+      ) : type === "image" && att.proxy_url ? (
+        <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-white/[0.06] border border-white/10 flex items-center justify-center">
+          <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
         </div>
       ) : type === "link" ? (
         <div className="flex-shrink-0 p-2 rounded-lg bg-blue-500/20 border border-blue-500/30">
@@ -83,14 +133,12 @@ function AttachmentItem({
             {att.filename || att.url || "Link"}
           </a>
         ) : att.proxy_url ? (
-          <a
-            href={`${API_BASE}${att.proxy_url}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-white hover:text-blue-300 transition-colors truncate block"
+          <button
+            onClick={handleDownload}
+            className="text-sm font-medium text-white hover:text-blue-300 transition-colors truncate block text-left cursor-pointer"
           >
             {att.filename || "File"}
-          </a>
+          </button>
         ) : (
           <span className="text-sm font-medium text-white truncate block">
             {att.filename || "File"}
@@ -282,6 +330,7 @@ export function TaskAttachments({
               att={att}
               onDelete={() => handleDelete(att.id)}
               deleting={deletingIds.has(att.id)}
+              token={token}
             />
           ))}
         </div>
