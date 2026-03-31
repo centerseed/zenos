@@ -121,7 +121,7 @@ updated: 2026-03-26
   due_date          string?     選填    ISO-8601 日期字串（如 "2026-03-29"）
   blocked_by        string[]?   選填    阻塞此任務的其他 task IDs
   acceptance_criteria string[]? 選填    驗收條件列表
-  created_by        string      必填    建立者 UID（如 "barry"、"pm-agent"）
+  created_by        string      必填    建立者 partner ID（由 server 依 API key context 決定）
 
 輸出：
   {
@@ -133,7 +133,7 @@ updated: 2026-03-26
       "priority": "high",
       "priorityReason": "連結到 severity=red 的 blindspot，建議高優先度",
       "assignee": "barry",
-      "createdBy": "pm-agent",
+      "createdBy": "partner_abc123",
       "linkedEntities": ["entity-001"],
       "linkedProtocol": null,
       "linkedBlindspot": "blindspot-003",
@@ -167,6 +167,10 @@ Server-side 行為：
      c. 從 linked_blindspot 拉取 description
      d. 拼接成 2-3 句話的摘要
   7. 寫入 Firestore tasks collection
+  8. `created_by` identity hardening：
+     a. 有 API key partner context 時，強制使用 `current_partner.id`
+     b. 忽略 caller 傳入的任意 `created_by`
+     c. 無 partner context 時拒絕建立
 ```
 
 ### update_task

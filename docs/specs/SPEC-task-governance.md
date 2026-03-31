@@ -437,6 +437,23 @@ Agent 不應在 create 時直接假設：
 
 禁止建立「owner 未定且無指派條件」的 task。
 
+### 9. created_by identity（MCP 必須可追溯）
+
+`created_by` 在 MCP `task(action="create")` 必須具備可追溯的 partner identity。
+
+硬性規則（server side）：
+
+1. 若請求具備 MCP partner context（API key 可解析 partner），`created_by` 最終值必須是該 `partner.id`。
+2. 當 partner context 存在時，server 必須忽略或覆寫 caller 傳入的任意 `created_by` 字串，避免偽造建立者。
+3. 若 partner context 不存在，server 不得建立 task，應回傳 `UNAUTHORIZED` 或 `INVALID_INPUT`。
+4. 禁止將 `created_by` 寫成匿名常數（如 `system`）或無法對應 partner 的暫時字串。
+
+驗收檢查：
+
+- 新建 task 的 `created_by` 能在 `partners.id` 找到對應 row。
+- Kanban Outbox 以 `created_by = current partner.id` 篩選時，能穩定命中該 partner 建立的任務。
+- task card 的建立者顯示不應因 `display_name` 缺值而退化成不可辨識字串。
+
 ### 8. result（完成輸出落點）
 
 進入 `review` 前，必須有可供驗收的完成輸出。
@@ -739,3 +756,7 @@ Task 治理不是單向派工。以下情境完成後，應觸發知識層反饋
    - 至少一篇 draft 文件有完整紀錄：建立審核 task -> reviewer 輸出 -> editor 修正（可選）-> owner 最終確認。
    - reviewer 輸出可在 task `result` 或 fallback `Result:` 區塊直接查到。
    - owner 可在 WebUI 一處看到審核摘要與文章連結並完成最終確認。
+
+6. 建立者身份可追溯
+   - 至少一張本次變更後建立的 task 可驗證 `created_by` = 呼叫當下 API key 對應的 `partner.id`。
+   - 以該 `partner.id` 查詢 Outbox（`created_by` filter）可命中此 task。

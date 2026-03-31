@@ -900,13 +900,14 @@ async def write(
                         assignee = entity.tags.who
                         break
 
+                creator_id = (_partner_ctx or {}).get("id") or "system"
                 auto_task_data = {
                     "title": f"處理盲點：{result.description[:30]}",
                     "source_type": "blindspot",
                     "linked_blindspot": result.id,
                     "linked_entities": result.related_entity_ids or [],
                     "status": "backlog",
-                    "created_by": "system",
+                    "created_by": creator_id,
                     "assignee": assignee,
                 }
                 auto_task_result = await task_service.create_task(auto_task_data)
@@ -1164,10 +1165,13 @@ async def _task_handler(
         if action == "create":
             if not title:
                 return {"error": "INVALID_INPUT", "message": "title is required for create"}
-            # Auto-fill created_by from partner identity if not provided
-            if not created_by:
-                if partner:
-                    created_by = partner.get("displayName", "unknown")
+            # In MCP context, creator identity must follow the authenticated
+            # partner bound to the API key, not arbitrary caller input.
+            if partner and partner.get("id"):
+                created_by = partner.get("id")
+            elif not created_by:
+                # Backward-compat fallback for non-MCP/internal callers.
+                created_by = None
             if not created_by:
                 return {"error": "INVALID_INPUT", "message": "created_by is required for create"}
 

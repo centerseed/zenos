@@ -97,7 +97,7 @@ class TestTaskCreatedByAutoFill:
         t = _make_task(created_by="Alice")
         create_result = TaskResult(task=t, cascade_updates=[])
 
-        token = _current_partner.set({"displayName": "Alice", "email": "alice@test.com"})
+        token = _current_partner.set({"id": "p_alice", "displayName": "Alice", "email": "alice@test.com"})
         try:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
@@ -112,18 +112,18 @@ class TestTaskCreatedByAutoFill:
                 assert "error" not in result
                 # Verify create_task was called with auto-filled created_by
                 call_data = mock_ts.create_task.call_args[0][0]
-                assert call_data["created_by"] == "Alice"
+                assert call_data["created_by"] == "p_alice"
         finally:
             _current_partner.reset(token)
 
-    async def test_created_by_not_overridden_when_provided(self):
+    async def test_created_by_overridden_by_partner_context(self):
         from zenos.interface.tools import _task_handler, _current_partner
         from zenos.application.task_service import TaskResult
 
         t = _make_task(created_by="Barry")
         create_result = TaskResult(task=t, cascade_updates=[])
 
-        token = _current_partner.set({"displayName": "Alice", "email": "alice@test.com"})
+        token = _current_partner.set({"id": "p_alice", "displayName": "Alice", "email": "alice@test.com"})
         try:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
@@ -136,7 +136,7 @@ class TestTaskCreatedByAutoFill:
 
                 assert "error" not in result
                 call_data = mock_ts.create_task.call_args[0][0]
-                assert call_data["created_by"] == "Barry"
+                assert call_data["created_by"] == "p_alice"
         finally:
             _current_partner.reset(token)
 
@@ -162,7 +162,7 @@ class TestTaskCreatedByAutoFill:
         t = _make_task(created_by="superadmin")
         create_result = TaskResult(task=t, cascade_updates=[])
 
-        token = _current_partner.set({"displayName": "superadmin", "email": "admin"})
+        token = _current_partner.set({"id": "p_admin", "displayName": "superadmin", "email": "admin"})
         try:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
@@ -174,7 +174,7 @@ class TestTaskCreatedByAutoFill:
 
                 assert "error" not in result
                 call_data = mock_ts.create_task.call_args[0][0]
-                assert call_data["created_by"] == "superadmin"
+                assert call_data["created_by"] == "p_admin"
         finally:
             _current_partner.reset(token)
 

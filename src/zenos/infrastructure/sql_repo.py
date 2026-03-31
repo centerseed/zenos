@@ -943,7 +943,9 @@ class SqlTaskRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"""SELECT t.*, p1.display_name as creator_name, p2.display_name as assignee_name
+                f"""SELECT t.*,
+                           COALESCE(NULLIF(NULLIF(p1.display_name, ''), 'Unknown'), p1.email, p1.id, t.created_by) as creator_name,
+                           COALESCE(NULLIF(NULLIF(p2.display_name, ''), 'Unknown'), p2.email, p2.id, t.assignee) as assignee_name
                     FROM {SCHEMA}.tasks t
                     LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id
                     LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id
@@ -1091,7 +1093,9 @@ class SqlTaskRepository:
             join_clause = ""
 
         sql = (
-            f"SELECT DISTINCT t.*, p1.display_name as creator_name, p2.display_name as assignee_name "
+            f"SELECT DISTINCT t.*, "
+            f"COALESCE(NULLIF(NULLIF(p1.display_name, ''), 'Unknown'), p1.email, p1.id, t.created_by) as creator_name, "
+            f"COALESCE(NULLIF(NULLIF(p2.display_name, ''), 'Unknown'), p2.email, p2.id, t.assignee) as assignee_name "
             f"FROM {SCHEMA}.tasks t "
             f"{join_clause} "
             f"LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id "
