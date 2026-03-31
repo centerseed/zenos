@@ -313,6 +313,7 @@ class Task:
     rejection_reason: str | None = None
     result: str | None = None
     project: str = ""  # Partner-level project grouping (e.g. "zenos", "paceriz")
+    project_id: str | None = None  # Link to product/project entity ID
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None

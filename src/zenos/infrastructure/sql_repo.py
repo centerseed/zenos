@@ -880,6 +880,7 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         rejection_reason=row["rejection_reason"],
         result=row["result"],
         project=row["project"],
+        project_id=row["project_id"] if "project_id" in row else None,
         created_at=_to_dt(row["created_at"]) or _now(),
         updated_at=_to_dt(row["updated_at"]) or _now(),
         completed_at=_to_dt(row["completed_at"]),
@@ -976,11 +977,11 @@ class SqlTaskRepository:
                     plan_id, plan_order, depends_on_task_ids_json,
                     linked_protocol, linked_blindspot, source_type, source_metadata_json, context_summary,
                     due_date, blocked_reason, acceptance_criteria_json, completed_by,
-                    confirmed_by_creator, rejection_reason, result, project,
+                    confirmed_by_creator, rejection_reason, result, project, project_id,
                     created_at, updated_at, completed_at
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
-                    $12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19,$20,$21,$22::jsonb,$23,$24,$25,$26,$27,$28,$29,$30
+                    $12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19,$20,$21,$22::jsonb,$23,$24,$25,$26,$27,$28,$29,$30,$31
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     title=EXCLUDED.title, description=EXCLUDED.description,
@@ -1004,6 +1005,7 @@ class SqlTaskRepository:
                     confirmed_by_creator=EXCLUDED.confirmed_by_creator,
                     rejection_reason=EXCLUDED.rejection_reason,
                     result=EXCLUDED.result, project=EXCLUDED.project,
+                    project_id=EXCLUDED.project_id,
                     updated_at=EXCLUDED.updated_at,
                     completed_at=EXCLUDED.completed_at
                 WHERE tasks.partner_id = EXCLUDED.partner_id
@@ -1016,7 +1018,7 @@ class SqlTaskRepository:
                     task.source_type, _dumps(task.source_metadata), task.context_summary, task.due_date,
                     task.blocked_reason, _dumps(task.acceptance_criteria),
                     task.completed_by, task.confirmed_by_creator,
-                    task.rejection_reason, task.result, task.project,
+                    task.rejection_reason, task.result, task.project, task.project_id,
                     task.created_at, task.updated_at, task.completed_at,
                 )
                 # Sync task_entities join table
