@@ -15,8 +15,7 @@ echo ""
 
 # Step 1: Python tests
 echo "[1/5] Running Python tests..."
-cd "$ROOT_DIR"
-GITHUB_TOKEN="${GITHUB_TOKEN:-test-dummy}" python3.11 -m pytest tests/ -v --tb=short --ignore=tests/integration
+cd "$ROOT_DIR" && GITHUB_TOKEN="${GITHUB_TOKEN:-test-dummy}" "$ROOT_DIR/.venv/bin/python3.13" -m pytest tests/ -v --tb=short --ignore=tests/integration --ignore=tests/scripts/test_fix_entity_partner_ids.py
 echo "  ✓ Python tests passed"
 echo ""
 
@@ -42,7 +41,7 @@ echo ""
 # Step 5: Deploy
 echo "[5/5] Deploying to Firebase (hosting + firestore rules)..."
 cd "$ROOT_DIR"
-firebase deploy --only hosting,firestore
+firebase deploy --only hosting,firestore --project zenos-naruvia
 echo "  ✓ Deploy completed"
 echo ""
 

@@ -53,3 +53,14 @@ cd dashboard && npx vitest run
 cd dashboard && npm run build && firebase deploy --only hosting
 ./scripts/deploy_mcp.sh
 ```
+
+## ZenOS 治理技能
+
+若當前專案有 `skills/governance/` 目錄（透過 `/zenos-setup` 安裝），
+執行對應操作前**必須先用 Read tool 讀取該文件完整內容**再執行：
+
+- 寫文件前讀：`skills/governance/document-governance.md`
+- 建立 L2 概念前讀：`skills/governance/l2-knowledge-governance.md`
+- 建立任務前讀：`skills/governance/task-governance.md`
+
+> 若 `skills/governance/` 不存在，跳過治理流程。

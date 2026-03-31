@@ -19,6 +19,7 @@ from zenos.domain.task_rules import (
     is_valid_initial_status,
     is_valid_transition,
     is_valid_update_target,
+    normalize_task_status,
     recommend_priority,
 )
 
@@ -70,10 +71,10 @@ class TaskService:
                     f"Must be one of: {', '.join(valid_priorities)}"
                 )
 
-        status = data.get("status", TaskStatus.BACKLOG)
+        status = normalize_task_status(data.get("status", TaskStatus.TODO))
         if not is_valid_initial_status(status):
             raise ValueError(
-                f"Invalid initial status '{status}'. Must be 'backlog' or 'todo'."
+                f"Invalid initial status '{status}'. Must be 'todo'."
             )
 
         # Build linked context for priority recommendation
@@ -108,6 +109,10 @@ class TaskService:
 
         blocked_by = data.get("blocked_by", [])
         blocked_reason = data.get("blocked_reason")
+        if blocked_by and not blocked_reason:
+            raise ValueError("blocked_reason is required when blocked_by is set")
+        if blocked_by and status == TaskStatus.TODO:
+            status = TaskStatus.BLOCKED
         plan_id = data.get("plan_id")
         plan_order = data.get("plan_order")
         depends_on_task_ids = data.get("depends_on_task_ids", [])
@@ -116,15 +121,6 @@ class TaskService:
             raise ValueError("plan_id is required when plan_order is provided")
         if plan_order is not None and int(plan_order) < 1:
             raise ValueError("plan_order must be >= 1")
-
-        # Auto-set to blocked if has blockers and not backlog
-        if blocked_by and status != TaskStatus.BACKLOG:
-            if not blocked_reason:
-                raise ValueError(
-                    "blocked_reason is required when blocked_by is non-empty "
-                    "and initial status is not 'backlog'"
-                )
-            status = TaskStatus.BLOCKED
 
         # Priority recommendation
         due_date = data.get("due_date")
@@ -185,8 +181,9 @@ class TaskService:
         task = await self._tasks.get_by_id(task_id)
         if task is None:
             raise ValueError(f"Task '{task_id}' not found")
+        task.status = normalize_task_status(task.status)
 
-        new_status = updates.get("status")
+        new_status = normalize_task_status(updates.get("status")) if updates.get("status") else None
         cascades: list[CascadeUpdate] = []
 
         # Status transition validation
@@ -200,8 +197,6 @@ class TaskService:
                 raise ValueError(
                     f"Invalid transition: {task.status} → {new_status}"
                 )
-            if new_status == TaskStatus.BLOCKED and not updates.get("blocked_reason"):
-                raise ValueError("blocked_reason is required when status is 'blocked'")
             if new_status == TaskStatus.REVIEW and not (
                 updates.get("result") or task.result
             ):
@@ -249,6 +244,7 @@ class TaskService:
         task = await self._tasks.get_by_id(task_id)
         if task is None:
             raise ValueError(f"Task '{task_id}' not found")
+        task.status = normalize_task_status(task.status)
         if task.status != TaskStatus.REVIEW:
             raise ValueError(
                 f"Can only confirm tasks in 'review' status. "
@@ -342,17 +338,17 @@ class TaskService:
         cascades: list[CascadeUpdate] = []
 
         for bt in blocked_tasks:
+            bt.status = normalize_task_status(bt.status)
             bt.blocked_by = [
                 tid for tid in bt.blocked_by if tid != completed_task_id
             ]
-            if not bt.blocked_by and bt.status == TaskStatus.BLOCKED:
-                bt.status = TaskStatus.TODO
+            if not bt.blocked_by and bt.status == TaskStatus.IN_PROGRESS:
                 bt.blocked_reason = None
                 bt.updated_at = datetime.utcnow()
                 await self._tasks.upsert(bt)
                 cascades.append(CascadeUpdate(
                     task_id=bt.id or "",
-                    change="blocked → todo",
+                    change="in_progress (unblocked)",
                     reason=f"blockedBy {completed_task_id} 已完成",
                 ))
             else:

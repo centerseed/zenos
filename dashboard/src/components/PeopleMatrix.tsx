@@ -8,32 +8,26 @@ interface PeopleMatrixProps {
   partners: Partner[];
 }
 
-type StatusRank = "blocked" | "in_progress" | "review" | "todo" | "backlog" | "done";
+type StatusRank = "in_progress" | "review" | "todo" | "done";
 
 const STATUS_PRIORITY: StatusRank[] = [
-  "blocked",
   "in_progress",
   "review",
   "todo",
-  "backlog",
   "done",
 ];
 
 const STATUS_LABELS: Record<StatusRank, string> = {
-  blocked: "BLOCKED",
   in_progress: "WORKING",
   review: "REVIEW",
   todo: "TODO",
-  backlog: "BACKLOG",
   done: "DONE",
 };
 
 const STATUS_COLORS: Record<StatusRank, string> = {
-  blocked: "bg-red-900/50 text-red-400",
   in_progress: "bg-yellow-900/50 text-yellow-400",
   review: "bg-purple-900/50 text-purple-400",
   todo: "bg-blue-900/50 text-blue-400",
-  backlog: "bg-secondary text-muted-foreground",
   done: "bg-green-900/50 text-green-400",
 };
 
@@ -52,7 +46,7 @@ function hasOverdue(cellTasks: Task[]): boolean {
     (t) =>
       t.dueDate !== null &&
       t.dueDate.getTime() < now &&
-      !["done", "cancelled", "archived"].includes(t.status)
+      !["done", "cancelled"].includes(t.status)
   );
 }
 
@@ -104,7 +98,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
               const personTasks = tasks.filter((t) => t.assignee === assignee);
               const doneCount = personTasks.filter((t) => t.status === "done").length;
               const remaining = personTasks.filter(
-                (t) => !["done", "cancelled", "archived"].includes(t.status)
+                (t) => !["done", "cancelled"].includes(t.status)
               ).length;
 
               return (
@@ -119,7 +113,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                         t.linkedEntities.includes(entity.id)
                     );
                     const activeCellTasks = cellTasks.filter(
-                      (t) => !["done", "cancelled", "archived"].includes(t.status)
+                      (t) => !["done", "cancelled"].includes(t.status)
                     );
                     const activeCount = activeCellTasks.length;
 
@@ -132,18 +126,14 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                     }
 
                     const highestStatus = getHighestStatus(cellTasks);
-                    const isBlocked = cellTasks.some((t) => t.status === "blocked");
                     const isOverdue = hasOverdue(cellTasks);
                     const allDone = cellTasks.every(
-                      (t) => t.status === "done" || t.status === "cancelled" || t.status === "archived"
+                      (t) => t.status === "done" || t.status === "cancelled"
                     );
 
                     let cellBg = "bg-card";
                     let cellBorder = "border border-border";
-                    if (isBlocked) {
-                      cellBg = "bg-red-900/20";
-                      cellBorder = "border border-red-800";
-                    } else if (isOverdue) {
+                    if (isOverdue) {
                       cellBorder = "border-2 border-orange-600";
                     } else if (allDone) {
                       cellBg = "bg-green-900/20";

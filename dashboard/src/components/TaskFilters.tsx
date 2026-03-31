@@ -6,30 +6,27 @@ import type { TaskStatus, TaskPriority } from "@/types";
 interface TaskFiltersProps {
   selectedStatuses: TaskStatus[];
   selectedPriority: TaskPriority | null;
+  selectedProject: string | null;
+  availableProjects: string[];
   onStatusChange: (statuses: TaskStatus[]) => void;
   onPriorityChange: (priority: TaskPriority | null) => void;
+  onProjectChange: (project: string | null) => void;
 }
 
 const ALL_STATUSES: TaskStatus[] = [
-  "backlog",
   "todo",
   "in_progress",
   "review",
   "done",
-  "blocked",
   "cancelled",
-  "archived",
 ];
 
 const STATUS_LABELS: Record<string, string> = {
-  backlog: "Backlog",
   todo: "Todo",
   in_progress: "In Progress",
   review: "Review",
   done: "Done",
-  blocked: "Blocked",
   cancelled: "Cancelled",
-  archived: "Archived",
 };
 
 const ALL_PRIORITIES: TaskPriority[] = ["critical", "high", "medium", "low"];
@@ -37,8 +34,11 @@ const ALL_PRIORITIES: TaskPriority[] = ["critical", "high", "medium", "low"];
 export function TaskFilters({
   selectedStatuses,
   selectedPriority,
+  selectedProject,
+  availableProjects,
   onStatusChange,
   onPriorityChange,
+  onProjectChange,
 }: TaskFiltersProps) {
   const [statusOpen, setStatusOpen] = useState(false);
   const statusRef = useRef<HTMLDivElement>(null);
@@ -62,7 +62,7 @@ export function TaskFilters({
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-3 flex-wrap">
       {/* Status multi-select */}
       <div className="relative" ref={statusRef}>
         <button
@@ -99,6 +99,22 @@ export function TaskFilters({
           </div>
         )}
       </div>
+
+      {/* Project Select */}
+      <select
+        value={selectedProject ?? ""}
+        onChange={(e) =>
+          onProjectChange(e.target.value || null)
+        }
+        className="text-sm border border-border rounded-lg px-3 py-1.5 bg-card text-foreground cursor-pointer"
+      >
+        <option value="">All Projects</option>
+        {availableProjects.map((p) => (
+          <option key={p} value={p}>
+            {p.toUpperCase()}
+          </option>
+        ))}
+      </select>
 
       {/* Priority single-select */}
       <select

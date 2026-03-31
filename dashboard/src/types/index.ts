@@ -74,7 +74,7 @@ export interface Blindspot {
 /** @deprecated Use Entity with type="document" instead */
 export type DocumentEntry = Entity;
 
-export type TaskStatus = "backlog" | "todo" | "in_progress" | "review" | "done" | "archived" | "blocked" | "cancelled";
+export type TaskStatus = "todo" | "in_progress" | "review" | "done" | "cancelled";
 export type TaskPriority = "critical" | "high" | "medium" | "low";
 
 export interface Task {
@@ -87,6 +87,10 @@ export interface Task {
   priorityReason: string;
   assignee: string | null;
   assigneeName?: string | null;
+  assigneeRoleId?: string | null;
+  planId?: string | null;
+  planOrder?: number | null;
+  dependsOnTaskIds?: string[];
   createdBy: string;
   creatorName?: string | null;
   linkedEntities: string[];
@@ -94,9 +98,8 @@ export interface Task {
   linkedBlindspot: string | null;
   sourceType: string;
   sourceMetadata?: {
-    actor_type?: "human" | "agent" | string;
-    actor_name?: string;
-    actor_session?: string;
+    created_via_agent?: boolean;
+    agent_name?: string;
     actor_partner_id?: string;
     provenance?: Array<{
       type?: string;

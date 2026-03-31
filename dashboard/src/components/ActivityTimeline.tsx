@@ -13,7 +13,6 @@ function getActionLabel(task: Task): string {
   switch (task.status) {
     case "done": return "completed";
     case "in_progress": return "in progress";
-    case "blocked": return "blocked";
     case "review": return "submitted review";
     default: return "updated";
   }
@@ -24,7 +23,6 @@ function getActionIcon(task: Task): string {
   switch (task.status) {
     case "done": return "\u2705";
     case "in_progress": return "\uD83D\uDD04";
-    case "blocked": return "\uD83D\uDD34";
     case "review": return "\uD83D\uDCCB";
     default: return "\uD83D\uDCDD";
   }

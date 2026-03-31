@@ -904,9 +904,9 @@ class TestTaskTool:
             payload = mock_ts.create_task.call_args.args[0]
             assert payload["source_metadata"]["sync_sources"] == metadata["sync_sources"]
             assert payload["source_metadata"]["provenance"] == metadata["provenance"]
-            assert payload["source_metadata"]["actor_type"] == "agent"
+            assert payload["source_metadata"]["created_via_agent"] is True
 
-    async def test_create_task_accepts_explicit_actor_metadata(self):
+    async def test_create_task_accepts_explicit_agent_metadata(self):
         from zenos.interface.tools import task
         from zenos.application.task_service import TaskResult
 
@@ -920,15 +920,13 @@ class TestTaskTool:
                 action="create",
                 title="建立 actor trace",
                 created_by="amy",
-                actor_type="agent",
-                actor_name="architect-agent",
-                actor_session="sess-123",
+                created_via_agent=True,
+                agent_name="architect-agent",
             )
 
             payload = mock_ts.create_task.call_args.args[0]
-            assert payload["source_metadata"]["actor_type"] == "agent"
-            assert payload["source_metadata"]["actor_name"] == "architect-agent"
-            assert payload["source_metadata"]["actor_session"] == "sess-123"
+            assert payload["source_metadata"]["created_via_agent"] is True
+            assert payload["source_metadata"]["agent_name"] == "architect-agent"
 
     async def test_update_task_success(self):
         from zenos.interface.tools import task

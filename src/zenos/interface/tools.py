@@ -310,7 +310,15 @@ def _serialize(obj: object) -> dict:
     JSON-serializable.
     """
     raw = asdict(obj)  # type: ignore[arg-type]
-    return _convert_datetimes(raw)
+    data = _convert_datetimes(raw)
+    # Backward-compatible task status normalization
+    if "created_by" in data and "priority_reason" in data and "status" in data:
+        data["status"] = {
+            "backlog": "todo",
+            "blocked": "in_progress",
+            "archived": "done",
+        }.get(data["status"], data["status"])
+    return data
 
 
 def _convert_datetimes(data: dict) -> dict:
@@ -905,13 +913,13 @@ async def write(
                     "title": f"處理盲點：{result.description[:30]}",
                     "source_type": "blindspot",
                     "source_metadata": {
-                        "actor_type": "agent",
-                        "actor_name": "system-auto",
+                        "created_via_agent": True,
+                        "agent_name": "system-auto",
                         "actor_partner_id": creator_id,
                     },
                     "linked_blindspot": result.id,
                     "linked_entities": result.related_entity_ids or [],
-                    "status": "backlog",
+                    "status": "todo",
                     "created_by": creator_id,
                     "assignee": assignee,
                 }
@@ -1116,9 +1124,8 @@ async def _task_handler(
     linked_blindspot: str | None = None,
     source_type: str | None = None,
     source_metadata: dict | None = None,
-    actor_type: str | None = None,
-    actor_name: str | None = None,
-    actor_session: str | None = None,
+    created_via_agent: bool | None = None,
+    agent_name: str | None = None,
     due_date: str | None = None,
     blocked_by: list[str] | None = None,
     blocked_reason: str | None = None,
@@ -1167,20 +1174,12 @@ async def _task_handler(
 
     def _merge_actor_metadata(meta: dict | None, partner_ctx: dict | None) -> dict:
         merged = dict(meta or {})
-        if actor_type:
-            merged["actor_type"] = actor_type
-        elif "actor_type" not in merged:
-            merged["actor_type"] = "agent"
-
-        if actor_name:
-            merged["actor_name"] = actor_name
-        elif "actor_name" not in merged:
-            default_name = (partner_ctx or {}).get("displayName")
-            if default_name:
-                merged["actor_name"] = default_name
-
-        if actor_session:
-            merged["actor_session"] = actor_session
+        via_agent = True if created_via_agent is None else bool(created_via_agent)
+        merged["created_via_agent"] = via_agent
+        if agent_name:
+            merged["agent_name"] = agent_name
+        elif via_agent and "agent_name" not in merged:
+            merged["agent_name"] = "agent"
         if partner_ctx and partner_ctx.get("id"):
             merged["actor_partner_id"] = partner_ctx["id"]
         return merged
@@ -1222,7 +1221,7 @@ async def _task_handler(
                 "description": normalized_description,
                 "assignee": assignee,
                 "priority": priority,
-                "status": status or "backlog",
+                "status": status or "todo",
                 "linked_entities": linked_entities or [],
                 "linked_protocol": linked_protocol,
                 "linked_blindspot": linked_blindspot,
@@ -1326,9 +1325,8 @@ async def task(
     linked_blindspot: str | None = None,
     source_type: str | None = None,
     source_metadata: dict | None = None,
-    actor_type: str | None = None,
-    actor_name: str | None = None,
-    actor_session: str | None = None,
+    created_via_agent: bool | None = None,
+    agent_name: str | None = None,
     due_date: str | None = None,
     blocked_by: list[str] | None = None,
     blocked_reason: str | None = None,
@@ -1351,13 +1349,13 @@ async def task(
     - 改狀態 → action="update"（必填：id。改 status/assignee/priority 等）
     - 列任務 → 不要用這個，用 search(collection="tasks") 更靈活
 
-    狀態流：backlog → todo → in_progress → review → done → archived
-            任何狀態可 → cancelled。blocked 是特殊狀態（需填 blocked_reason）。
+    狀態流：todo → in_progress → review → done
+            任何活躍狀態可 → cancelled。
     注意：不能用 update 把 status 改成 done（必須走 confirm 驗收流程）。
     補充限制：
-    - create 時初始 status 只能是 backlog 或 todo
+    - create 時初始 status 只能是 todo
     - update 到 review 時，result 為必填（SQL schema 強制）
-    - create 時若 blocked_by 非空且 status 不是 backlog，會進入 blocked，且 blocked_reason 必填
+    - blocked_by 可記錄依賴，但不再使用 blocked 狀態欄
     - linked_protocol / linked_blindspot / assignee_role_id / linked_entities 會受資料庫外鍵限制，ID 必須存在於同租戶資料中
     - task 屬於某個 plan 時，建議帶 plan_id 與 plan_order，讓 agent 能按順序執行
 
@@ -1368,12 +1366,12 @@ async def task(
     Args:
         action: "create" 或 "update"
         title: 任務標題，動詞開頭（create 必填）
-        created_by: 建立者 UID（create 必填）
+        created_by: 建立者 partner ID（create 時由 server 依 API key context 覆寫）
         id: 任務 ID（update 必填）
         description: 任務描述
         assignee: 被指派者 UID
         priority: critical/high/medium/low（不傳時 AI 自動推薦）
-        status: create 時只能 backlog/todo；update 時需通過合法性驗證
+        status: create 時只能 todo；update 時需通過合法性驗證
         linked_entities: 關聯的 entity IDs
         linked_protocol: 關聯的 Protocol ID
         linked_blindspot: 觸發的 blindspot ID
@@ -1392,12 +1390,11 @@ async def task(
               ],
               "syncSources": ["github", "linear", "slack"]
             }
-        actor_type: 執行者類型（"human" | "agent"）。未傳時預設為 "agent"（MCP 路徑）。
-        actor_name: 執行者名稱（如 "architect-agent"、"Barry"）。
-        actor_session: 執行會話識別（可選，供 trace）。
+        created_via_agent: 是否由 agent 建立。預設 true（MCP 路徑）。
+        agent_name: agent 名稱（如 "architect-agent"）。created_via_agent=true 時建議帶入。
         due_date: 到期日 ISO-8601（如 "2026-03-29"）
         blocked_by: 阻塞此任務的 task IDs
-        blocked_reason: status=blocked 時必填；create 若 blocked_by 讓任務進入 blocked 也必填
+        blocked_reason: 可選的依賴/阻塞說明（不再綁定 blocked 狀態）
         acceptance_criteria: 驗收條件列表
         result: 完成產出描述（status=review 時必填）
         project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
@@ -1421,9 +1418,8 @@ async def task(
         linked_blindspot=linked_blindspot,
         source_type=source_type,
         source_metadata=source_metadata,
-        actor_type=actor_type,
-        actor_name=actor_name,
-        actor_session=actor_session,
+        created_via_agent=created_via_agent,
+        agent_name=agent_name,
         due_date=due_date,
         blocked_by=blocked_by,
         blocked_reason=blocked_reason,
@@ -1615,7 +1611,7 @@ async def analyze(
         try:
             downstream_entities = await governance_service.find_stale_l2_downstream_entities()
             # Enrich with open tasks at interface layer (task_repo available here)
-            _open_statuses = {"backlog", "todo", "in_progress", "review", "blocked"}
+            _open_statuses = {"todo", "in_progress", "review"}
             all_tasks = await task_service.list_tasks(limit=500)
             for entry in downstream_entities:
                 mod_id = entry["stale_module_id"]

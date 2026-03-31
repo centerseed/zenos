@@ -37,9 +37,7 @@ const STATUS_BADGE_COLORS: Record<string, string> = {
 const TASK_STATUS_LABELS: Record<string, string> = {
   in_progress: "In Progress",
   review: "Review",
-  todo: "Backlog",
-  backlog: "Backlog",
-  blocked: "Blocked",
+  todo: "Todo",
 };
 
 export default function NodeDetailSheet({
@@ -67,9 +65,9 @@ export default function NodeDetailSheet({
     if (!entity) return { inProgress: [], review: [], backlog: [] };
     const related = tasks.filter((t) => t.linkedEntities.includes(entity.id));
     return {
-      inProgress: related.filter((t) => t.status === "in_progress" || t.status === "blocked"),
+      inProgress: related.filter((t) => t.status === "in_progress"),
       review: related.filter((t) => t.status === "review"),
-      backlog: related.filter((t) => t.status === "todo" || t.status === "backlog"),
+      backlog: related.filter((t) => t.status === "todo"),
     };
   }, [entity, tasks]);
 
@@ -149,7 +147,7 @@ export default function NodeDetailSheet({
                     {[
                       { label: "Review", items: categorizedTasks.review, color: "text-amber-400" },
                       { label: "In Progress", items: categorizedTasks.inProgress, color: "text-blue-400" },
-                      { label: "Backlog", items: categorizedTasks.backlog, color: "text-foreground/40" },
+                      { label: "Todo", items: categorizedTasks.backlog, color: "text-foreground/40" },
                     ].map((group) => group.items.length > 0 && (
                       <div key={group.label}>
                         <div className={`text-[10px] font-semibold uppercase mb-2 ${group.color}`}>
@@ -163,7 +161,7 @@ export default function NodeDetailSheet({
                               onMouseLeave={() => onHoverNode?.(null)}
                               className="group flex items-start gap-2 p-2 rounded-md bg-foreground/5 hover:bg-foreground/10 transition-colors border border-transparent hover:border-border/50"
                             >
-                              <div className={`w-1 h-4 rounded-full mt-0.5 shrink-0 ${task.status === 'blocked' ? 'bg-red-500' : 'bg-orange-500/40'}`} />
+                              <div className="w-1 h-4 rounded-full mt-0.5 shrink-0 bg-orange-500/40" />
                               <div className="flex-1 min-w-0">
                                 <div className="text-xs font-medium text-foreground/80 truncate group-hover:text-foreground transition-colors">
                                   {task.title}

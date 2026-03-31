@@ -91,3 +91,21 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 | linked_entities 為空 | 切斷 task 與知識層的連結，失去 ontology 價值 |
 | 完成後不更新 result | 知識無法流回 ontology，形成知識黑洞 |
 | 直接 write status=done | 繞過驗收流程，AC 可能未達成 |
+
+## 建立者顯示規則（強制簡化）
+
+- `created_by` 必須是 owner 的 `partner.id`（不是 `architect`/`pm` 這類角色字串）。
+- 若任務是 agent 代開，寫入：
+  - `source_metadata.created_via_agent = true`
+  - `source_metadata.agent_name = "<agent-name>"`
+- UI 一律顯示：
+  - 非 agent：`<owner_name>`
+  - agent 代開：`agent (by <owner_name>)`
+
+## 狀態模型（2026-03-31）
+
+- 允許狀態：`todo` / `in_progress` / `review` / `done` / `cancelled`
+- `backlog` 併入 `todo`
+- `blocked` 移除（仍可用 `blocked_by` + `blocked_reason` 描述阻塞）
+- `archived` 併入 `done`
+- 建票初始狀態只能是 `todo`

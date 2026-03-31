@@ -24,41 +24,34 @@ from .models import (
 
 # Adjacency set: (from_status, to_status) pairs that are legal.
 _VALID_TRANSITIONS: set[tuple[str, str]] = {
-    # from backlog
-    (TaskStatus.BACKLOG, TaskStatus.TODO),
-    (TaskStatus.BACKLOG, TaskStatus.IN_PROGRESS),
-    (TaskStatus.BACKLOG, TaskStatus.BLOCKED),
-    (TaskStatus.BACKLOG, TaskStatus.CANCELLED),
     # from todo
-    (TaskStatus.TODO, TaskStatus.BACKLOG),
     (TaskStatus.TODO, TaskStatus.IN_PROGRESS),
-    (TaskStatus.TODO, TaskStatus.BLOCKED),
     (TaskStatus.TODO, TaskStatus.CANCELLED),
     # from in_progress
     (TaskStatus.IN_PROGRESS, TaskStatus.TODO),
     (TaskStatus.IN_PROGRESS, TaskStatus.REVIEW),
-    (TaskStatus.IN_PROGRESS, TaskStatus.BLOCKED),
     (TaskStatus.IN_PROGRESS, TaskStatus.CANCELLED),
     # from review (done only via confirm_task, not update_task)
     (TaskStatus.REVIEW, TaskStatus.IN_PROGRESS),
     (TaskStatus.REVIEW, TaskStatus.DONE),
     (TaskStatus.REVIEW, TaskStatus.CANCELLED),
-    # from done
-    (TaskStatus.DONE, TaskStatus.ARCHIVED),
-    # from archived
-    (TaskStatus.ARCHIVED, TaskStatus.TODO),
-    # from blocked
-    (TaskStatus.BLOCKED, TaskStatus.TODO),
-    (TaskStatus.BLOCKED, TaskStatus.CANCELLED),
-    # from cancelled
-    (TaskStatus.CANCELLED, TaskStatus.ARCHIVED),
+    # from done (allow reopen)
+    (TaskStatus.DONE, TaskStatus.TODO),
 }
 
 # Statuses that can be set by update_task (review→done must go via confirm_task)
 _UPDATE_FORBIDDEN_TARGETS = {TaskStatus.DONE}
 
 # Valid initial statuses for create_task
-_INITIAL_STATUSES = {TaskStatus.BACKLOG, TaskStatus.TODO}
+_INITIAL_STATUSES = {TaskStatus.TODO}
+
+
+def normalize_task_status(status: str) -> str:
+    """Map deprecated statuses into canonical statuses."""
+    return {
+        "backlog": TaskStatus.TODO,
+        "archived": TaskStatus.DONE,
+    }.get(status, status)
 
 
 def is_valid_transition(from_status: str, to_status: str) -> bool:

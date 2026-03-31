@@ -9,6 +9,15 @@ import {
   Minus,
   ArrowDown,
   X,
+  Layers,
+  Calendar,
+  User,
+  ExternalLink,
+  Bot,
+  Hash,
+  Link2,
+  FileText,
+  Clock,
 } from "lucide-react";
 
 interface TaskDetailDrawerProps {
@@ -18,50 +27,83 @@ interface TaskDetailDrawerProps {
   entitiesById?: Record<string, Entity>;
 }
 
-const priorityConfig: Record<
-  string,
-  { icon: React.ReactNode; label: string; color: string }
-> = {
-  critical: {
-    icon: <AlertTriangle className="w-4 h-4" />,
-    label: "Critical",
-    color: "text-red-400",
-  },
-  high: {
-    icon: <ArrowUp className="w-4 h-4" />,
-    label: "High",
-    color: "text-orange-400",
-  },
-  medium: {
-    icon: <Minus className="w-4 h-4" />,
-    label: "Medium",
-    color: "text-blue-400",
-  },
-  low: {
-    icon: <ArrowDown className="w-4 h-4" />,
-    label: "Low",
-    color: "text-muted-foreground",
-  },
+const priorityIcons: Record<string, React.ReactNode> = {
+  critical: <AlertTriangle className="w-4 h-4 text-red-400" />,
+  high: <ArrowUp className="w-4 h-4 text-orange-400" />,
+  medium: <Minus className="w-4 h-4 text-yellow-400" />,
+  low: <ArrowDown className="w-4 h-4 text-blue-400" />,
 };
 
 const statusColors: Record<string, string> = {
-  backlog: "bg-secondary text-secondary-foreground",
-  todo: "bg-blue-900/50 text-blue-400",
-  in_progress: "bg-yellow-900/50 text-yellow-400",
-  review: "bg-purple-900/50 text-purple-400",
-  blocked: "bg-red-900/50 text-red-400",
-  done: "bg-green-900/50 text-green-400",
-  cancelled: "bg-secondary text-muted-foreground line-through",
-  archived: "bg-secondary text-muted-foreground",
+  todo: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  in_progress: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
+  review: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+  done: "bg-green-500/10 text-green-400 border-green-500/20",
+  blocked: "bg-red-500/10 text-red-400 border-red-500/20",
+  backlog: "bg-gray-500/10 text-gray-400 border-gray-500/20",
 };
 
-function formatDate(date: Date | null): string | null {
-  if (!date) return null;
+function formatDate(date: Date | null): string {
+  if (!date) return "No date set";
   return date.toLocaleDateString("zh-TW", {
     year: "numeric",
-    month: "short",
+    month: "long",
     day: "numeric",
   });
+}
+
+function ContextCard({ entity, name }: { entity?: Entity; name: string }) {
+  if (!entity) return null;
+  
+  return (
+    <div className="bg-white/[0.03] border border-white/5 rounded-xl p-4 space-y-3 hover:bg-white/[0.05] transition-colors shadow-sm overflow-hidden group relative">
+      <div className="flex items-start justify-between">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20">
+            <Link2 className="w-3.5 h-3.5 text-blue-400" />
+          </div>
+          <div>
+            <h4 className="text-sm font-bold text-foreground/90 group-hover:text-blue-400 transition-colors">
+              {entity.name}
+            </h4>
+            <span className="text-[10px] uppercase tracking-widest text-muted-foreground/60 font-bold">
+              {entity.type}
+            </span>
+          </div>
+        </div>
+        <div className={`px-2 py-0.5 rounded-full text-[9px] font-bold border ${
+          entity.status === 'active' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+        }`}>
+          {entity.status.toUpperCase()}
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 italic opacity-80">
+        "{entity.summary}"
+      </p>
+
+      {entity.tags && (
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          {entity.tags.what && entity.tags.what.length > 0 && (
+            <div className="space-y-1">
+              <span className="text-[9px] font-black text-muted-foreground/40 uppercase tracking-tighter">What</span>
+              <div className="flex flex-wrap gap-1">
+                {(Array.isArray(entity.tags.what) ? entity.tags.what : []).slice(0, 2).map((t: string, i: number) => (
+                  <span key={i} className="text-[9px] text-foreground/60">{t}</span>
+                ))}
+              </div>
+            </div>
+          )}
+          {entity.owner && (
+            <div className="space-y-1">
+              <span className="text-[9px] font-black text-muted-foreground/40 uppercase tracking-tighter">Owner</span>
+              <div className="text-[9px] text-foreground/60">{entity.owner}</div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function TaskDetailDrawer({
@@ -71,405 +113,181 @@ export function TaskDetailDrawer({
   entitiesById = {},
 }: TaskDetailDrawerProps) {
   const drawerRef = useRef<HTMLDivElement>(null);
-  const [showProvenance, setShowProvenance] = useState(false);
+  const [isVisible, setIsVisible] = useState(false);
 
   useEffect(() => {
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
     if (task) {
-      document.addEventListener("keydown", handleEsc);
+      setIsVisible(true);
       document.body.style.overflow = "hidden";
+    } else {
+      setIsVisible(false);
+      document.body.style.overflow = "unset";
     }
-    return () => {
-      document.removeEventListener("keydown", handleEsc);
-      document.body.style.overflow = "";
-    };
-  }, [task, onClose]);
-
-  useEffect(() => {
-    if (!task) setShowProvenance(false);
   }, [task]);
 
   if (!task) return null;
 
-  const priority = priorityConfig[task.priority];
-  const provenanceItems = Array.isArray(task.sourceMetadata?.provenance)
-    ? task.sourceMetadata?.provenance
-    : [];
-  const syncSources = Array.isArray(task.sourceMetadata?.sync_sources)
-    ? task.sourceMetadata?.sync_sources
-    : [];
-  const actorType = task.sourceMetadata?.actor_type;
-  const actorName = task.sourceMetadata?.actor_name;
-  const creatorLabel = task.creatorName || task.createdBy;
-  const creatorViaLabel =
-    actorType === "agent"
-      ? `${creatorLabel}${actorName ? ` (via ${actorName})` : " (via agent)"}`
-      : creatorLabel;
-
   return (
-    <>
+    <div
+      className={`fixed inset-0 z-50 transition-opacity duration-300 ${
+        isVisible ? "opacity-100" : "opacity-0 pointer-events-none"
+      }`}
+    >
       {/* Backdrop */}
       <div
-        className="fixed inset-0 bg-black/60 z-40 backdrop-blur-sm animate-in fade-in duration-200"
+        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
         onClick={onClose}
       />
 
       {/* Drawer */}
       <div
         ref={drawerRef}
-        className="fixed right-0 top-0 h-full w-full max-w-2xl bg-card border-l border-border z-50 overflow-y-auto shadow-2xl animate-in slide-in-from-right duration-300"
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Task detail: ${task.title}`}
+        className={`absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-gradient-to-b from-[#0a0a0a] to-background border-l border-border/40 shadow-2xl transition-transform duration-500 ease-out flex flex-col ${
+          isVisible ? "translate-x-0" : "translate-x-full"
+        }`}
       >
-        {/* Header */}
-        <div className="sticky top-0 bg-card/95 backdrop-blur-md border-b border-border px-6 py-4 z-10">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <h2 className="text-lg font-semibold text-foreground leading-tight">
-                {task.title}
-              </h2>
-              <div className="flex items-center gap-2 mt-2 flex-wrap">
-                {/* Status Badge */}
-                <span
-                  className={`text-xs px-2 py-0.5 rounded-full ${statusColors[task.status] ?? "bg-secondary text-muted-foreground"}`}
-                >
-                  {task.status.replace("_", " ")}
+        {/* Header Section */}
+        <div className="p-6 border-b border-border/30 bg-white/[0.01]">
+          <div className="flex items-start justify-between mb-6">
+            <div className="space-y-4 flex-1 pr-8">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${statusColors[task.status]}`}>
+                  {task.status}
                 </span>
-
-                {/* Priority with Icon */}
-                {priority && (
-                  <span
-                    className={`inline-flex items-center gap-1 text-xs ${priority.color}`}
-                  >
-                    {priority.icon}
-                    {priority.label}
-                  </span>
-                )}
-
-                {/* Assignee */}
-                {(task.assignee || task.assigneeName) && (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                    <span className="w-5 h-5 rounded-full bg-gradient-to-br from-blue-500 to-purple-500 flex items-center justify-center text-[10px] font-bold text-white uppercase">
-                      {(task.assigneeName || task.assignee || "?")[0]}
-                    </span>
-                    {task.assigneeName || task.assignee}
-                  </span>
-                )}
-
-                {/* Due Date */}
-                {task.dueDate && (
-                  <span
-                    className={`text-xs ${
-                      task.dueDate.getTime() < Date.now() &&
-                      !["done", "cancelled", "archived"].includes(task.status)
-                        ? "text-red-400 font-medium"
-                        : "text-muted-foreground"
-                    }`}
-                  >
-                    Due {formatDate(task.dueDate)}
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${priorityBg[task.priority]}`}>
+                  {priorityIcons[task.priority]}
+                  {task.priority}
+                </span>
+                {task.planId && (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-purple-500/20 bg-purple-500/5 text-purple-400 shadow-sm">
+                    <Layers className="w-3.5 h-3.5" />
+                    {entityNames[task.planId] || task.planId}
+                    {task.planOrder !== null && (
+                      <span className="opacity-50 ml-1">#{task.planOrder}</span>
+                    )}
                   </span>
                 )}
               </div>
+              <h2 className="text-2xl font-bold text-foreground leading-tight tracking-tight">
+                {task.title}
+              </h2>
             </div>
             <button
               onClick={onClose}
-              className="p-1.5 rounded-lg hover:bg-secondary transition-colors cursor-pointer"
-              aria-label="Close task detail"
+              className="p-2 rounded-xl hover:bg-white/5 text-muted-foreground hover:text-foreground transition-all border border-transparent hover:border-white/10"
             >
-              <X className="w-5 h-5 text-muted-foreground" />
+              <X className="w-5 h-5" />
             </button>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 pt-2">
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest flex items-center gap-1.5">
+                <User className="w-3 h-3" /> Owner
+              </span>
+              <div className="text-sm font-medium text-foreground/90 truncate">
+                {task.assigneeName || task.assignee || "Unassigned"}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest flex items-center gap-1.5">
+                <Clock className="w-3 h-3" /> Due Date
+              </span>
+              <div className="text-sm font-medium text-foreground/90">
+                {formatDate(task.dueDate)}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest flex items-center gap-1.5">
+                <Hash className="w-3 h-3" /> Project
+              </span>
+              <div className="text-sm font-bold text-blue-400 uppercase tracking-tight">
+                {task.project || "N/A"}
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <span className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest flex items-center gap-1.5">
+                <Bot className="w-3 h-3" /> Source
+              </span>
+              <div className="text-sm font-medium text-foreground/70 truncate">
+                {task.creatorName || task.createdBy}
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* Body */}
-        <div className="px-6 py-5 space-y-5">
-          {/* Linked Entities Tags */}
-          {task.linkedEntities.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Linked Entities
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {task.linkedEntities.map((id) => (
-                  <span
-                    key={id}
-                    className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md bg-blue-900/30 text-blue-300 border border-blue-800/50"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400" />
-                    {entityNames[id] ?? id.slice(0, 8)}
-                  </span>
-                ))}
+        {/* Content Area */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          <div className="p-8 space-y-10">
+            
+            {/* Context Cards Section */}
+            {task.linkedEntities.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="h-4 w-1 rounded-full bg-blue-500" />
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground/80">Contextual Assets</h3>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {task.linkedEntities.map(id => (
+                    <ContextCard key={id} name={id} entity={entitiesById[id]} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Description Section */}
+            <div className="space-y-4">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-4 w-1 rounded-full bg-indigo-500" />
+                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground/80">Instruction & Logic</h3>
+              </div>
+              <div className="prose prose-invert prose-sm max-w-none bg-white/[0.02] border border-white/5 rounded-2xl p-6 shadow-inner leading-relaxed">
+                <MarkdownRenderer content={task.description || "_No description provided._"} />
               </div>
             </div>
-          )}
 
-          {/* Context Cards (SPEC-task-communication-sync P0-1) */}
-          {task.linkedEntities.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Context Cards
-              </p>
-              <div className="space-y-2">
-                {task.linkedEntities.map((id) => {
-                  const ent = entitiesById[id];
-                  if (!ent) return null;
-                  return (
-                    <div
-                      key={`ctx-${id}`}
-                      className="rounded-lg border border-border/60 bg-secondary/15 p-3"
-                    >
-                      <p className="text-sm font-medium text-foreground">
-                        {ent.name}
-                      </p>
-                      {ent.summary && (
-                        <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                          {ent.summary}
-                        </p>
-                      )}
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2 text-xs">
-                        <div>
-                          <p className="text-muted-foreground/80">What</p>
-                          <p className="text-foreground">
-                            {Array.isArray(ent.tags.what) ? ent.tags.what.join(", ") : ent.tags.what}
-                          </p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground/80">Why</p>
-                          <p className="text-foreground">{ent.tags.why}</p>
-                        </div>
-                        <div>
-                          <p className="text-muted-foreground/80">How</p>
-                          <p className="text-foreground">{ent.tags.how}</p>
-                        </div>
+            {/* Acceptance Criteria */}
+            {task.acceptanceCriteria && task.acceptanceCriteria.length > 0 && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="h-4 w-1 rounded-full bg-purple-500" />
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground/80">Success Criteria</h3>
+                </div>
+                <div className="space-y-2.5">
+                  {task.acceptanceCriteria.map((item, idx) => (
+                    <div key={idx} className="flex items-start gap-3 bg-white/[0.02] border border-white/5 p-3 rounded-xl">
+                      <div className="mt-1 w-4 h-4 rounded-full bg-purple-500/10 border border-purple-500/30 flex items-center justify-center flex-shrink-0 text-[10px] font-bold text-purple-400">
+                        {idx + 1}
                       </div>
+                      <p className="text-sm text-foreground/80">{item}</p>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Cross-platform Sync Indicator (SPEC-task-communication-sync P1-1) */}
-          {syncSources.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Sync Indicators
-              </p>
-              <div className="flex flex-wrap gap-1.5">
-                {syncSources.map((item, idx) => (
-                  <span
-                    key={`sync-${idx}`}
-                    className="inline-flex items-center text-xs px-2 py-1 rounded-md border border-emerald-800/40 bg-emerald-900/20 text-emerald-300"
-                  >
-                    Sync: {item}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Input Provenance (SPEC-task-communication-sync P0-2) */}
-          {provenanceItems.length > 0 && (
-            <div>
-              <button
-                type="button"
-                onClick={() => setShowProvenance(true)}
-                className="text-xs px-2.5 py-1.5 rounded-md border border-border hover:bg-secondary transition-colors cursor-pointer"
-              >
-                來源追溯
-              </button>
-            </div>
-          )}
-
-          {/* Description */}
-          {task.description && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Description
-              </p>
-              <div className="bg-secondary/20 rounded-lg p-4 border border-border/50">
-                <MarkdownRenderer
-                  content={task.description}
-                  className="text-sm"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Context Summary */}
-          {task.contextSummary && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Context
-              </p>
-              <p className="text-sm text-foreground bg-secondary/20 rounded-lg p-3 border border-border/50">
-                {task.contextSummary}
-              </p>
-            </div>
-          )}
-
-          {/* Acceptance Criteria */}
-          {task.acceptanceCriteria.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Acceptance Criteria
-              </p>
-              <ul className="space-y-1.5">
-                {task.acceptanceCriteria.map((ac, i) => (
-                  <li
-                    key={i}
-                    className="flex items-start gap-2 text-sm text-foreground"
-                  >
-                    <span className="w-5 h-5 mt-0.5 rounded border border-border flex items-center justify-center text-xs text-muted-foreground flex-shrink-0">
-                      {i + 1}
-                    </span>
-                    {ac}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Blocked Info */}
-          {task.blockedBy.length > 0 && (
-            <div className="bg-red-900/10 border border-red-900/30 rounded-lg p-3">
-              <p className="text-xs font-medium text-red-400 mb-1">
-                Blocked By
-              </p>
-              <p className="text-sm text-foreground">
-                {task.blockedBy.join(", ")}
-              </p>
-              {task.blockedReason && (
-                <p className="text-sm text-red-300 mt-1">
-                  {task.blockedReason}
-                </p>
-              )}
-            </div>
-          )}
-
-          {/* Result */}
-          {task.result && (
-            <div>
-              <p className="text-xs font-medium text-muted-foreground mb-2">
-                Result
-              </p>
-              <div className="bg-green-900/10 border border-green-900/30 rounded-lg p-4">
-                <MarkdownRenderer
-                  content={task.result}
-                  className="text-sm"
-                />
-              </div>
-            </div>
-          )}
-
-          {/* Rejection Reason */}
-          {task.rejectionReason && (
-            <div className="bg-red-900/10 border border-red-900/30 rounded-lg p-3">
-              <p className="text-xs font-medium text-red-400 mb-1">
-                Rejection Reason
-              </p>
-              <p className="text-sm text-red-300">{task.rejectionReason}</p>
-            </div>
-          )}
-
-          {/* Metadata Footer */}
-          <div className="border-t border-border pt-4 grid grid-cols-2 gap-3 text-xs text-muted-foreground">
-            <div>
-              <span className="block text-muted-foreground/70">Created by</span>
-              <span className="text-foreground">{creatorViaLabel}</span>
-            </div>
-            <div>
-              <span className="block text-muted-foreground/70">Project</span>
-              <span className="text-foreground">
-                {task.project || "unscoped"}
-              </span>
-            </div>
-            <div>
-              <span className="block text-muted-foreground/70">Created</span>
-              <span className="text-foreground">
-                {formatDate(task.createdAt)}
-              </span>
-            </div>
-            <div>
-              <span className="block text-muted-foreground/70">Updated</span>
-              <span className="text-foreground">
-                {formatDate(task.updatedAt)}
-              </span>
-            </div>
-            {task.completedAt && (
-              <div>
-                <span className="block text-muted-foreground/70">
-                  Completed
-                </span>
-                <span className="text-foreground">
-                  {formatDate(task.completedAt)}
-                </span>
+            {/* Result / Deliverables */}
+            {task.result && (
+              <div className="space-y-4 pt-4 border-t border-border/20">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="h-4 w-1 rounded-full bg-green-500" />
+                  <h3 className="text-xs font-black uppercase tracking-[0.2em] text-muted-foreground/80">Outcome</h3>
+                </div>
+                <div className="bg-green-500/5 border border-green-500/10 rounded-2xl p-6 text-sm text-green-100/80 leading-relaxed italic">
+                  <MarkdownRenderer content={task.result} />
+                </div>
               </div>
             )}
           </div>
         </div>
       </div>
-
-      {showProvenance && provenanceItems.length > 0 && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/50 z-[60]"
-            onClick={() => setShowProvenance(false)}
-          />
-          <div className="fixed inset-x-4 top-10 mx-auto max-w-2xl max-h-[80vh] overflow-y-auto rounded-xl border border-border bg-card p-4 z-[70]">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-sm font-semibold text-foreground">來源追溯</p>
-              <button
-                type="button"
-                onClick={() => setShowProvenance(false)}
-                className="p-1 rounded hover:bg-secondary"
-                aria-label="Close provenance"
-              >
-                <X className="w-4 h-4 text-muted-foreground" />
-              </button>
-            </div>
-            <div className="space-y-3">
-              {provenanceItems.map((item, idx) => (
-                <div
-                  key={`prov-${idx}`}
-                  className="rounded-lg border border-border/60 bg-secondary/10 p-3"
-                >
-                  <p className="text-xs text-muted-foreground">
-                    {(item.type ?? "source").toString()}
-                    {item.label ? ` • ${item.label}` : ""}
-                    {item.sheet_ref ? ` • ${item.sheet_ref}` : ""}
-                  </p>
-                  {item.snippet && (
-                    <p className="text-sm text-foreground mt-1 whitespace-pre-wrap">
-                      {item.snippet}
-                    </p>
-                  )}
-                  {item.url && (
-                    <a
-                      href={item.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-blue-400 underline underline-offset-2"
-                    >
-                      {item.url}
-                    </a>
-                  )}
-                  {item.image_url && (
-                    <img
-                      src={item.image_url}
-                      alt={item.label ?? "provenance"}
-                      className="mt-2 rounded border border-border max-h-60 object-contain"
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
-    </>
+    </div>
   );
 }
+
+const priorityBg: Record<string, string> = {
+  critical: "bg-red-500/10 border-red-500/20 text-red-400",
+  high: "bg-orange-500/10 border-orange-500/20 text-orange-400",
+  medium: "bg-yellow-500/10 border-yellow-500/20 text-yellow-400",
+  low: "bg-blue-500/10 border-blue-500/20 text-blue-400",
+};

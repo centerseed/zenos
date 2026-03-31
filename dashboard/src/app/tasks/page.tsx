@@ -20,8 +20,8 @@ type ViewMode = "pulse" | "kanban";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "all", label: "All" },
-  { key: "inbox", label: "My Inbox" },
-  { key: "outbox", label: "My Outbox" },
+  { key: "inbox", label: "Inbox" },
+  { key: "outbox", label: "Outbox" },
   { key: "review", label: "Review" },
 ];
 
@@ -48,7 +48,7 @@ function tabFilters(
 
 function TasksPage() {
   const { user, partner } = useAuth();
-  const [viewMode, setViewMode] = useState<ViewMode>("pulse");
+  const [viewMode, setViewMode] = useState<ViewMode>("kanban");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
   const [allEntities, setAllEntities] = useState<Entity[]>([]);
@@ -57,6 +57,7 @@ function TasksPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("all");
   const [filterStatuses, setFilterStatuses] = useState<TaskStatus[]>([]);
   const [filterPriority, setFilterPriority] = useState<TaskPriority | null>(null);
+  const [filterProject, setFilterProject] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [newTaskCount, setNewTaskCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -169,6 +170,17 @@ function TasksPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, viewMode]);
 
+  // Build partner name lookup for legacy ID strings
+  const partnerNames = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of partners) {
+      map[p.id] = p.displayName;
+      map[p.displayName.toLowerCase()] = p.displayName;
+    }
+    if (!map["pm"]) map["pm"] = "PM";
+    return map;
+  }, [partners]);
+
   // Build entity name lookup for rich card tags
   const entityNames = useMemo(() => {
     const map: Record<string, string> = {};
@@ -186,65 +198,133 @@ function TasksPage() {
     return map;
   }, [allEntities]);
 
+  const availableProjects = useMemo(() => {
+    const projects = new Set<string>();
+    for (const t of tasks) {
+      if (t.project) projects.add(t.project);
+    }
+    return Array.from(projects).sort();
+  }, [tasks]);
+
   const filteredTasks = useMemo(() => {
-    let result = tasks;
-
-    if (filterStatuses.length > 0) {
-      result = result.filter((t) => filterStatuses.includes(t.status));
-    }
-
-    if (filterPriority) {
-      result = result.filter((t) => t.priority === filterPriority);
-    }
-
-    return result;
-  }, [tasks, filterStatuses, filterPriority]);
+    if (!tasks) return [];
+    
+    return tasks.map(t => {
+      const cId = t.createdBy?.toLowerCase();
+      const aId = t.assignee?.toLowerCase();
+      const actorPartnerId = (t.sourceMetadata?.actor_partner_id as string | undefined)?.toLowerCase();
+      const createdByLooksLikePartnerId = Boolean(cId && /^[0-9a-f]{32}$/.test(cId));
+      const createdViaAgent =
+        t.sourceMetadata?.created_via_agent !== undefined
+          ? Boolean(t.sourceMetadata?.created_via_agent)
+          : !createdByLooksLikePartnerId;
+      const rawAgentName =
+        typeof t.sourceMetadata?.agent_name === "string"
+          ? t.sourceMetadata.agent_name.trim()
+          : "";
+      const normalizedAgentName = rawAgentName
+        ? rawAgentName.replace(/-agent$/i, "")
+        : "agent";
+      
+      const ownerName =
+        (actorPartnerId ? partnerNames[actorPartnerId] : null) ||
+        (createdByLooksLikePartnerId && cId ? partnerNames[cId] : null) ||
+        (partner?.displayName || null) ||
+        t.creatorName ||
+        t.createdBy;
+      const cName = createdViaAgent
+        ? `${normalizedAgentName}(by ${ownerName})`
+        : ownerName;
+      const aName = t.assigneeName || (aId ? partnerNames[aId] : null) || t.assignee;
+      
+      return {
+        ...t,
+        creatorName: cName,
+        assigneeName: aName
+      };
+    })
+    .filter(t => {
+      if (filterStatuses.length > 0 && !filterStatuses.includes(t.status)) return false;
+      if (filterPriority && t.priority !== filterPriority) return false;
+      if (filterProject && t.project !== filterProject) return false;
+      return true;
+    });
+  }, [tasks, partnerNames, filterStatuses, filterPriority, filterProject, partner?.displayName]);
 
   return (
     <div className="min-h-screen">
       <AppNav />
 
-      <main id="main-content" className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {/* View Mode Toggle */}
-        <div className="flex items-center justify-between mb-6 gap-3">
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-semibold text-foreground">Tasks</h2>
-
-            {/* Refresh Button (P1-3: show after agent creates tasks) */}
+      <main id="main-content" className={`mx-auto px-4 sm:px-6 py-4 transition-all duration-300 ${viewMode === "kanban" ? "max-w-[1600px]" : "max-w-7xl"}`}>
+        
+        {/* Compressed Single Line Header */}
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 mb-6 bg-card/20 p-2 rounded-xl border border-border/40 backdrop-blur-sm">
+          
+          <div className="flex items-center gap-4">
+            {/* Refresh Button */}
             <button
               onClick={handleRefresh}
               disabled={refreshing}
-              className="p-1.5 rounded-lg hover:bg-secondary transition-colors disabled:opacity-50 cursor-pointer relative"
+              className="p-2 rounded-lg hover:bg-secondary transition-colors disabled:opacity-50 cursor-pointer relative group border border-border/50"
               aria-label="Refresh tasks"
-              title="刷新任務列表（Agent 建票後點此查看最新任務）"
             >
-              <RefreshCw className={`w-4 h-4 text-muted-foreground ${refreshing ? "animate-spin" : ""}`} />
+              <RefreshCw className={`w-4 h-4 text-muted-foreground group-hover:text-foreground ${refreshing ? "animate-spin" : ""}`} />
               {newTaskCount > 0 && (
                 <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 text-white text-[9px] font-bold flex items-center justify-center animate-bounce">
                   {newTaskCount}
                 </span>
               )}
             </button>
+
+            {/* Tabs - Now in the same line */}
+            <div className="flex items-center bg-background/50 rounded-lg p-1 border border-border/50">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-200 cursor-pointer uppercase tracking-tighter ${
+                    activeTab === tab.key
+                      ? "bg-blue-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex items-center rounded-lg overflow-hidden border border-border">
+
+          {/* Filters - Now in the same line */}
+          <div className="flex-1 flex items-center justify-center">
+            <TaskFilters
+              selectedStatuses={filterStatuses}
+              selectedPriority={filterPriority}
+              selectedProject={filterProject}
+              availableProjects={availableProjects}
+              onStatusChange={setFilterStatuses}
+              onPriorityChange={setFilterPriority}
+              onProjectChange={setFilterProject}
+            />
+          </div>
+
+          {/* View Toggle */}
+          <div className="flex items-center rounded-lg overflow-hidden border border-border/50 p-1 bg-background/50">
             <button
               onClick={() => setViewMode("pulse")}
-              aria-label="Switch to pulse view"
-              className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
+              className={`px-3 py-1 text-xs font-bold rounded-md cursor-pointer transition-all ${
                 viewMode === "pulse"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-secondary"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary"
               }`}
             >
               Pulse
             </button>
             <button
               onClick={() => setViewMode("kanban")}
-              aria-label="Switch to kanban view"
-              className={`px-4 py-2 text-sm font-medium cursor-pointer transition-colors ${
+              className={`px-3 py-1 text-xs font-bold rounded-md cursor-pointer transition-all ${
                 viewMode === "kanban"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:bg-secondary"
+                  ? "bg-primary text-primary-foreground shadow-sm"
+                  : "text-muted-foreground hover:bg-secondary"
               }`}
             >
               Kanban
@@ -271,34 +351,6 @@ function TasksPage() {
         {/* Kanban View */}
         {viewMode === "kanban" && (
           <>
-            {/* Tabs */}
-            <div className="flex items-center gap-1 mb-4 border-b border-border overflow-x-auto">
-              {TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  aria-label={`Filter tasks by ${tab.label}`}
-                  className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px cursor-pointer transition-colors ${
-                    activeTab === tab.key
-                      ? "border-blue-500 text-blue-400"
-                      : "border-transparent text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Filters */}
-            <div className="mb-6">
-              <TaskFilters
-                selectedStatuses={filterStatuses}
-                selectedPriority={filterPriority}
-                onStatusChange={setFilterStatuses}
-                onPriorityChange={setFilterPriority}
-              />
-            </div>
-
             {/* Board */}
             {loading ? (
               <LoadingState label="Loading tasks..." />
@@ -329,6 +381,7 @@ function TasksPage() {
                 tasks={filteredTasks}
                 entityNames={entityNames}
                 entitiesById={entitiesById}
+                visibleStatuses={filterStatuses}
               />
             )}
           </>

@@ -7,6 +7,28 @@ created: 2026-03-26
 updated: 2026-03-27
 ---
 
+## 2026-03-31 狀態模型簡化（最新覆寫）
+
+本節覆寫舊版 `backlog/blocked/archived` 設計，從即日起 task 狀態以以下五態為準：
+
+- `todo`
+- `in_progress`
+- `review`
+- `done`
+- `cancelled`
+
+語義調整：
+
+- `backlog` 併入 `todo`
+- `blocked` 移除（阻塞資訊保留在 `blocked_by` / `blocked_reason`，不再作為狀態）
+- `archived` 併入 `done`
+
+治理規則同步調整：
+
+- 建票初始狀態只能是 `todo`
+- 驗收通過後進入 `done`
+- `done` / `cancelled` 為終態（需重做請開新票）
+
 # Feature Spec: ZenOS Task Governance
 
 > **治理定位：External（Task 治理模組）**
@@ -437,22 +459,24 @@ Agent 不應在 create 時直接假設：
 
 禁止建立「owner 未定且無指派條件」的 task。
 
-### 9. created_by identity（MCP 必須可追溯）
+### 9. 建立者顯示與身份追溯（簡化版）
 
-`created_by` 在 MCP `task(action="create")` 必須具備可追溯的 partner identity。
+為避免建立者顯示混亂，統一採兩層語意：
+
+1. `created_by`：永遠是 owner 的 `partner.id`（不是 agent 名稱）。
+2. `source_metadata.created_via_agent` + `source_metadata.agent_name`：只描述是否由 agent 代開與 agent 身份。
 
 硬性規則（server side）：
 
-1. 若請求具備 MCP partner context（API key 可解析 partner），`created_by` 最終值必須是該 `partner.id`。
-2. 當 partner context 存在時，server 必須忽略或覆寫 caller 傳入的任意 `created_by` 字串，避免偽造建立者。
-3. 若 partner context 不存在，server 不得建立 task，應回傳 `UNAUTHORIZED` 或 `INVALID_INPUT`。
-4. 禁止將 `created_by` 寫成匿名常數（如 `system`）或無法對應 partner 的暫時字串。
+1. MCP `task(action="create")` 進入時，若可解析 partner context，`created_by` 最終值必須是該 `partner.id`。
+2. partner context 存在時，server 忽略 caller 傳入的任意 `created_by`。
+3. 無 partner context 時，不得建立 task。
+4. `created_via_agent=true` 時，應寫入 `agent_name`（可用 `"agent"` 兜底）。
 
-驗收檢查：
+前端顯示規則（固定）：
 
-- 新建 task 的 `created_by` 能在 `partners.id` 找到對應 row。
-- Kanban Outbox 以 `created_by = current partner.id` 篩選時，能穩定命中該 partner 建立的任務。
-- task card 的建立者顯示不應因 `display_name` 缺值而退化成不可辨識字串。
+- 永遠顯示 owner 名稱（由 `created_by -> partner.display_name` 解析）。
+- 若 `created_via_agent=true`，顯示：`agent (by <owner_name>)`。
 
 ### 8. result（完成輸出落點）
 

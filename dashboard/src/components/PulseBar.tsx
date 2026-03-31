@@ -10,18 +10,16 @@ export function PulseBar({ tasks }: PulseBarProps) {
   const now = new Date();
 
   const active = tasks.filter((t) =>
-    ["backlog", "todo", "in_progress", "review", "blocked"].includes(t.status)
+    ["todo", "in_progress", "review"].includes(t.status)
   ).length;
 
   const moving = tasks.filter((t) => t.status === "in_progress").length;
-
-  const blocked = tasks.filter((t) => t.status === "blocked").length;
 
   const overdue = tasks.filter(
     (t) =>
       t.dueDate !== null &&
       t.dueDate.getTime() < now.getTime() &&
-      !["done", "cancelled", "archived"].includes(t.status)
+      !["done", "cancelled"].includes(t.status)
   ).length;
 
   const review = tasks.filter(
@@ -31,12 +29,6 @@ export function PulseBar({ tasks }: PulseBarProps) {
   const metrics = [
     { label: "Active", value: active, color: "text-blue-400", bg: "bg-blue-900/30" },
     { label: "Moving", value: moving, color: "text-green-400", bg: "bg-green-900/30" },
-    {
-      label: "Blocked",
-      value: blocked,
-      color: blocked > 0 ? "text-red-400" : "text-muted-foreground",
-      bg: blocked > 0 ? "bg-red-900/30" : "bg-secondary",
-    },
     {
       label: "Overdue",
       value: overdue,
@@ -48,7 +40,7 @@ export function PulseBar({ tasks }: PulseBarProps) {
 
   return (
     <div className="bg-card rounded-lg border border-border p-4">
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         {metrics.map((m) => (
           <div
             key={m.label}

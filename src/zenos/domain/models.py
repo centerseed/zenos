@@ -74,13 +74,11 @@ class BlindspotStatus(str, Enum):
 
 
 class TaskStatus(str, Enum):
-    BACKLOG = "backlog"
     TODO = "todo"
+    BLOCKED = "blocked"
     IN_PROGRESS = "in_progress"
     REVIEW = "review"
     DONE = "done"
-    ARCHIVED = "archived"
-    BLOCKED = "blocked"
     CANCELLED = "cancelled"
 
 

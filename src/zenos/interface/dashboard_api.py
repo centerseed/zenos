@@ -160,11 +160,16 @@ def _blindspot_to_dict(b: Blindspot) -> dict:
 
 
 def _task_to_dict(t: Task) -> dict:
+    status = {
+        "backlog": "todo",
+        "blocked": "in_progress",
+        "archived": "done",
+    }.get(t.status, t.status)
     return {
         "id": t.id,
         "title": t.title,
         "description": t.description,
-        "status": t.status,
+        "status": status,
         "priority": t.priority,
         "priorityReason": t.priority_reason,
         "assignee": t.assignee,
