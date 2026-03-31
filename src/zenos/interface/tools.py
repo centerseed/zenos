@@ -1604,21 +1604,22 @@ async def upload_attachment(
 ) -> dict:
     """上傳附件到任務。
 
-    兩種模式：
-    1. base64_content 有值：server 端直接上傳到 GCS（限制 5MB）
-    2. base64_content 為空：回傳 signed PUT URL 讓 client 直接上傳
+    ⚠️ 推薦流程（signed URL 模式，適用所有檔案大小）：
+    1. 呼叫此工具，不傳 base64_content → 取得 signed_put_url
+    2. 用 Bash 執行 curl 上傳檔案到 signed URL：
+       curl -X PUT -H "Content-Type: image/png" --data-binary @/path/to/file "SIGNED_PUT_URL"
+    3. 上傳完成後，附件自動關聯到任務，可在 Dashboard 查看
+
+    ⚠️ base64 模式僅適合極小檔案（< 10KB）。圖片請一律用 signed URL 模式。
+    base64 傳大檔案會被截斷導致圖片損壞。
 
     回傳 attachment_id 和 proxy_url，用於後續 task create/update 的 attachments 欄位。
-
-    使用時機：
-    - 要在任務上附加圖片或檔案 → 先呼叫此工具取得 attachment_id
-    - 取得 attachment_id 後，在 task create/update 的 attachments 帶入
 
     Args:
         task_id: 目標任務 ID
         filename: 原始檔名
         content_type: MIME type（如 "image/png", "application/pdf"）
-        base64_content: Base64 編碼的檔案內容（可選，<=5MB 解碼後）
+        base64_content: Base64 編碼的檔案內容（僅限極小檔案 < 10KB，圖片請用 signed URL 模式）
         description: 附件描述（可選）
     """
     try:
