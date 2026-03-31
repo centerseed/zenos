@@ -1550,7 +1550,7 @@ async def task(
             ⚠️ 附件必須用此參數，不能放在 source_metadata 裡。
             每個項目需有 type ("image"/"file"/"link")。
             - link 類型：需有 url 和 title。範例：{"type": "link", "url": "https://...", "title": "蝦皮旗艦館"}
-            - image/file 類型：需有 attachment_id（先呼叫 upload_attachment 取得）。
+            - image/file 類型：先呼叫 upload_attachment 取得 signed_put_url，用 curl PUT 上傳檔案後，再帶 attachment_id。
               範例：{"type": "image", "id": "<attachment_id>", "filename": "photo.jpg", "content_type": "image/jpeg"}
             update 時為全量覆寫——傳入的陣列會取代所有既有附件。
 
@@ -1599,27 +1599,22 @@ async def upload_attachment(
     task_id: str,
     filename: str,
     content_type: str,
-    base64_content: str | None = None,
     description: str | None = None,
 ) -> dict:
-    """上傳附件到任務。
+    """上傳附件到任務（signed URL 模式）。
 
-    ⚠️ 推薦流程（signed URL 模式，適用所有檔案大小）：
-    1. 呼叫此工具，不傳 base64_content → 取得 signed_put_url
+    流程：
+    1. 呼叫此工具 → 取得 signed_put_url（15 分鐘有效）
     2. 用 Bash 執行 curl 上傳檔案到 signed URL：
-       curl -X PUT -H "Content-Type: image/png" --data-binary @/path/to/file "SIGNED_PUT_URL"
+       curl -X PUT -H "Content-Type: <content_type>" --data-binary @/path/to/file "<signed_put_url>"
     3. 上傳完成後，附件自動關聯到任務，可在 Dashboard 查看
 
-    ⚠️ base64 模式僅適合極小檔案（< 10KB）。圖片請一律用 signed URL 模式。
-    base64 傳大檔案會被截斷導致圖片損壞。
-
-    回傳 attachment_id 和 proxy_url，用於後續 task create/update 的 attachments 欄位。
+    回傳 attachment_id、proxy_url、signed_put_url。
 
     Args:
         task_id: 目標任務 ID
         filename: 原始檔名
         content_type: MIME type（如 "image/png", "application/pdf"）
-        base64_content: Base64 編碼的檔案內容（僅限極小檔案 < 10KB，圖片請用 signed URL 模式）
         description: 附件描述（可選）
     """
     try:
@@ -1634,32 +1629,16 @@ async def upload_attachment(
         if task_obj is None:
             return {"error": "NOT_FOUND", "message": f"Task '{task_id}' not found"}
 
-        import base64 as b64module
         from zenos.infrastructure.gcs_client import (
             get_default_bucket,
-            upload_blob,
             generate_signed_put_url,
         )
 
         attachment_id = uuid.uuid4().hex
         gcs_path = f"tasks/{task_id}/attachments/{attachment_id}/{filename}"
         bucket_name = get_default_bucket()
-        uploaded = False
-        signed_put_url = None
 
-        if base64_content:
-            # Mode 1: server-side upload
-            try:
-                data = b64module.b64decode(base64_content)
-            except Exception:
-                return {"error": "INVALID_INPUT", "message": "Invalid base64_content"}
-            if len(data) > 5 * 1024 * 1024:
-                return {"error": "INVALID_INPUT", "message": "File exceeds 5MB limit"}
-            upload_blob(bucket_name, gcs_path, data, content_type)
-            uploaded = True
-        else:
-            # Mode 2: return signed PUT URL for client upload
-            signed_put_url = generate_signed_put_url(bucket_name, gcs_path, content_type)
+        signed_put_url = generate_signed_put_url(bucket_name, gcs_path, content_type)
 
         attachment = {
             "id": attachment_id,
@@ -1667,7 +1646,7 @@ async def upload_attachment(
             "content_type": content_type,
             "gcs_path": gcs_path,
             "uploaded_by": partner["id"],
-            "uploaded": uploaded,
+            "uploaded": False,
             "description": description or "",
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -1679,15 +1658,13 @@ async def upload_attachment(
         result = {
             "attachment_id": attachment_id,
             "proxy_url": f"/attachments/{attachment_id}",
-            "uploaded": uploaded,
+            "signed_put_url": signed_put_url,
         }
-        if signed_put_url:
-            result["signed_put_url"] = signed_put_url
 
         _audit_log(
             event_type="attachment.upload",
             target={"task_id": task_id, "attachment_id": attachment_id},
-            changes={"filename": filename, "content_type": content_type, "mode": "inline" if uploaded else "signed_url"},
+            changes={"filename": filename, "content_type": content_type, "mode": "signed_url"},
         )
         return result
 
