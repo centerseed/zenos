@@ -200,6 +200,7 @@ def build_claude_web_payload(selection: str, skip_overview: bool) -> dict:
 def build_codex_payload(selection: str, skip_overview: bool) -> dict:
     """組裝 codex 平台的完整 install response。"""
     bundle_version = get_bundle_version()
+    skill_files = get_skill_files(selection)
     agents_md_addition = _build_agents_md_addition(selection)
 
     response: dict = {
@@ -208,16 +209,15 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
         "bundle_version": bundle_version,
         "skill_selection": selection,
         "payload": {
-            "curl_command": (
-                "curl -sL https://github.com/centerseed/zenos/archive/refs/heads/main.tar.gz"
-                " | tar -xz --strip-components=1 \"zenos-main/skills/\""
-            ),
+            "skill_files": skill_files,
             "agents_md_addition": agents_md_addition,
         },
         "instructions": [
-            "1. 在專案根目錄執行 payload.curl_command 下載 skills/",
-            "2. 在 AGENTS.md 加入 payload.agents_md_addition 的內容",
+            "1. 將 payload.skill_files 中每個 key 作為專案根目錄的相對路徑，寫入對應內容",
+            "2. 在專案根目錄的 AGENTS.md 加入 payload.agents_md_addition 的內容",
+            "3. 完成後呼叫 mcp__zenos__search(query='ZenOS', collection='entities') 驗證 MCP 連線",
         ],
+        "verification_command": "mcp__zenos__search(query='ZenOS', collection='entities')",
     }
 
     if not skip_overview:

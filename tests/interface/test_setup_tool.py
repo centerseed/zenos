@@ -329,7 +329,7 @@ class TestSetupToolClaudeWeb:
 
 
 class TestSetupToolCodex:
-    """DC-4: setup(platform='codex') → curl_command + agents_md_addition."""
+    """DC-4: setup(platform='codex') → skill_files + agents_md_addition."""
 
     async def test_action_is_install(self):
         from zenos.interface.tools import setup
@@ -341,12 +341,11 @@ class TestSetupToolCodex:
         result = await setup(platform="codex")
         assert "bundle_version" in result
 
-    async def test_payload_has_curl_command(self):
+    async def test_payload_has_skill_files(self):
         from zenos.interface.tools import setup
         result = await setup(platform="codex")
-        curl = result["payload"]["curl_command"]
-        assert isinstance(curl, str)
-        assert "curl" in curl
+        assert "skill_files" in result["payload"]
+        assert len(result["payload"]["skill_files"]) > 0
 
     async def test_payload_has_agents_md_addition(self):
         from zenos.interface.tools import setup
