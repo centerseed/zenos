@@ -5,3 +5,5 @@ node_modules/
 out/
 scripts/qa-service-account.json
 playwright/.auth/
+playwright-report/
+test-results/
