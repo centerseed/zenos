@@ -1088,6 +1088,21 @@ class OntologyService:
                 "L2 entity 初始為 draft 狀態。經 confirm 且至少有 1 條具體 impacts 後才會升為 active。"
             )
 
+        # L2 consolidation_mode: store the mode that was used to produce this L2.
+        # Applies to both new and existing module entities.
+        if entity_type == EntityType.MODULE:
+            consolidation_mode = merged_data.get("consolidation_mode")
+            if consolidation_mode is not None:
+                valid_modes = {"global", "incremental"}
+                if consolidation_mode not in valid_modes:
+                    raise ValueError(
+                        f"consolidation_mode 必須是 {valid_modes} 之一，收到：'{consolidation_mode}'"
+                    )
+                details = merged_data.get("details") or {}
+                if isinstance(details, dict):
+                    details["consolidation_mode"] = consolidation_mode
+                    merged_data["details"] = details
+
         # 7. duplicate name+type check (new entity only)
         if not merged_data.get("id"):
             existing = await self._entities.get_by_name(name)

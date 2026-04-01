@@ -1336,6 +1336,33 @@ def run_quality_check(
         ),
     ))
 
+    # --- 16. L2 consolidation mode tracking ---
+    # L2 entities produced without global consolidation mode should be flagged.
+    modules_without_global: list[tuple[Entity, str]] = []
+    for mod in module_entities:
+        cm = (
+            mod.details.get("consolidation_mode")
+            if mod.details and isinstance(mod.details, dict)
+            else None
+        )
+        if cm is None:
+            modules_without_global.append((mod, "missing"))
+        elif cm == "incremental":
+            modules_without_global.append((mod, "incremental"))
+
+    items.append(QualityCheckItem(
+        name="l2_consolidation_mode",
+        passed=True,  # warning-only
+        detail=(
+            f"{len(modules_without_global)} 個 L2 entity 缺少全局統合模式標記或為 incremental 模式："
+            + ", ".join(f"'{m.name}' ({reason})" for m, reason in modules_without_global[:5])
+            + (f" ... (+{len(modules_without_global) - 5})" if len(modules_without_global) > 5 else "")
+            + "。建議以全局模式重新 capture。"
+            if modules_without_global
+            else f"所有 {len(module_entities)} 個 L2 entity 均標記為 global 統合模式"
+        ),
+    ))
+
     # Compute overall score (warnings don't affect score)
     passed = [i for i in items if i.passed]
     failed = [i for i in items if not i.passed]
@@ -1347,6 +1374,8 @@ def run_quality_check(
         warning_items.append(items[10])  # l2_summary_conciseness
     if overdue_modules:
         warning_items.append(items[13])  # l2_governance_review_overdue
+    if modules_without_global:
+        warning_items.append(items[-1])  # l2_consolidation_mode
     score = int((len(passed) / len(items)) * 100) if items else 0
 
     return QualityReport(

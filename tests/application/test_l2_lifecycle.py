@@ -330,6 +330,90 @@ class TestConfirmModuleImpactsGate:
         assert result["confirmed_by_user"] is True
 
 
+class TestConfirmModuleThreeQuestionGate:
+    """三問判斷 gate: confirm L2 requires complete layer_decision."""
+
+    async def test_confirm_l2_without_layer_decision_raises(self):
+        """L2 confirm 應在缺少 layer_decision 時拋出 ValueError。"""
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1", name="Pricing Rules", type="module",
+            summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
+            status="draft", parent_id="prod-1",
+            details=None,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+        with pytest.raises(ValueError, match="layer_decision"):
+            await svc.confirm("entities", "mod-1")
+
+    async def test_confirm_l2_with_empty_details_raises(self):
+        """L2 confirm 應在 details 為空 dict（無 layer_decision）時拋出 ValueError。"""
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1", name="Pricing Rules", type="module",
+            summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
+            status="draft", parent_id="prod-1",
+            details={},
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+        with pytest.raises(ValueError, match="layer_decision"):
+            await svc.confirm("entities", "mod-1")
+
+    async def test_confirm_l2_with_q1_false_raises(self):
+        """L2 confirm 應在 q1_persistent=False 時拋出 ValueError。"""
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1", name="Pricing Rules", type="module",
+            summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
+            status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": False, "q2_cross_role": True, "q3_company_consensus": True}},
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+        with pytest.raises(ValueError, match="三問判斷未全通過"):
+            await svc.confirm("entities", "mod-1")
+
+    async def test_confirm_l2_with_q3_false_raises(self):
+        """L2 confirm 應在 q3_company_consensus=False 時拋出 ValueError。"""
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1", name="Pricing Rules", type="module",
+            summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
+            status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": False}},
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+        with pytest.raises(ValueError, match="三問判斷未全通過"):
+            await svc.confirm("entities", "mod-1")
+
+    async def test_confirm_l2_with_complete_layer_decision_and_impacts_succeeds(self):
+        """L2 confirm 三問全通過 + 有具體 impacts → 成功。"""
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1", name="Pricing Rules", type="module",
+            summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
+            status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
+        )
+        concrete_rel = Relationship(
+            id="rel-1", source_entity_id="mod-1", target_id="prod-1",
+            type=RelationshipType.IMPACTS,
+            description="pricing 改了→billing 監控要跟著看",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[concrete_rel])
+        svc = _make_service(repos)
+        result = await svc.confirm("entities", "mod-1")
+        assert result["confirmed_by_user"] is True
+
+
 # ---------------------------------------------------------------------------
 # DC-5: write update cannot transition module from draft to active
 # ---------------------------------------------------------------------------
@@ -543,6 +627,7 @@ class TestConfirmSetsLastReviewedAt:
             tags=Tags(what="features", why="control", how="flags", who="pm"),
             status="draft",
             confirmed_by_user=False,
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
         )
         concrete_rel = Relationship(
             id="r1",
@@ -669,3 +754,85 @@ class TestL2SummaryTechTermScanOnWrite:
         assert "API" in warning_text
         # Status NOT forced to draft for confirmed entity
         assert result.entity.status != "draft"
+
+
+# ---------------------------------------------------------------------------
+# Consolidation mode tests
+# ---------------------------------------------------------------------------
+
+class TestL2ConsolidationMode:
+
+    def _make_repos_with_parent(self):
+        repos = _mock_repos()
+        parent = _make_parent()
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[parent])
+        return repos
+
+    async def test_write_new_l2_with_global_mode_stores_in_details(self):
+        """write L2 with consolidation_mode='global' → details['consolidation_mode'] == 'global'."""
+        repos = self._make_repos_with_parent()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_module_data(consolidation_mode="global"))
+        assert result.entity is not None
+        assert result.entity.details is not None
+        assert result.entity.details.get("consolidation_mode") == "global"
+
+    async def test_write_new_l2_with_incremental_mode_stores_in_details(self):
+        """write L2 with consolidation_mode='incremental' → details['consolidation_mode'] == 'incremental'."""
+        repos = self._make_repos_with_parent()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_module_data(consolidation_mode="incremental"))
+        assert result.entity is not None
+        assert result.entity.details is not None
+        assert result.entity.details.get("consolidation_mode") == "incremental"
+
+    async def test_write_new_l2_with_invalid_mode_raises_value_error(self):
+        """write L2 with consolidation_mode='invalid' → ValueError."""
+        repos = self._make_repos_with_parent()
+        svc = _make_service(repos)
+        with pytest.raises(ValueError, match="consolidation_mode 必須是"):
+            await svc.upsert_entity(_module_data(consolidation_mode="invalid"))
+
+    async def test_write_new_l2_without_consolidation_mode_succeeds(self):
+        """write L2 without consolidation_mode → no details key set (backward compatible)."""
+        repos = self._make_repos_with_parent()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(_module_data())
+        assert result.entity is not None
+        # details may be None or a dict without consolidation_mode
+        if result.entity.details:
+            assert "consolidation_mode" not in result.entity.details
+
+    async def test_update_existing_l2_can_set_consolidation_mode(self):
+        """Updating an existing L2 with consolidation_mode stores it in details."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="mod-existing",
+            name="Pricing Rules",
+            type="module",
+            summary="定義方案與升降級規則",
+            tags=Tags(what="pricing", why="revenue", how="rules", who="pm"),
+            status="draft",
+            parent_id="prod-1",
+        )
+        parent = _make_parent()
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[parent, existing])
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[])
+
+        svc = _make_service(repos)
+        result = await svc.upsert_entity({
+            "id": "mod-existing",
+            "name": "Pricing Rules",
+            "type": "module",
+            "summary": "定義方案與升降級規則",
+            "tags": {"what": "pricing", "why": "revenue", "how": "rules", "who": "pm"},
+            "parent_id": "prod-1",
+            "consolidation_mode": "global",
+        })
+        assert result.entity is not None
+        assert result.entity.details is not None
+        assert result.entity.details.get("consolidation_mode") == "global"

@@ -1281,3 +1281,185 @@ class TestFindTechTermsInSummary:
         check = next(i for i in report.failed if i.name == "l2_summary_readability")
         for term in found:
             assert term in check.detail
+
+
+# ──────────────────────────────────────────────
+# Check 15: l2_three_question_record
+# ──────────────────────────────────────────────
+
+class TestL2ThreeQuestionRecord:
+    """Quality check 15: active L2 entities must have complete three-question record."""
+
+    def test_active_module_without_layer_decision_fails(self):
+        """Active L2 with no layer_decision in details → check15 fails."""
+        module = _make_entity(
+            name="Pricing Rules",
+            entity_type=EntityType.MODULE,
+            status=EntityStatus.ACTIVE,
+            details=None,
+        )
+        report = run_quality_check([module], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_three_question_record" in failed_names
+
+    def test_active_module_with_empty_details_fails(self):
+        """Active L2 with empty details dict (no layer_decision key) → check15 fails."""
+        module = _make_entity(
+            name="Pricing Rules",
+            entity_type=EntityType.MODULE,
+            status=EntityStatus.ACTIVE,
+            details={},
+        )
+        report = run_quality_check([module], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_three_question_record" in failed_names
+
+    def test_active_module_with_incomplete_layer_decision_fails(self):
+        """Active L2 where q1_persistent=False → check15 fails."""
+        module = _make_entity(
+            name="Pricing Rules",
+            entity_type=EntityType.MODULE,
+            status=EntityStatus.ACTIVE,
+            details={"layer_decision": {"q1_persistent": False, "q2_cross_role": True, "q3_company_consensus": True}},
+        )
+        report = run_quality_check([module], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_three_question_record" in failed_names
+
+    def test_active_module_with_complete_layer_decision_passes(self):
+        """Active L2 with all three questions True → check15 passes."""
+        module = _make_entity(
+            name="Pricing Rules",
+            entity_type=EntityType.MODULE,
+            status=EntityStatus.ACTIVE,
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
+        )
+        report = run_quality_check([module], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_three_question_record" in passed_names
+
+    def test_draft_module_without_layer_decision_is_not_checked(self):
+        """Draft (non-active) L2 is excluded from check15 — only active modules are checked."""
+        module = _make_entity(
+            name="Draft Module",
+            entity_type=EntityType.MODULE,
+            status=EntityStatus.DRAFT,
+            details=None,
+        )
+        report = run_quality_check([module], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_three_question_record" in passed_names
+
+    def test_no_active_modules_passes(self):
+        """No active modules → check15 passes with 'all 0 entities' message."""
+        report = run_quality_check([], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_three_question_record" in passed_names
+
+    def test_mixed_modules_reports_only_incomplete_ones(self):
+        """Mix of complete and incomplete L2s → check15 fails and detail lists incomplete ones."""
+        complete = _make_entity(
+            name="Complete Module",
+            entity_type=EntityType.MODULE,
+            status=EntityStatus.ACTIVE,
+            entity_id="m1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
+        )
+        incomplete = _make_entity(
+            name="Incomplete Module",
+            entity_type=EntityType.MODULE,
+            status=EntityStatus.ACTIVE,
+            entity_id="m2",
+            details=None,
+        )
+        report = run_quality_check([complete, incomplete], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_three_question_record" in failed_names
+        check = next(f for f in report.failed if f.name == "l2_three_question_record")
+        assert "Incomplete Module" in check.detail
+
+
+# ──────────────────────────────────────────────
+# 16. L2 consolidation mode check
+# ──────────────────────────────────────────────
+
+class TestL2ConsolidationModeCheck:
+
+    def test_all_global_mode_passes_with_no_warning(self):
+        """All L2s with consolidation_mode='global' → check passes and no warning item."""
+        mod = _make_entity(
+            name="Global Module",
+            entity_type=EntityType.MODULE,
+            entity_id="m1",
+            details={"consolidation_mode": "global"},
+        )
+        report = run_quality_check([mod], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_consolidation_mode" in passed_names
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_consolidation_mode" not in warning_names
+
+    def test_incremental_mode_triggers_warning(self):
+        """L2 with consolidation_mode='incremental' → check passes (warning-only) and is in warnings."""
+        mod = _make_entity(
+            name="Incremental Module",
+            entity_type=EntityType.MODULE,
+            entity_id="m1",
+            details={"consolidation_mode": "incremental"},
+        )
+        report = run_quality_check([mod], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_consolidation_mode" in passed_names
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_consolidation_mode" in warning_names
+        check = next(w for w in report.warnings if w.name == "l2_consolidation_mode")
+        assert "Incremental Module" in check.detail
+        assert "incremental" in check.detail
+        assert "建議以全局模式重新 capture" in check.detail
+
+    def test_missing_consolidation_mode_triggers_warning(self):
+        """L2 without consolidation_mode in details → check passes (warning-only) and is in warnings."""
+        mod = _make_entity(
+            name="Missing Mode Module",
+            entity_type=EntityType.MODULE,
+            entity_id="m1",
+            details=None,
+        )
+        report = run_quality_check([mod], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_consolidation_mode" in passed_names
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_consolidation_mode" in warning_names
+        check = next(w for w in report.warnings if w.name == "l2_consolidation_mode")
+        assert "Missing Mode Module" in check.detail
+        assert "missing" in check.detail
+
+    def test_no_modules_passes_with_no_warning(self):
+        """No module entities → check passes with 0-count message, no warning."""
+        report = run_quality_check([], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_consolidation_mode" in passed_names
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_consolidation_mode" not in warning_names
+
+    def test_mixed_modes_warning_lists_non_global(self):
+        """Mix of global and incremental/missing L2s → warning lists the non-global ones."""
+        global_mod = _make_entity(
+            name="Good Module",
+            entity_type=EntityType.MODULE,
+            entity_id="m1",
+            details={"consolidation_mode": "global"},
+        )
+        bad_mod = _make_entity(
+            name="Bad Module",
+            entity_type=EntityType.MODULE,
+            entity_id="m2",
+            details={"consolidation_mode": "incremental"},
+        )
+        report = run_quality_check([global_mod, bad_mod], [], [], [], [])
+        warning_names = [w.name for w in report.warnings]
+        assert "l2_consolidation_mode" in warning_names
+        check = next(w for w in report.warnings if w.name == "l2_consolidation_mode")
+        assert "Bad Module" in check.detail
+        assert "Good Module" not in check.detail
+        assert "Complete Module" not in check.detail

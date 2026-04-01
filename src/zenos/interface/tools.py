@@ -793,6 +793,7 @@ async def write(
               選填：sources([{uri, label, type}]) 或 append_sources（追加不覆蓋）
               選填：visibility（"public" | "restricted"，預設 public）
               選填：force（true 時可覆寫已確認 entity 的非空欄位）
+              選填：consolidation_mode（"global" | "incremental"，標記 L2 建立時的統合模式）
               選填：layer_decision({q1_persistent, q2_cross_role, q3_company_consensus, impacts_draft})
                     — 新建 L2（type=module）時必填，除非 force=True
                     — 型別必須是 object（dict），不可傳 JSON 字串
