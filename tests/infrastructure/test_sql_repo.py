@@ -817,6 +817,32 @@ class TestSqlTaskRepository:
         main_sql = conn.fetch.call_args_list[0][0][0]
         assert "archived" in main_sql
 
+    def test_list_all_with_offset_uses_sql_offset(self):
+        """list_all(offset=10) includes OFFSET in the SQL query."""
+        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        import asyncio
+
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlTaskRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.list_all(offset=10))
+
+        main_sql = conn.fetch.call_args_list[0][0][0]
+        assert "OFFSET" in main_sql.upper()
+
+    def test_list_all_with_explicit_status_uses_offset(self):
+        """list_all with explicit status filter uses OFFSET in SQL."""
+        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        import asyncio
+
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlTaskRepository(pool)
+        asyncio.get_event_loop().run_until_complete(
+            repo.list_all(status=["todo"], offset=5)
+        )
+
+        main_sql = conn.fetch.call_args_list[0][0][0]
+        assert "OFFSET" in main_sql.upper()
+
     def test_list_blocked_by_queries_blocker_task_id(self):
         """list_blocked_by queries task_blockers by blocker_task_id."""
         from zenos.infrastructure.sql_repo import SqlTaskRepository
@@ -1355,9 +1381,9 @@ class TestSqlUsageLogRepository:
         asyncio.get_event_loop().run_until_complete(
             repo.write_usage_log(
                 partner_id="p1",
-                tool_name="query_memory",
-                entity_count=3,
-                token_count=500,
+                feature="governance.infer_all",
+                tokens_in=500,
+                tokens_out=120,
                 model="gpt-4o",
             )
         )
@@ -1367,9 +1393,10 @@ class TestSqlUsageLogRepository:
         assert "INSERT" in sql
         assert "usage_logs" in sql
         assert args[0] == "p1"        # partner_id
-        assert args[1] == "gpt-4o"   # model
-        assert args[2] == 500         # tokens_in
-        assert args[3] == 0           # tokens_out
+        assert args[1] == "governance.infer_all"  # feature
+        assert args[2] == "gpt-4o"   # model
+        assert args[3] == 500         # tokens_in
+        assert args[4] == 120         # tokens_out
 
     def test_skips_insert_for_empty_partner_id(self):
         """write_usage_log silently returns without querying when partner_id is empty."""
@@ -1381,9 +1408,9 @@ class TestSqlUsageLogRepository:
         asyncio.get_event_loop().run_until_complete(
             repo.write_usage_log(
                 partner_id="",
-                tool_name="query_memory",
-                entity_count=0,
-                token_count=100,
+                feature="governance.infer_all",
+                tokens_in=100,
+                tokens_out=20,
                 model="gpt-4o",
             )
         )
@@ -1400,9 +1427,9 @@ class TestSqlUsageLogRepository:
         asyncio.get_event_loop().run_until_complete(
             repo.write_usage_log(
                 partner_id=None,
-                tool_name="query_memory",
-                entity_count=0,
-                token_count=100,
+                feature="governance.infer_all",
+                tokens_in=100,
+                tokens_out=20,
                 model="gpt-4o",
             )
         )

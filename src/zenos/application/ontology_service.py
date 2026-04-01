@@ -78,6 +78,29 @@ class DocumentSyncResult:
     document: Entity | None = None
 
 
+def _collect_subtree_ids(root_id: str, entity_map: dict[str, Entity]) -> set[str]:
+    """Return the set of entity IDs that belong to a product subtree.
+
+    Includes the root itself and any entity whose parent_id chain leads to it.
+    Uses iterative BFS to avoid stack overflow on deep trees.
+    """
+    ids: set[str] = {root_id}
+    # Build parent -> children index
+    children: dict[str, list[str]] = {}
+    for eid, e in entity_map.items():
+        if e.parent_id:
+            children.setdefault(e.parent_id, []).append(eid)
+    # BFS
+    queue = [root_id]
+    while queue:
+        current = queue.pop(0)
+        for child_id in children.get(current, []):
+            if child_id not in ids:
+                ids.add(child_id)
+                queue.append(child_id)
+    return ids
+
+
 # ──────────────────────────────────────────────
 # Service
 # ──────────────────────────────────────────────
@@ -695,11 +718,23 @@ class OntologyService:
         # Fallback: try legacy documents collection
         return await self._documents.get_by_id(doc_id)
 
-    async def search(self, query: str) -> list[SearchResult]:
+    async def search(
+        self,
+        query: str,
+        *,
+        max_level: int | None = None,
+        product_id: str | None = None,
+    ) -> list[SearchResult]:
         """Keyword search across entities, documents, and protocols.
 
         Archived document entities (dead links confirmed unresolvable) are excluded
         from the default search space per the source governance spec.
+
+        Args:
+            max_level: If set, only include entities with level <= max_level.
+            product_id: If set, only include entities that belong to the given
+                        product subtree (the product itself or any entity whose
+                        parent_id chain leads to it).
         """
         all_entities = await self._entities.list_all()
         # Exclude archived document entities — they have been removed due to unresolvable dead links
@@ -707,6 +742,13 @@ class OntologyService:
             e for e in all_entities
             if not (e.type == "document" and e.status == "archived")
         ]
+
+        # Filter by product subtree if requested
+        if product_id is not None:
+            entity_map = {e.id: e for e in entities if e.id}
+            product_ids = _collect_subtree_ids(product_id, entity_map)
+            entities = [e for e in entities if e.id in product_ids]
+
         # Document entities are included in entities list (type="document")
         # Also fetch legacy documents for backward compat
         documents = await self._documents.list_all()
@@ -717,7 +759,7 @@ class OntologyService:
                 protocol = await self._protocols.get_by_entity(entity.id)
                 if protocol is not None:
                     protocols.append(protocol)
-        return search_ontology(query, entities, documents, protocols)
+        return search_ontology(query, entities, documents, protocols, max_level=max_level)
 
     # ──────────────────────────────────────────
     # Governance-facing use cases (治理端)

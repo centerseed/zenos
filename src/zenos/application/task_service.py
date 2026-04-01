@@ -351,7 +351,8 @@ class TaskService:
         priority: str | None = None,
         linked_entity: str | None = None,
         include_archived: bool = False,
-        limit: int = 50,
+        limit: int = 200,
+        offset: int = 0,
         project: str | None = None,
         plan_id: str | None = None,
     ) -> list[Task]:
@@ -364,6 +365,7 @@ class TaskService:
             linked_entity=linked_entity,
             include_archived=include_archived,
             limit=limit,
+            offset=offset,
             project=project,
             plan_id=plan_id,
         )

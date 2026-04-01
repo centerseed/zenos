@@ -1,4 +1,4 @@
-"""Tests for in-memory keyword search."""
+"""Tests for in-memory keyword search and ontology helpers."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from zenos.domain.models import (
     Tags,
 )
 from zenos.domain.search import SearchResult, search_ontology, _tokenize, _score_match
+from zenos.application.ontology_service import _collect_subtree_ids
 
 
 # ──────────────────────────────────────────────
@@ -203,3 +204,113 @@ class TestSearchOntology:
         assert r.name == "Test"
         assert r.summary == "Test summary"
         assert r.score > 0
+
+
+# ──────────────────────────────────────────────
+# max_level filtering tests
+# ──────────────────────────────────────────────
+
+class TestSearchOntologyMaxLevel:
+    def _entity_with_level(self, name: str, level: int | None) -> Entity:
+        e = _entity(name)
+        e.level = level
+        return e
+
+    def test_max_level_2_excludes_l3(self):
+        l1 = self._entity_with_level("Product", 1)
+        l2 = self._entity_with_level("Module", 2)
+        l3 = self._entity_with_level("Detail", 3)
+        results = search_ontology("Product Module Detail", [l1, l2, l3], [], [], max_level=2)
+        names = {r.name for r in results}
+        assert "Product" in names
+        assert "Module" in names
+        assert "Detail" not in names
+
+    def test_max_level_1_excludes_l2_l3(self):
+        l1 = self._entity_with_level("Product", 1)
+        l2 = self._entity_with_level("Module", 2)
+        results = search_ontology("Product Module", [l1, l2], [], [], max_level=1)
+        names = {r.name for r in results}
+        assert "Product" in names
+        assert "Module" not in names
+
+    def test_max_level_none_includes_all(self):
+        l1 = self._entity_with_level("Product", 1)
+        l3 = self._entity_with_level("Detail", 3)
+        results = search_ontology("Product Detail", [l1, l3], [], [], max_level=None)
+        assert len(results) == 2
+
+    def test_level_none_treated_as_l1(self):
+        """Entities with level=None are treated as L1 (included when max_level >= 1)."""
+        no_level = self._entity_with_level("Legacy", None)
+        results = search_ontology("Legacy", [no_level], [], [], max_level=2)
+        assert len(results) == 1
+
+    def test_level_none_excluded_when_max_level_0(self):
+        """Edge case: max_level=0 would exclude level=None (treated as 1)."""
+        no_level = self._entity_with_level("Legacy", None)
+        results = search_ontology("Legacy", [no_level], [], [], max_level=0)
+        assert len(results) == 0
+
+    def test_max_level_does_not_affect_documents_or_protocols(self):
+        """max_level only filters entities, not documents or protocols."""
+        l3 = self._entity_with_level("Detail", 3)
+        doc = _document("API Guide")
+        proto = _protocol("TestModule")
+        results = search_ontology("API TestModule Detail", [l3], [doc], [proto], max_level=2)
+        types = {r.type for r in results}
+        assert "document" in types
+        assert "protocol" in types
+        assert "entity" not in types
+
+
+# ──────────────────────────────────────────────
+# _collect_subtree_ids tests
+# ──────────────────────────────────────────────
+
+class TestCollectSubtreeIds:
+    def _entity_with_parent(self, eid: str, parent_id: str | None = None) -> Entity:
+        return Entity(
+            id=eid,
+            name=eid,
+            type="module",
+            summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+            parent_id=parent_id,
+        )
+
+    def test_root_only(self):
+        root = self._entity_with_parent("prod-1")
+        entity_map = {"prod-1": root}
+        ids = _collect_subtree_ids("prod-1", entity_map)
+        assert ids == {"prod-1"}
+
+    def test_includes_children(self):
+        root = self._entity_with_parent("prod-1")
+        child1 = self._entity_with_parent("mod-1", "prod-1")
+        child2 = self._entity_with_parent("mod-2", "prod-1")
+        entity_map = {"prod-1": root, "mod-1": child1, "mod-2": child2}
+        ids = _collect_subtree_ids("prod-1", entity_map)
+        assert ids == {"prod-1", "mod-1", "mod-2"}
+
+    def test_includes_grandchildren(self):
+        root = self._entity_with_parent("prod-1")
+        child = self._entity_with_parent("mod-1", "prod-1")
+        grandchild = self._entity_with_parent("doc-1", "mod-1")
+        entity_map = {"prod-1": root, "mod-1": child, "doc-1": grandchild}
+        ids = _collect_subtree_ids("prod-1", entity_map)
+        assert ids == {"prod-1", "mod-1", "doc-1"}
+
+    def test_excludes_unrelated(self):
+        root = self._entity_with_parent("prod-1")
+        child = self._entity_with_parent("mod-1", "prod-1")
+        unrelated = self._entity_with_parent("mod-other", "prod-2")
+        entity_map = {"prod-1": root, "mod-1": child, "mod-other": unrelated}
+        ids = _collect_subtree_ids("prod-1", entity_map)
+        assert "mod-other" not in ids
+
+    def test_missing_root_returns_singleton(self):
+        """Even if root doesn't exist in map, it still returns the root ID."""
+        entity_map: dict[str, Entity] = {}
+        ids = _collect_subtree_ids("missing", entity_map)
+        assert ids == {"missing"}

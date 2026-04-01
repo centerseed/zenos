@@ -1080,7 +1080,8 @@ class SqlTaskRepository:
         priority: str | None = None,
         linked_entity: str | None = None,
         include_archived: bool = False,
-        limit: int = 50,
+        limit: int = 200,
+        offset: int = 0,
         project: str | None = None,
         plan_id: str | None = None,
     ) -> list[Task]:
@@ -1110,6 +1111,9 @@ class SqlTaskRepository:
             conditions.append(f"t.plan_id = ${idx}")
             params.append(plan_id)
             idx += 1
+        # Track whether caller explicitly filtered by status
+        explicit_status_filter = status is not None
+
         if status is not None:
             normalized = []
             for s in status:
@@ -1133,17 +1137,46 @@ class SqlTaskRepository:
         else:
             join_clause = ""
 
-        sql = (
-            f"SELECT DISTINCT t.*, "
+        select_cols = (
+            f"DISTINCT t.*, "
             f"COALESCE(NULLIF(NULLIF(p1.display_name, ''), 'Unknown'), p1.email, p1.id, t.created_by) as creator_name, "
-            f"COALESCE(NULLIF(NULLIF(p2.display_name, ''), 'Unknown'), p2.email, p2.id, t.assignee) as assignee_name "
-            f"FROM {SCHEMA}.tasks t "
+            f"COALESCE(NULLIF(NULLIF(p2.display_name, ''), 'Unknown'), p2.email, p2.id, t.assignee) as assignee_name"
+        )
+        from_clause = (
+            f"{SCHEMA}.tasks t "
             f"{join_clause} "
             f"LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id "
-            f"LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id "
-            f"WHERE {where_clause} ORDER BY t.created_at DESC LIMIT ${idx}"
+            f"LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id"
         )
+
+        # Build LIMIT/OFFSET clause
+        limit_idx = idx
         params.append(limit)
+        idx += 1
+        offset_idx = idx
+        params.append(offset)
+        idx += 1
+
+        if not explicit_status_filter:
+            # Split query: active tickets unlimited (up to limit), done/cancelled capped at 5 each
+            active_where = f"{where_clause} AND t.status NOT IN ('done', 'cancelled')"
+            done_where = f"{where_clause} AND t.status = 'done'"
+            cancelled_where = f"{where_clause} AND t.status = 'cancelled'"
+            sql = (
+                f"SELECT * FROM ("
+                f"  (SELECT {select_cols} FROM {from_clause} WHERE {active_where} ORDER BY t.created_at DESC LIMIT ${limit_idx} OFFSET ${offset_idx})"
+                f"  UNION ALL"
+                f"  (SELECT {select_cols} FROM {from_clause} WHERE {done_where} ORDER BY t.updated_at DESC LIMIT 5)"
+                f"  UNION ALL"
+                f"  (SELECT {select_cols} FROM {from_clause} WHERE {cancelled_where} ORDER BY t.updated_at DESC LIMIT 5)"
+                f") combined ORDER BY created_at DESC"
+            )
+        else:
+            sql = (
+                f"SELECT {select_cols} "
+                f"FROM {from_clause} "
+                f"WHERE {where_clause} ORDER BY t.created_at DESC LIMIT ${limit_idx} OFFSET ${offset_idx}"
+            )
 
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(sql, *params)
@@ -1263,6 +1296,7 @@ def _row_to_entry(row: asyncpg.Record) -> EntityEntry:
         content=row["content"],
         context=row["context"],
         author=row["author"],
+        department=row["department"] if "department" in row else None,
         source_task_id=row["source_task_id"],
         status=row["status"],
         superseded_by=row["superseded_by"],
@@ -1288,12 +1322,12 @@ class SqlEntityEntryRepository:
                 f"""
                 INSERT INTO {SCHEMA}.entity_entries (
                     id, partner_id, entity_id, type, content,
-                    context, author, source_task_id, status,
+                    context, author, department, source_task_id, status,
                     superseded_by, created_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
                 """,
                 entry.id, pid, entry.entity_id, entry.type, entry.content,
-                entry.context, entry.author, entry.source_task_id, entry.status,
+                entry.context, entry.author, entry.department, entry.source_task_id, entry.status,
                 entry.superseded_by, entry.created_at,
             )
         return entry
@@ -1309,25 +1343,27 @@ class SqlEntityEntryRepository:
         return _row_to_entry(row) if row else None
 
     async def list_by_entity(
-        self, entity_id: str, status: str | None = "active"
+        self, entity_id: str, status: str | None = "active", department: str | None = None
     ) -> list[EntityEntry]:
         """List entries for an entity. Defaults to active only; pass None for all."""
         pid = _get_partner_id()
+        conditions = ["partner_id = $1", "entity_id = $2"]
+        params: list[object] = [pid, entity_id]
+        idx = 3
+        if status is not None:
+            conditions.append(f"status = ${idx}")
+            params.append(status)
+            idx += 1
+        if department and department != "all":
+            conditions.append(f"(department = ${idx} OR department = 'all' OR department IS NULL)")
+            params.append(department)
         async with self._pool.acquire() as conn:
-            if status is not None:
-                rows = await conn.fetch(
-                    f"""SELECT * FROM {SCHEMA}.entity_entries
-                        WHERE partner_id = $1 AND entity_id = $2 AND status = $3
-                        ORDER BY created_at DESC""",
-                    pid, entity_id, status,
-                )
-            else:
-                rows = await conn.fetch(
-                    f"""SELECT * FROM {SCHEMA}.entity_entries
-                        WHERE partner_id = $1 AND entity_id = $2
-                        ORDER BY created_at DESC""",
-                    pid, entity_id,
-                )
+            rows = await conn.fetch(
+                f"""SELECT * FROM {SCHEMA}.entity_entries
+                    WHERE {' AND '.join(conditions)}
+                    ORDER BY created_at DESC""",
+                *params,
+            )
         return [_row_to_entry(r) for r in rows]
 
     async def update_status(
@@ -1373,18 +1409,23 @@ class SqlEntityEntryRepository:
             for r in rows
         ]
 
-    async def count_active_by_entity(self, entity_id: str) -> int:
+    async def count_active_by_entity(self, entity_id: str, department: str | None = None) -> int:
         """Count active entries for an entity. Used for saturation check."""
         pid = _get_partner_id()
+        conditions = ["partner_id = $1", "entity_id = $2", "status = 'active'"]
+        params: list[object] = [pid, entity_id]
+        if department and department != "all":
+            conditions.append("(department = $3 OR department = 'all' OR department IS NULL)")
+            params.append(department)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""SELECT COUNT(*) as cnt FROM {SCHEMA}.entity_entries
-                    WHERE partner_id = $1 AND entity_id = $2 AND status = 'active'""",
-                pid, entity_id,
+                    WHERE {' AND '.join(conditions)}""",
+                *params,
             )
         return int(row["cnt"]) if row else 0
 
-    async def search_content(self, query: str, limit: int = 20) -> list[dict]:
+    async def search_content(self, query: str, limit: int = 20, department: str | None = None) -> list[dict]:
         """Search entries by content keyword, returning entries with entity context.
 
         Returns a list of dicts: {entry: EntityEntry, entity_id: str}.
@@ -1392,17 +1433,24 @@ class SqlEntityEntryRepository:
         """
         pid = _get_partner_id()
         query_lower = f"%{query.lower()}%"
+        conditions = ["ee.partner_id = $1", "LOWER(ee.content) LIKE $2"]
+        params: list[object] = [pid, query_lower]
+        idx = 3
+        if department and department != "all":
+            conditions.append(f"(ee.department = ${idx} OR ee.department = 'all' OR ee.department IS NULL)")
+            params.append(department)
+            idx += 1
+        params.append(limit)
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""SELECT ee.*, e.name AS entity_name
                     FROM {SCHEMA}.entity_entries ee
                     JOIN {SCHEMA}.entities e
                       ON e.id = ee.entity_id AND e.partner_id = ee.partner_id
-                    WHERE ee.partner_id = $1
-                      AND LOWER(ee.content) LIKE $2
+                    WHERE {' AND '.join(conditions)}
                     ORDER BY ee.created_at DESC
-                    LIMIT $3""",
-                pid, query_lower, limit,
+                    LIMIT ${idx}""",
+                *params,
             )
         results = []
         for row in rows:
@@ -1433,9 +1481,9 @@ class SqlUsageLogRepository:
     async def write_usage_log(
         self,
         partner_id: str,
-        tool_name: str,
-        entity_count: int,
-        token_count: int,
+        feature: str,
+        tokens_in: int,
+        tokens_out: int,
         model: str,
     ) -> None:
         """Insert a usage log row. Silently ignores empty partner_id."""
@@ -1443,12 +1491,13 @@ class SqlUsageLogRepository:
             return
         async with self._pool.acquire() as conn:
             await conn.execute(
-                f"""INSERT INTO {SCHEMA}.usage_logs (partner_id, model, tokens_in, tokens_out)
-                    VALUES ($1, $2, $3, $4)""",
+                f"""INSERT INTO {SCHEMA}.usage_logs (partner_id, feature, model, tokens_in, tokens_out)
+                    VALUES ($1, $2, $3, $4, $5)""",
                 partner_id,
+                feature,
                 model,
-                token_count,
-                0,
+                tokens_in,
+                tokens_out,
             )
 
 
@@ -1600,8 +1649,8 @@ class SqlPartnerRepository:
                 f"""INSERT INTO {SCHEMA}.partners (
                         id, email, display_name, api_key, authorized_entity_ids,
                         status, is_admin, shared_partner_id, invited_by,
-                        created_at, updated_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)""",
+                        roles, department, created_at, updated_at
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
                 data["id"],
                 data["email"],
                 data["displayName"],
@@ -1611,9 +1660,87 @@ class SqlPartnerRepository:
                 data.get("isAdmin", False),
                 data.get("sharedPartnerId"),
                 data.get("invitedBy", ""),
+                data.get("roles", []),
+                data.get("department", "all"),
                 data["createdAt"],
                 data["updatedAt"],
             )
+
+    async def list_departments(self, tenant_id: str) -> list[str]:
+        """Return stored departments plus any in-use partner departments."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT name FROM {SCHEMA}.partner_departments
+                    WHERE tenant_id = $1
+                    ORDER BY CASE WHEN name = 'all' THEN 0 ELSE 1 END, lower(name)""",
+                tenant_id,
+            )
+            partner_rows = await conn.fetch(
+                f"""SELECT department, shared_partner_id, id
+                    FROM {SCHEMA}.partners"""
+            )
+        departments = {str(row["name"]) for row in rows if row["name"]}
+        for row in partner_rows:
+            row_tenant = row["shared_partner_id"] or row["id"]
+            if row_tenant == tenant_id and row["department"]:
+                departments.add(str(row["department"]))
+        departments.add("all")
+        return sorted(departments, key=lambda value: (value != "all", value.lower()))
+
+    async def create_department(self, tenant_id: str, name: str) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""INSERT INTO {SCHEMA}.partner_departments (tenant_id, name)
+                    VALUES ($1, $2)
+                    ON CONFLICT (tenant_id, name) DO NOTHING""",
+                tenant_id,
+                name,
+            )
+
+    async def rename_department(self, tenant_id: str, old_name: str, new_name: str) -> None:
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    f"""DELETE FROM {SCHEMA}.partner_departments
+                        WHERE tenant_id = $1 AND name = $2""",
+                    tenant_id,
+                    old_name,
+                )
+                await conn.execute(
+                    f"""INSERT INTO {SCHEMA}.partner_departments (tenant_id, name)
+                        VALUES ($1, $2)
+                        ON CONFLICT (tenant_id, name) DO NOTHING""",
+                    tenant_id,
+                    new_name,
+                )
+                await conn.execute(
+                    f"""UPDATE {SCHEMA}.partners
+                        SET department = $1
+                        WHERE COALESCE(shared_partner_id, id) = $2
+                          AND department = $3""",
+                    new_name,
+                    tenant_id,
+                    old_name,
+                )
+
+    async def delete_department(self, tenant_id: str, name: str, fallback_department: str = "all") -> None:
+        async with self._pool.acquire() as conn:
+            async with conn.transaction():
+                await conn.execute(
+                    f"""DELETE FROM {SCHEMA}.partner_departments
+                        WHERE tenant_id = $1 AND name = $2""",
+                    tenant_id,
+                    name,
+                )
+                await conn.execute(
+                    f"""UPDATE {SCHEMA}.partners
+                        SET department = $1
+                        WHERE COALESCE(shared_partner_id, id) = $2
+                          AND department = $3""",
+                    fallback_department,
+                    tenant_id,
+                    name,
+                )
 
     async def update_fields(self, partner_id: str, fields: dict) -> None:
         """Update arbitrary partner fields by building a SET clause.

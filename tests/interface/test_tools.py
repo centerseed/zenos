@@ -153,7 +153,9 @@ class TestSearchTool:
 
             assert "results" in result
             assert result["count"] == 1
-            mock_os.search.assert_called_once_with("Paceriz")
+            mock_os.search.assert_called_once_with(
+                "Paceriz", max_level=2, product_id=None,
+            )
 
     async def test_list_entities_collection(self):
         from zenos.interface.tools import search
@@ -194,7 +196,8 @@ class TestSearchTool:
                 assignee="developer",
                 created_by=None,
                 status=None,
-                limit=50,
+                limit=200,
+                offset=0,
                 project=None,
                 plan_id=None,
             )
@@ -212,7 +215,8 @@ class TestSearchTool:
                 assignee=None,
                 created_by=None,
                 status=["todo", "in_progress"],
-                limit=50,
+                limit=200,
+                offset=0,
                 project=None,
                 plan_id=None,
             )
@@ -340,6 +344,167 @@ class TestSearchTool:
 
             assert "documents" in result
             assert [d["id"] for d in result["documents"]] == ["doc-1"]
+
+
+class TestSearchNewParams:
+    """Tests for new search params: product_id, offset, entity_level."""
+
+    async def test_offset_pagination_entities(self):
+        """offset skips the first N results for collection listing."""
+        from zenos.interface.tools import search
+
+        entities = [_make_entity(id=f"ent-{i}", name=f"E{i}") for i in range(5)]
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=entities)
+            result = await search(collection="entities", limit=2, offset=2)
+            assert len(result["entities"]) == 2
+            assert result["entities"][0]["id"] == "ent-2"
+
+    async def test_offset_pagination_tasks(self):
+        """offset is passed to task_service.list_tasks."""
+        from zenos.interface.tools import search
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.list_tasks = AsyncMock(return_value=[])
+            await search(collection="tasks", offset=10, limit=5)
+            mock_ts.list_tasks.assert_called_once_with(
+                assignee=None,
+                created_by=None,
+                status=None,
+                limit=5,
+                offset=10,
+                project=None,
+                plan_id=None,
+            )
+
+    async def test_entity_level_default_filters_l3(self):
+        """Default entity_level=None filters out L3 entities."""
+        from zenos.interface.tools import search
+
+        l1 = _make_entity(id="ent-l1", name="Product", level=1)
+        l2 = _make_entity(id="ent-l2", name="Module", level=2)
+        l3 = _make_entity(id="ent-l3", name="Detail", level=3)
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=[l1, l2, l3])
+            result = await search(collection="entities")
+            ids = [e["id"] for e in result["entities"]]
+            assert "ent-l1" in ids
+            assert "ent-l2" in ids
+            assert "ent-l3" not in ids
+
+    async def test_entity_level_all_includes_l3(self):
+        """entity_level='all' includes L3 entities."""
+        from zenos.interface.tools import search
+
+        l3 = _make_entity(id="ent-l3", name="Detail", level=3)
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=[l3])
+            result = await search(collection="entities", entity_level="all")
+            assert len(result["entities"]) == 1
+
+    async def test_entity_level_l1_only(self):
+        """entity_level='L1' filters out L2 and L3."""
+        from zenos.interface.tools import search
+
+        l1 = _make_entity(id="ent-l1", name="Product", level=1)
+        l2 = _make_entity(id="ent-l2", name="Module", level=2)
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=[l1, l2])
+            result = await search(collection="entities", entity_level="L1")
+            ids = [e["id"] for e in result["entities"]]
+            assert "ent-l1" in ids
+            assert "ent-l2" not in ids
+
+    async def test_entity_level_none_level_treated_as_l1(self):
+        """Entities with level=None are treated as L1 (included in default)."""
+        from zenos.interface.tools import search
+
+        no_level = _make_entity(id="ent-nolevel", name="Legacy")
+        # level defaults to None in Entity
+        assert no_level.level is None
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=[no_level])
+            result = await search(collection="entities")
+            assert len(result["entities"]) == 1
+
+    async def test_product_id_filters_entities_to_subtree(self):
+        """product_id filters entities to the product's subtree."""
+        from zenos.interface.tools import search
+
+        product = _make_entity(id="prod-1", name="MyApp", type="product", level=1)
+        child = _make_entity(id="mod-1", name="Auth", type="module", level=2, parent_id="prod-1")
+        unrelated = _make_entity(id="mod-2", name="Billing", type="module", level=2, parent_id="prod-other")
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=[product, child, unrelated])
+            result = await search(collection="entities", product_id="prod-1")
+            ids = [e["id"] for e in result["entities"]]
+            assert "prod-1" in ids
+            assert "mod-1" in ids
+            assert "mod-2" not in ids
+
+    async def test_keyword_search_passes_max_level_and_product_id(self):
+        """Keyword search passes max_level and product_id to ontology_service.search."""
+        from zenos.interface.tools import search
+
+        with patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_os.search = AsyncMock(return_value=[])
+            mock_ts.list_tasks = AsyncMock(return_value=[])
+            await search(query="test", collection="all", entity_level="L1", product_id="prod-1")
+            mock_os.search.assert_called_once_with(
+                "test", max_level=1, product_id="prod-1",
+            )
+
+    async def test_keyword_search_offset_pagination(self):
+        """Keyword search with offset paginates the results."""
+        from zenos.interface.tools import search
+        from zenos.domain.search import SearchResult
+
+        results = [
+            SearchResult(type="entity", id=f"ent-{i}", name=f"E{i}", summary="s", score=1.0)
+            for i in range(5)
+        ]
+        with patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_os.search = AsyncMock(return_value=results)
+            mock_ts.list_tasks = AsyncMock(return_value=[])
+            result = await search(query="test", collection="all", offset=2, limit=2)
+            assert result["count"] == 2
+            assert result["total"] == 5
+            assert result["results"][0]["id"] == "ent-2"
+
+
+class TestParseEntityLevel:
+    """Tests for _parse_entity_level helper."""
+
+    def test_none_defaults_to_2(self):
+        from zenos.interface.tools import _parse_entity_level
+        assert _parse_entity_level(None) == 2
+
+    def test_all_returns_none(self):
+        from zenos.interface.tools import _parse_entity_level
+        assert _parse_entity_level("all") is None
+
+    def test_l1_returns_1(self):
+        from zenos.interface.tools import _parse_entity_level
+        assert _parse_entity_level("L1") == 1
+
+    def test_l2_returns_2(self):
+        from zenos.interface.tools import _parse_entity_level
+        assert _parse_entity_level("L2") == 2
+
+    def test_l1_l2_returns_2(self):
+        from zenos.interface.tools import _parse_entity_level
+        assert _parse_entity_level("L1,L2") == 2
+
+    def test_l1_l2_l3_returns_none(self):
+        from zenos.interface.tools import _parse_entity_level
+        assert _parse_entity_level("L1,L2,L3") is None
+
+    def test_case_insensitive(self):
+        from zenos.interface.tools import _parse_entity_level
+        assert _parse_entity_level("l1") == 1
+        assert _parse_entity_level("ALL") is None
 
 
 # ---------------------------------------------------------------------------
@@ -570,6 +735,8 @@ class TestWriteTool:
 
             assert result["entity"]["name"] == "Paceriz"
             assert result.get("warnings") is None
+            assert "context_bundle" in result
+            assert "governance_hints" in result
 
     async def test_write_module_without_parent_id_returns_warning(self):
         from zenos.interface.tools import write
@@ -758,6 +925,8 @@ class TestConfirmTool:
 
             mock_os.confirm.assert_called_once_with("entities", "ent-1")
             assert result["status"] == "confirmed"
+            assert "context_bundle" in result
+            assert "governance_hints" in result
 
     async def test_confirm_not_found(self):
         from zenos.interface.tools import confirm
@@ -808,6 +977,25 @@ class TestTaskTool:
             )
 
             assert result["title"] == "Fix login"
+
+    async def test_create_task_accepts_json_array_string_for_list_fields(self):
+        from zenos.interface.tools import task
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task()
+        create_result = TaskResult(task=t, cascade_updates=[])
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+            await task(
+                action="create",
+                title="Fix login",
+                created_by="architect",
+                linked_entities='["ent-1","ent-2"]',
+                acceptance_criteria='["a","b"]',
+            )
+            payload = mock_ts.create_task.call_args.args[0]
+            assert payload["linked_entities"] == ["ent-1", "ent-2"]
+            assert payload["acceptance_criteria"] == ["a", "b"]
 
     async def test_create_task_missing_title(self):
         from zenos.interface.tools import task

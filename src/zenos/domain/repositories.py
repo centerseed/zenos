@@ -110,8 +110,10 @@ class TaskRepository(TypingProtocol):
         priority: str | None = None,
         linked_entity: str | None = None,
         include_archived: bool = False,
-        limit: int = 50,
+        limit: int = 200,
+        offset: int = 0,
         project: str | None = None,
+        plan_id: str | None = None,
     ) -> list[Task]: ...
 
     async def list_blocked_by(self, task_id: str) -> list[Task]:
@@ -168,9 +170,9 @@ class UsageLogRepository(TypingProtocol):
     async def write_usage_log(
         self,
         partner_id: str,
-        tool_name: str,
-        entity_count: int,
-        token_count: int,
+        feature: str,
+        tokens_in: int,
+        tokens_out: int,
         model: str,
     ) -> None: ...
 
@@ -202,6 +204,14 @@ class PartnerRepository(TypingProtocol):
         visible_to_members: list[str],
         visible_to_departments: list[str],
     ) -> None: ...
+
+    async def list_departments(self, tenant_id: str) -> list[str]: ...
+
+    async def create_department(self, tenant_id: str, name: str) -> None: ...
+
+    async def rename_department(self, tenant_id: str, old_name: str, new_name: str) -> None: ...
+
+    async def delete_department(self, tenant_id: str, name: str, fallback_department: str = "all") -> None: ...
 
 
 class CrmRepository(TypingProtocol):

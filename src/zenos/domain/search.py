@@ -102,6 +102,8 @@ def search_ontology(
     entities: list[Entity],
     documents: list[Document],
     protocols: list[Protocol],
+    *,
+    max_level: int | None = None,
 ) -> list[SearchResult]:
     """Search across entities, documents, and protocols by keyword matching.
 
@@ -110,12 +112,23 @@ def search_ontology(
       2. Match tokens against name, summary, and tags of each object
       3. Score by match ratio
       4. Return results sorted by score descending (only score > 0)
+
+    Args:
+        max_level: If set, only include entities with level <= max_level.
+                   Entities with level=None are treated as L1 (included when max_level >= 1).
     """
     query_tokens = _tokenize(query)
     if not query_tokens:
         return []
 
     results: list[SearchResult] = []
+
+    # Filter entities by level if requested
+    if max_level is not None:
+        entities = [
+            e for e in entities
+            if (e.level or 1) <= max_level
+        ]
 
     # Search entities
     for entity in entities:

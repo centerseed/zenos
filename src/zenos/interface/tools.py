@@ -50,7 +50,7 @@ from zenos.application.governance_ai import GovernanceAI
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.models import EntityEntry
 from zenos.application.governance_service import GovernanceService
-from zenos.application.ontology_service import OntologyService
+from zenos.application.ontology_service import OntologyService, _collect_subtree_ids
 from zenos.application.source_service import SourceService
 from zenos.application.task_service import TaskService
 from zenos.infrastructure.llm_client import create_llm_client
@@ -362,9 +362,112 @@ async def _enrich_task_result(task_obj) -> dict:
     return task_dict
 
 
+async def _build_context_bundle(
+    *,
+    linked_entity_ids: list[str] | None = None,
+    protocol_id: str | None = None,
+    blindspot_id: str | None = None,
+    limit: int = 5,
+) -> dict:
+    """Build a compact context bundle for write/confirm/search responses."""
+    bundle: dict = {
+        "entities": [],
+        "protocol": None,
+        "blindspot": None,
+    }
+
+    seen: set[str] = set()
+    for eid in linked_entity_ids or []:
+        if not eid or eid in seen:
+            continue
+        seen.add(eid)
+        if entity_repo is None:
+            continue
+        entity = await entity_repo.get_by_id(eid)
+        if entity is None or not _is_entity_visible(entity):
+            continue
+        bundle["entities"].append(
+            {
+                "id": entity.id,
+                "name": entity.name,
+                "summary": entity.summary,
+                "status": entity.status,
+                "type": entity.type,
+            }
+        )
+        if len(bundle["entities"]) >= limit:
+            break
+
+    if protocol_id:
+        if protocol_repo is None:
+            return bundle
+        proto = await protocol_repo.get_by_id(protocol_id)
+        if proto and await _is_protocol_visible(proto):
+            bundle["protocol"] = {
+                "id": proto.id,
+                "entity_id": proto.entity_id,
+                "entity_name": proto.entity_name,
+            }
+
+    if blindspot_id:
+        if blindspot_repo is None:
+            return bundle
+        bs = await blindspot_repo.get_by_id(blindspot_id)
+        if bs and await _is_blindspot_visible(bs):
+            bundle["blindspot"] = {
+                "id": bs.id,
+                "severity": bs.severity,
+                "description": bs.description,
+            }
+
+    return bundle
+
+
+def _build_governance_hints(
+    *,
+    warnings: list[str] | None = None,
+    suggested_follow_up_tasks: list[dict] | None = None,
+) -> dict:
+    """Return additive governance hints for caller guidance."""
+    warnings = warnings or []
+    lowered = " ".join(warnings).lower()
+    duplicate_signals = []
+    if "duplicate" in lowered or "重複" in lowered:
+        duplicate_signals.append("possible_duplicate")
+
+    return {
+        "duplicate_signals": duplicate_signals,
+        "stale_candidates": [],
+        "suggested_follow_up_tasks": suggested_follow_up_tasks or [],
+    }
+
+
 def _new_id() -> str:
     """Generate a short unique ID (32-char hex UUID4)."""
     return uuid.uuid4().hex
+
+
+def _parse_entity_level(entity_level: str | None) -> int | None:
+    """Convert entity_level string to max_level int for domain layer.
+
+    Returns:
+        None  — no filtering (caller explicitly asked for "all" or "L1,L2,L3")
+        1     — L1 only
+        2     — L1+L2 (default when entity_level is not provided)
+    """
+    if entity_level is None:
+        # Default: L1+L2 only
+        return 2
+
+    normalized = entity_level.strip().lower()
+    if normalized in ("all", "l1,l2,l3", "l3"):
+        return None
+    if normalized == "l1":
+        return 1
+    if normalized in ("l2", "l1,l2"):
+        return 2
+    # Unrecognized → fall back to default L1+L2
+    return 2
 
 
 def _is_entity_visible(entity: object) -> bool:
@@ -396,6 +499,102 @@ def _is_entity_visible(entity: object) -> bool:
         return False
 
     return True
+
+
+async def _is_task_visible(task: object) -> bool:
+    """Task inherits most-restrictive visibility from linked entities.
+
+    If ANY linked entity is invisible to the caller, the task is hidden.
+    Tasks with no linked entities are always visible (fail-open).
+    """
+    try:
+        linked = getattr(task, "linked_entities", None) or []
+        if not linked:
+            return True
+        partner = _current_partner.get() or {}
+        if partner.get("isAdmin", False):
+            return True
+        for eid in linked:
+            if isinstance(eid, dict):
+                eid = eid.get("id", "")
+            if not eid:
+                continue
+            entity = await entity_repo.get_by_id(eid)
+            if entity and not _is_entity_visible(entity):
+                return False
+        return True
+    except Exception:
+        logger.warning("_is_task_visible check failed, defaulting to visible", exc_info=True)
+        return True
+
+
+async def _is_protocol_visible(protocol: object) -> bool:
+    """Protocol inherits visibility from its linked entity."""
+    try:
+        entity_id = getattr(protocol, "entity_id", None)
+        if not entity_id:
+            return True  # orphan protocol = visible
+        partner = _current_partner.get() or {}
+        if partner.get("isAdmin", False):
+            return True
+        entity = await entity_repo.get_by_id(entity_id)
+        if entity is None:
+            return True  # entity deleted = show protocol
+        return _is_entity_visible(entity)
+    except Exception:
+        logger.warning("_is_protocol_visible check failed, defaulting to visible", exc_info=True)
+        return True
+
+
+async def _is_blindspot_visible(blindspot: object) -> bool:
+    """Blindspot is visible if ANY related entity is visible.
+
+    If ALL related entities are invisible, the blindspot is hidden.
+    Blindspots with no related entities are always visible.
+    """
+    try:
+        related = getattr(blindspot, "related_entity_ids", None) or []
+        if not related:
+            return True
+        partner = _current_partner.get() or {}
+        if partner.get("isAdmin", False):
+            return True
+        for eid in related:
+            entity = await entity_repo.get_by_id(eid)
+            if entity and _is_entity_visible(entity):
+                return True  # at least one visible
+        return False
+    except Exception:
+        logger.warning("_is_blindspot_visible check failed, defaulting to visible", exc_info=True)
+        return True
+
+
+def _check_write_visibility(existing_entity: object, data: dict) -> dict | None:
+    """Check if caller is authorized to write to an existing entity.
+
+    Returns an error dict if unauthorized, None if OK.
+    Fail-open: exceptions default to allowing the write.
+    """
+    try:
+        if not _is_entity_visible(existing_entity):
+            return {
+                "error": "FORBIDDEN",
+                "message": "You do not have permission to modify this entity.",
+            }
+        # Non-admin cannot change visibility on confidential entities
+        partner = _current_partner.get() or {}
+        is_admin = bool(partner.get("isAdmin", False))
+        visibility_fields = {"visibility", "visible_to_roles", "visible_to_members", "visible_to_departments"}
+        if not is_admin and getattr(existing_entity, "visibility", "public") == "confidential":
+            if any(f in data for f in visibility_fields):
+                return {
+                    "error": "FORBIDDEN",
+                    "message": "Only admin can modify visibility settings on confidential entities.",
+                }
+        return None
+    except Exception:
+        logger.warning("_check_write_visibility failed, allowing write", exc_info=True)
+        return None
 
 
 def _audit_log(
@@ -492,9 +691,12 @@ async def search(
     assignee: str | None = None,
     created_by: str | None = None,
     confirmed_only: bool | None = None,
-    limit: int = 50,
+    limit: int = 200,
+    offset: int = 0,
     project: str | None = None,
     plan_id: str | None = None,
+    product_id: str | None = None,
+    entity_level: str | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -507,6 +709,8 @@ async def search(
     - 看待確認項目 → confirmed_only=False
     - 查任務 → collection="tasks"，可加 assignee/created_by 過濾
     - 查同一 plan 的所有任務 → collection="tasks"，plan_id="my-plan-id"
+    - 按產品過濾 → product_id="product-xxx"（過濾該產品及其子節點）
+    - 控制搜尋層級 → entity_level="L1,L2"（預設只搜 L1+L2，排除 L3 細節）
 
     不要用這個工具的情境：
     - 已知確切名稱要看完整資料 → 用 get
@@ -517,27 +721,42 @@ async def search(
 
     Args:
         query: 搜尋關鍵字（空字串 = 列出全部）
-        collection: 搜尋範圍。all/entities/documents/protocols/blindspots/tasks
+        collection: 搜尋範圍。all/entities/documents/protocols/blindspots/tasks/entries
         status: 按狀態過濾（如 active/open/todo/in_progress，逗號分隔多值）
         severity: 按嚴重度過濾 blindspots（red/yellow/green）
         entity_name: 按實體名稱過濾（blindspots 和 documents 用）
         assignee: 按被指派者過濾 tasks（Inbox 視角）
         created_by: 按建立者過濾 tasks（Outbox 視角）
         confirmed_only: true=只看已確認 / false=只看未確認 / 不傳=全部
-        limit: 回傳上限，預設 50
+        limit: 回傳上限，預設 200（無硬性 cap，可依需求調大）
+        offset: 分頁偏移量，預設 0。搭配 limit 做分頁。
         project: 按專案過濾 tasks（如 "zenos"、"paceriz"）。
             未傳時自動使用 partner 的 default_project，確保跨專案隔離。
         plan_id: 按 plan 過濾 tasks（精確找同一 plan 的所有票）。
+        product_id: 按產品 ID 過濾。只回傳該產品及其子樹內的 entity/task。
+        entity_level: 控制搜尋的 entity 層級。
+            "L1" = 只搜 L1（product, project, goal, role）
+            "L2" = 只搜 L2（module, strategy, knowledge 等）
+            "L1,L2" = 搜 L1+L2（預設行為）
+            "L1,L2,L3" 或 "all" = 搜所有層級（含 L3 文件/細節）
+            不傳時預設只搜 L1+L2，排除 L3 細節節點。
     """
     await _ensure_services()
     results: dict = {}
 
+    # Parse entity_level → max_level int for domain layer
+    max_level = _parse_entity_level(entity_level)
+
     # Keyword search mode (cross-collection)
     if query.strip() and collection == "all":
-        search_results = await ontology_service.search(query)
+        search_results = await ontology_service.search(
+            query, max_level=max_level, product_id=product_id,
+        )
         visible_results = [r for r in search_results if (r.type != "entity" or _is_entity_visible(r))]
-        results["results"] = [_serialize(r) for r in visible_results[:limit]]
+        paginated = visible_results[offset:offset + limit]
+        results["results"] = [_serialize(r) for r in paginated]
         results["count"] = len(results["results"])
+        results["total"] = len(visible_results)
 
         # Also search tasks by title/description keyword
         # Auto-fill project from partner context if caller omits it
@@ -549,17 +768,34 @@ async def search(
             t for t in all_tasks
             if query_lower in t.title.lower()
             or query_lower in t.description.lower()
-        ][:limit]
-        if matched_tasks:
-            results["tasks"] = [await _enrich_task_result(t) for t in matched_tasks]
+        ]
+        # Filter tasks by linked entity visibility
+        visible_tasks = []
+        for t in matched_tasks:
+            if await _is_task_visible(t):
+                visible_tasks.append(t)
+                if len(visible_tasks) >= limit:
+                    break
+        if visible_tasks:
+            results["tasks"] = [await _enrich_task_result(t) for t in visible_tasks]
 
-        # Also search entity entries content
-        entry_hits = await entry_repo.search_content(query, limit=limit)
+        # Also search entity entries content (filter by parent entity visibility)
+        partner_department = str(current_partner_department.get() or "all")
+        entry_hits = await entry_repo.search_content(query, limit=limit, department=partner_department)
         if entry_hits:
-            results["entries"] = [
-                {**_serialize(hit["entry"]), "entity_name": hit["entity_name"]}
-                for hit in entry_hits
-            ]
+            visible_entries = []
+            for hit in entry_hits:
+                entry_obj = hit["entry"]
+                parent_eid = getattr(entry_obj, "entity_id", None)
+                if parent_eid:
+                    parent_entity = await entity_repo.get_by_id(parent_eid)
+                    if parent_entity and not _is_entity_visible(parent_entity):
+                        continue
+                visible_entries.append(
+                    {**_serialize(entry_obj), "entity_name": hit["entity_name"]}
+                )
+            if visible_entries:
+                results["entries"] = visible_entries
 
         # Log a tool event for each exposed entity
         exposed_count = results.get("count", 0)
@@ -583,12 +819,21 @@ async def search(
             ) else None
             entities = await ontology_service.list_entities(type_filter=type_filter)
             entities = [e for e in entities if _is_entity_visible(e)]
+            # Apply level filter
+            if max_level is not None:
+                entities = [e for e in entities if (e.level or 1) <= max_level]
+            # Apply product_id filter
+            if product_id is not None:
+                entity_map = {e.id: e for e in entities if e.id}
+                subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                entities = [e for e in entities if e.id in subtree_ids]
             if confirmed_only is not None:
                 entities = [
                     e for e in entities
                     if e.confirmed_by_user == confirmed_only
                 ]
-            items = [_serialize(e) for e in entities[:limit]]
+            paginated_entities = entities[offset:offset + limit]
+            items = [_serialize(e) for e in paginated_entities]
             results["entities"] = items
 
         elif col == "documents":
@@ -597,6 +842,12 @@ async def search(
             doc_entities = [d for d in doc_entities if _is_entity_visible(d)]
             # Exclude archived document entities (dead links confirmed unresolvable)
             doc_entities = [d for d in doc_entities if d.status != "archived"]
+            # Apply product_id filter for documents via parent_id chain
+            if product_id is not None:
+                all_entities = await ontology_service._entities.list_all()
+                entity_map = {e.id: e for e in all_entities if e.id}
+                subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                doc_entities = [d for d in doc_entities if d.parent_id in subtree_ids]
             if query.strip():
                 q = query.lower().strip()
                 filtered = []
@@ -615,14 +866,15 @@ async def search(
                     ]
             if confirmed_only is not None:
                 doc_entities = [d for d in doc_entities if d.confirmed_by_user == confirmed_only]
-            results["documents"] = [_serialize(d) for d in doc_entities[:limit]]
+            results["documents"] = [_serialize(d) for d in doc_entities[offset:offset + limit]]
 
         elif col == "protocols":
             if confirmed_only is False:
                 protos = await ontology_service._protocols.list_unconfirmed()
             else:
                 protos = await ontology_service._protocols.list_all(confirmed_only=confirmed_only)
-            results["protocols"] = [_serialize(p) for p in protos[:limit]]
+            visible_protos = [p for p in protos if await _is_protocol_visible(p)]
+            results["protocols"] = [_serialize(p) for p in visible_protos[offset:offset + limit]]
 
         elif col == "blindspots":
             blindspots = await ontology_service.list_blindspots(
@@ -633,7 +885,8 @@ async def search(
                     b for b in blindspots
                     if b.confirmed_by_user == confirmed_only
                 ]
-            results["blindspots"] = [_serialize(b) for b in blindspots[:limit]]
+            visible_bs = [b for b in blindspots if await _is_blindspot_visible(b)]
+            results["blindspots"] = [_serialize(b) for b in visible_bs[offset:offset + limit]]
 
         elif col == "tasks":
             status_list = status.split(",") if status else None
@@ -645,10 +898,30 @@ async def search(
                 created_by=created_by,
                 status=status_list,
                 limit=limit,
+                offset=offset,
                 project=effective_project or None,
                 plan_id=plan_id,
             )
-            results["tasks"] = [await _enrich_task_result(t) for t in tasks]
+            # Filter tasks by linked entity visibility
+            visible_tasks = [t for t in tasks if await _is_task_visible(t)]
+            results["tasks"] = [await _enrich_task_result(t) for t in visible_tasks]
+
+        elif col == "entries":
+            if not query.strip():
+                return {
+                    "error": "INVALID_INPUT",
+                    "message": "search(collection='entries') 目前需要提供 query 關鍵字",
+                }
+            partner_department = str(current_partner_department.get() or "all")
+            entry_hits = await entry_repo.search_content(
+                query,
+                limit=limit,
+                department=partner_department,
+            )
+            results["entries"] = [
+                {**_serialize(hit["entry"]), "entity_name": hit["entity_name"]}
+                for hit in entry_hits
+            ]
 
     # Log a tool event for each entity exposed in collection-specific results
     entity_items = results.get("entities", [])
@@ -736,6 +1009,8 @@ async def get(
             result = None
         if result is None:
             return {"error": "NOT_FOUND", "message": "Protocol not found"}
+        if not await _is_protocol_visible(result):
+            return {"error": "NOT_FOUND", "message": "Protocol not found"}
         return _serialize(result)
 
     elif collection == "documents":
@@ -756,6 +1031,8 @@ async def get(
         result = await blindspot_repo.get_by_id(id)
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
+        if not await _is_blindspot_visible(result):
+            return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
         return _serialize(result)
 
     elif collection == "tasks":
@@ -765,6 +1042,8 @@ async def get(
         if enriched is None:
             return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
         task_obj, _ = enriched
+        if not await _is_task_visible(task_obj):
+            return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
         return await _enrich_task_result(task_obj)
 
     else:
@@ -925,16 +1204,60 @@ async def write(
             data["id"] = id
 
         if collection == "entities":
+            # --- Permission check: existing entity must be visible to caller ---
+            existing_id = data.get("id")
+            existing_name = data.get("name")
+            existing_entity = None
+            if existing_id:
+                existing_entity = await entity_repo.get_by_id(existing_id)
+            elif existing_name:
+                existing_entity = await entity_repo.get_by_name(existing_name)
+            if existing_entity:
+                auth_error = _check_write_visibility(existing_entity, data)
+                if auth_error:
+                    return auth_error
+                # Capture before-state for audit diff
+                _before_visibility = {
+                    "visibility": getattr(existing_entity, "visibility", "public"),
+                    "visible_to_roles": list(getattr(existing_entity, "visible_to_roles", []) or []),
+                    "visible_to_members": list(getattr(existing_entity, "visible_to_members", []) or []),
+                    "visible_to_departments": list(getattr(existing_entity, "visible_to_departments", []) or []),
+                }
+            else:
+                _before_visibility = None
+
             result = await ontology_service.upsert_entity(data)
             response = _serialize(result)
             if result.warnings:
                 response["warnings"] = result.warnings
+            entity_id = response.get("entity", {}).get("id")
             _audit_log(
                 event_type="ontology.entity.upsert",
-                target={"collection": collection, "id": response.get("entity", {}).get("id")},
+                target={"collection": collection, "id": entity_id},
                 changes={"input": data},
                 governance={"warnings": result.warnings or []},
             )
+            response["context_bundle"] = await _build_context_bundle(
+                linked_entity_ids=[entity_id] if entity_id else []
+            )
+            response["governance_hints"] = _build_governance_hints(
+                warnings=result.warnings or []
+            )
+            # --- Visibility change audit ---
+            if _before_visibility is not None:
+                result_entity = result.entity if hasattr(result, "entity") else None
+                _after_visibility = {
+                    "visibility": getattr(result_entity, "visibility", "public") if result_entity else data.get("visibility", "public"),
+                    "visible_to_roles": list(getattr(result_entity, "visible_to_roles", []) or []) if result_entity else data.get("visible_to_roles", []),
+                    "visible_to_members": list(getattr(result_entity, "visible_to_members", []) or []) if result_entity else data.get("visible_to_members", []),
+                    "visible_to_departments": list(getattr(result_entity, "visible_to_departments", []) or []) if result_entity else data.get("visible_to_departments", []),
+                }
+                if _before_visibility != _after_visibility:
+                    _audit_log(
+                        event_type="governance.visibility.change",
+                        target={"collection": collection, "id": entity_id},
+                        changes={"before": _before_visibility, "after": _after_visibility},
+                    )
             return response
 
         elif collection == "documents":
@@ -955,6 +1278,9 @@ async def write(
                 target={"collection": collection, "id": response.get("id")},
                 changes={"input": data},
             )
+            linked_ids = response.get("linked_entity_ids") or data.get("linked_entity_ids") or []
+            response["context_bundle"] = await _build_context_bundle(linked_entity_ids=linked_ids)
+            response["governance_hints"] = _build_governance_hints()
             return response
 
         elif collection == "protocols":
@@ -965,6 +1291,11 @@ async def write(
                 target={"collection": collection, "id": response.get("id")},
                 changes={"input": data},
             )
+            response["context_bundle"] = await _build_context_bundle(
+                linked_entity_ids=[response.get("entity_id")] if response.get("entity_id") else [],
+                protocol_id=response.get("id"),
+            )
+            response["governance_hints"] = _build_governance_hints()
             return response
 
         elif collection == "blindspots":
@@ -995,6 +1326,17 @@ async def write(
                 if duplicate_open is not None:
                     response["auto_created_task"] = _serialize(duplicate_open)
                     response["auto_task_skipped"] = "EXISTING_OPEN_TASK"
+                    response["context_bundle"] = await _build_context_bundle(
+                        linked_entity_ids=result.related_entity_ids,
+                        blindspot_id=result.id,
+                    )
+                    response["governance_hints"] = _build_governance_hints(
+                        suggested_follow_up_tasks=[{
+                            "id": duplicate_open.id,
+                            "title": duplicate_open.title,
+                            "reason": "existing_open_task_for_blindspot",
+                        }]
+                    )
                     _audit_log(
                         event_type="ontology.blindspot.upsert",
                         target={"collection": collection, "id": response.get("id")},
@@ -1039,6 +1381,20 @@ async def write(
                 target={"collection": collection, "id": response.get("id")},
                 changes={"input": data},
             )
+            response["context_bundle"] = await _build_context_bundle(
+                linked_entity_ids=result.related_entity_ids,
+                blindspot_id=result.id,
+            )
+            follow_ups = []
+            if "auto_created_task" in response and isinstance(response["auto_created_task"], dict):
+                follow_ups.append({
+                    "id": response["auto_created_task"].get("id"),
+                    "title": response["auto_created_task"].get("title"),
+                    "reason": "blindspot_requires_action",
+                })
+            response["governance_hints"] = _build_governance_hints(
+                suggested_follow_up_tasks=follow_ups
+            )
             return response
 
         elif collection == "relationships":
@@ -1054,6 +1410,10 @@ async def write(
                 target={"collection": collection, "id": response.get("id")},
                 changes={"input": data},
             )
+            response["context_bundle"] = await _build_context_bundle(
+                linked_entity_ids=[data["source_entity_id"], data["target_entity_id"]],
+            )
+            response["governance_hints"] = _build_governance_hints()
             return response
 
         elif collection == "entries":
@@ -1077,7 +1437,12 @@ async def write(
                 updated = await entry_repo.update_status(id, new_status, superseded_by, archive_reason)
                 if updated is None:
                     return {"error": "NOT_FOUND", "message": f"Entry '{id}' not found"}
-                return _serialize(updated)
+                response = _serialize(updated)
+                response["context_bundle"] = await _build_context_bundle(
+                    linked_entity_ids=[response.get("entity_id")] if response.get("entity_id") else []
+                )
+                response["governance_hints"] = _build_governance_hints()
+                return response
 
             # Create new entry
             entity_id = data.get("entity_id")
@@ -1094,7 +1459,9 @@ async def write(
             if context and len(context) > 200:
                 return {"error": "INVALID_INPUT", "message": "context 最多 200 字元"}
 
-            pid = (_current_partner.get() or {}).get("id", "")
+            partner_ctx = _current_partner.get() or {}
+            pid = partner_ctx.get("id", "")
+            partner_department = str(partner_ctx.get("department") or current_partner_department.get() or "all")
             entry = EntityEntry(
                 id=_new_id(),
                 partner_id=pid,
@@ -1103,6 +1470,7 @@ async def write(
                 content=content,
                 context=context,
                 author=data.get("author"),
+                department=partner_department,
                 source_task_id=data.get("source_task_id"),
             )
             result = await entry_repo.create(entry)
@@ -1112,12 +1480,18 @@ async def write(
                 changes={"input": data},
             )
             response = _serialize(result)
-            active_count = await entry_repo.count_active_by_entity(entity_id)
+            active_count = await entry_repo.count_active_by_entity(entity_id, department=partner_department)
             if active_count >= 20:
                 response["warning"] = (
                     "此 entity 已達 20 條 active entries 上限，"
                     "建議執行 analyze(check_type='quality') 觸發歸納"
                 )
+            response["context_bundle"] = await _build_context_bundle(
+                linked_entity_ids=[entity_id]
+            )
+            response["governance_hints"] = _build_governance_hints(
+                warnings=[response["warning"]] if response.get("warning") else []
+            )
             return response
 
         else:
@@ -1188,6 +1562,21 @@ async def confirm(
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}
                     for c in result.cascade_updates
                 ]
+            response["context_bundle"] = await _build_context_bundle(
+                linked_entity_ids=[e.get("id") for e in response.get("linked_entities", []) if isinstance(e, dict)]
+                or [e for e in getattr(result.task, "linked_entities", []) if isinstance(e, str)],
+                blindspot_id=getattr(result.task, "linked_blindspot", None),
+            )
+            response["governance_hints"] = _build_governance_hints(
+                suggested_follow_up_tasks=[
+                    {
+                        "id": c.task_id,
+                        "title": "follow-up task updated by cascade",
+                        "reason": c.reason,
+                    }
+                    for c in (result.cascade_updates or [])
+                ]
+            )
             _audit_log(
                 event_type="task.confirm",
                 target={"collection": collection, "id": id},
@@ -1201,12 +1590,20 @@ async def confirm(
             return response
         else:
             result = await ontology_service.confirm(collection, id)
+            if isinstance(result, dict):
+                response = dict(result)
+            else:
+                response = result
+            response["context_bundle"] = await _build_context_bundle(
+                linked_entity_ids=[id] if collection == "entities" else []
+            )
+            response["governance_hints"] = _build_governance_hints()
             _audit_log(
                 event_type="ontology.confirm",
                 target={"collection": collection, "id": id},
                 changes={"accepted": accepted},
             )
-            return result
+            return response
     except ValueError as e:
         error_msg = str(e)
         if "not found" in error_msg.lower():
@@ -1394,6 +1791,29 @@ async def _task_handler(
             merged["actor_partner_id"] = partner_ctx["id"]
         return merged
 
+    def _normalize_str_list(value: list[str] | str | None, field: str) -> list[str] | dict:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            if not all(isinstance(v, str) for v in value):
+                return {"error": "INVALID_INPUT", "message": f"{field} must be list[str]"}
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            # Accept JSON array string for backward compatibility.
+            if text.startswith("["):
+                try:
+                    parsed = json.loads(text)
+                except json.JSONDecodeError:
+                    return {"error": "INVALID_INPUT", "message": f"{field} must be list[str] or JSON array string"}
+                if not isinstance(parsed, list) or not all(isinstance(v, str) for v in parsed):
+                    return {"error": "INVALID_INPUT", "message": f"{field} must be list[str]"}
+                return parsed
+            return {"error": "INVALID_INPUT", "message": f"{field} must be list[str], not plain string"}
+        return {"error": "INVALID_INPUT", "message": f"{field} must be list[str]"}
+
     try:
         # Resolve partner context once — used for auto-filling created_by and project
         partner = _current_partner.get()
@@ -1424,6 +1844,18 @@ async def _task_handler(
                     return {"error": "INVALID_INPUT", "message": f"Invalid due_date format: {due_date}"}
 
             normalized_description = _normalize_description_to_markdown(description)
+            normalized_linked_entities = _normalize_str_list(linked_entities, "linked_entities")
+            if isinstance(normalized_linked_entities, dict):
+                return normalized_linked_entities
+            normalized_blocked_by = _normalize_str_list(blocked_by, "blocked_by")
+            if isinstance(normalized_blocked_by, dict):
+                return normalized_blocked_by
+            normalized_acceptance_criteria = _normalize_str_list(acceptance_criteria, "acceptance_criteria")
+            if isinstance(normalized_acceptance_criteria, dict):
+                return normalized_acceptance_criteria
+            normalized_depends_on = _normalize_str_list(depends_on_task_ids, "depends_on_task_ids")
+            if isinstance(normalized_depends_on, dict):
+                return normalized_depends_on
 
             data = {
                 "title": title,
@@ -1433,20 +1865,20 @@ async def _task_handler(
                 "assignee": assignee,
                 "priority": priority,
                 "status": status or "todo",
-                "linked_entities": linked_entities or [],
+                "linked_entities": normalized_linked_entities,
                 "linked_protocol": linked_protocol,
                 "linked_blindspot": linked_blindspot,
                 "source_type": source_type or "",
                 "source_metadata": _merge_actor_metadata(source_metadata, partner),
                 "due_date": parsed_due,
-                "blocked_by": blocked_by or [],
+                "blocked_by": normalized_blocked_by,
                 "blocked_reason": blocked_reason,
-                "acceptance_criteria": acceptance_criteria or [],
+                "acceptance_criteria": normalized_acceptance_criteria,
                 "project": effective_project,
                 "assignee_role_id": assignee_role_id,
                 "plan_id": plan_id,
                 "plan_order": plan_order,
-                "depends_on_task_ids": depends_on_task_ids or [],
+                "depends_on_task_ids": normalized_depends_on,
             }
 
             # Validate and process attachments
@@ -1488,11 +1920,19 @@ async def _task_handler(
             if result is not None:
                 updates["result"] = result
             if blocked_by is not None:
-                updates["blocked_by"] = blocked_by
+                normalized_blocked_by = _normalize_str_list(blocked_by, "blocked_by")
+                if isinstance(normalized_blocked_by, dict):
+                    return normalized_blocked_by
+                updates["blocked_by"] = normalized_blocked_by
             if source_metadata is not None:
                 updates["source_metadata"] = source_metadata
             if acceptance_criteria is not None:
-                updates["acceptance_criteria"] = acceptance_criteria
+                normalized_acceptance_criteria = _normalize_str_list(
+                    acceptance_criteria, "acceptance_criteria"
+                )
+                if isinstance(normalized_acceptance_criteria, dict):
+                    return normalized_acceptance_criteria
+                updates["acceptance_criteria"] = normalized_acceptance_criteria
             if due_date is not None:
                 try:
                     updates["due_date"] = datetime.fromisoformat(due_date)
@@ -1503,7 +1943,12 @@ async def _task_handler(
             if plan_order is not None:
                 updates["plan_order"] = plan_order
             if depends_on_task_ids is not None:
-                updates["depends_on_task_ids"] = depends_on_task_ids
+                normalized_depends_on = _normalize_str_list(
+                    depends_on_task_ids, "depends_on_task_ids"
+                )
+                if isinstance(normalized_depends_on, dict):
+                    return normalized_depends_on
+                updates["depends_on_task_ids"] = normalized_depends_on
 
             # Attachments: full replacement with GCS cleanup for removed items
             if attachments is not None:
@@ -1614,7 +2059,7 @@ async def task(
         assignee: 被指派者 UID（具體的人或 agent）
         priority: critical/high/medium/low（不傳時 AI 自動推薦）
         status: create 時只能 todo；update 時需通過合法性驗證
-        linked_entities: 關聯的 entity IDs
+        linked_entities: 關聯的 entity IDs，型別必須是 list[str]（不可傳單一字串）
         linked_protocol: 關聯的 Protocol ID
         linked_blindspot: 觸發的 blindspot ID
         source_type: 來源類型（如 "chat"、"doc"、"repo"、"spec"、"review"）
@@ -1635,9 +2080,9 @@ async def task(
         agent_name: agent 名稱（如 "architect-agent"）。created_via_agent=true 時建議帶入。
                     ⚠️ 此值不會獨立存為 task 欄位，而是合併寫入 source_metadata.agent_info。
         due_date: 到期日 ISO-8601（如 "2026-03-29"）
-        blocked_by: 阻塞此任務的 task IDs
+        blocked_by: 阻塞此任務的 task IDs，型別必須是 list[str]
         blocked_reason: 可選的依賴/阻塞說明（不再綁定 blocked 狀態）
-        acceptance_criteria: 驗收條件列表
+        acceptance_criteria: 驗收條件列表，型別必須是 list[str]
         result: 完成產出描述（status=review 時必填）
         project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
             未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
@@ -1645,7 +2090,7 @@ async def task(
                           get 時會展開為角色的 name/summary context。
         plan_id: 任務群組 ID（PLAN 層識別）
         plan_order: 任務在 plan 內順序（>=1）
-        depends_on_task_ids: 前置依賴 task IDs（可選）
+        depends_on_task_ids: 前置依賴 task IDs（可選，型別必須是 list[str]）
         attachments: 附件陣列（可選）。create 時傳入初始附件；update 時為全量覆寫。
             ⚠️ 附件必須用此參數，不能放在 source_metadata 裡。
             每個項目需有 type ("image"/"file"/"link")。
