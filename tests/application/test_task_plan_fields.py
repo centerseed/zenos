@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
 
-from zenos.application.task_service import TaskService
+from zenos.application.task_service import TaskService, _parse_due_date
 from zenos.domain.models import Task
 
 
@@ -99,3 +100,47 @@ async def test_update_accepts_plan_fields_when_valid():
 
     assert result.task.plan_order == 3
     assert result.task.depends_on_task_ids == ["task-0"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# _parse_due_date — string-to-datetime conversion used for dashboard API dates
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_parse_due_date_returns_none_for_none():
+    assert _parse_due_date(None) is None
+
+
+def test_parse_due_date_returns_none_for_empty_string():
+    assert _parse_due_date("") is None
+
+
+def test_parse_due_date_parses_iso_date_string():
+    result = _parse_due_date("2026-04-15")
+    assert isinstance(result, datetime)
+    assert result.year == 2026
+    assert result.month == 4
+    assert result.day == 15
+    assert result.tzinfo == timezone.utc
+
+
+def test_parse_due_date_parses_iso_datetime_with_z():
+    result = _parse_due_date("2026-04-15T12:00:00Z")
+    assert isinstance(result, datetime)
+    assert result.tzinfo is not None
+
+
+def test_parse_due_date_passthrough_for_datetime():
+    dt = datetime(2026, 4, 15, tzinfo=timezone.utc)
+    result = _parse_due_date(dt)
+    assert result is dt
+
+
+def test_parse_due_date_adds_utc_to_naive_datetime():
+    dt = datetime(2026, 4, 15)
+    result = _parse_due_date(dt)
+    assert result is not None
+    assert result.tzinfo == timezone.utc
+
+
+def test_parse_due_date_returns_none_for_invalid_string():
+    assert _parse_due_date("not-a-date") is None

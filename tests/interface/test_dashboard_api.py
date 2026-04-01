@@ -18,6 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from zenos.application.task_service import TaskResult
 from zenos.domain.models import Blindspot, Entity, Relationship, Tags, Task
 
 
@@ -497,3 +498,367 @@ class TestSerialization:
         assert "confirmedByUser" in result
         assert "createdAt" in result
         assert "related_entity_ids" not in result
+
+
+# ---------------------------------------------------------------------------
+# F. POST /api/data/tasks — create task
+# ---------------------------------------------------------------------------
+
+def _make_task_result(tid: str = "t-new") -> TaskResult:
+    return TaskResult(task=_make_task(tid), cascade_updates=[])
+
+
+class TestCreateTask:
+
+    async def test_creates_task_with_title(self):
+        from zenos.interface.dashboard_api import create_task
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={"title": "New task"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.create_task = AsyncMock(return_value=_make_task_result("t-new"))
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await create_task(request)
+
+        assert resp.status_code == 201
+        import json
+        body = json.loads(resp.body)
+        assert body["task"]["id"] == "t-new"
+
+    async def test_requires_title(self):
+        from zenos.interface.dashboard_api import create_task
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={"description": "No title"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER):
+            resp = await create_task(request)
+
+        assert resp.status_code == 400
+        import json
+        body = json.loads(resp.body)
+        assert "title" in body["message"].lower()
+
+    async def test_passes_partner_id_as_created_by(self):
+        from zenos.interface.dashboard_api import create_task
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={"title": "Task from p1"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.create_task = AsyncMock(return_value=_make_task_result())
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            await create_task(request)
+
+        call_data = mock_svc.create_task.call_args[0][0]
+        assert call_data["created_by"] == "p1"
+
+    async def test_returns_400_on_service_value_error(self):
+        from zenos.interface.dashboard_api import create_task
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={"title": "Bad priority", "priority": "ultra"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.create_task = AsyncMock(side_effect=ValueError("Invalid priority 'ultra'"))
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await create_task(request)
+
+        assert resp.status_code == 400
+
+    async def test_returns_401_without_auth(self):
+        from zenos.interface.dashboard_api import create_task
+
+        request = _make_request(method="POST")
+        request.json = AsyncMock(return_value={"title": "x"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=None):
+            resp = await create_task(request)
+
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# G. PATCH /api/data/tasks/{taskId} — update task
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTask:
+
+    async def test_updates_task_fields(self):
+        from zenos.interface.dashboard_api import update_task
+
+        request = _make_request(
+            method="PATCH",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"priority": "high", "assignee": "Alice"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.update_task = AsyncMock(return_value=_make_task_result("t1"))
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await update_task(request)
+
+        assert resp.status_code == 200
+        import json
+        body = json.loads(resp.body)
+        assert body["task"]["id"] == "t1"
+
+    async def test_returns_404_when_task_not_found(self):
+        from zenos.interface.dashboard_api import update_task
+
+        request = _make_request(
+            method="PATCH",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "missing"},
+        )
+        request.json = AsyncMock(return_value={"priority": "low"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.update_task = AsyncMock(side_effect=ValueError("Task 'missing' not found"))
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await update_task(request)
+
+        assert resp.status_code == 404
+
+    async def test_returns_400_on_invalid_transition(self):
+        from zenos.interface.dashboard_api import update_task
+
+        request = _make_request(
+            method="PATCH",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"status": "done"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.update_task = AsyncMock(side_effect=ValueError("Cannot set status to 'done' via update"))
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await update_task(request)
+
+        assert resp.status_code == 400
+
+    async def test_returns_401_without_auth(self):
+        from zenos.interface.dashboard_api import update_task
+
+        request = _make_request(method="PATCH", path_params={"taskId": "t1"})
+        request.json = AsyncMock(return_value={})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=None):
+            resp = await update_task(request)
+
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# H. POST /api/data/tasks/{taskId}/confirm — approve/reject task
+# ---------------------------------------------------------------------------
+
+
+class TestConfirmTask:
+
+    async def test_approve_task(self):
+        from zenos.interface.dashboard_api import confirm_task
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"action": "approve"})
+
+        done_task = _make_task("t1")
+        done_task.status = "done"
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.confirm_task = AsyncMock(return_value=TaskResult(task=done_task, cascade_updates=[]))
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await confirm_task(request)
+
+        assert resp.status_code == 200
+        import json
+        body = json.loads(resp.body)
+        assert body["task"]["id"] == "t1"
+        mock_svc.confirm_task.assert_called_once_with(
+            "t1", accepted=True, rejection_reason=None, updated_by="p1"
+        )
+
+    async def test_reject_task_without_reason_succeeds(self):
+        """Spec R6: rejection_reason is optional."""
+        from zenos.interface.dashboard_api import confirm_task
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"action": "reject"})
+
+        in_progress_task = _make_task("t1")
+        in_progress_task.status = "in_progress"
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.confirm_task = AsyncMock(
+                return_value=TaskResult(task=in_progress_task, cascade_updates=[])
+            )
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await confirm_task(request)
+
+        assert resp.status_code == 200
+        mock_svc.confirm_task.assert_called_once_with(
+            "t1", accepted=False, rejection_reason=None, updated_by="p1"
+        )
+
+    async def test_reject_task_with_reason(self):
+        from zenos.interface.dashboard_api import confirm_task
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"action": "reject", "rejection_reason": "Not ready"})
+
+        in_progress_task = _make_task("t1")
+        in_progress_task.status = "in_progress"
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.confirm_task = AsyncMock(
+                return_value=TaskResult(task=in_progress_task, cascade_updates=[])
+            )
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await confirm_task(request)
+
+        assert resp.status_code == 200
+        mock_svc.confirm_task.assert_called_once_with(
+            "t1", accepted=False, rejection_reason="Not ready", updated_by="p1"
+        )
+
+    async def test_invalid_action_returns_400(self):
+        from zenos.interface.dashboard_api import confirm_task
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"action": "maybe"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER):
+            resp = await confirm_task(request)
+
+        assert resp.status_code == 400
+
+    async def test_task_not_in_review_returns_400(self):
+        from zenos.interface.dashboard_api import confirm_task
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"action": "approve"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.confirm_task = AsyncMock(
+                side_effect=ValueError("Can only confirm tasks in 'review' status. Current status: 'todo'")
+            )
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await confirm_task(request)
+
+        assert resp.status_code == 400
+
+    async def test_returns_401_without_auth(self):
+        from zenos.interface.dashboard_api import confirm_task
+
+        request = _make_request(method="POST", path_params={"taskId": "t1"})
+        request.json = AsyncMock(return_value={"action": "approve"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=None):
+            resp = await confirm_task(request)
+
+        assert resp.status_code == 401

@@ -858,6 +858,156 @@ class TestSqlTaskRepository:
         result = asyncio.get_event_loop().run_until_complete(repo.upsert(task))
         assert result.id is not None
 
+    def test_upsert_insert_params_have_no_none_in_not_null_columns(self):
+        """INSERT params must not pass None for NOT NULL columns.
+
+        This is a dry-run test that verifies the SQL parameter list passed to
+        asyncpg.execute() does not contain None for columns constrained NOT NULL
+        in the tasks table schema. Previously, description and project could be
+        None (from dashboard API passing body.get() results), causing a NOT NULL
+        constraint violation on INSERT.
+        """
+        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.domain.models import Task, TaskStatus, TaskPriority
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlTaskRepository(pool)
+
+        # Create a minimal task with only required fields (simulating
+        # the dashboard POST /api/data/tasks with {"title": "test task"})
+        task = Task(
+            title="test task",
+            status=TaskStatus.TODO,
+            priority=TaskPriority.MEDIUM,
+            created_by=PARTNER_ID,
+            updated_by=PARTNER_ID,
+            description="",   # must never be None
+            project="",        # must never be None
+            source_type="",    # must never be None
+            priority_reason="",
+        )
+
+        asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+        # The first execute call is the INSERT statement.
+        # asyncpg receives args as individual positional params:
+        # call.args[0] = SQL string, call.args[1..32] = the 32 parameter values.
+        all_args = conn.execute.call_args_list[0].args
+        insert_sql = all_args[0]
+        # params are 1-indexed in SQL ($1..$32), 1-indexed in all_args[1..32]
+        assert "INSERT INTO" in insert_sql
+
+        # NOT NULL columns and their $N positions (1-indexed in SQL)
+        not_null_positions = {
+            "id": 1,
+            "partner_id": 2,
+            "title": 3,
+            "description": 4,
+            "status": 5,
+            "priority": 6,
+            "priority_reason": 7,
+            "created_by": 10,
+            "source_type": 17,
+            "context_summary": 19,
+            "project": 27,
+        }
+        for col_name, sql_pos in not_null_positions.items():
+            arg_val = all_args[sql_pos]  # all_args[1] = $1, all_args[2] = $2 ...
+            assert arg_val is not None, (
+                f"Column '{col_name}' (${sql_pos}) is None — "
+                f"would violate NOT NULL constraint in PostgreSQL"
+            )
+
+    def test_upsert_passes_through_none_description_to_asyncpg(self):
+        """sql_repo passes None description straight to asyncpg (no guard at repo layer).
+
+        Documents the architecture contract: sql_repo does NOT coerce None values —
+        the caller (task_service.create_task) is responsible for ensuring NOT NULL
+        columns are never None before calling upsert.
+        """
+        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.domain.models import Task, TaskStatus, TaskPriority
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlTaskRepository(pool)
+
+        # Simulate the broken state (pre-fix): description=None
+        task = Task(
+            title="test task",
+            status=TaskStatus.TODO,
+            priority=TaskPriority.MEDIUM,
+            created_by=PARTNER_ID,
+            description=None,  # type: ignore[arg-type]  — intentionally wrong
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+        all_args = conn.execute.call_args_list[0].args
+        # The description is at $4 (all_args[4] in the positional args list).
+        # This test documents that passing None would reach asyncpg —
+        # the guard must be upstream in task_service.create_task.
+        description_arg = all_args[4]
+        # We assert this: if it's None, asyncpg would raise with PostgreSQL.
+        # The task_service fix must ensure this is NEVER None.
+        assert description_arg is None, (
+            "If this assertion fails, sql_repo itself now guards against None — "
+            "which is also acceptable."
+        )
+
+    def test_task_service_create_task_never_passes_none_description(self):
+        """create_task() with no description in data produces task.description=''.
+
+        This is the end-to-end fix verification: TaskService.create_task must
+        coerce None to '' for description and project (NOT NULL columns).
+        """
+        from zenos.application.task_service import TaskService
+        from zenos.domain.models import Task
+        from unittest.mock import AsyncMock
+        import asyncio
+
+        captured: list[Task] = []
+
+        async def fake_upsert(task: Task) -> Task:
+            captured.append(task)
+            return task
+
+        task_repo_mock = AsyncMock()
+        task_repo_mock.upsert = AsyncMock(side_effect=fake_upsert)
+
+        entity_repo_mock = AsyncMock()
+        entity_repo_mock.list_all = AsyncMock(return_value=[])
+        entity_repo_mock.get_by_id = AsyncMock(return_value=None)
+
+        blindspot_repo_mock = AsyncMock()
+        blindspot_repo_mock.get_by_id = AsyncMock(return_value=None)
+
+        svc = TaskService(
+            task_repo=task_repo_mock,
+            entity_repo=entity_repo_mock,
+            blindspot_repo=blindspot_repo_mock,
+        )
+
+        # Simulate dashboard API: description key is present but value is None
+        data = {
+            "title": "test task",
+            "description": None,   # body.get("description") when not in JSON
+            "project": None,        # body.get("project") when not in JSON
+            "created_by": PARTNER_ID,
+        }
+        asyncio.get_event_loop().run_until_complete(svc.create_task(data))
+
+        assert len(captured) == 1
+        task = captured[0]
+        assert task.description == "", (
+            f"description should be '' but got {task.description!r} — "
+            "None would cause NOT NULL violation in PostgreSQL"
+        )
+        assert task.project == "", (
+            f"project should be '' but got {task.project!r} — "
+            "None would cause NOT NULL violation in PostgreSQL"
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SqlPartnerKeyValidator

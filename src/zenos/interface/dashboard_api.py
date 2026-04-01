@@ -1,18 +1,21 @@
 """Dashboard REST API — Firebase ID token auth for data access endpoints.
 
 Endpoints:
-  GET  /api/partner/me                     — current partner info
-  GET  /api/data/entities                  — list entities
-  GET  /api/data/entities/{id}             — get single entity
-  GET  /api/data/entities/{id}/children    — get child entities
-  GET  /api/data/entities/{id}/relationships — get entity relationships
-  GET  /api/data/relationships             — list all relationships
-  GET  /api/data/blindspots               — list blindspots
-  GET  /api/data/tasks                     — list tasks
-  GET  /api/data/tasks/by-entity/{entityId} — tasks by entity
-  POST /api/data/tasks/{taskId}/attachments — upload attachment (returns signed URL)
+  GET    /api/partner/me                                  — current partner info
+  GET    /api/data/entities                               — list entities
+  GET    /api/data/entities/{id}                          — get single entity
+  GET    /api/data/entities/{id}/children                 — get child entities
+  GET    /api/data/entities/{id}/relationships            — get entity relationships
+  GET    /api/data/relationships                          — list all relationships
+  GET    /api/data/blindspots                             — list blindspots
+  GET    /api/data/tasks                                  — list tasks
+  POST   /api/data/tasks                                  — create task
+  GET    /api/data/tasks/by-entity/{entityId}             — tasks by entity
+  PATCH  /api/data/tasks/{taskId}                         — update task fields
+  POST   /api/data/tasks/{taskId}/confirm                 — approve or reject task
+  POST   /api/data/tasks/{taskId}/attachments             — upload attachment (returns signed URL)
   DELETE /api/data/tasks/{taskId}/attachments/{attachmentId} — delete attachment
-  GET  /attachments/{attachment_id}        — proxy-stream attachment file
+  GET    /attachments/{attachment_id}                     — proxy-stream attachment file
 
 Auth: Firebase ID token → email → SQL partners table → partner scope.
 CORS: allows requests from the Dashboard origin.
@@ -29,6 +32,7 @@ from starlette.responses import Response
 from starlette.routing import Route
 
 from zenos.application.ontology_service import OntologyService
+from zenos.application.task_service import TaskService
 from zenos.domain.models import Blindspot, Entity, Relationship, Task
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.sql_repo import (  # composition root
@@ -671,6 +675,160 @@ async def delete_task_attachment(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# TaskService helper
+# ──────────────────────────────────────────────
+
+
+def _make_task_service() -> TaskService:
+    """Construct a TaskService from the initialized repositories."""
+    return TaskService(
+        task_repo=_task_repo,
+        entity_repo=_entity_repo,
+        blindspot_repo=_blindspot_repo,
+    )
+
+
+# ──────────────────────────────────────────────
+# Endpoint: POST /api/data/tasks
+# ──────────────────────────────────────────────
+
+
+async def create_task(request: Request) -> Response:
+    """Create a new task. title is required; all other fields are optional."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    title = body.get("title", "").strip()
+    if not title:
+        return _error_response("INVALID_INPUT", "title is required", 400, request=request)
+
+    data: dict = {"title": title, "created_by": effective_id}
+    for _field in ("description", "priority", "assignee", "due_date", "project"):
+        _val = body.get(_field)
+        if _val is not None:
+            data[_field] = _val
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_service = _make_task_service()
+        result = await task_service.create_task(data)
+    except ValueError as exc:
+        return _error_response("INVALID_INPUT", str(exc), 400, request=request)
+    except Exception:
+        logger.exception("Failed to create task")
+        return _error_response("INTERNAL_ERROR", "Failed to create task", 500, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+    logger.info("Created task %s by partner %s", result.task.id, effective_id)
+    return _json_response({"task": _task_to_dict(result.task)}, status_code=201, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: PATCH /api/data/tasks/{taskId}
+# ──────────────────────────────────────────────
+
+
+async def update_task(request: Request) -> Response:
+    """Update a task's fields. All fields are optional."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    allowed_fields = {"status", "title", "description", "priority", "assignee", "due_date", "result"}
+    updates: dict = {k: v for k, v in body.items() if k in allowed_fields and v is not None}
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_service = _make_task_service()
+        result = await task_service.update_task(task_id, updates)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            return _error_response("NOT_FOUND", msg, 404, request=request)
+        return _error_response("INVALID_INPUT", msg, 400, request=request)
+    except Exception:
+        logger.exception("Failed to update task %s", task_id)
+        return _error_response("INTERNAL_ERROR", "Failed to update task", 500, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+    logger.info("Updated task %s by partner %s", task_id, effective_id)
+    return _json_response({"task": _task_to_dict(result.task)}, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: POST /api/data/tasks/{taskId}/confirm
+# ──────────────────────────────────────────────
+
+
+async def confirm_task(request: Request) -> Response:
+    """Approve or reject a task in review status."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    action = body.get("action")
+    if action not in ("approve", "reject"):
+        return _error_response("INVALID_INPUT", "action must be 'approve' or 'reject'", 400, request=request)
+
+    rejection_reason = body.get("rejection_reason")
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_service = _make_task_service()
+        result = await task_service.confirm_task(
+            task_id,
+            accepted=(action == "approve"),
+            rejection_reason=rejection_reason,
+            updated_by=effective_id,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            return _error_response("NOT_FOUND", msg, 404, request=request)
+        return _error_response("INVALID_INPUT", msg, 400, request=request)
+    except Exception:
+        logger.exception("Failed to confirm task %s", task_id)
+        return _error_response("INTERNAL_ERROR", "Failed to confirm task", 500, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+    logger.info("Confirmed task %s action=%s by partner %s", task_id, action, effective_id)
+    return _json_response({"task": _task_to_dict(result.task)}, request=request)
+
+
+# ──────────────────────────────────────────────
 # Route table
 # ──────────────────────────────────────────────
 
@@ -683,8 +841,11 @@ dashboard_routes = [
     Route("/api/data/relationships", list_relationships, methods=["GET", "OPTIONS"]),
     Route("/api/data/blindspots", list_blindspots, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/by-entity/{entityId}", list_tasks_by_entity, methods=["GET", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}/confirm", confirm_task, methods=["POST", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/attachments/{attachmentId}", delete_task_attachment, methods=["DELETE", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/attachments", upload_task_attachment, methods=["POST", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}", update_task, methods=["PATCH", "OPTIONS"]),
     Route("/api/data/tasks", list_tasks, methods=["GET", "OPTIONS"]),
+    Route("/api/data/tasks", create_task, methods=["POST", "OPTIONS"]),
     Route("/attachments/{attachment_id}", get_attachment, methods=["GET", "OPTIONS"]),
 ]

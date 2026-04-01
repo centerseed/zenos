@@ -7,7 +7,7 @@ context assembly, and cascade unblocking.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 from zenos.domain.models import Blindspot, EntityType, Task, TaskPriority, TaskStatus
 from zenos.domain.repositories import (
@@ -22,6 +22,40 @@ from zenos.domain.task_rules import (
     normalize_task_status,
     recommend_priority,
 )
+
+
+def _parse_due_date(value: object) -> datetime | None:
+    """Convert a due_date value to a timezone-aware datetime or None.
+
+    Accepts:
+    - None / empty string → None
+    - datetime (already correct) → unchanged
+    - ISO date string "YYYY-MM-DD" → midnight UTC datetime
+    - ISO datetime string → parsed and made UTC-aware
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value
+    if isinstance(value, str):
+        raw = value.strip()
+        if not raw:
+            return None
+        # Date-only "YYYY-MM-DD"
+        if len(raw) == 10 and raw[4] == "-":
+            return datetime.strptime(raw, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        # Try full ISO format (may include T and Z/offset)
+        raw_normalized = raw.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(raw_normalized)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt
+        except ValueError:
+            return None
+    return None
 
 
 @dataclass
@@ -123,7 +157,7 @@ class TaskService:
             raise ValueError("plan_order must be >= 1")
 
         # Priority recommendation
-        due_date = data.get("due_date")
+        due_date = _parse_due_date(data.get("due_date"))
         rec_priority, priority_reason = recommend_priority(
             linked_entities=linked_entities,
             linked_blindspot=linked_blindspot,
@@ -146,29 +180,29 @@ class TaskService:
 
         task = Task(
             title=data["title"],
-            description=data.get("description", ""),
+            description=data.get("description") or "",
             status=status,
             priority=priority,
             priority_reason=priority_reason,
-            assignee=data.get("assignee"),
-            assignee_role_id=data.get("assignee_role_id"),
+            assignee=data.get("assignee") or None,
+            assignee_role_id=data.get("assignee_role_id") or None,
             plan_id=plan_id,
             plan_order=int(plan_order) if plan_order is not None else None,
             depends_on_task_ids=depends_on_task_ids,
             created_by=data["created_by"],
             updated_by=data.get("updated_by") or data["created_by"],
             linked_entities=linked_entity_ids,
-            linked_protocol=data.get("linked_protocol"),
+            linked_protocol=data.get("linked_protocol") or None,
             linked_blindspot=linked_blindspot_id,
-            source_type=data.get("source_type", ""),
-            source_metadata=data.get("source_metadata", {}) or {},
+            source_type=data.get("source_type") or "",
+            source_metadata=data.get("source_metadata") or {},
             context_summary=context_summary,
             due_date=due_date,
             blocked_by=blocked_by,
             blocked_reason=blocked_reason,
-            acceptance_criteria=data.get("acceptance_criteria", []),
-            project=data.get("project", ""),
-            attachments=data.get("attachments", []),
+            acceptance_criteria=data.get("acceptance_criteria") or [],
+            project=data.get("project") or "",
+            attachments=data.get("attachments") or [],
         )
 
         saved = await self._tasks.upsert(task)
@@ -215,12 +249,14 @@ class TaskService:
         # Apply other field updates
         for field in (
             "assignee", "priority", "description", "blocked_reason",
-            "due_date", "result", "acceptance_criteria", "blocked_by",
+            "result", "acceptance_criteria", "blocked_by",
             "plan_id", "plan_order", "depends_on_task_ids", "source_metadata",
             "updated_by", "project", "linked_entities", "attachments",
         ):
             if field in updates:
                 setattr(task, field, updates[field])
+        if "due_date" in updates:
+            task.due_date = _parse_due_date(updates["due_date"])
 
         if task.plan_order is not None and not task.plan_id:
             raise ValueError("plan_id is required when plan_order is provided")

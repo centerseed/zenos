@@ -4,16 +4,29 @@ import { useState, useMemo } from "react";
 import type { Entity, Task, TaskStatus } from "@/types";
 import { TaskCard } from "./TaskCard";
 import { TaskDetailDrawer } from "./TaskDetailDrawer";
-import { Layers } from "lucide-react";
+import { Layers, AlertTriangle } from "lucide-react";
+import {
+  DndContext,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+  useDraggable,
+} from "@dnd-kit/core";
 
 interface TaskBoardProps {
   tasks: Task[];
   entityNames?: Record<string, string>;
   entitiesById?: Record<string, Entity>;
-  visibleStatuses?: TaskStatus[]; // New prop to support dynamic filtering
+  visibleStatuses?: TaskStatus[];
+  onStatusChange?: (taskId: string, newStatus: string) => Promise<void>;
+  onUpdateTask?: (taskId: string, updates: Record<string, unknown>) => Promise<void>;
+  onConfirmTask?: (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => Promise<void>;
 }
 
-// Default order: simplified lifecycle
 const DEFAULT_COLUMN_ORDER: TaskStatus[] = [
   "todo",
   "in_progress",
@@ -35,15 +48,87 @@ const COLUMN_HEADER_COLORS: Record<string, string> = {
   done: "bg-green-900/50 text-green-400",
 };
 
+// ─── DraggableTaskCard ────────────────────────────────────────────────────────
+
+function DraggableTaskCard({
+  task,
+  onSelect,
+  entityNames,
+}: {
+  task: Task;
+  onSelect: (t: Task) => void;
+  entityNames: Record<string, string>;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id,
+    data: { task },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      {...listeners}
+      {...attributes}
+      className={`cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40" : ""}`}
+    >
+      <TaskCard
+        task={task}
+        onSelect={onSelect}
+        entityNames={entityNames}
+      />
+    </div>
+  );
+}
+
+// ─── DroppableColumn ──────────────────────────────────────────────────────────
+
+function DroppableColumn({
+  status,
+  children,
+  isEmpty,
+}: {
+  status: string;
+  children: React.ReactNode;
+  isEmpty: boolean;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: status });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`bg-card/40 backdrop-blur-sm rounded-b-xl p-2.5 space-y-4 flex-1 overflow-y-auto border-x border-b border-border/60 shadow-inner min-h-[200px] transition-all ${
+        isOver ? "ring-2 ring-primary/40 bg-primary/5" : ""
+      }`}
+    >
+      {isEmpty ? (
+        <div className={`flex flex-col items-center justify-center py-12 transition-opacity ${isOver ? "opacity-60" : "opacity-30"}`}>
+          <div className={`w-10 h-10 rounded-full border-2 border-dashed mb-3 ${isOver ? "border-primary/60" : "border-muted-foreground"}`} />
+          <p className="text-[10px] font-medium uppercase tracking-tighter">No tasks</p>
+        </div>
+      ) : children}
+    </div>
+  );
+}
+
+// ─── TaskBoard ────────────────────────────────────────────────────────────────
+
 export function TaskBoard({
   tasks,
   entityNames = {},
   entitiesById = {},
   visibleStatuses = [],
+  onStatusChange,
+  onUpdateTask,
+  onConfirmTask,
 }: TaskBoardProps) {
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [activeTask, setActiveTask] = useState<Task | null>(null);
+  // Warning dialog for bad status jumps
+  const [pendingDrag, setPendingDrag] = useState<{ taskId: string; newStatus: string } | null>(null);
+  const [dragWarning, setDragWarning] = useState<string | null>(null);
 
-  // Use selected statuses from filter, or fall back to default order
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+
   const activeColumns = useMemo(() => {
     if (visibleStatuses.length > 0) {
       return DEFAULT_COLUMN_ORDER.filter(s => visibleStatuses.includes(s));
@@ -54,13 +139,11 @@ export function TaskBoard({
   // Group by status, then by planId within status
   const boardData = useMemo(() => {
     const data: Record<string, { planId: string | null; tasks: Task[] }[]> = {};
-    
+
     for (const status of DEFAULT_COLUMN_ORDER) {
       let statusTasks = tasks.filter(t => t.status === status);
-      
-      // Sorting logic per column
+
       if (status === "done") {
-        // Done: Recent first
         statusTasks.sort((a, b) => {
           const timeA = a.completedAt?.getTime() || a.updatedAt.getTime();
           const timeB = b.completedAt?.getTime() || b.updatedAt.getTime();
@@ -70,7 +153,7 @@ export function TaskBoard({
 
       const planGroups: Record<string, Task[]> = {};
       const noPlanTasks: Task[] = [];
-      
+
       for (const t of statusTasks) {
         if (t.planId) {
           if (!planGroups[t.planId]) planGroups[t.planId] = [];
@@ -79,22 +162,21 @@ export function TaskBoard({
           noPlanTasks.push(t);
         }
       }
-      
+
       const sortedGroups = Object.entries(planGroups).map(([planId, groupTasks]) => ({
         planId,
-        tasks: groupTasks.sort((a, b) => (a.planOrder ?? 0) - (b.planOrder ?? 0))
+        tasks: groupTasks.sort((a, b) => (a.planOrder ?? 0) - (b.planOrder ?? 0)),
       })).sort((a, b) => a.planId.localeCompare(b.planId));
-      
+
       let finalGroups = [
         ...sortedGroups,
         ...(noPlanTasks.length > 0 ? [{ planId: null, tasks: noPlanTasks.sort((a, b) => {
-          if (status === "done") return 0; // Already sorted above
+          if (status === "done") return 0;
           const pMap: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
           return pMap[a.priority] - pMap[b.priority];
-        }) }] : [])
+        }) }] : []),
       ];
 
-      // Limit Todo and Done to top 20
       if (status === "todo" || status === "done") {
         let count = 0;
         const limitedGroups = [];
@@ -111,44 +193,83 @@ export function TaskBoard({
         }
         finalGroups = limitedGroups;
       }
-      
+
       data[status] = finalGroups;
     }
     return data;
   }, [tasks]);
 
+  function handleDragStart(event: DragStartEvent) {
+    const task = event.active.data.current?.task as Task | undefined;
+    if (task) setActiveTask(task);
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    setActiveTask(null);
+    const { active, over } = event;
+    if (!over || !onStatusChange) return;
+
+    const taskId = active.id as string;
+    const newStatus = over.id as string;
+    const task = tasks.find(t => t.id === taskId);
+    if (!task || task.status === newStatus) return;
+
+    // Warning: todo → done (skipping stages)
+    if (task.status === "todo" && newStatus === "done") {
+      setDragWarning("建議先經過 in_progress 和 review，確定要直接完成？");
+      setPendingDrag({ taskId, newStatus });
+      return;
+    }
+    // Warning: moving to review with no result
+    if (newStatus === "review" && !task.result) {
+      setDragWarning("建議填寫任務成果後再送審，確定要送審？");
+      setPendingDrag({ taskId, newStatus });
+      return;
+    }
+
+    onStatusChange(taskId, newStatus);
+  }
+
+  function confirmDrag() {
+    if (!pendingDrag || !onStatusChange) return;
+    onStatusChange(pendingDrag.taskId, pendingDrag.newStatus);
+    setPendingDrag(null);
+    setDragWarning(null);
+  }
+
+  // Update selected task when tasks array changes (after optimistic update)
+  const selectedTaskUpToDate = useMemo(() => {
+    if (!selectedTask) return null;
+    return tasks.find(t => t.id === selectedTask.id) ?? selectedTask;
+  }, [selectedTask, tasks]);
+
   return (
     <>
-      <div className="flex flex-col md:flex-row gap-5 md:overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">
-        {activeColumns.map((status) => {
-          const groups = boardData[status] || [];
-          const totalCountInView = groups.reduce((acc, g) => acc + g.tasks.length, 0);
-          const totalCountActual = tasks.filter(t => t.status === status).length;
-          
-          return (
-            <div key={status} className="w-full md:flex-shrink-0 md:w-[320px] flex flex-col h-full max-h-[calc(100vh-140px)]">
-              <div
-                className={`rounded-t-xl px-4 py-3 flex items-center justify-between shadow-sm z-10 ${COLUMN_HEADER_COLORS[status] ?? "bg-secondary text-muted-foreground"}`}
-              >
-                <span className="text-[11px] font-bold uppercase tracking-widest">
-                  {COLUMN_LABELS[status] ?? status}
-                  {(status === "todo" || status === "done") && totalCountActual > 20 && (
-                    <span className="ml-1 opacity-60 normal-case font-normal text-[9px]">(Top 20)</span>
-                  )}
-                </span>
-                <span className="text-[10px] font-bold rounded-full bg-white/10 px-2 py-0.5 border border-white/5">
-                  {totalCountActual}
-                </span>
-              </div>
-              
-              <div className="bg-card/40 backdrop-blur-sm rounded-b-xl p-2.5 space-y-4 flex-1 overflow-y-auto border-x border-b border-border/60 shadow-inner min-h-[200px]">
-                {totalCountInView === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12 opacity-30">
-                    <div className="w-10 h-10 rounded-full border-2 border-dashed border-muted-foreground mb-3" />
-                    <p className="text-[10px] font-medium uppercase tracking-tighter">No tasks</p>
-                  </div>
-                ) : (
-                  groups.map((group, gIdx) => (
+      <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="flex flex-col md:flex-row gap-5 md:overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">
+          {activeColumns.map((status) => {
+            const groups = boardData[status] || [];
+            const totalCountInView = groups.reduce((acc, g) => acc + g.tasks.length, 0);
+            const totalCountActual = tasks.filter(t => t.status === status).length;
+
+            return (
+              <div key={status} className="w-full md:flex-shrink-0 md:w-[320px] flex flex-col h-full max-h-[calc(100vh-140px)]">
+                <div
+                  className={`rounded-t-xl px-4 py-3 flex items-center justify-between shadow-sm z-10 ${COLUMN_HEADER_COLORS[status] ?? "bg-secondary text-muted-foreground"}`}
+                >
+                  <span className="text-[11px] font-bold uppercase tracking-widest">
+                    {COLUMN_LABELS[status] ?? status}
+                    {(status === "todo" || status === "done") && totalCountActual > 20 && (
+                      <span className="ml-1 opacity-60 normal-case font-normal text-[9px]">(Top 20)</span>
+                    )}
+                  </span>
+                  <span className="text-[10px] font-bold rounded-full bg-white/10 px-2 py-0.5 border border-white/5">
+                    {totalCountActual}
+                  </span>
+                </div>
+
+                <DroppableColumn status={status} isEmpty={totalCountInView === 0}>
+                  {groups.map((group, gIdx) => (
                     <div key={group.planId || `no-plan-${gIdx}`} className="space-y-2">
                       {group.planId && (
                         <div className="flex items-center gap-1.5 px-1 py-1 mb-1">
@@ -161,7 +282,7 @@ export function TaskBoard({
                       )}
                       <div className={`space-y-2.5 ${group.planId ? "pl-1 border-l border-purple-500/20" : ""}`}>
                         {group.tasks.map((task) => (
-                          <TaskCard
+                          <DraggableTaskCard
                             key={task.id}
                             task={task}
                             onSelect={setSelectedTask}
@@ -170,19 +291,59 @@ export function TaskBoard({
                         ))}
                       </div>
                     </div>
-                  ))
-                )}
+                  ))}
+                </DroppableColumn>
               </div>
+            );
+          })}
+        </div>
+
+        <DragOverlay>
+          {activeTask && (
+            <div className="opacity-80 rotate-1 scale-[1.03] shadow-2xl">
+              <TaskCard
+                task={activeTask}
+                onSelect={() => {}}
+                entityNames={entityNames}
+              />
             </div>
-          );
-        })}
-      </div>
+          )}
+        </DragOverlay>
+      </DndContext>
+
+      {/* Drag warning dialog */}
+      {dragWarning && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-card border border-border rounded-2xl p-6 mx-4 max-w-sm w-full space-y-4 shadow-2xl">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-foreground">{dragWarning}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={confirmDrag}
+                className="flex-1 px-3 py-2 text-xs font-bold bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+              >
+                強制執行
+              </button>
+              <button
+                onClick={() => { setPendingDrag(null); setDragWarning(null); }}
+                className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <TaskDetailDrawer
-        task={selectedTask}
+        task={selectedTaskUpToDate}
         onClose={() => setSelectedTask(null)}
         entityNames={entityNames}
         entitiesById={entitiesById}
+        onUpdateTask={onUpdateTask}
+        onConfirmTask={onConfirmTask}
       />
     </>
   );

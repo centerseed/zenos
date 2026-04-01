@@ -11,9 +11,10 @@ import { ProjectProgress } from "@/components/ProjectProgress";
 import { PeopleMatrix } from "@/components/PeopleMatrix";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { LoadingState } from "@/components/LoadingState";
-import { getTasks, getProjectEntities, getAllEntities } from "@/lib/api";
-import { RefreshCw } from "lucide-react";
+import { getTasks, getProjectEntities, getAllEntities, createTask, updateTask, confirmTask } from "@/lib/api";
+import { RefreshCw, Plus } from "lucide-react";
 import type { Task, TaskStatus, TaskPriority, Entity, Partner } from "@/types";
+import { TaskCreateDialog } from "@/components/TaskCreateDialog";
 
 type TabKey = "all" | "inbox" | "outbox" | "review";
 type ViewMode = "pulse" | "kanban";
@@ -61,6 +62,7 @@ function TasksPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [newTaskCount, setNewTaskCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [showCreateDialog, setShowCreateDialog] = useState(false);
   const prevTaskIdsRef = useRef<Set<string>>(new Set());
 
   // Initial load: all tasks + entities + partners list
@@ -206,6 +208,48 @@ function TasksPage() {
     return Array.from(projects).sort();
   }, [tasks]);
 
+  // ─── Mutation handlers ────────────────────────────────────────────────────
+
+  const handleCreateTask = useCallback(async (data: {
+    title: string;
+    description?: string;
+    priority?: string;
+    assignee?: string;
+    due_date?: string;
+    project?: string;
+  }) => {
+    if (!user) throw new Error("未登入");
+    const token = await user.getIdToken();
+    const newTask = await createTask(token, data);
+    setTasks(prev => [newTask, ...prev]);
+  }, [user]);
+
+  const handleUpdateTask = useCallback(async (taskId: string, updates: Record<string, unknown>) => {
+    if (!user) throw new Error("未登入");
+    // Optimistic update
+    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } as Task : t));
+    try {
+      const token = await user.getIdToken();
+      const updated = await updateTask(token, taskId, updates as Parameters<typeof updateTask>[2]);
+      setTasks(prev => prev.map(t => t.id === taskId ? updated : t));
+    } catch (err) {
+      // Rollback: re-fetch just that task's state by refreshing
+      console.error("Failed to update task:", err);
+      throw err;
+    }
+  }, [user]);
+
+  const handleConfirmTask = useCallback(async (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => {
+    if (!user) throw new Error("未登入");
+    const token = await user.getIdToken();
+    const updated = await confirmTask(token, taskId, data);
+    setTasks(prev => prev.map(t => t.id === taskId ? updated : t));
+  }, [user]);
+
+  const handleStatusChange = useCallback(async (taskId: string, newStatus: string) => {
+    await handleUpdateTask(taskId, { status: newStatus });
+  }, [handleUpdateTask]);
+
   const filteredTasks = useMemo(() => {
     if (!tasks) return [];
     
@@ -261,6 +305,15 @@ function TasksPage() {
         <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 mb-6 bg-card/20 p-2 rounded-xl border border-border/40 backdrop-blur-sm">
           
           <div className="flex items-center gap-4">
+            {/* New Task Button */}
+            <button
+              onClick={() => setShowCreateDialog(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              新增任務
+            </button>
+
             {/* Refresh Button */}
             <button
               onClick={handleRefresh}
@@ -382,11 +435,20 @@ function TasksPage() {
                 entityNames={entityNames}
                 entitiesById={entitiesById}
                 visibleStatuses={filterStatuses}
+                onStatusChange={handleStatusChange}
+                onUpdateTask={handleUpdateTask}
+                onConfirmTask={handleConfirmTask}
               />
             )}
           </>
         )}
       </main>
+
+      <TaskCreateDialog
+        isOpen={showCreateDialog}
+        onClose={() => setShowCreateDialog(false)}
+        onCreateTask={handleCreateTask}
+      />
     </div>
   );
 }

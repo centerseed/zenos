@@ -250,6 +250,80 @@ export async function addLinkAttachment(
   return res.json();
 }
 
+/** Create a new task */
+export async function createTask(
+  token: string,
+  data: {
+    title: string;
+    description?: string;
+    priority?: string;
+    assignee?: string;
+    due_date?: string;
+    project?: string;
+  }
+): Promise<Task> {
+  const res = await fetch(`${API_BASE}/api/data/tasks`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Create task failed: ${res.status}`);
+  const body = await res.json();
+  return hydrateDates(body.task ?? body) as Task;
+}
+
+/** Update an existing task (partial update) */
+export async function updateTask(
+  token: string,
+  taskId: string,
+  updates: {
+    status?: string;
+    title?: string;
+    description?: string;
+    priority?: string;
+    assignee?: string;
+    due_date?: string | null;
+    result?: string;
+  }
+): Promise<Task> {
+  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) throw new Error(`Update task failed: ${res.status}`);
+  const body = await res.json();
+  return hydrateDates(body.task ?? body) as Task;
+}
+
+/** Confirm a task (approve or reject) */
+export async function confirmTask(
+  token: string,
+  taskId: string,
+  data: {
+    action: "approve" | "reject";
+    rejection_reason?: string;
+  }
+): Promise<Task> {
+  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/confirm`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error(`Confirm task failed: ${res.status}`);
+  const body = await res.json();
+  return hydrateDates(body.task ?? body) as Task;
+}
+
 /** Delete a task attachment */
 export async function deleteTaskAttachment(
   token: string,
