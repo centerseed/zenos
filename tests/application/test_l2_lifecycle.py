@@ -241,6 +241,7 @@ class TestConfirmModuleImpactsGate:
             id="mod-1", name="Pricing Rules", type="module",
             summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
             status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
         )
         concrete_rel = Relationship(
             id="rel-1", source_entity_id="mod-1", target_id="prod-1",
@@ -264,6 +265,7 @@ class TestConfirmModuleImpactsGate:
             id="mod-1", name="Pricing Rules", type="module",
             summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
             status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
         repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[])
@@ -278,6 +280,7 @@ class TestConfirmModuleImpactsGate:
             id="mod-1", name="Pricing Rules", type="module",
             summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
             status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
         )
         non_concrete_rel = Relationship(
             id="rel-2", source_entity_id="mod-1", target_id="prod-1",
@@ -297,6 +300,7 @@ class TestConfirmModuleImpactsGate:
             id="mod-1", name="Pricing Rules", type="module",
             summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
             status="stale", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
         )
         concrete_rel = Relationship(
             id="rel-1", source_entity_id="mod-1", target_id="prod-1",
@@ -496,6 +500,7 @@ class TestConfirmSetsLastReviewedAt:
             tags=Tags(what="pricing", why="revenue", how="rules", who="pm"),
             status="draft",
             confirmed_by_user=False,
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
         )
         # Confirm gate for L2: needs a concrete impacts relationship
         concrete_rel = Relationship(

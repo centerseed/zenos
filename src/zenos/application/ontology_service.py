@@ -1811,8 +1811,29 @@ class OntologyService:
             if entity is None:
                 raise ValueError(f"Entity '{item_id}' not found")
 
-            # L2 (module) confirmation gate: require at least one outgoing concrete impacts relationship
+            # L2 (module) confirmation gate: require three-question record and concrete impacts
             if entity.type == EntityType.MODULE:
+                # Gate 1: three-question record must exist and all answers must be True
+                layer_decision = (
+                    entity.details.get("layer_decision")
+                    if entity.details and isinstance(entity.details, dict)
+                    else None
+                )
+                if layer_decision is None:
+                    raise ValueError(
+                        f"L2 confirm 失敗：'{entity.name}' 缺少三問判斷紀錄（layer_decision）。"
+                        f"請先用 write 更新 entity，在 data 中提供 layer_decision。"
+                    )
+                q1 = layer_decision.get("q1_persistent")
+                q2 = layer_decision.get("q2_cross_role")
+                q3 = layer_decision.get("q3_company_consensus")
+                if not (q1 and q2 and q3):
+                    raise ValueError(
+                        f"L2 confirm 失敗：'{entity.name}' 的三問判斷未全通過"
+                        f"（q1={q1}, q2={q2}, q3={q3}）。三問必須全部為 True 才能 confirm L2。"
+                    )
+
+                # Gate 2: require at least one outgoing concrete impacts relationship
                 rels = await self._relationships.list_by_entity(entity.id)
                 has_concrete_impacts = any(
                     r.type == RelationshipType.IMPACTS

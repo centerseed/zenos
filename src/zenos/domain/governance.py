@@ -992,10 +992,10 @@ def run_quality_check(
     blindspots: list[Blindspot],
     relationships: list[Relationship],
 ) -> QualityReport:
-    """Run the 12-item quality checklist from REF-ontology-methodology.md.
+    """Run the 15-item quality checklist from REF-ontology-methodology.md.
 
     Returns a QualityReport with score (0-100), passed, failed, and warnings.
-    Items 1-9 cover general ontology quality; items 10-12 cover L2 (module) quality.
+    Items 1-9 cover general ontology quality; items 10-15 cover L2 (module) quality.
     """
     items: list[QualityCheckItem] = []
     entity_map = {e.id: e for e in entities if e.id}
@@ -1302,6 +1302,37 @@ def run_quality_check(
             + (f" ... (+{len(overdue_modules) - 5})" if len(overdue_modules) > 5 else "")
             if overdue_modules
             else "所有 active L2 entity 均在 governance review 期限內（90 天）"
+        ),
+    ))
+
+    # --- 15. L2 three-question record completeness ---
+    # All confirmed L2 (active status) should have layer_decision with all three questions True
+    confirmed_modules = [
+        e for e in entities
+        if e.type == EntityType.MODULE and e.status == EntityStatus.ACTIVE
+    ]
+    modules_missing_3q: list[tuple[Entity, str]] = []
+    for mod in confirmed_modules:
+        ld = (
+            mod.details.get("layer_decision")
+            if mod.details and isinstance(mod.details, dict)
+            else None
+        )
+        if ld is None:
+            modules_missing_3q.append((mod, "missing"))
+        elif not (ld.get("q1_persistent") and ld.get("q2_cross_role") and ld.get("q3_company_consensus")):
+            modules_missing_3q.append((mod, "incomplete"))
+
+    check15_ok = len(modules_missing_3q) == 0
+    items.append(QualityCheckItem(
+        name="l2_three_question_record",
+        passed=check15_ok,
+        detail=(
+            f"{len(modules_missing_3q)} 個 active L2 entity 缺少完整三問紀錄："
+            + ", ".join(f"'{m.name}' ({reason})" for m, reason in modules_missing_3q[:5])
+            + (f" ... (+{len(modules_missing_3q) - 5})" if len(modules_missing_3q) > 5 else "")
+            if modules_missing_3q
+            else f"所有 {len(confirmed_modules)} 個 active L2 entity 均有完整三問紀錄"
         ),
     ))
 
