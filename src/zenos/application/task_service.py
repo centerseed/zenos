@@ -383,18 +383,14 @@ class TaskService:
 
         return "。".join(parts) if parts else ""
 
-    async def get_task_enriched(self, task_id: str) -> tuple[Task, dict] | None:
-        """Get task with linked_entities/assignee_role/blindspot expanded.
+    async def enrich_task(self, task: Task) -> dict:
+        """Enrich a single task with expanded linked_entities/assignee_role/blindspot_detail.
 
-        Returns (task, enrichments) where enrichments is a plain dict:
+        Returns enrichments dict:
           - expanded_entities: list of entity objects (id/name/summary/tags/status)
           - assignee_role: entity object or None (only present if assignee_role_id set)
           - blindspot_detail: blindspot detail dict (only present if linked_blindspot set)
         """
-        task = await self._tasks.get_by_id(task_id)
-        if task is None:
-            return None
-
         enrichments: dict = {}
 
         # Expand linked_entities from IDs to objects
@@ -419,7 +415,7 @@ class TaskService:
                 expanded.append({"id": eid, "not_found": True})
         enrichments["expanded_entities"] = expanded
 
-        # Expand assignee_role (P1a)
+        # Expand assignee_role
         if task.assignee_role_id:
             role = await self._entities.get_by_id(task.assignee_role_id)
             enrichments["assignee_role"] = (
@@ -427,7 +423,7 @@ class TaskService:
                 if role else None
             )
 
-        # Expand blindspot_detail (P1b)
+        # Expand blindspot_detail
         if task.linked_blindspot:
             bs = await self._blindspots.get_by_id(task.linked_blindspot)
             if bs:
@@ -437,4 +433,18 @@ class TaskService:
                     "suggested_action": bs.suggested_action,
                 }
 
+        return enrichments
+
+    async def get_task_enriched(self, task_id: str) -> tuple[Task, dict] | None:
+        """Get task with linked_entities/assignee_role/blindspot expanded.
+
+        Returns (task, enrichments) where enrichments is a plain dict:
+          - expanded_entities: list of entity objects (id/name/summary/tags/status)
+          - assignee_role: entity object or None (only present if assignee_role_id set)
+          - blindspot_detail: blindspot detail dict (only present if linked_blindspot set)
+        """
+        task = await self._tasks.get_by_id(task_id)
+        if task is None:
+            return None
+        enrichments = await self.enrich_task(task)
         return task, enrichments

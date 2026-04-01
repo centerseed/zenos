@@ -344,6 +344,18 @@ def _convert_datetimes(data: dict) -> dict:
     return out
 
 
+async def _enrich_task_result(task_obj) -> dict:
+    """Serialize a task and apply enrichment (expanded entities/role/blindspot)."""
+    task_dict = _serialize(task_obj)
+    enr = await task_service.enrich_task(task_obj)
+    task_dict["linked_entities"] = enr["expanded_entities"]
+    if "assignee_role" in enr:
+        task_dict["assignee_role"] = enr["assignee_role"]
+    if "blindspot_detail" in enr:
+        task_dict["blindspot_detail"] = enr["blindspot_detail"]
+    return task_dict
+
+
 def _new_id() -> str:
     """Generate a short unique ID (32-char hex UUID4)."""
     return uuid.uuid4().hex
@@ -481,7 +493,7 @@ async def search(
             or query_lower in t.description.lower()
         ][:limit]
         if matched_tasks:
-            results["tasks"] = [_serialize(t) for t in matched_tasks]
+            results["tasks"] = [await _enrich_task_result(t) for t in matched_tasks]
 
         # Also search entity entries content
         entry_hits = await entry_repo.search_content(query, limit=limit)
@@ -571,7 +583,7 @@ async def search(
                 project=effective_project or None,
                 plan_id=plan_id,
             )
-            results["tasks"] = [_serialize(t) for t in tasks]
+            results["tasks"] = [await _enrich_task_result(t) for t in tasks]
 
     return results
 
@@ -678,14 +690,8 @@ async def get(
         enriched = await task_service.get_task_enriched(id)
         if enriched is None:
             return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
-        task_obj, enrichments = enriched
-        result = _serialize(task_obj)
-        result["linked_entities"] = enrichments["expanded_entities"]
-        if "assignee_role" in enrichments:
-            result["assignee_role"] = enrichments["assignee_role"]
-        if "blindspot_detail" in enrichments:
-            result["blindspot_detail"] = enrichments["blindspot_detail"]
-        return result
+        task_obj, _ = enriched
+        return await _enrich_task_result(task_obj)
 
     else:
         return {
@@ -790,6 +796,11 @@ async def write(
               選填：layer_decision({q1_persistent, q2_cross_role, q3_company_consensus, impacts_draft})
                     — 新建 L2（type=module）時必填，除非 force=True
                     — 型別必須是 object（dict），不可傳 JSON 字串
+                    — 各欄位說明：
+                      q1_persistent: bool — 是否為公司核心持久知識？（非臨時性、非短期任務）
+                      q2_cross_role: bool — 是否跨角色共識？（不是某個人的個人筆記）
+                      q3_company_consensus: bool — 是否全司共識？（經過確認的公司知識）
+                      impacts_draft: str — 具體影響描述，格式「A 改了什麼 → B 的什麼要跟著看」
                     — 正確：
                       layer_decision={
                         "q1_persistent": true,
@@ -802,15 +813,25 @@ async def write(
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary。更新語意為 merge update（未提供欄位不清空）。
                linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
-               可用 sync_mode(rename/reclassify/archive/supersede/sync_repair)
-               + dry_run=true 做文件治理批次同步預覽。
+               可用 sync_mode 做文件治理批次同步：
+                 - rename: 文件改名
+                 - reclassify: 重新分類（改 tags/type）
+                 - archive: 歸檔（標記為不再使用）
+                 - supersede: 被新版取代
+                 - sync_repair: 修復同步問題
+               搭配 dry_run=true 可先預覽變更。
     protocols: entity_id, entity_name, content({what, why, how, who})
     blindspots: description, severity(red/yellow/green), suggested_action
     relationships: source_entity_id, target_entity_id, type(depends_on/serves/
                    owned_by/part_of/blocks/related_to/impacts/enables), description
-    entries: entity_id（必填）, type（必填：decision/insight/limitation/change/context）,
-             content（必填：1-200 字元）
+    entries: entity_id（必填）, type（必填）, content（必填：1-200 字元）
              選填：context（額外脈絡，最多 200 字元）, author, source_task_id
+             type（必填）各類型區別：
+               - decision: 團隊做出的決定（如「選用 PostgreSQL」）
+               - insight: 發現的洞察（如「用戶主要在週末使用」）
+               - limitation: 已知限制（如「API 不支援批量操作」）
+               - change: 變更記錄（如「v2.0 移除了舊認證」）
+               - context: 背景脈絡（如「此模組由外部團隊維護」）
 
              supersede 流程：
              1. 先建立新 entry（write collection="entries", data={entity_id, type, content, ...}）
@@ -1086,7 +1107,7 @@ async def confirm(
                 new_blindspot=new_blindspot,
                 updated_by=((_current_partner.get() or {}).get("id")),
             )
-            response = _serialize(result.task)
+            response = await _enrich_task_result(result.task)
             if result.cascade_updates:
                 response["cascadeUpdates"] = [
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}
@@ -1457,7 +1478,7 @@ async def _task_handler(
     tags={"write"},
 )
 async def task(
-    action: str,
+    action: str,  # "create" | "update"
     title: str | None = None,
     created_by: str | None = None,
     id: str | None = None,
@@ -1515,12 +1536,13 @@ async def task(
         created_by: 建立者 partner ID（create 時由 server 依 API key context 覆寫）
         id: 任務 ID（update 必填）
         description: 任務描述
-        assignee: 被指派者 UID
+        assignee: 被指派者 UID（具體的人或 agent）
         priority: critical/high/medium/low（不傳時 AI 自動推薦）
         status: create 時只能 todo；update 時需通過合法性驗證
         linked_entities: 關聯的 entity IDs
         linked_protocol: 關聯的 Protocol ID
         linked_blindspot: 觸發的 blindspot ID
+        source_type: 來源類型（如 "chat"、"doc"、"repo"、"spec"、"review"）
         source_metadata: 來源追溯與外部同步資訊（可選，dict）。
             ⚠️ 這是「來源追溯」用途，不是放附件的地方。附件請用 attachments 參數。
             推薦結構：
@@ -1534,7 +1556,9 @@ async def task(
               ]
             }
         created_via_agent: 是否由 agent 建立。預設 true（MCP 路徑）。
+                           ⚠️ 此欄位與 agent_name 會合併寫入 source_metadata.agent_info。
         agent_name: agent 名稱（如 "architect-agent"）。created_via_agent=true 時建議帶入。
+                    ⚠️ 此值不會獨立存為 task 欄位，而是合併寫入 source_metadata.agent_info。
         due_date: 到期日 ISO-8601（如 "2026-03-29"）
         blocked_by: 阻塞此任務的 task IDs
         blocked_reason: 可選的依賴/阻塞說明（不再綁定 blocked 狀態）
@@ -1542,7 +1566,8 @@ async def task(
         result: 完成產出描述（status=review 時必填）
         project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
             未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
-        assignee_role_id: 指向 role entity 的 ID（可選），用於展開角色 context
+        assignee_role_id: 指向 role entity 的 ID（可選），表達「這個任務需要什麼角色」而非「指派給誰」。
+                          get 時會展開為角色的 name/summary context。
         plan_id: 任務群組 ID（PLAN 層識別）
         plan_order: 任務在 plan 內順序（>=1）
         depends_on_task_ids: 前置依賴 task IDs（可選）
@@ -1706,6 +1731,18 @@ async def analyze(
 
     Args:
         check_type: "all" / "quality" / "staleness" / "blindspot" / "impacts" / "document_consistency"
+
+    Returns:
+        dict — 各 check_type 對應的子結構：
+        - quality: {score, total_entities, issues[{entity_id, entity_name, defect}], ...}
+                   含 L2 治理補充欄位（l2_impacts_repairs, l2_backfill_proposals, 等）
+        - staleness: {warnings[{...}], count, document_consistency_warnings, document_consistency_count}
+        - blindspots: {blindspots[{...}], count, task_signal_suggestions[{...}], task_signal_count}
+        - impacts: quality.l2_impacts_validity（掛在 quality 子結構下）
+        - document_consistency: {document_consistency_warnings[{...}], document_consistency_count}
+        - kpis: {total_items, unconfirmed_items, unconfirmed_ratio, blindspot_total,
+                 duplicate_blindspots, duplicate_blindspot_rate, median_confirm_latency_days,
+                 active_l2_missing_impacts, weekly_review_required}（check_type="all" 時包含）
     """
     await _ensure_services()
     results: dict = {}
@@ -2108,7 +2145,7 @@ async def setup(
     """自助安裝 ZenOS 治理能力到你的 AI agent 平台。
 
     已完成 MCP 連線的用戶呼叫此 tool，即可取得 ZenOS skill 安裝指引。
-    支援：Claude Code、Claude Web UI、OpenAI Codex。
+    支援：Claude Code、Claude Web UI、OpenAI Codex / ChatGPT。
     不需要 DB 連線，不需要 partner key。
 
     使用時機：
@@ -2123,10 +2160,12 @@ async def setup(
     - 治理規則查詢 → 用 governance_guide
 
     Args:
-        platform: 目標平台。claude_code / claude_web / codex。
+        platform: 目標平台。claude_code / claude_web / codex（含 ChatGPT）。
                   不傳時回傳平台清單，讓 agent 詢問用戶後帶正確值再次呼叫。
         skill_selection: 治理能力組合。
-                         full=完整（L2+L3+Task），doc_task=文件+Task，task_only=僅Task。
+            full=完整治理（L2 知識節點 + L3 文件 + Task），適合全功能使用。
+            doc_task=文件 + Task 治理，適合不需要深度知識建模的場景。
+            task_only=僅 Task 治理，適合只需要任務管理的場景。
         skip_overview: 跳過治理概要說明，適合更新操作（已熟悉 ZenOS 的用戶）。
 
     Returns:

@@ -306,3 +306,95 @@ async def test_create_task_no_linked_no_context():
     }
     task_result = await svc.create_task(data)
     assert task_result.task.context_summary == ""
+
+
+# ---------------------------------------------------------------------------
+# T12: enrich_task expands linked_entities (same result as get_task_enriched)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enrich_task_expands_entities():
+    entity = _entity()
+    task = _task(linked_entities=["ent-1"])
+    svc = _make_service(task=task, entity=entity)
+
+    enrichments = await svc.enrich_task(task)
+
+    assert len(enrichments["expanded_entities"]) == 1
+    exp = enrichments["expanded_entities"][0]
+    assert exp["id"] == "ent-1"
+    assert exp["name"] == "Paceriz"
+    assert exp["tags"]["what"] == "app"
+    assert exp["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_enrich_task_empty_linked_entities():
+    task = _task(linked_entities=[])
+    svc = _make_service(task=task)
+
+    enrichments = await svc.enrich_task(task)
+
+    assert enrichments["expanded_entities"] == []
+    assert "assignee_role" not in enrichments
+    assert "blindspot_detail" not in enrichments
+
+
+# ---------------------------------------------------------------------------
+# T13: enrich_task expands assignee_role and blindspot_detail
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_enrich_task_expands_assignee_role_and_blindspot():
+    role = _entity(id="role-1", name="Product Manager", summary="Owns the roadmap")
+    bs = Blindspot(
+        id="bs-1",
+        description="No monitoring on prod",
+        severity="red",
+        related_entity_ids=[],
+        suggested_action="Add Datadog",
+    )
+    task = _task(assignee_role_id="role-1", linked_blindspot="bs-1")
+
+    def entity_side_effect(eid: str):
+        if eid == "role-1":
+            return role
+        return None
+
+    svc = _make_service(task=task, blindspot=bs, entity_side_effect=entity_side_effect)
+
+    enrichments = await svc.enrich_task(task)
+
+    assert "assignee_role" in enrichments
+    ar = enrichments["assignee_role"]
+    assert ar is not None
+    assert ar["id"] == "role-1"
+    assert ar["name"] == "Product Manager"
+
+    assert "blindspot_detail" in enrichments
+    bd = enrichments["blindspot_detail"]
+    assert bd["description"] == "No monitoring on prod"
+    assert bd["severity"] == "red"
+    assert bd["suggested_action"] == "Add Datadog"
+
+
+# ---------------------------------------------------------------------------
+# T14: get_task_enriched still works correctly after refactor (regression)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_task_enriched_regression_after_refactor():
+    entity = _entity()
+    task = _task(linked_entities=["ent-1"])
+    svc = _make_service(task=task, entity=entity)
+
+    result = await svc.get_task_enriched("task-1")
+
+    assert result is not None
+    got_task, enrichments = result
+    assert got_task.id == "task-1"
+    assert len(enrichments["expanded_entities"]) == 1
+    assert enrichments["expanded_entities"][0]["name"] == "Paceriz"
