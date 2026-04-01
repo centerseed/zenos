@@ -123,6 +123,25 @@ class TaskRepository(TypingProtocol):
         ...
 
 
+class ToolEventRepository(TypingProtocol):
+    """Persistence interface for agent tool event tracking."""
+
+    async def log_tool_event(
+        self,
+        partner_id: str,
+        tool_name: str,
+        entity_id: str | None,
+        query: str | None,
+        result_count: int | None,
+    ) -> None: ...
+
+    async def get_entity_usage_stats(
+        self,
+        partner_id: str,
+        days: int = 30,
+    ) -> list[dict]: ...
+
+
 class SourceAdapter(TypingProtocol):
     """Read-only access to external document content."""
 

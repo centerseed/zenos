@@ -24,6 +24,7 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -61,12 +62,14 @@ from zenos.infrastructure.sql_repo import (
     SqlProtocolRepository,
     SqlRelationshipRepository,
     SqlTaskRepository,
+    SqlToolEventRepository,
     SqlUsageLogRepository,
     get_pool,
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
 from zenos.infrastructure.context import (
     current_partner_department,
+    current_partner_id as _current_partner_id,
     current_partner_is_admin,
     current_partner_roles,
 )
@@ -233,16 +236,18 @@ source_adapter = GitHubAdapter()
 # GovernanceAI: LLM-based auto-inference (optional, depends on env config)
 _governance_ai: GovernanceAI | None = None
 _usage_log_repo: SqlUsageLogRepository | None = None
+_tool_event_repo: SqlToolEventRepository | None = None
 
 
 async def _ensure_governance_ai() -> None:
     """Wire GovernanceAI with SqlUsageLogRepository after pool is available."""
-    global _governance_ai, _usage_log_repo
+    global _governance_ai, _usage_log_repo, _tool_event_repo
     if _governance_ai is not None:
         return
     try:
         pool = await get_pool()
         _usage_log_repo = SqlUsageLogRepository(pool)
+        _tool_event_repo = SqlToolEventRepository(pool)
         llm_client = create_llm_client()
         from zenos.infrastructure.context import current_partner_id as _ctx_partner_id
         _governance_ai = GovernanceAI(
@@ -417,6 +422,58 @@ def _audit_log(
 
 
 # ===================================================================
+# Tool event logging helper
+# ===================================================================
+
+
+async def _log_tool_event(
+    partner_id: str,
+    tool_name: str,
+    entity_id: str | None,
+    query: str | None,
+    result_count: int | None,
+) -> None:
+    """Write a single tool event row. Errors are logged as warnings only."""
+    if _tool_event_repo is None:
+        return
+    try:
+        await _tool_event_repo.log_tool_event(
+            partner_id=partner_id,
+            tool_name=tool_name,
+            entity_id=entity_id,
+            query=query,
+            result_count=result_count,
+        )
+    except Exception:
+        logger.warning("tool_event logging failed", exc_info=True)
+
+
+def _schedule_tool_event(
+    tool_name: str,
+    entity_id: str | None,
+    query: str | None,
+    result_count: int | None,
+) -> None:
+    """Schedule a non-blocking tool event insert via asyncio.create_task."""
+    partner_id = _current_partner_id.get()
+    if not partner_id:
+        return
+    try:
+        asyncio.create_task(
+            _log_tool_event(
+                partner_id=partner_id,
+                tool_name=tool_name,
+                entity_id=entity_id,
+                query=query,
+                result_count=result_count,
+            )
+        )
+    except RuntimeError:
+        # No running event loop (e.g. tests not using asyncio)
+        pass
+
+
+# ===================================================================
 # Tool 1: search — find and list across all collections
 # ===================================================================
 
@@ -503,6 +560,13 @@ async def search(
                 for hit in entry_hits
             ]
 
+        # Log a tool event for each exposed entity
+        exposed_count = results.get("count", 0)
+        for r in visible_results[:limit]:
+            eid = getattr(r, "id", None)
+            if eid:
+                _schedule_tool_event("search", eid, query, exposed_count)
+
         return results
 
     # Collection-specific listing
@@ -585,6 +649,14 @@ async def search(
             )
             results["tasks"] = [await _enrich_task_result(t) for t in tasks]
 
+    # Log a tool event for each entity exposed in collection-specific results
+    entity_items = results.get("entities", [])
+    total_count = sum(len(v) for v in results.values() if isinstance(v, list))
+    for item in entity_items:
+        eid = item.get("id") if isinstance(item, dict) else None
+        if eid:
+            _schedule_tool_event("search", eid, query or None, total_count)
+
     return results
 
 
@@ -647,6 +719,7 @@ async def get(
         eid = result.entity.id
         active_entries = await entry_repo.list_by_entity(eid) if eid else []
         response["active_entries"] = [_serialize(e) for e in active_entries]
+        _schedule_tool_event("get", eid, None, None)
         return response
 
     elif collection == "protocols":
