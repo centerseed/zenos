@@ -47,6 +47,7 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 from zenos.application.governance_ai import GovernanceAI
+from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.models import EntityEntry
 from zenos.application.governance_service import GovernanceService
 from zenos.application.ontology_service import OntologyService
@@ -2006,6 +2007,39 @@ async def analyze(
             results["quality"]["entry_saturation_count"] = len(entry_saturation)
         except Exception:
             logger.warning("Entry saturation check failed", exc_info=True)
+
+        # Search-unused signals
+        try:
+            if _tool_event_repo is not None:
+                partner_id = _current_partner_id.get() or ""
+                all_entities_for_signals = await ontology_service._entities.list_all()
+                usage_stats = await _tool_event_repo.get_entity_usage_stats(partner_id, days=30)
+                search_unused = compute_search_unused_signals(usage_stats, all_entities_for_signals)
+                if search_unused:
+                    results["quality"]["search_unused_signals"] = search_unused
+        except Exception:
+            logger.warning("Search unused signals check failed", exc_info=True)
+
+        # Summary quality flags
+        try:
+            all_entities_for_quality = await ontology_service._entities.list_all()
+            l2_entities = [
+                e for e in all_entities_for_quality
+                if e.type == "module" and e.status in ("active", "draft") and e.id
+            ]
+            summary_flags = []
+            for e in l2_entities:
+                quality = score_summary_quality(e.summary or "", e.type)
+                if quality["quality_score"] != "good":
+                    summary_flags.append({
+                        "entity_id": e.id,
+                        "entity_name": e.name,
+                        **quality,
+                    })
+            if summary_flags:
+                results["quality"]["summary_quality_flags"] = summary_flags
+        except Exception:
+            logger.warning("Summary quality flags check failed", exc_info=True)
 
     if check_type in ("all", "staleness", "document_consistency"):
         staleness_result = await governance_service.run_staleness_check()

@@ -21,6 +21,7 @@ from zenos.domain.governance import (
     check_impacts_target_validity,
     check_reverse_impacts,
     compute_quality_correction_priority,
+    compute_search_unused_signals,
     detect_staleness,
     detect_stale_documents_from_consistency,
     find_stale_l2_downstream_entities,
@@ -51,12 +52,14 @@ class GovernanceService:
         protocol_repo: ProtocolRepository | None = None,
         blindspot_repo: BlindspotRepository | None = None,
         task_repo=None,  # TaskRepository (duck typing to avoid circular import)
+        tool_event_repo=None,  # ToolEventRepository (duck typing to avoid circular import)
     ) -> None:
         self._entities = entity_repo
         self._relationships = relationship_repo
         self._protocols = protocol_repo
         self._blindspots = blindspot_repo
         self._tasks = task_repo
+        self._tool_events = tool_event_repo
 
     async def _load_all_relationships(self, entities: list) -> list:
         """Collect all relationships by querying each entity's relationships."""
@@ -461,3 +464,23 @@ class GovernanceService:
             documents=documents,
             relationships=relationships,
         )
+
+    async def compute_search_unused_for_partner(
+        self,
+        partner_id: str,
+        days: int = 30,
+    ) -> list[dict]:
+        """Compute search-unused signals for all entities of a partner.
+
+        Fetches entity usage stats from ToolEventRepository and delegates to
+        domain function compute_search_unused_signals.
+
+        Returns list of dicts for entities with unused_ratio > 0.8 and
+        search_count >= 3 (flagged=True only).
+        """
+        if self._tool_events is None:
+            return []
+        usage_stats = await self._tool_events.get_entity_usage_stats(partner_id, days=days)
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        return compute_search_unused_signals(usage_stats, entities)

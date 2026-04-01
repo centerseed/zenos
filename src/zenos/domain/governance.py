@@ -1696,3 +1696,113 @@ def detect_stale_documents_from_consistency(
                 )
 
     return warnings
+
+
+# ──────────────────────────────────────────────
+# Search-unused signals (搜尋後未使用信號)
+# ──────────────────────────────────────────────
+
+def compute_search_unused_signals(
+    entity_usage_stats: list[dict],
+    entities: list[Entity],
+) -> list[dict]:
+    """Calculate per-entity unused ratio from tool event stats.
+
+    Args:
+        entity_usage_stats: List of dicts from ToolEventRepository.get_entity_usage_stats().
+            Each dict contains entity_id, search_count, get_count.
+        entities: Entity objects for name lookup.
+
+    Returns:
+        List of dicts for entities flagged as low-usage-efficiency (flagged=True).
+        Each dict: entity_id, entity_name, search_count, get_count,
+        unused_ratio, flagged.
+    """
+    entity_name_map = {e.id: e.name for e in entities if e.id}
+
+    flagged: list[dict] = []
+    for stat in entity_usage_stats:
+        entity_id = stat["entity_id"]
+        search_count = int(stat.get("search_count") or 0)
+        get_count = int(stat.get("get_count") or 0)
+        unused_ratio = 1.0 - get_count / max(search_count, 1)
+        is_flagged = unused_ratio > 0.8 and search_count >= 3
+        if is_flagged:
+            flagged.append({
+                "entity_id": entity_id,
+                "entity_name": entity_name_map.get(entity_id, entity_id),
+                "search_count": search_count,
+                "get_count": get_count,
+                "unused_ratio": round(unused_ratio, 4),
+                "flagged": True,
+            })
+    return flagged
+
+
+# ──────────────────────────────────────────────
+# Summary heuristic quality (摘要品質評估)
+# ──────────────────────────────────────────────
+
+TECHNICAL_KEYWORDS: list[str] = [
+    "API", "schema", "pipeline", "算法", "架構", "SQL", "migration",
+    "endpoint", "cache", "queue", "repository", "service", "domain",
+    "LLM", "prompt", "inference", "model", "token",
+]
+
+CHALLENGE_KEYWORDS: list[str] = ["挑戰", "限制", "問題", "風險", "瓶頸", "trade-off", "取捨"]
+
+MARKETING_KEYWORDS: list[str] = ["負責", "提供", "支援", "確保", "優化", "全面", "高效", "完善"]
+
+
+def score_summary_quality(
+    summary: str,
+    entity_type: str,
+) -> dict:
+    """Evaluate semantic quality of an L2 entity summary.
+
+    Args:
+        summary: The entity summary text to evaluate.
+        entity_type: The entity type string (for future type-specific rules).
+
+    Returns:
+        Dict with keys: has_technical_keywords, has_challenge_context,
+        is_too_generic, marketing_ratio, quality_score.
+        quality_score is "good", "needs_improvement", or "poor".
+    """
+    summary_lower = (summary or "").lower()
+
+    has_technical_keywords = any(kw.lower() in summary_lower for kw in TECHNICAL_KEYWORDS)
+    has_challenge_context = any(kw.lower() in summary_lower for kw in CHALLENGE_KEYWORDS)
+
+    # A summary is too generic if shorter than 50 chars or lacks any proper noun.
+    # Proper noun heuristic: uppercase-starting ASCII token or CJK sequence of 2+ chars.
+    has_proper_noun = bool(
+        re.search(r"[A-Z][a-zA-Z0-9_]{1,}", summary or "")
+        or re.search(r"[\u4e00-\u9fff]{2,}", summary or "")
+    )
+    is_too_generic = len((summary or "").strip()) < 50 or not has_proper_noun
+
+    # Marketing ratio: keyword hit count / total word count (CJK chars + ASCII words)
+    word_count = max(len(re.findall(r"[\u4e00-\u9fff]|[A-Za-z0-9]+", summary or "")), 1)
+    marketing_hits = sum(summary_lower.count(kw.lower()) for kw in MARKETING_KEYWORDS)
+    marketing_ratio = marketing_hits / word_count
+
+    if (
+        has_technical_keywords
+        and has_challenge_context
+        and not is_too_generic
+        and marketing_ratio < 0.1
+    ):
+        quality_score = "good"
+    elif is_too_generic or (not has_technical_keywords and marketing_ratio > 0.2):
+        quality_score = "poor"
+    else:
+        quality_score = "needs_improvement"
+
+    return {
+        "has_technical_keywords": has_technical_keywords,
+        "has_challenge_context": has_challenge_context,
+        "is_too_generic": is_too_generic,
+        "marketing_ratio": round(marketing_ratio, 4),
+        "quality_score": quality_score,
+    }
