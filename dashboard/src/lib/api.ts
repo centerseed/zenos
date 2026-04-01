@@ -2,7 +2,7 @@
  * API layer — all data fetching goes through the ZenOS REST API.
  * Replaces direct Firestore SDK calls. All functions require a Firebase ID token.
  */
-import type { Entity, Relationship, Blindspot, Task, Partner } from "@/types";
+import type { Entity, Relationship, Blindspot, Task, Partner, QualitySignals } from "@/types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
@@ -248,6 +248,11 @@ export async function addLinkAttachment(
   });
   if (!res.ok) throw new Error(`Add link attachment failed: ${res.status}`);
   return res.json();
+}
+
+/** Fetch quality signals: search_unused and summary_poor flags */
+export async function getQualitySignals(token: string): Promise<QualitySignals> {
+  return apiFetch<QualitySignals>("/api/data/quality-signals", token);
 }
 
 /** Create a new task */

@@ -11,8 +11,9 @@ import {
   getAllBlindspots,
   getAllRelationships,
   getTasks,
+  getQualitySignals,
 } from "@/lib/api";
-import type { Entity, Blindspot, Relationship, Task } from "@/types";
+import type { Entity, Blindspot, Relationship, Task, QualitySignals } from "@/types";
 import { NODE_TYPE_COLORS, NODE_TYPE_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
@@ -130,6 +131,7 @@ function KnowledgeMapContent() {
   const [blindspots, setBlindspots] = useState<Blindspot[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [qualitySignals, setQualitySignals] = useState<QualitySignals>({ search_unused: [], summary_poor: [] });
   const [loading, setLoading] = useState(true);
   
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -144,17 +146,19 @@ function KnowledgeMapContent() {
     async function load() {
       try {
         const token = await user!.getIdToken();
-        const [fetchedEntities, fetchedBlindspots, fetchedRelationships, fetchedTasks] =
+        const [fetchedEntities, fetchedBlindspots, fetchedRelationships, fetchedTasks, fetchedQuality] =
           await Promise.all([
             getAllEntities(token),
             getAllBlindspots(token),
             getAllRelationships(token),
             getTasks(token),
+            getQualitySignals(token).catch(() => ({ search_unused: [], summary_poor: [] })),
           ]);
         setEntities(fetchedEntities);
         setBlindspots(fetchedBlindspots);
         setRelationships(fetchedRelationships);
         setTasks(fetchedTasks);
+        setQualitySignals(fetchedQuality);
 
         // Auto-select if id is in URL
         if (targetId) {
@@ -250,6 +254,7 @@ function KnowledgeMapContent() {
               relationships={relationships}
               blindspots={blindspotsByEntity.get(selectedEntity.id) ?? []}
               tasks={tasks}
+              qualitySignals={qualitySignals}
               onClose={() => setSelectedId(null)}
               onHoverNode={setHoveredSidebarNodeId}
               onFocusNode={(id) => {

@@ -74,6 +74,32 @@ export interface Blindspot {
 /** @deprecated Use Entity with type="document" instead */
 export type DocumentEntry = Entity;
 
+/** Quality signal: entity searched frequently but rarely accessed */
+export interface SearchUnusedSignal {
+  entity_id: string;
+  entity_name: string;
+  search_count: number;
+  get_count: number;
+  unused_ratio: number;
+  flagged: true;
+}
+
+/** Quality signal: entity summary has poor semantic quality */
+export interface SummaryPoorSignal {
+  entity_id: string;
+  entity_name: string;
+  quality_score: "poor" | "needs_improvement" | "good";
+  has_technical_keywords: boolean;
+  has_challenge_context: boolean;
+  is_too_generic: boolean;
+  marketing_ratio: number;
+}
+
+export interface QualitySignals {
+  search_unused: SearchUnusedSignal[];
+  summary_poor: SummaryPoorSignal[];
+}
+
 export type TaskStatus = "todo" | "in_progress" | "review" | "done" | "cancelled";
 export type TaskPriority = "critical" | "high" | "medium" | "low";
 

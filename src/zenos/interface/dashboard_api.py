@@ -33,7 +33,8 @@ from starlette.routing import Route
 
 from zenos.application.ontology_service import OntologyService
 from zenos.application.task_service import TaskService
-from zenos.domain.models import Blindspot, Entity, Relationship, Task
+from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
+from zenos.domain.models import Blindspot, Entity, EntityType, Relationship, Task
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.sql_repo import (  # composition root
     SqlBlindspotRepository,
@@ -41,6 +42,7 @@ from zenos.infrastructure.sql_repo import (  # composition root
     SqlPartnerRepository,
     SqlRelationshipRepository,
     SqlTaskRepository,
+    SqlToolEventRepository,
     get_pool,
 )
 from zenos.interface.admin_api import (
@@ -64,10 +66,11 @@ _relationship_repo: SqlRelationshipRepository | None = None
 _blindspot_repo: SqlBlindspotRepository | None = None
 _task_repo: SqlTaskRepository | None = None
 _partner_repo: SqlPartnerRepository | None = None
+_tool_event_repo: SqlToolEventRepository | None = None
 
 
 async def _ensure_repos() -> None:
-    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo, _partner_repo
+    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo, _partner_repo, _tool_event_repo
     if _repos_ready:
         return
     pool = await get_pool()
@@ -76,6 +79,7 @@ async def _ensure_repos() -> None:
     _blindspot_repo = SqlBlindspotRepository(pool)
     _task_repo = SqlTaskRepository(pool)
     _partner_repo = SqlPartnerRepository(pool)
+    _tool_event_repo = SqlToolEventRepository(pool)
     _repos_ready = True
 
 
@@ -829,6 +833,68 @@ async def confirm_task(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Endpoint: GET /api/data/quality-signals
+# ──────────────────────────────────────────────
+
+
+async def get_quality_signals(request: Request) -> Response:
+    """Return quality signal flags for all entities.
+
+    Response:
+        {
+          "search_unused": [{ "entity_id": str, "entity_name": str, ... }],
+          "summary_poor":  [{ "entity_id": str, "entity_name": str, "quality_score": str, ... }]
+        }
+    """
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        all_entities = await _entity_repo.list_all()
+    finally:
+        current_partner_id.reset(token)
+
+    # Search-unused signals
+    search_unused: list[dict] = []
+    try:
+        if _tool_event_repo is not None:
+            usage_stats = await _tool_event_repo.get_entity_usage_stats(effective_id, days=30)
+            non_doc_entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+            search_unused = compute_search_unused_signals(usage_stats, non_doc_entities)
+    except Exception:
+        logger.warning("Quality signals: search_unused computation failed", exc_info=True)
+
+    # Summary quality flags (poor only, for L2 active/draft modules)
+    summary_poor: list[dict] = []
+    try:
+        l2_entities = [
+            e for e in all_entities
+            if e.type == EntityType.MODULE and e.status in ("active", "draft") and e.id
+        ]
+        for e in l2_entities:
+            quality = score_summary_quality(e.summary or "", e.type)
+            if quality["quality_score"] == "poor":
+                summary_poor.append({
+                    "entity_id": e.id,
+                    "entity_name": e.name,
+                    **quality,
+                })
+    except Exception:
+        logger.warning("Quality signals: summary_poor computation failed", exc_info=True)
+
+    return _json_response(
+        {"search_unused": search_unused, "summary_poor": summary_poor},
+        request=request,
+    )
+
+
+# ──────────────────────────────────────────────
 # Route table
 # ──────────────────────────────────────────────
 
@@ -840,6 +906,7 @@ dashboard_routes = [
     Route("/api/data/entities/{id}", get_entity, methods=["GET", "OPTIONS"]),
     Route("/api/data/relationships", list_relationships, methods=["GET", "OPTIONS"]),
     Route("/api/data/blindspots", list_blindspots, methods=["GET", "OPTIONS"]),
+    Route("/api/data/quality-signals", get_quality_signals, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/by-entity/{entityId}", list_tasks_by_entity, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/confirm", confirm_task, methods=["POST", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/attachments/{attachmentId}", delete_task_attachment, methods=["DELETE", "OPTIONS"]),

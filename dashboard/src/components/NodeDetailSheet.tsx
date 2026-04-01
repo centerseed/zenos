@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import type { Entity, Relationship, Blindspot, Task } from "@/types";
+import type { Entity, Relationship, Blindspot, Task, QualitySignals } from "@/types";
 import {
   Sheet,
   SheetContent,
@@ -22,6 +22,7 @@ interface NodeDetailSheetProps {
   blindspots: Blindspot[];
   entities: Entity[];
   tasks: Task[];
+  qualitySignals?: QualitySignals;
   onClose: () => void;
   onHoverNode?: (nodeId: string | null) => void;
   onFocusNode?: (nodeId: string) => void;
@@ -46,11 +47,22 @@ export default function NodeDetailSheet({
   blindspots,
   entities,
   tasks,
+  qualitySignals,
   onClose,
   onHoverNode,
   onFocusNode,
 }: NodeDetailSheetProps) {
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.id, e])), [entities]);
+
+  const isSearchUnused = useMemo(
+    () => entity != null && (qualitySignals?.search_unused ?? []).some((s) => s.entity_id === entity.id),
+    [entity, qualitySignals]
+  );
+
+  const isSummaryPoor = useMemo(
+    () => entity != null && (qualitySignals?.summary_poor ?? []).some((s) => s.entity_id === entity.id),
+    [entity, qualitySignals]
+  );
 
   // Filter relationships relevant to this entity
   const relevantRels = useMemo(() => {
@@ -113,7 +125,7 @@ export default function NodeDetailSheet({
                       </Badge>
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-wrap gap-2">
                     {!entity.confirmedByUser && (
                       <Badge variant="outline" className="border-orange-500/50 text-orange-400 bg-orange-500/5">draft</Badge>
                     )}
@@ -122,6 +134,12 @@ export default function NodeDetailSheet({
                     >
                       {entity.status}
                     </Badge>
+                    {isSearchUnused && (
+                      <Badge className="bg-yellow-500/15 text-yellow-400 border border-yellow-500/30">少被引用</Badge>
+                    )}
+                    {isSummaryPoor && (
+                      <Badge className="bg-orange-500/15 text-orange-400 border border-orange-500/30">摘要待改善</Badge>
+                    )}
                   </div>
                 </div>
                 <SheetTitle className="text-2xl font-bold text-foreground pt-2">

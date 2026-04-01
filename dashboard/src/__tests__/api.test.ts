@@ -16,6 +16,7 @@ import {
   uploadToSignedUrl,
   deleteTaskAttachment,
   addLinkAttachment,
+  getQualitySignals,
 } from "@/lib/api";
 
 const FAKE_TOKEN = "fake-token-abc";
@@ -491,6 +492,56 @@ describe("addLinkAttachment", () => {
     await expect(
       addLinkAttachment(FAKE_TOKEN, "task-123", { url: "" })
     ).rejects.toThrow("400");
+  });
+});
+
+// ─── getQualitySignals ───
+
+describe("getQualitySignals", () => {
+  it("calls GET /api/data/quality-signals with auth header", async () => {
+    const body = { search_unused: [], summary_poor: [] };
+    const fakeFetch = mockFetch(body);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await getQualitySignals(FAKE_TOKEN);
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/data/quality-signals`,
+      { headers: { Authorization: `Bearer ${FAKE_TOKEN}` } }
+    );
+  });
+
+  it("returns search_unused and summary_poor arrays from response", async () => {
+    const signal = {
+      entity_id: "e-1",
+      entity_name: "Auth Module",
+      search_count: 10,
+      get_count: 1,
+      unused_ratio: 0.9,
+      flagged: true as const,
+    };
+    const summaryFlag = {
+      entity_id: "e-2",
+      entity_name: "Core Module",
+      quality_score: "poor" as const,
+      has_technical_keywords: false,
+      has_challenge_context: false,
+      is_too_generic: true,
+      marketing_ratio: 0.1,
+    };
+    const body = { search_unused: [signal], summary_poor: [summaryFlag] };
+    vi.stubGlobal("fetch", mockFetch(body));
+
+    const result = await getQualitySignals(FAKE_TOKEN);
+    expect(result.search_unused).toHaveLength(1);
+    expect(result.search_unused[0].entity_id).toBe("e-1");
+    expect(result.summary_poor).toHaveLength(1);
+    expect(result.summary_poor[0].quality_score).toBe("poor");
+  });
+
+  it("throws on non-ok response", async () => {
+    vi.stubGlobal("fetch", mockFetch({}, false, 401));
+    await expect(getQualitySignals(FAKE_TOKEN)).rejects.toThrow("401");
   });
 });
 
