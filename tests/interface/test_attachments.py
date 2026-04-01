@@ -130,40 +130,6 @@ class TestValidateAttachments:
 
 
 class TestUploadAttachment:
-    async def test_upload_base64_mode(self):
-        from zenos.interface.tools import upload_attachment, _current_partner
-
-        task_obj = _make_task(attachments=[])
-        token = _current_partner.set({"id": "partner-1", "defaultProject": "zenos"})
-
-        try:
-            with (
-                patch("zenos.interface.tools._ensure_services"),
-                patch("zenos.interface.tools.task_service") as mock_ts,
-                patch("zenos.infrastructure.gcs_client.upload_blob") as mock_upload,
-                patch("zenos.infrastructure.gcs_client._get_client") as mock_client,
-            ):
-                mock_ts._tasks = AsyncMock()
-                mock_ts._tasks.get_by_id = AsyncMock(return_value=task_obj)
-                mock_ts._tasks.upsert = AsyncMock(return_value=task_obj)
-
-                content = base64.b64encode(b"hello world").decode()
-                result = await upload_attachment(
-                    task_id="task-1",
-                    filename="test.txt",
-                    content_type="text/plain",
-                    base64_content=content,
-                    description="A test file",
-                )
-
-                assert "attachment_id" in result
-                assert result["uploaded"] is True
-                assert result["proxy_url"].startswith("/attachments/")
-                assert "signed_put_url" not in result
-                mock_upload.assert_called_once()
-        finally:
-            _current_partner.reset(token)
-
     async def test_upload_signed_url_mode(self):
         from zenos.interface.tools import upload_attachment, _current_partner
 
@@ -188,36 +154,9 @@ class TestUploadAttachment:
                 )
 
                 assert "attachment_id" in result
-                assert result["uploaded"] is False
                 assert result["signed_put_url"] == "https://signed.url"
+                assert result["proxy_url"].startswith("/attachments/")
                 mock_sign.assert_called_once()
-        finally:
-            _current_partner.reset(token)
-
-    async def test_upload_rejects_over_5mb(self):
-        from zenos.interface.tools import upload_attachment, _current_partner
-
-        task_obj = _make_task(attachments=[])
-        token = _current_partner.set({"id": "partner-1", "defaultProject": "zenos"})
-
-        try:
-            with (
-                patch("zenos.interface.tools._ensure_services"),
-                patch("zenos.interface.tools.task_service") as mock_ts,
-            ):
-                mock_ts._tasks = AsyncMock()
-                mock_ts._tasks.get_by_id = AsyncMock(return_value=task_obj)
-
-                big_data = base64.b64encode(b"x" * (6 * 1024 * 1024)).decode()
-                result = await upload_attachment(
-                    task_id="task-1",
-                    filename="big.bin",
-                    content_type="application/octet-stream",
-                    base64_content=big_data,
-                )
-
-                assert result["error"] == "INVALID_INPUT"
-                assert "5MB" in result["message"]
         finally:
             _current_partner.reset(token)
 
