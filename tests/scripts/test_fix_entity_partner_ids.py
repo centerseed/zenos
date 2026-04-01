@@ -304,12 +304,15 @@ class TestRunFixLive:
         async def fetchrow_side_effect(query, admin_id):
             return {"n": 5}
 
-        call_index = {"i": 0}
+        update_index = {"i": 0}
 
         async def execute_side_effect(query, *args):
-            count = call_index["i"] + 1
-            call_index["i"] += 1
-            return f"UPDATE {count}"
+            # Only return meaningful counts for UPDATE statements;
+            # DROP/ADD CONSTRAINT calls also hit execute but don't affect summary.
+            if query.strip().startswith("UPDATE"):
+                update_index["i"] += 1
+                return f"UPDATE {update_index['i']}"
+            return ""
 
         conn = _make_conn(
             fetchrow_side_effect=fetchrow_side_effect,
