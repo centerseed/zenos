@@ -18,7 +18,7 @@ from zenos.domain.models import (
     Tags,
 )
 from zenos.domain.search import SearchResult, search_ontology, _tokenize, _score_match
-from zenos.application.ontology_service import _collect_subtree_ids
+from zenos.application.ontology_service import _collect_subtree_ids, _build_ancestors
 
 
 # ──────────────────────────────────────────────
@@ -314,3 +314,84 @@ class TestCollectSubtreeIds:
         entity_map: dict[str, Entity] = {}
         ids = _collect_subtree_ids("missing", entity_map)
         assert ids == {"missing"}
+
+
+# ──────────────────────────────────────────────
+# SearchResult ancestors field tests
+# ──────────────────────────────────────────────
+
+class TestSearchResultAncestors:
+    def test_ancestors_field_exists_and_defaults_to_none(self):
+        r = SearchResult(type="entity", id="e-1", name="Test", summary="s", score=1.0)
+        assert hasattr(r, "ancestors")
+        assert r.ancestors is None
+
+    def test_ancestors_can_be_set(self):
+        r = SearchResult(
+            type="entity", id="e-1", name="Test", summary="s", score=1.0,
+            ancestors=[{"id": "e-parent", "name": "Parent", "type": "product", "level": 1}],
+        )
+        assert r.ancestors is not None
+        assert len(r.ancestors) == 1
+        assert r.ancestors[0]["id"] == "e-parent"
+
+
+# ──────────────────────────────────────────────
+# _build_ancestors tests
+# ──────────────────────────────────────────────
+
+class TestBuildAncestors:
+    def _entity_with_parent(self, eid: str, name: str, parent_id: str | None = None, level: int | None = None) -> Entity:
+        return Entity(
+            id=eid,
+            name=name,
+            type="module",
+            summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+            parent_id=parent_id,
+            level=level,
+        )
+
+    def test_no_parent(self):
+        root = self._entity_with_parent("prod-1", "Product")
+        entity_map = {"prod-1": root}
+        ancestors = _build_ancestors("prod-1", entity_map)
+        assert ancestors == []
+
+    def test_one_level(self):
+        root = self._entity_with_parent("prod-1", "Product", level=1)
+        child = self._entity_with_parent("mod-1", "Module", parent_id="prod-1", level=2)
+        entity_map = {"prod-1": root, "mod-1": child}
+        ancestors = _build_ancestors("mod-1", entity_map)
+        assert len(ancestors) == 1
+        assert ancestors[0]["id"] == "prod-1"
+        assert ancestors[0]["name"] == "Product"
+        assert ancestors[0]["type"] == "module"
+        assert ancestors[0]["level"] == 1
+
+    def test_multi_level(self):
+        root = self._entity_with_parent("prod-1", "Product", level=1)
+        mid = self._entity_with_parent("mod-1", "Module", parent_id="prod-1", level=2)
+        leaf = self._entity_with_parent("doc-1", "Doc", parent_id="mod-1", level=3)
+        entity_map = {"prod-1": root, "mod-1": mid, "doc-1": leaf}
+        ancestors = _build_ancestors("doc-1", entity_map)
+        assert len(ancestors) == 2
+        assert ancestors[0]["id"] == "mod-1"   # direct parent first
+        assert ancestors[1]["id"] == "prod-1"
+
+    def test_max_depth_cap(self):
+        # Build 7-level chain
+        entities = {}
+        for i in range(7):
+            eid = f"e-{i}"
+            parent_id = f"e-{i - 1}" if i > 0 else None
+            entities[eid] = self._entity_with_parent(eid, f"Entity{i}", parent_id=parent_id)
+        # e-6 is the leaf, ancestor chain goes up to e-0 (6 levels)
+        ancestors = _build_ancestors("e-6", entities, max_depth=5)
+        assert len(ancestors) == 5
+
+    def test_missing_parent(self):
+        child = self._entity_with_parent("mod-1", "Module", parent_id="missing-parent")
+        entity_map = {"mod-1": child}
+        ancestors = _build_ancestors("mod-1", entity_map)
+        assert ancestors == []

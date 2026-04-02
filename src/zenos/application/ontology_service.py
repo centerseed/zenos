@@ -78,6 +78,39 @@ class DocumentSyncResult:
     document: Entity | None = None
 
 
+def _build_ancestors(entity_id: str, entity_map: dict[str, Entity], max_depth: int = 5) -> list[dict]:
+    """Build ancestor chain for an entity, from direct parent up to max_depth levels.
+
+    Returns a list of ancestor dicts ordered from direct parent (index 0) to furthest ancestor.
+    Each dict: {"id": str, "name": str, "type": str, "level": int | None}
+    Stops early if parent_id is missing, not found in entity_map, or a cycle is detected.
+    """
+    ancestors: list[dict] = []
+    current_id = entity_id
+    seen: set[str] = {current_id}
+
+    for _ in range(max_depth):
+        entity = entity_map.get(current_id)
+        if entity is None or not entity.parent_id:
+            break
+        parent_id = entity.parent_id
+        if parent_id in seen:
+            break  # cycle guard
+        parent = entity_map.get(parent_id)
+        if parent is None:
+            break
+        ancestors.append({
+            "id": parent.id,
+            "name": parent.name,
+            "type": parent.type,
+            "level": parent.level,
+        })
+        seen.add(parent_id)
+        current_id = parent_id
+
+    return ancestors
+
+
 def _collect_subtree_ids(root_id: str, entity_map: dict[str, Entity]) -> set[str]:
     """Return the set of entity IDs that belong to a product subtree.
 
@@ -743,10 +776,12 @@ class OntologyService:
             if not (e.type == "document" and e.status == "archived")
         ]
 
+        # Build full entity map for ancestor traversal (from all_entities, not filtered)
+        full_entity_map = {e.id: e for e in all_entities if e.id}
+
         # Filter by product subtree if requested
         if product_id is not None:
-            entity_map = {e.id: e for e in entities if e.id}
-            product_ids = _collect_subtree_ids(product_id, entity_map)
+            product_ids = _collect_subtree_ids(product_id, full_entity_map)
             entities = [e for e in entities if e.id in product_ids]
 
         # Document entities are included in entities list (type="document")
@@ -759,7 +794,14 @@ class OntologyService:
                 protocol = await self._protocols.get_by_entity(entity.id)
                 if protocol is not None:
                     protocols.append(protocol)
-        return search_ontology(query, entities, documents, protocols, max_level=max_level)
+        results = search_ontology(query, entities, documents, protocols, max_level=max_level)
+
+        # Fill ancestors for entity results
+        for result in results:
+            if result.type == "entity" and result.id:
+                result.ancestors = _build_ancestors(result.id, full_entity_map)
+
+        return results
 
     # ──────────────────────────────────────────
     # Governance-facing use cases (治理端)

@@ -16,6 +16,7 @@ class SearchResult:
     name: str
     summary: str
     score: float    # higher = better match
+    ancestors: list[dict] | None = None  # filled by application layer for entity results
 
 
 def _tokenize(text: str) -> list[str]:

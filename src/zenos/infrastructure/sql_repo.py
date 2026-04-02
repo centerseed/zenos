@@ -173,7 +173,7 @@ class SqlEntityRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT * FROM {SCHEMA}.entities WHERE name = $1 AND partner_id = $2 LIMIT 1",
+                f"SELECT * FROM {SCHEMA}.entities WHERE LOWER(name) = LOWER($1) AND partner_id = $2 LIMIT 1",
                 name, pid,
             )
         return _row_to_entity(row) if row else None

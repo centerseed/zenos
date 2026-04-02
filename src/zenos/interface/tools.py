@@ -696,6 +696,7 @@ async def search(
     project: str | None = None,
     plan_id: str | None = None,
     product_id: str | None = None,
+    product: str | None = None,
     entity_level: str | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
@@ -709,7 +710,7 @@ async def search(
     - 看待確認項目 → confirmed_only=False
     - 查任務 → collection="tasks"，可加 assignee/created_by 過濾
     - 查同一 plan 的所有任務 → collection="tasks"，plan_id="my-plan-id"
-    - 按產品過濾 → product_id="product-xxx"（過濾該產品及其子節點）
+    - 按產品過濾 → product="Paceriz"（by name）或 product_id="product-xxx"（by ID）
     - 控制搜尋層級 → entity_level="L1,L2"（預設只搜 L1+L2，排除 L3 細節）
 
     不要用這個工具的情境：
@@ -734,6 +735,8 @@ async def search(
             未傳時自動使用 partner 的 default_project，確保跨專案隔離。
         plan_id: 按 plan 過濾 tasks（精確找同一 plan 的所有票）。
         product_id: 按產品 ID 過濾。只回傳該產品及其子樹內的 entity/task。
+        product: 按產品名稱過濾（case-insensitive）。找不到時回傳錯誤提示。
+            與 product_id 並存，product 優先。
         entity_level: 控制搜尋的 entity 層級。
             "L1" = 只搜 L1（product, project, goal, role）
             "L2" = 只搜 L2（module, strategy, knowledge 等）
@@ -743,6 +746,16 @@ async def search(
     """
     await _ensure_services()
     results: dict = {}
+
+    # Resolve product name → product_id (product takes priority over product_id)
+    if product is not None:
+        resolved = await entity_repo.get_by_name(product)
+        if resolved is None:
+            return {
+                "error": f"找不到名為 '{product}' 的產品。請確認名稱是否正確。",
+                "hint": "用 search(collection='entities', status='product') 查看所有產品。",
+            }
+        product_id = resolved.id
 
     # Parse entity_level → max_level int for domain layer
     max_level = _parse_entity_level(entity_level)

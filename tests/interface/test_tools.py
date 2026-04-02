@@ -473,6 +473,58 @@ class TestSearchNewParams:
             assert result["total"] == 5
             assert result["results"][0]["id"] == "ent-2"
 
+    async def test_search_with_product_name(self):
+        """product name resolves to product_id via get_by_name."""
+        from zenos.interface.tools import search
+        from zenos.domain.search import SearchResult
+
+        product_entity = _make_entity(id="prod-abc", name="Paceriz", type="product")
+        with patch("zenos.interface.tools.entity_repo") as mock_repo, \
+             patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_repo.get_by_name = AsyncMock(return_value=product_entity)
+            mock_os.search = AsyncMock(return_value=[])
+            mock_ts.list_tasks = AsyncMock(return_value=[])
+
+            await search(query="test", collection="all", product="Paceriz")
+
+            mock_repo.get_by_name.assert_called_once_with("Paceriz")
+            mock_os.search.assert_called_once_with(
+                "test", max_level=2, product_id="prod-abc",
+            )
+
+    async def test_search_with_invalid_product_name(self):
+        """product name not found returns error dict."""
+        from zenos.interface.tools import search
+
+        with patch("zenos.interface.tools.entity_repo") as mock_repo:
+            mock_repo.get_by_name = AsyncMock(return_value=None)
+
+            result = await search(query="test", collection="all", product="NonExistent")
+
+            assert "error" in result
+            assert "NonExistent" in result["error"]
+            assert "hint" in result
+
+    async def test_search_product_name_takes_priority(self):
+        """When both product and product_id are passed, product takes priority."""
+        from zenos.interface.tools import search
+
+        product_entity = _make_entity(id="prod-from-name", name="Paceriz", type="product")
+        with patch("zenos.interface.tools.entity_repo") as mock_repo, \
+             patch("zenos.interface.tools.ontology_service") as mock_os, \
+             patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_repo.get_by_name = AsyncMock(return_value=product_entity)
+            mock_os.search = AsyncMock(return_value=[])
+            mock_ts.list_tasks = AsyncMock(return_value=[])
+
+            # Pass both; product should win
+            await search(query="test", collection="all", product="Paceriz", product_id="prod-ignored")
+
+            mock_os.search.assert_called_once_with(
+                "test", max_level=2, product_id="prod-from-name",
+            )
+
 
 class TestParseEntityLevel:
     """Tests for _parse_entity_level helper."""
