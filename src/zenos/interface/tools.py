@@ -1163,11 +1163,12 @@ async def write(
               選填：layer_decision({q1_persistent, q2_cross_role, q3_company_consensus, impacts_draft})
                     — 新建 L2（type=module）時必填，除非 force=True
                     — 型別必須是 object（dict），不可傳 JSON 字串
-                    — 各欄位說明：
-                      q1_persistent: bool — 是否為公司核心持久知識？（非臨時性、非短期任務）
-                      q2_cross_role: bool — 是否跨角色共識？（不是某個人的個人筆記）
-                      q3_company_consensus: bool — 是否全司共識？（經過確認的公司知識）
-                      impacts_draft: str — 具體影響描述，格式「A 改了什麼 → B 的什麼要跟著看」
+                    — 三問（boolean）：
+                      q1_persistent: bool — 持久性：是否為公司核心持久知識？（非臨時性、不隨 sprint 消失）
+                      q2_cross_role: bool — 跨角色：是否跨角色共識？（不是某個人的個人筆記）
+                      q3_company_consensus: bool — 全司共識：是否為經確認的公司知識？（在不同情境指向同一件事）
+                    — impacts 門檻（string，三問全 true 後獨立驗證）：
+                      impacts_draft: str — 具體影響描述，格式「A 改了什麼 → B 的什麼要跟著看」（至少 1 條）
                     — 正確：
                       layer_decision={
                         "q1_persistent": true,
@@ -1532,6 +1533,7 @@ async def confirm(
     rejection_reason: str | None = None,
     mark_stale_entity_ids: list[str] | None = None,
     new_blindspot: dict | None = None,
+    entity_entries: list[dict] | None = None,
 ) -> dict:
     """確認（批准）一個 AI 產出的 draft 或驗收一個已完成的任務。
 
@@ -1557,6 +1559,9 @@ async def confirm(
         rejection_reason: accepted=false 時必填，打回原因
         mark_stale_entity_ids: 任務完成時，標記這些 entity 的相關文件為 stale（僅 tasks 集合生效）
         new_blindspot: 任務完成時發現的新盲點（{description, severity, related_entity_ids, suggested_action}）
+        entity_entries: 任務完成時回寫的知識條目 list。
+            每個 entry 格式：{entity_id: str, type: "decision"|"insight"|"limitation"|"change"|"context", content: str(1-200字)}
+            僅 tasks 集合 + accepted=True 時生效。
     """
     await _ensure_services()
     try:
@@ -1568,7 +1573,37 @@ async def confirm(
                 mark_stale_entity_ids=mark_stale_entity_ids,
                 new_blindspot=new_blindspot,
                 updated_by=((_current_partner.get() or {}).get("id")),
+                entity_entries=entity_entries,
             )
+
+            # Write entity entries (knowledge feedback loop) — only when accepted
+            if accepted and entity_entries and entry_repo is not None:
+                partner_ctx = _current_partner.get() or {}
+                pid = partner_ctx.get("id", "")
+                partner_department = str(
+                    partner_ctx.get("department") or current_partner_department.get() or "all"
+                )
+                valid_entry_types = {"decision", "insight", "limitation", "change", "context"}
+                for entry_data in entity_entries:
+                    entity_id = entry_data.get("entity_id")
+                    if not entity_id:
+                        continue
+                    content = entry_data.get("content", "")
+                    if not content or len(content) > 200:
+                        continue
+                    entry_type = entry_data.get("type", "insight")
+                    if entry_type not in valid_entry_types:
+                        entry_type = "insight"
+                    entry = EntityEntry(
+                        id=_new_id(),
+                        partner_id=pid,
+                        entity_id=entity_id,
+                        type=entry_type,
+                        content=content,
+                        department=partner_department,
+                        source_task_id=id,
+                    )
+                    await entry_repo.create(entry)
             response = await _enrich_task_result(result.task)
             if result.cascade_updates:
                 response["cascadeUpdates"] = [
@@ -1598,6 +1633,7 @@ async def confirm(
                     "rejection_reason": rejection_reason,
                     "mark_stale_entity_ids": mark_stale_entity_ids or [],
                     "new_blindspot": new_blindspot or {},
+                    "entity_entries": entity_entries or [],
                 },
             )
             return response

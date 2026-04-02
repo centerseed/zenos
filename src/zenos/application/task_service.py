@@ -279,6 +279,7 @@ class TaskService:
         mark_stale_entity_ids: list[str] | None = None,
         new_blindspot: dict | None = None,
         updated_by: str | None = None,
+        entity_entries: list[dict] | None = None,
     ) -> TaskResult:
         """Accept or reject a task in review status."""
         task = await self._tasks.get_by_id(task_id)

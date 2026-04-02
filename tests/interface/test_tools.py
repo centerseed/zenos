@@ -1002,6 +1002,135 @@ class TestConfirmTool:
 
             assert result["error"] == "INVALID_INPUT"
 
+    async def test_confirm_task_with_entity_entries_writes_entries_when_accepted(self):
+        from zenos.interface.tools import confirm
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task(id="task-review", status="done")
+        confirm_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.tools.task_service") as mock_ts, \
+             patch("zenos.interface.tools.entry_repo") as mock_entry_repo:
+            mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
+            mock_entry_repo.create = AsyncMock(side_effect=lambda e: e)
+
+            entries = [
+                {"entity_id": "ent-1", "type": "insight", "content": "Some valuable insight"},
+                {"entity_id": "ent-2", "type": "decision", "content": "Key architectural decision"},
+            ]
+            result = await confirm(
+                collection="tasks",
+                id="task-review",
+                accepted=True,
+                entity_entries=entries,
+            )
+
+            # task_service.confirm_task should receive entity_entries
+            mock_ts.confirm_task.assert_called_once()
+            call_kwargs = mock_ts.confirm_task.call_args.kwargs
+            assert call_kwargs["entity_entries"] == entries
+
+            # entry_repo.create should be called for each entry
+            assert mock_entry_repo.create.call_count == 2
+
+    async def test_confirm_task_entity_entries_not_written_when_rejected(self):
+        from zenos.interface.tools import confirm
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task(id="task-review", status="in_progress")
+        confirm_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.tools.task_service") as mock_ts, \
+             patch("zenos.interface.tools.entry_repo") as mock_entry_repo:
+            mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
+            mock_entry_repo.create = AsyncMock(side_effect=lambda e: e)
+
+            entries = [{"entity_id": "ent-1", "type": "insight", "content": "ignored entry"}]
+            result = await confirm(
+                collection="tasks",
+                id="task-review",
+                accepted=False,
+                rejection_reason="Does not meet criteria",
+                entity_entries=entries,
+            )
+
+            # entry_repo.create should NOT be called for rejected tasks
+            mock_entry_repo.create.assert_not_called()
+
+    async def test_confirm_task_entity_entries_skips_invalid_content(self):
+        """Entries with missing entity_id or content > 200 chars are skipped."""
+        from zenos.interface.tools import confirm
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task(id="task-review", status="done")
+        confirm_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.tools.task_service") as mock_ts, \
+             patch("zenos.interface.tools.entry_repo") as mock_entry_repo:
+            mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
+            mock_entry_repo.create = AsyncMock(side_effect=lambda e: e)
+
+            entries = [
+                {"type": "insight", "content": "missing entity_id — should be skipped"},
+                {"entity_id": "ent-1", "type": "insight", "content": "x" * 201},  # too long
+                {"entity_id": "ent-2", "type": "insight", "content": "valid entry"},
+            ]
+            await confirm(
+                collection="tasks",
+                id="task-review",
+                accepted=True,
+                entity_entries=entries,
+            )
+
+            # Only the valid entry should be written
+            assert mock_entry_repo.create.call_count == 1
+
+    async def test_confirm_task_without_entity_entries_is_backward_compatible(self):
+        """confirm without entity_entries works the same as before."""
+        from zenos.interface.tools import confirm
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task(id="task-review", status="done")
+        confirm_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.tools.task_service") as mock_ts, \
+             patch("zenos.interface.tools.entry_repo") as mock_entry_repo:
+            mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
+            mock_entry_repo.create = AsyncMock(side_effect=lambda e: e)
+
+            result = await confirm(collection="tasks", id="task-review", accepted=True)
+
+            mock_ts.confirm_task.assert_called_once()
+            mock_entry_repo.create.assert_not_called()
+
+    async def test_confirm_task_audit_log_includes_entity_entries(self):
+        """Audit log records entity_entries in changes."""
+        from zenos.interface.tools import confirm
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task(id="task-review", status="done")
+        confirm_result = TaskResult(task=t, cascade_updates=[])
+
+        audit_calls = []
+        with patch("zenos.interface.tools.task_service") as mock_ts, \
+             patch("zenos.interface.tools.entry_repo") as mock_entry_repo, \
+             patch("zenos.interface.tools._audit_log", side_effect=lambda **kw: audit_calls.append(kw)):
+            mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
+            mock_entry_repo.create = AsyncMock(side_effect=lambda e: e)
+
+            entries = [{"entity_id": "ent-1", "type": "insight", "content": "test insight"}]
+            await confirm(
+                collection="tasks",
+                id="task-review",
+                accepted=True,
+                entity_entries=entries,
+            )
+
+            assert len(audit_calls) == 1
+            changes = audit_calls[0]["changes"]
+            assert "entity_entries" in changes
+            assert changes["entity_entries"] == entries
+
 
 # ---------------------------------------------------------------------------
 # Tool 6: task
