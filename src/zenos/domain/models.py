@@ -89,6 +89,95 @@ class TaskPriority(str, Enum):
     LOW = "low"
 
 
+class Visibility(str, Enum):
+    """Entity visibility levels, ordered from most open to most restrictive.
+
+    Spec mapping (SPEC-agent-aware-permission-governance.md):
+      public        ↔ open
+      role-restricted ↔ internal (scoped by department/role)
+      restricted    ↔ restricted
+      confidential  ↔ confidential
+    """
+    PUBLIC = "public"
+    ROLE_RESTRICTED = "role-restricted"
+    RESTRICTED = "restricted"
+    CONFIDENTIAL = "confidential"
+
+
+# Numeric order for comparison: higher = more restrictive.
+VISIBILITY_ORDER: dict[str, int] = {
+    "public": 0,
+    "role-restricted": 1,
+    "restricted": 2,
+    "confidential": 3,
+}
+
+
+class Classification(str, Enum):
+    OPEN = "open"
+    INTERNAL = "internal"
+    RESTRICTED = "restricted"
+    CONFIDENTIAL = "confidential"
+
+
+CLASSIFICATION_ORDER: dict[str, int] = {
+    "open": 0,
+    "internal": 1,
+    "restricted": 2,
+    "confidential": 3,
+}
+
+
+class InheritanceMode(str, Enum):
+    INHERIT = "inherit"
+    CUSTOM = "custom"
+
+
+@dataclass
+class UserPrincipal:
+    user_id: str
+    partner_id: str
+    role_ids: list[str] = field(default_factory=list)
+    department_ids: list[str] = field(default_factory=list)
+    is_admin: bool = False
+
+
+@dataclass
+class AgentScope:
+    read_classification_max: str = Classification.OPEN.value
+    write_classification_max: str = Classification.INTERNAL.value
+    allowed_role_ids: list[str] = field(default_factory=list)
+    allowed_department_ids: list[str] = field(default_factory=list)
+    allowed_entity_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AgentPrincipal:
+    agent_id: str
+    owner_user_id: str
+    partner_id: str
+    scope: AgentScope = field(default_factory=AgentScope)
+
+
+@dataclass
+class AccessPolicy:
+    classification: str = Classification.OPEN.value
+    inheritance_mode: str = InheritanceMode.INHERIT.value
+    allowed_role_ids: list[str] = field(default_factory=list)
+    allowed_department_ids: list[str] = field(default_factory=list)
+    allowed_member_ids: list[str] = field(default_factory=list)
+
+    def validate_transition_from_parent(self, parent_classification: str | None) -> bool:
+        if not parent_classification:
+            return True
+        return CLASSIFICATION_ORDER[self.classification] >= CLASSIFICATION_ORDER[parent_classification]
+
+    def validate_custom_scope(self) -> bool:
+        if self.inheritance_mode == InheritanceMode.INHERIT.value:
+            return not (self.allowed_role_ids or self.allowed_department_ids or self.allowed_member_ids)
+        return True
+
+
 # ──────────────────────────────────────────────
 # Skeleton Layer (骨架層)
 # ──────────────────────────────────────────────
@@ -260,6 +349,7 @@ class QualityCheckItem:
     name: str
     passed: bool
     detail: str
+    weight: int = 1
 
 
 @dataclass
@@ -354,6 +444,7 @@ class EntityEntry:
     status: str = "active"  # EntryStatus value
     context: str | None = None  # optional extra context, max 200 chars
     author: str | None = None
+    department: str | None = None
     source_task_id: str | None = None
     superseded_by: str | None = None  # ID of the entry that supersedes this one
     archive_reason: str | None = None  # required when status='archived'; values: 'merged' | 'manual'

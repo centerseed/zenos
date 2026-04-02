@@ -240,6 +240,20 @@ class TestQualityCorrectionPriority:
         result = compute_quality_correction_priority([m], [])
         assert result[0]["dimensions"]["three_q_confidence"] == 0.5
 
+    def test_dc7_three_q_confidence_list_tags_no_attributeerror(self):
+        """DC-7: tags.why/how as list must not raise AttributeError."""
+        m = _entity("m1", "Module A", status=EntityStatus.ACTIVE,
+                    tags=Tags(what=["feat"], why=["revenue reason"], how=["rules engine"], who=["pm"]))
+        result = compute_quality_correction_priority([m], [])
+        assert result[0]["dimensions"]["three_q_confidence"] == 0.0
+
+    def test_dc7_three_q_confidence_empty_list_tags(self):
+        """DC-7: empty list tags treated as missing why/how."""
+        m = _entity("m1", "Module A", status=EntityStatus.DRAFT,
+                    tags=Tags(what=[], why=[], how=[], who=[]))
+        result = compute_quality_correction_priority([m], [])
+        assert result[0]["dimensions"]["three_q_confidence"] == 2.0
+
     def test_dc8_score_formula_and_order(self):
         """DC-8: score = iv*0.5 + sg*0.3 + tq*0.2, sorted descending."""
         # High score: no impacts(2), short summary(2), draft no tags(2.0)

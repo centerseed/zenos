@@ -2421,7 +2421,26 @@ async def analyze(
         return proposals
 
     if check_type in ("all", "quality"):
-        report = await governance_service.run_quality_check()
+        # Gather entry counts per entity for sparsity check
+        _entries_by_entity: dict[str, int] | None = None
+        if entry_repo is not None:
+            try:
+                all_entities_for_sparsity = await ontology_service._entities.list_all()
+                active_module_ids = [
+                    e.id for e in all_entities_for_sparsity
+                    if e.type == "module" and e.status == "active" and e.id
+                ]
+                _entries_by_entity = {}
+                for eid in active_module_ids:
+                    try:
+                        cnt = await entry_repo.count_active_by_entity(eid)
+                        _entries_by_entity[eid] = cnt
+                    except Exception:
+                        _entries_by_entity[eid] = 0
+            except Exception:
+                logger.warning("Entry sparsity data collection failed", exc_info=True)
+
+        report = await governance_service.run_quality_check(entries_by_entity=_entries_by_entity)
         results["quality"] = _serialize(report)
         try:
             l2_repairs = await _infer_l2_repairs()

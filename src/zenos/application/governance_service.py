@@ -245,11 +245,21 @@ class GovernanceService:
 
         return proposals
 
-    async def run_quality_check(self) -> QualityReport:
-        """Run the full 9-item quality checklist across the ontology.
+    async def run_quality_check(
+        self,
+        tasks: list | None = None,
+        entries_by_entity: dict[str, int] | None = None,
+    ) -> QualityReport:
+        """Run the full quality checklist across the ontology.
 
         Fetches all entities (including type=document), protocols, blindspots,
         and relationships, then delegates to domain.governance.run_quality_check.
+
+        Args:
+            tasks: Optional list of Task objects for duplicate task detection.
+                   If None, attempts to fetch from task_repo if available.
+            entries_by_entity: Optional mapping of entity_id -> entry count.
+                               Used for entry sparsity check.
         """
         all_entities = await self._entities.list_all()
         # Split: non-document entities vs document entities
@@ -266,12 +276,21 @@ class GovernanceService:
                 if protocol is not None:
                     protocols.append(protocol)
 
+        # Fetch tasks if not provided but task_repo is available
+        if tasks is None and self._tasks is not None:
+            try:
+                tasks = await self._tasks.list_all(limit=500)
+            except Exception:
+                tasks = None
+
         return run_quality_check(
             entities=entities,
             documents=documents,
             protocols=protocols,
             blindspots=blindspots,
             relationships=relationships,
+            tasks=tasks,
+            entries_by_entity=entries_by_entity,
         )
 
     async def run_staleness_check(self) -> dict:

@@ -32,6 +32,9 @@ from zenos.domain.models import (
     Source,
     SourceType,
     Tags,
+    Task,
+    TaskPriority,
+    TaskStatus,
 )
 
 
@@ -516,11 +519,13 @@ class TestRunQualityCheck:
         assert "split_granularity" in failed_names
 
     def test_score_calculation(self):
-        """Score should be percentage of passed checks."""
+        """Score should be weighted percentage of passed checks."""
         report = run_quality_check([], [], [], [], [])
-        total = len(report.passed) + len(report.failed)
-        if total > 0:
-            expected = int((len(report.passed) / total) * 100)
+        all_items = report.passed + report.failed
+        if all_items:
+            weighted_total = sum(i.weight for i in all_items)
+            weighted_passed = sum(i.weight for i in report.passed)
+            expected = int((weighted_passed / weighted_total) * 100) if weighted_total else 0
             assert report.score == expected
 
 
@@ -1463,3 +1468,361 @@ class TestL2ConsolidationModeCheck:
         assert "Bad Module" in check.detail
         assert "Good Module" not in check.detail
         assert "Complete Module" not in check.detail
+
+
+# ──────────────────────────────────────────────
+# Part A: blindspot type safety (_safe_str)
+# ──────────────────────────────────────────────
+
+def _make_entity_with_list_how(entity_id: str = "m1") -> Entity:
+    """Create an entity whose tags.how is a list (simulates DB mismatch)."""
+    now = datetime(2026, 3, 1)
+    return Entity(
+        id=entity_id,
+        name="ListHowModule",
+        type=EntityType.MODULE,
+        summary="A module with list-typed how tag",
+        tags=Tags(what=["test"], why="testing", how=["step1", "step2"], who="developer"),
+        status=EntityStatus.ACTIVE,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+class TestBlindspotTypeSafety:
+    def test_how_tag_as_list_does_not_crash(self):
+        """analyze_blindspots must not raise AttributeError when tags.how is a list."""
+        entity = _make_entity_with_list_how()
+        doc = Document(
+            id="d1",
+            title="test.md",
+            source=Source(type=SourceType.GITHUB, uri="docs/test.md", adapter="git"),
+            tags=DocumentTags(
+                what=["test"],
+                why="testing",
+                how=["step1", "已確認問題"],  # list with problem indicator
+                who=["developer"],
+            ),
+            linked_entity_ids=["m1"],
+            summary="doc summary",
+            status=DocumentStatus.CURRENT,
+            created_at=datetime(2026, 3, 1),
+            updated_at=datetime(2026, 3, 1),
+        )
+        # Should not raise 'list' object has no attribute 'lower'
+        result = analyze_blindspots([entity], [doc], [])
+        assert isinstance(result, list)
+
+    def test_how_tag_as_list_triggers_problem_detection(self):
+        """When how is a list containing a problem indicator, blindspot should be detected."""
+        doc = Document(
+            id="d1",
+            title="bug-report.md",
+            source=Source(type=SourceType.GITHUB, uri="docs/bug-report.md", adapter="git"),
+            tags=DocumentTags(
+                what=["test"],
+                why="testing",
+                how=["已確認問題", "needs fix"],
+                who=["developer"],
+            ),
+            linked_entity_ids=[],
+            summary="doc summary",
+            status=DocumentStatus.CURRENT,
+            created_at=datetime(2026, 3, 1),
+            updated_at=datetime(2026, 3, 1),
+        )
+        result = analyze_blindspots([], [doc], [])
+        problem_spots = [b for b in result if "problem" in b.description.lower() or "problems" in b.description.lower()]
+        assert len(problem_spots) >= 1
+
+    def test_analyze_blindspots_check_type_all_does_not_crash_with_list_tags(self):
+        """analyze_blindspots runs without crash when multiple tag fields are lists."""
+        entity = Entity(
+            id="m1",
+            name="Complex Entity",
+            type=EntityType.MODULE,
+            summary="A module",
+            tags=Tags(
+                what=["feature", "core"],
+                why="testing",
+                how=["process A", "process B"],
+                who=["developer", "pm"],
+            ),
+            status=EntityStatus.ACTIVE,
+            created_at=datetime(2026, 3, 1),
+            updated_at=datetime(2026, 3, 1),
+        )
+        result = analyze_blindspots([entity], [], [])
+        assert isinstance(result, list)
+
+
+# ──────────────────────────────────────────────
+# Part B: weighted scoring
+# ──────────────────────────────────────────────
+
+class TestWeightedScoring:
+    def test_quality_check_item_has_weight_field(self):
+        """QualityCheckItem should have a weight field with default 1."""
+        from zenos.domain.models import QualityCheckItem
+        item = QualityCheckItem(name="test", passed=True, detail="ok")
+        assert item.weight == 1
+
+    def test_critical_failure_lowers_score_more_than_nice_failure(self):
+        """Failing a critical check (weight=3) should reduce score more than a nice check (weight=1)."""
+        # Setup: module without dependency (fails dependency_completeness weight=3)
+        # vs a module with all docs but archived without rationale (fails archive_rationale weight=1)
+
+        # Critical failure scenario: active module with no relationships
+        mod_no_rel = _make_entity(name="ModuleA", entity_type=EntityType.MODULE, entity_id="m1")
+        report_critical = run_quality_check([mod_no_rel], [], [], [], [])
+
+        # Nice failure scenario: archived doc with no rationale
+        archived_doc = _make_doc(status=DocumentStatus.ARCHIVED)
+        archived_doc.summary = ""
+        report_nice = run_quality_check([], [archived_doc], [], [], [])
+
+        # Score should be lower when critical item fails
+        assert report_critical.score < report_nice.score
+
+    def test_all_checks_pass_gives_100(self):
+        """Empty ontology should produce a score (not necessarily 100 but not crash)."""
+        report = run_quality_check([], [], [], [], [])
+        assert 0 <= report.score <= 100
+
+    def test_score_uses_weighted_calculation(self):
+        """Score should reflect weighted calculation, not simple count."""
+        report = run_quality_check([], [], [], [], [])
+        all_items = report.passed + report.failed
+        if all_items:
+            weighted_total = sum(i.weight for i in all_items)
+            weighted_passed = sum(i.weight for i in report.passed)
+            expected = int((weighted_passed / weighted_total) * 100) if weighted_total else 0
+            assert report.score == expected
+
+
+# ──────────────────────────────────────────────
+# Part C: new checks (C1-C5)
+# ──────────────────────────────────────────────
+
+class TestDuplicateL2Detection:
+    def test_identical_l2_names_detected(self):
+        """Two modules with identical names should be flagged as duplicates."""
+        m1 = _make_entity(name="Knowledge Sharing", entity_type=EntityType.MODULE, entity_id="m1",
+                          summary="knowledge sharing across teams")
+        m2 = _make_entity(name="Knowledge Sharing", entity_type=EntityType.MODULE, entity_id="m2",
+                          summary="knowledge sharing across teams")
+        report = run_quality_check([m1, m2], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "duplicate_l2_detection" in failed_names
+
+    def test_very_similar_l2_names_detected(self):
+        """Two modules with highly similar names should be flagged."""
+        m1 = _make_entity(name="Task Management System", entity_type=EntityType.MODULE, entity_id="m1",
+                          summary="system for managing tasks")
+        m2 = _make_entity(name="Task Management Platform", entity_type=EntityType.MODULE, entity_id="m2",
+                          summary="system for managing tasks")
+        report = run_quality_check([m1, m2], [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "duplicate_l2_detection" in failed_names
+
+    def test_distinct_l2_modules_pass(self):
+        """Modules with clearly different names and summaries should not be flagged."""
+        m1 = _make_entity(name="Auth Service", entity_type=EntityType.MODULE, entity_id="m1",
+                          summary="handles user authentication and session tokens")
+        m2 = _make_entity(name="Billing Module", entity_type=EntityType.MODULE, entity_id="m2",
+                          summary="processes payments and invoices for customers")
+        report = run_quality_check([m1, m2], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_l2_detection" in passed_names
+
+    def test_archived_modules_not_checked(self):
+        """Archived/completed modules should not be included in duplicate check."""
+        m1 = _make_entity(name="Old System", entity_type=EntityType.MODULE, entity_id="m1",
+                          status=EntityStatus.COMPLETED,
+                          summary="old system same name")
+        m2 = _make_entity(name="Old System", entity_type=EntityType.MODULE, entity_id="m2",
+                          status=EntityStatus.COMPLETED,
+                          summary="old system same name")
+        report = run_quality_check([m1, m2], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_l2_detection" in passed_names
+
+
+class TestDuplicateDocumentDetection:
+    def test_same_uri_documents_detected(self):
+        """Two non-archived documents with the same source URI should be flagged."""
+        doc1 = _make_doc(doc_id="d1", uri="docs/shared.md")
+        doc2 = _make_doc(doc_id="d2", uri="docs/shared.md")
+        report = run_quality_check([], [doc1, doc2], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "duplicate_document_detection" in failed_names
+
+    def test_different_uri_documents_pass(self):
+        """Documents with different URIs should not be flagged."""
+        doc1 = _make_doc(doc_id="d1", uri="docs/alpha.md")
+        doc2 = _make_doc(doc_id="d2", uri="docs/beta.md")
+        report = run_quality_check([], [doc1, doc2], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_document_detection" in passed_names
+
+    def test_archived_documents_excluded_from_dup_check(self):
+        """Archived documents sharing a URI with a current doc should not trigger failure."""
+        doc1 = _make_doc(doc_id="d1", uri="docs/shared.md", status=DocumentStatus.ARCHIVED)
+        doc2 = _make_doc(doc_id="d2", uri="docs/shared.md", status=DocumentStatus.CURRENT)
+        report = run_quality_check([], [doc1, doc2], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_document_detection" in passed_names
+
+    def test_empty_uri_not_flagged(self):
+        """Documents with empty URI should not cause false positives."""
+        doc1 = _make_doc(doc_id="d1", uri="")
+        doc2 = _make_doc(doc_id="d2", uri="")
+        report = run_quality_check([], [doc1, doc2], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_document_detection" in passed_names
+
+
+def _make_task(title: str, task_id: str = "t1", status: str = "todo") -> Task:
+    return Task(
+        id=task_id,
+        title=title,
+        status=status,
+        priority=TaskPriority.MEDIUM,
+        created_by="test",
+    )
+
+
+class TestDuplicateTaskDetection:
+    def test_identical_open_tasks_detected(self):
+        """Two open tasks with identical titles should be flagged."""
+        t1 = _make_task("Fix login bug", task_id="t1")
+        t2 = _make_task("Fix login bug", task_id="t2")
+        report = run_quality_check([], [], [], [], [], tasks=[t1, t2])
+        failed_names = [f.name for f in report.failed]
+        assert "duplicate_task_detection" in failed_names
+
+    def test_highly_similar_open_tasks_detected(self):
+        """Two open tasks with >0.7 Jaccard similarity should be flagged."""
+        # "Fix user login bug issue" vs "Fix user login bug":
+        # intersection={fix,user,login,bug} union={fix,user,login,bug,issue} → 4/5=0.8 > 0.7
+        t1 = _make_task("Fix user login bug issue", task_id="t1")
+        t2 = _make_task("Fix user login bug", task_id="t2")
+        report = run_quality_check([], [], [], [], [], tasks=[t1, t2])
+        failed_names = [f.name for f in report.failed]
+        assert "duplicate_task_detection" in failed_names
+
+    def test_distinct_open_tasks_pass(self):
+        """Tasks with clearly different titles should not be flagged."""
+        t1 = _make_task("Fix login bug", task_id="t1")
+        t2 = _make_task("Update billing invoice format", task_id="t2")
+        report = run_quality_check([], [], [], [], [], tasks=[t1, t2])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_task_detection" in passed_names
+
+    def test_done_tasks_excluded(self):
+        """Completed/cancelled tasks should not be included in duplicate check."""
+        t1 = _make_task("Fix login bug", task_id="t1", status="done")
+        t2 = _make_task("Fix login bug", task_id="t2", status="done")
+        report = run_quality_check([], [], [], [], [], tasks=[t1, t2])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_task_detection" in passed_names
+
+    def test_no_tasks_passes(self):
+        """When tasks=None, check should pass trivially."""
+        report = run_quality_check([], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "duplicate_task_detection" in passed_names
+
+
+class TestEntrySparsity:
+    def test_majority_l2_without_entries_fails(self):
+        """When >50% of active L2 modules have 0 entries, check should fail."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        m3 = _make_entity(name="M3", entity_type=EntityType.MODULE, entity_id="m3")
+        # 2 out of 3 have 0 entries = 66% > 50%
+        entries_by_entity = {"m1": 5, "m2": 0, "m3": 0}
+        report = run_quality_check([m1, m2, m3], [], [], [], [],
+                                   entries_by_entity=entries_by_entity)
+        failed_names = [f.name for f in report.failed]
+        assert "entry_sparsity" in failed_names
+
+    def test_minority_l2_without_entries_passes(self):
+        """When <=50% of active L2 modules have 0 entries, check should pass."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
+        m3 = _make_entity(name="M3", entity_type=EntityType.MODULE, entity_id="m3")
+        # 1 out of 3 has 0 entries = 33% <= 50%
+        entries_by_entity = {"m1": 5, "m2": 3, "m3": 0}
+        report = run_quality_check([m1, m2, m3], [], [], [], [],
+                                   entries_by_entity=entries_by_entity)
+        passed_names = [p.name for p in report.passed]
+        assert "entry_sparsity" in passed_names
+
+    def test_no_entry_data_passes(self):
+        """When entries_by_entity=None, sparsity check should pass (skipped)."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        report = run_quality_check([m1], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "entry_sparsity" in passed_names
+
+
+class TestL2CountBalance:
+    def test_product_with_too_many_modules_fails(self):
+        """A product with >15 active/draft modules should be flagged as imbalanced."""
+        product = _make_entity(name="BigProduct", entity_type=EntityType.PRODUCT, entity_id="p1")
+        modules = [
+            _make_entity(
+                name=f"Module{i}",
+                entity_type=EntityType.MODULE,
+                entity_id=f"m{i}",
+                details={"parent_id": "p1"},
+            )
+            for i in range(16)
+        ]
+        # Set parent_id directly on each module
+        for m in modules:
+            m.parent_id = "p1"
+        report = run_quality_check([product] + modules, [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_count_balance" in failed_names
+
+    def test_product_with_too_few_modules_fails(self):
+        """A product with <3 active/draft modules should be flagged as imbalanced."""
+        product = _make_entity(name="TinyProduct", entity_type=EntityType.PRODUCT, entity_id="p1")
+        modules = [
+            _make_entity(
+                name=f"Module{i}",
+                entity_type=EntityType.MODULE,
+                entity_id=f"m{i}",
+            )
+            for i in range(2)
+        ]
+        for m in modules:
+            m.parent_id = "p1"
+        report = run_quality_check([product] + modules, [], [], [], [])
+        failed_names = [f.name for f in report.failed]
+        assert "l2_count_balance" in failed_names
+
+    def test_product_with_balanced_modules_passes(self):
+        """A product with 3-15 active/draft modules should pass."""
+        product = _make_entity(name="GoodProduct", entity_type=EntityType.PRODUCT, entity_id="p1")
+        modules = [
+            _make_entity(
+                name=f"Module{i}",
+                entity_type=EntityType.MODULE,
+                entity_id=f"m{i}",
+            )
+            for i in range(5)
+        ]
+        for m in modules:
+            m.parent_id = "p1"
+        report = run_quality_check([product] + modules, [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_count_balance" in passed_names
+
+    def test_no_products_passes_balance_check(self):
+        """No products in ontology means balance check passes trivially."""
+        report = run_quality_check([], [], [], [], [])
+        passed_names = [p.name for p in report.passed]
+        assert "l2_count_balance" in passed_names

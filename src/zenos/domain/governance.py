@@ -30,6 +30,26 @@ from .models import (
 )
 
 
+def _safe_str(val) -> str:
+    """Safely convert a tag field value to str (handles list/str/None)."""
+    if val is None:
+        return ""
+    if isinstance(val, list):
+        return " ".join(str(v) for v in val)
+    return str(val)
+
+
+def _jaccard_similarity(a: str, b: str) -> float:
+    """Token-level Jaccard similarity for short text."""
+    tokens_a = set(a.lower().split())
+    tokens_b = set(b.lower().split())
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    return len(intersection) / len(union)
+
+
 # ──────────────────────────────────────────────
 # 1. Split-criteria check (拆分粒度檢查)
 # ──────────────────────────────────────────────
@@ -486,7 +506,7 @@ def analyze_blindspots(
     for doc in documents:
         if _d_status(doc) == DocumentStatus.ARCHIVED:
             continue
-        how_lower = (doc.tags.how if hasattr(doc.tags, 'how') else "").lower()
+        how_lower = _safe_str(doc.tags.how if hasattr(doc.tags, 'how') else "").lower()
         has_problem = any(ind in how_lower for ind in _PROBLEM_INDICATORS)
         has_schedule = any(ind in how_lower for ind in _SCHEDULE_INDICATORS)
         if has_problem and not has_schedule:
@@ -991,11 +1011,23 @@ def run_quality_check(
     protocols: list[Protocol],
     blindspots: list[Blindspot],
     relationships: list[Relationship],
+    tasks: list | None = None,
+    entries_by_entity: dict[str, int] | None = None,
 ) -> QualityReport:
-    """Run the 15-item quality checklist from REF-ontology-methodology.md.
+    """Run the 21-item quality checklist from REF-ontology-methodology.md.
 
-    Returns a QualityReport with score (0-100), passed, failed, and warnings.
-    Items 1-9 cover general ontology quality; items 10-15 cover L2 (module) quality.
+    Returns a QualityReport with weighted score (0-100), passed, failed, and warnings.
+    Items 1-9 cover general ontology quality; items 10-16 cover L2 (module) quality;
+    items 17-21 cover duplicate detection, entry sparsity, and L2 count balance.
+
+    Args:
+        entities: All non-document skeleton-layer entities.
+        documents: Neural-layer documents (Document or document-type Entity).
+        protocols: Protocol objects for each entity.
+        blindspots: Previously inferred blindspot objects.
+        relationships: Relationship edges between entities.
+        tasks: Optional list of Task objects for duplicate task detection.
+        entries_by_entity: Optional mapping of entity_id -> entry count for sparsity check.
     """
     items: list[QualityCheckItem] = []
     entity_map = {e.id: e for e in entities if e.id}
@@ -1038,6 +1070,7 @@ def run_quality_check(
             f"Total entity summary length: {total_summary} chars "
             f"({'within' if check1_ok else 'exceeds'} 2500-char / 2-min target)"
         ),
+        weight=1,
     ))
 
     # --- 2. Are dependency relationships complete? ---
@@ -1061,6 +1094,7 @@ def run_quality_check(
             f"{len(orphans)} active product/module(s) without any relationships"
             + (f": {', '.join(e.name for e in orphans)}" if orphans else "")
         ),
+        weight=3,
     ))
 
     # --- 3. Are all unconfirmed fields marked? ---
@@ -1086,6 +1120,7 @@ def run_quality_check(
             f"{unconfirmed_count}/{total_items} items pending confirmation"
             + (" (warning: all confirmed — verify this is intentional)" if check3_warning else "")
         ),
+        weight=1,
     ))
 
     # --- 4. Are blindspots inferred from cross-referencing? ---
@@ -1099,6 +1134,7 @@ def run_quality_check(
             f"{len(blindspots)} blindspot(s) identified"
             + (" (none found despite having material to analyze)" if not check4_ok else "")
         ),
+        weight=1,
     ))
 
     # --- 5. Every document has a linked module? ---
@@ -1111,6 +1147,7 @@ def run_quality_check(
             f"{len(unlinked)} non-archived document(s) without linked entities"
             + (f": {', '.join(_qc_title(d) for d in unlinked[:5])}" if unlinked else "")
         ),
+        weight=2,
     ))
 
     # --- 6. Archive suggestions have rationale? ---
@@ -1125,6 +1162,7 @@ def run_quality_check(
             f"{len(no_rationale)}/{len(archived)} archived document(s) "
             f"without rationale in summary"
         ),
+        weight=1,
     ))
 
     # --- 7. Goals have explicit priority? ---
@@ -1144,6 +1182,7 @@ def run_quality_check(
             f"{len(goals_with_priority)}/{len(active_goals)} active goals "
             f"have explicit priority"
         ),
+        weight=1,
     ))
 
     # --- 8. Role in skeleton but no docs in neural layer? ---
@@ -1166,6 +1205,7 @@ def run_quality_check(
             f"{len(roles_without_docs)} role(s) without neural-layer documents"
             + (f": {', '.join(r.name for r in roles_without_docs)}" if roles_without_docs else "")
         ),
+        weight=1,
     ))
 
     # --- 9. Split granularity reasonable (3-10 docs per module)? ---
@@ -1191,6 +1231,7 @@ def run_quality_check(
                 if bad_granularity else ""
             )
         ),
+        weight=1,
     ))
 
     # --- 10. L2 Summary readability (no technical jargon)? ---
@@ -1219,6 +1260,7 @@ def run_quality_check(
             if check10_detail_parts
             else f"所有 {len(module_entities)} 個 L2 entity 的 summary 均無技術術語"
         ),
+        weight=2,
     ))
 
     # --- 11. L2 Summary conciseness (≤ 5 sentences)? ---
@@ -1239,6 +1281,7 @@ def run_quality_check(
             if check11_warning_parts
             else f"所有 {len(module_entities)} 個 L2 entity 的 summary 均在 5 句以內"
         ),
+        weight=1,
     ))
 
     # --- 12. L2 impacts hard rule (every active L2 must have concrete impacts) ---
@@ -1266,6 +1309,7 @@ def run_quality_check(
             if not check12_ok
             else f"所有 {total_active_modules} 個 active L2 entity 皆具備至少 1 條具體 impacts"
         ),
+        weight=3,
     ))
 
     # --- 13. L2 impacts targets still valid? ---
@@ -1285,6 +1329,7 @@ def run_quality_check(
             if not check13_ok
             else "所有 L2 entity 的 impacts 目標均有效"
         ),
+        weight=3,
     ))
 
     # --- 14. L2 governance review overdue? ---
@@ -1303,6 +1348,7 @@ def run_quality_check(
             if overdue_modules
             else "所有 active L2 entity 均在 governance review 期限內（90 天）"
         ),
+        weight=2,
     ))
 
     # --- 15. L2 three-question record completeness ---
@@ -1334,6 +1380,7 @@ def run_quality_check(
             if modules_missing_3q
             else f"所有 {len(confirmed_modules)} 個 active L2 entity 均有完整三問紀錄"
         ),
+        weight=3,
     ))
 
     # --- 16. L2 consolidation mode tracking ---
@@ -1361,11 +1408,181 @@ def run_quality_check(
             if modules_without_global
             else f"所有 {len(module_entities)} 個 L2 entity 均標記為 global 統合模式"
         ),
+        weight=1,
     ))
 
-    # Compute overall score (warnings don't affect score)
+    # --- 17. Duplicate L2 detection ---
+    # Find active/draft module pairs with name+summary Jaccard similarity > 0.6.
+    candidate_modules = [
+        e for e in entities
+        if e.type == EntityType.MODULE and e.status in (EntityStatus.ACTIVE, EntityStatus.DRAFT) and e.id
+    ]
+    similar_l2_pairs: list[tuple[Entity, Entity, float]] = []
+    for i in range(len(candidate_modules)):
+        for j in range(i + 1, len(candidate_modules)):
+            m_a = candidate_modules[i]
+            m_b = candidate_modules[j]
+            text_a = f"{m_a.name} {m_a.summary}"
+            text_b = f"{m_b.name} {m_b.summary}"
+            sim = _jaccard_similarity(text_a, text_b)
+            if sim > 0.6:
+                similar_l2_pairs.append((m_a, m_b, sim))
+    check17_ok = len(similar_l2_pairs) == 0
+    items.append(QualityCheckItem(
+        name="duplicate_l2_detection",
+        passed=check17_ok,
+        detail=(
+            f"{len(similar_l2_pairs)} 組 L2 模組名稱/摘要高度相似（Jaccard > 0.6）："
+            + "; ".join(
+                f"'{a.name}' ↔ '{b.name}' ({sim:.2f})"
+                for a, b, sim in similar_l2_pairs[:5]
+            )
+            + (f" ... (+{len(similar_l2_pairs) - 5})" if len(similar_l2_pairs) > 5 else "")
+            if similar_l2_pairs
+            else f"所有 {len(candidate_modules)} 個 active/draft L2 模組均無重複"
+        ),
+        weight=2,
+    ))
+
+    # --- 18. Duplicate document detection ---
+    # Find non-archived documents sharing the same source URI.
+    uri_to_docs: dict[str, list] = {}
+    for doc in documents:
+        if _qc_status(doc) == DocumentStatus.ARCHIVED:
+            continue
+        uri = ""
+        if isinstance(doc, Document):
+            uri = doc.source.uri
+        elif hasattr(doc, "sources") and doc.sources:
+            uri = doc.sources[0].get("uri", "")
+        if not uri:
+            continue
+        uri_to_docs.setdefault(uri, []).append(doc)
+    dup_uris = {uri: docs for uri, docs in uri_to_docs.items() if len(docs) > 1}
+    check18_ok = len(dup_uris) == 0
+    items.append(QualityCheckItem(
+        name="duplicate_document_detection",
+        passed=check18_ok,
+        detail=(
+            f"{len(dup_uris)} 個 URI 有重複的非歸檔文件："
+            + "; ".join(
+                f"'{uri}' ({len(docs)} 份)"
+                for uri, docs in list(dup_uris.items())[:5]
+            )
+            + (f" ... (+{len(dup_uris) - 5})" if len(dup_uris) > 5 else "")
+            if dup_uris
+            else "所有非歸檔文件的 source URI 均唯一"
+        ),
+        weight=2,
+    ))
+
+    # --- 19. Duplicate task detection ---
+    # Find open tasks with Jaccard title similarity > 0.7.
+    open_tasks = [
+        t for t in (tasks or [])
+        if getattr(t, "status", None) in ("todo", "in_progress", "review")
+    ]
+    similar_task_pairs: list[tuple] = []
+    for i in range(len(open_tasks)):
+        for j in range(i + 1, len(open_tasks)):
+            t_a = open_tasks[i]
+            t_b = open_tasks[j]
+            sim = _jaccard_similarity(t_a.title, t_b.title)
+            if sim > 0.7:
+                similar_task_pairs.append((t_a, t_b, sim))
+    check19_ok = len(similar_task_pairs) == 0
+    items.append(QualityCheckItem(
+        name="duplicate_task_detection",
+        passed=check19_ok,
+        detail=(
+            f"{len(similar_task_pairs)} 組開放中任務標題高度相似（Jaccard > 0.7）："
+            + "; ".join(
+                f"'{a.title}' ↔ '{b.title}' ({sim:.2f})"
+                for a, b, sim in similar_task_pairs[:5]
+            )
+            + (f" ... (+{len(similar_task_pairs) - 5})" if len(similar_task_pairs) > 5 else "")
+            if similar_task_pairs
+            else f"所有 {len(open_tasks)} 個開放中任務均無重複"
+        ),
+        weight=1,
+    ))
+
+    # --- 20. Entry sparsity ---
+    # Active L2 modules with zero entries indicate shallow semantic knowledge.
+    active_l2_ids = [
+        e.id for e in entities
+        if e.type == EntityType.MODULE and e.status == EntityStatus.ACTIVE and e.id
+    ]
+    if active_l2_ids and entries_by_entity:
+        zero_entry_l2 = [
+            eid for eid in active_l2_ids
+            if entries_by_entity.get(eid, 0) == 0
+        ]
+        sparsity_ratio = len(zero_entry_l2) / len(active_l2_ids)
+        check20_ok = sparsity_ratio <= 0.5
+        # Map ids back to names for display
+        entity_name_map = {e.id: e.name for e in entities if e.id}
+        sparse_names = [entity_name_map.get(eid, eid) for eid in zero_entry_l2[:5]]
+        items.append(QualityCheckItem(
+            name="entry_sparsity",
+            passed=check20_ok,
+            detail=(
+                f"{len(zero_entry_l2)}/{len(active_l2_ids)} 個 active L2 模組無任何 entry"
+                f"（{sparsity_ratio:.0%}，超過 50% 閾值）："
+                + ", ".join(sparse_names)
+                + (f" ... (+{len(zero_entry_l2) - 5})" if len(zero_entry_l2) > 5 else "")
+                if not check20_ok
+                else f"{len(active_l2_ids)} 個 active L2 模組中，有 entry 的比例正常（{1 - sparsity_ratio:.0%}）"
+            ),
+            weight=2,
+        ))
+    else:
+        # No entry data provided or no active L2 — skip with pass
+        items.append(QualityCheckItem(
+            name="entry_sparsity",
+            passed=True,
+            detail="無 entry 資料或無 active L2，跳過稀疏度檢查",
+            weight=2,
+        ))
+
+    # --- 21. L2 count balance per product ---
+    # Products with < 3 or > 15 modules are imbalanced.
+    products = [e for e in entities if e.type == EntityType.PRODUCT and e.id]
+    module_count_by_product: dict[str, int] = {}
+    for mod in candidate_modules:
+        pid = mod.parent_id
+        if pid:
+            module_count_by_product[pid] = module_count_by_product.get(pid, 0) + 1
+    product_name_map = {p.id: p.name for p in products}
+    imbalanced_products = [
+        (pid, cnt)
+        for pid, cnt in module_count_by_product.items()
+        if cnt < 3 or cnt > 15
+    ]
+    check21_ok = len(imbalanced_products) == 0
+    items.append(QualityCheckItem(
+        name="l2_count_balance",
+        passed=check21_ok,
+        detail=(
+            f"{len(imbalanced_products)} 個 product 的 L2 數量不平衡（<3 或 >15）："
+            + "; ".join(
+                f"'{product_name_map.get(pid, pid)}' ({cnt} 個)"
+                for pid, cnt in imbalanced_products[:5]
+            )
+            + (f" ... (+{len(imbalanced_products) - 5})" if len(imbalanced_products) > 5 else "")
+            if imbalanced_products
+            else f"所有 {len(products)} 個 product 的 L2 數量均在合理範圍（3-15）"
+        ),
+        weight=1,
+    ))
+
+    # Compute overall score using weighted calculation (warnings don't affect score)
     passed = [i for i in items if i.passed]
     failed = [i for i in items if not i.passed]
+    weighted_total = sum(i.weight for i in items)
+    weighted_passed = sum(i.weight for i in passed)
+    score = int((weighted_passed / weighted_total) * 100) if weighted_total else 0
+
     # Warnings: check3 suspicious all-confirmed + check11 verbose L2 summaries + check14 review overdue
     warning_items: list[QualityCheckItem] = []
     if check3_warning:
@@ -1375,8 +1592,7 @@ def run_quality_check(
     if overdue_modules:
         warning_items.append(items[13])  # l2_governance_review_overdue
     if modules_without_global:
-        warning_items.append(items[-1])  # l2_consolidation_mode
-    score = int((len(passed) / len(items)) * 100) if items else 0
+        warning_items.append(items[15])  # l2_consolidation_mode (index 15, 0-based)
 
     return QualityReport(
         score=score,
@@ -1422,8 +1638,8 @@ def _compute_summary_generality(summary: str) -> int:
 def _compute_three_q_confidence(entity: Entity) -> float:
     """Compute three-question confidence dimension score (0/0.5/1.0/1.5/2.0)."""
     tags = entity.tags if entity.tags else Tags(what="", why="", how="", who="")
-    has_why = bool((tags.why or "").strip())
-    has_how = bool((tags.how or "").strip())
+    has_why = bool(_safe_str(tags.why).strip())
+    has_how = bool(_safe_str(tags.how).strip())
     has_layer_decision = bool(
         entity.details
         and isinstance(entity.details, dict)
