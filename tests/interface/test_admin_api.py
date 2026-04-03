@@ -219,7 +219,7 @@ class TestInvitePartner:
         request = _mock_request(
             method="POST",
             headers={"authorization": "Bearer fake-token"},
-            body={"email": "new@test.com"},
+            body={"email": "new@test.com", "authorized_entity_ids": ["e-1", "e-2"]},
         )
 
         mock_repo = AsyncMock()
@@ -233,7 +233,6 @@ class TestInvitePartner:
                      {
                          "email": "admin@test.com",
                          "isAdmin": True,
-                         "authorizedEntityIds": ["e-1", "e-2"],
                      },
                  ),
              ), \
@@ -250,6 +249,132 @@ class TestInvitePartner:
             assert body["apiKey"] == ""
             assert body["authorizedEntityIds"] == ["e-1", "e-2"]
             assert body["sharedPartnerId"] == "p1"
+            assert "inviteExpiresAt" in body
+
+    async def test_invite_sets_expires_at_7_days(self):
+        """New invite must have inviteExpiresAt set to approximately now + 7 days."""
+        from zenos.interface.admin_api import invite_partner
+        from datetime import timedelta
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            body={"email": "new2@test.com"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.create = AsyncMock(return_value=None)
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=(None, None)), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+
+            before = datetime.now(timezone.utc)
+            resp = await invite_partner(request)
+            after = datetime.now(timezone.utc)
+
+            assert resp.status_code == 201
+            import json
+            body = json.loads(resp.body)
+            expires_at_str = body["inviteExpiresAt"]
+            assert expires_at_str is not None
+            # Verify it's roughly 7 days from now
+            expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+            assert before + timedelta(days=6, hours=23) <= expires_at <= after + timedelta(days=7, seconds=5)
+
+    async def test_invite_authorized_entity_ids_from_body_not_caller(self):
+        """authorized_entity_ids must come from request body, not caller's own entity IDs."""
+        from zenos.interface.admin_api import invite_partner
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            body={"email": "client@test.com", "authorized_entity_ids": ["entity-x"]},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.create = AsyncMock(return_value=None)
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "authorizedEntityIds": ["caller-entity"]})), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=(None, None)), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+
+            resp = await invite_partner(request)
+
+            assert resp.status_code == 201
+            import json
+            body = json.loads(resp.body)
+            # Must use body's entity IDs, not caller's
+            assert body["authorizedEntityIds"] == ["entity-x"]
+
+    async def test_reinvite_same_invited_email_returns_200_and_updates_expiry(self):
+        """Re-inviting an already-invited email resets expires_at and returns 200."""
+        from zenos.interface.admin_api import invite_partner
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            body={"email": "pending@test.com"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        existing_partner = {
+            "email": "pending@test.com",
+            "status": "invited",
+            "authorizedEntityIds": [],
+            "displayName": "pending@test.com",
+        }
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p2", existing_partner)), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+
+            resp = await invite_partner(request)
+
+            assert resp.status_code == 200
+            mock_repo.update_fields.assert_called_once()
+            call_args = mock_repo.update_fields.call_args
+            assert call_args[0][0] == "p2"
+            assert "inviteExpiresAt" in call_args[0][1]
+
+    async def test_reinvite_updates_authorized_entity_ids_when_provided(self):
+        """Re-invite with authorized_entity_ids updates them on the existing record."""
+        from zenos.interface.admin_api import invite_partner
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            body={"email": "pending@test.com", "authorized_entity_ids": ["new-entity"]},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        existing_partner = {
+            "email": "pending@test.com",
+            "status": "invited",
+            "authorizedEntityIds": ["old-entity"],
+            "displayName": "pending@test.com",
+        }
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p2", existing_partner)), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+
+            resp = await invite_partner(request)
+
+            assert resp.status_code == 200
+            import json
+            body = json.loads(resp.body)
+            assert body["authorizedEntityIds"] == ["new-entity"]
+            call_fields = mock_repo.update_fields.call_args[0][1]
+            assert call_fields["authorizedEntityIds"] == ["new-entity"]
 
     async def test_invite_requires_admin(self):
         from zenos.interface.admin_api import invite_partner
@@ -277,7 +402,8 @@ class TestInvitePartner:
 
             assert resp.status_code == 401
 
-    async def test_invite_duplicate_email(self):
+    async def test_invite_active_email_returns_409(self):
+        """Inviting an email that is already active returns 409."""
         from zenos.interface.admin_api import invite_partner
 
         request = _mock_request(
@@ -289,6 +415,24 @@ class TestInvitePartner:
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
              patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p2", {"email": "existing@test.com", "status": "active"})):
+
+            resp = await invite_partner(request)
+
+            assert resp.status_code == 409
+
+    async def test_invite_suspended_email_returns_409(self):
+        """Inviting a suspended email returns 409."""
+        from zenos.interface.admin_api import invite_partner
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            body={"email": "suspended@test.com"},
+        )
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p3", {"email": "suspended@test.com", "status": "suspended"})):
 
             resp = await invite_partner(request)
 
@@ -531,6 +675,93 @@ class TestActivatePartner:
             resp = await activate_partner(request)
 
             assert resp.status_code == 401
+
+    async def test_activate_expired_invite_returns_410(self):
+        """Activating with an expired invite_expires_at returns 410."""
+        from zenos.interface.admin_api import activate_partner
+        from datetime import timedelta
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+        )
+
+        expired_at = datetime.now(timezone.utc) - timedelta(days=1)
+        partner_data = {
+            "email": "expired@test.com",
+            "status": "invited",
+            "displayName": "expired@test.com",
+            "inviteExpiresAt": expired_at,
+        }
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token(email="expired@test.com")), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p-exp", partner_data)):
+
+            resp = await activate_partner(request)
+
+            assert resp.status_code == 410
+            import json
+            body = json.loads(resp.body)
+            assert body["error"] == "INVITATION_EXPIRED"
+
+    async def test_activate_valid_invite_not_expired(self):
+        """Activating with a future invite_expires_at succeeds."""
+        from zenos.interface.admin_api import activate_partner
+        from datetime import timedelta
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        future_expires = datetime.now(timezone.utc) + timedelta(days=6)
+        partner_data = {
+            "email": "valid@test.com",
+            "status": "invited",
+            "displayName": "valid@test.com",
+            "inviteExpiresAt": future_expires,
+        }
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token(email="valid@test.com", name="Valid User")), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p-valid", partner_data)), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+
+            resp = await activate_partner(request)
+
+            assert resp.status_code == 200
+            import json
+            body = json.loads(resp.body)
+            assert body["status"] == "active"
+
+    async def test_activate_no_expires_at_succeeds(self):
+        """Activating with no invite_expires_at (NULL) succeeds (internal members)."""
+        from zenos.interface.admin_api import activate_partner
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        partner_data = {
+            "email": "internal@test.com",
+            "status": "invited",
+            "displayName": "internal@test.com",
+            "inviteExpiresAt": None,
+        }
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token(email="internal@test.com", name="Internal")), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=("p-int", partner_data)), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+
+            resp = await activate_partner(request)
+
+            assert resp.status_code == 200
 
 
 class TestDeletePartner:

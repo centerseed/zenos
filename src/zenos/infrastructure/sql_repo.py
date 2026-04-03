@@ -1593,12 +1593,13 @@ def _row_to_partner_dict(row: asyncpg.Record) -> dict:
         "invitedBy": row["invited_by"],
         "createdAt": row["created_at"] if "created_at" in row else None,
         "updatedAt": row["updated_at"] if "updated_at" in row else None,
+        "inviteExpiresAt": row["invite_expires_at"] if "invite_expires_at" in row else None,
     }
 
 
 _PARTNER_SELECT_COLS = """id, email, display_name, api_key, authorized_entity_ids,
                        status, is_admin, shared_partner_id, default_project, invited_by,
-                       roles, department, created_at, updated_at"""
+                       roles, department, created_at, updated_at, invite_expires_at"""
 
 
 class SqlPartnerRepository:
@@ -1649,8 +1650,8 @@ class SqlPartnerRepository:
                 f"""INSERT INTO {SCHEMA}.partners (
                         id, email, display_name, api_key, authorized_entity_ids,
                         status, is_admin, shared_partner_id, invited_by,
-                        roles, department, created_at, updated_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+                        roles, department, created_at, updated_at, invite_expires_at
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)""",
                 data["id"],
                 data["email"],
                 data["displayName"],
@@ -1664,6 +1665,7 @@ class SqlPartnerRepository:
                 data.get("department", "all"),
                 data["createdAt"],
                 data["updatedAt"],
+                data.get("inviteExpiresAt"),
             )
 
     async def list_departments(self, tenant_id: str) -> list[str]:
@@ -1760,6 +1762,7 @@ class SqlPartnerRepository:
             "department": "department",
             "authorizedEntityIds": "authorized_entity_ids",
             "updatedAt": "updated_at",
+            "inviteExpiresAt": "invite_expires_at",
         }
         sets = []
         params: list = []

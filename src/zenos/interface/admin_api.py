@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import firebase_admin  # type: ignore[import-untyped]
 from firebase_admin import auth as firebase_auth  # type: ignore[import-untyped]
@@ -268,26 +268,54 @@ async def invite_partner(request: Request) -> Response:
     if not email or "@" not in email:
         return _error_response("INVALID_INPUT", "Valid email is required", 400, request=request)
 
-    # Check if email already exists
-    existing_id, existing = await _get_partner_by_email(email)
-    if existing:
-        return _error_response(
-            "CONFLICT",
-            f"Partner with email {email} already exists (status: {existing.get('status')})",
-            409,
-            request=request,
-        )
+    authorized_entity_ids = body.get("authorized_entity_ids", [])
+    if not isinstance(authorized_entity_ids, list):
+        authorized_entity_ids = []
 
-    now = datetime.now(timezone.utc)
-    shared_partner_id = caller.get("sharedPartnerId") or caller_id
-    new_id = uuid.uuid4().hex
-    authorized_entity_ids = caller.get("authorizedEntityIds", [])
     roles_raw = body.get("roles", [])
     department_raw = str(body.get("department", "all") or "all").strip() or "all"
     if not isinstance(roles_raw, list) or any(not isinstance(role, str) for role in roles_raw):
         return _error_response("INVALID_INPUT", "roles must be string[]", 400, request=request)
     roles = sorted({role.strip() for role in roles_raw if role.strip()})
 
+    now = datetime.now(timezone.utc)
+    invite_expires_at = now + timedelta(days=7)
+    shared_partner_id = caller.get("sharedPartnerId") or caller_id
+
+    # Check if email already exists in this tenant
+    existing_id, existing = await _get_partner_by_email(email)
+    if existing:
+        existing_status = existing.get("status")
+        if existing_status == "active":
+            return _error_response("CONFLICT", "此 email 已是活躍成員", 409, request=request)
+        if existing_status == "suspended":
+            return _error_response("CONFLICT", "此 email 已被停用，請先重新啟用", 409, request=request)
+        if existing_status == "invited":
+            # Re-invite: reset expiry and optionally update authorized_entity_ids
+            reinvite_fields: dict[str, object] = {"inviteExpiresAt": invite_expires_at, "updatedAt": now}
+            if authorized_entity_ids:
+                reinvite_fields["authorizedEntityIds"] = authorized_entity_ids
+            repo = await _ensure_partner_repo()
+            await repo.update_fields(existing_id, reinvite_fields)
+            logger.info(
+                "audit",
+                extra={
+                    "action": "partner_reinvite",
+                    "caller_email": caller.get("email", ""),
+                    "target_email": email,
+                    "target_partner_id": existing_id,
+                    "result": "success",
+                    "detail": "invite_expires_at reset",
+                },
+            )
+            existing["inviteExpiresAt"] = invite_expires_at
+            existing["updatedAt"] = now
+            if authorized_entity_ids:
+                existing["authorizedEntityIds"] = authorized_entity_ids
+            existing["id"] = existing_id
+            return _json_response(existing, status_code=200, request=request)
+
+    new_id = uuid.uuid4().hex
     repo = await _ensure_partner_repo()
     await repo.create_department(shared_partner_id, department_raw)
     await repo.create({
@@ -304,6 +332,7 @@ async def invite_partner(request: Request) -> Response:
         "department": department_raw,
         "createdAt": now,
         "updatedAt": now,
+        "inviteExpiresAt": invite_expires_at,
     })
 
     logger.info(
@@ -332,6 +361,7 @@ async def invite_partner(request: Request) -> Response:
         "department": department_raw,
         "createdAt": now,
         "updatedAt": now,
+        "inviteExpiresAt": invite_expires_at,
     }
     return _json_response(partner_data, status_code=201, request=request)
 
@@ -806,6 +836,15 @@ async def activate_partner(request: Request) -> Response:
             "FORBIDDEN",
             f"Partner status is '{partner.get('status')}', cannot activate",
             403,
+            request=request,
+        )
+
+    invite_expires_at = partner.get("inviteExpiresAt")
+    if invite_expires_at and invite_expires_at < datetime.now(timezone.utc):
+        return _error_response(
+            "INVITATION_EXPIRED",
+            "邀請連結已過期，請聯繫管理員重新發送邀請",
+            410,
             request=request,
         )
 
