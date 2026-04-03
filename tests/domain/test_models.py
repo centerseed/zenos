@@ -5,13 +5,20 @@ from __future__ import annotations
 import pytest
 
 from zenos.domain.models import (
+    AccessPolicy,
+    AgentPrincipal,
+    AgentScope,
+    Classification,
     Entity,
     EntityEntry,
     EntryStatus,
     EntryType,
     EntityType,
+    InheritanceMode,
+    Relationship,
     RelationshipType,
     Tags,
+    UserPrincipal,
 )
 
 
@@ -136,6 +143,7 @@ class TestEntityEntryModel:
         assert entry.status == "active"
         assert entry.context is None
         assert entry.author is None
+        assert entry.department is None
         assert entry.source_task_id is None
         assert entry.superseded_by is None
         assert entry.created_at is not None
@@ -170,3 +178,81 @@ class TestEntityEntryModel:
     def test_entry_status_is_str_enum(self):
         assert isinstance(EntryStatus.ACTIVE, str)
         assert EntryStatus.ACTIVE == "active"
+
+
+class TestPermissionGovernanceModels:
+    def test_user_principal_defaults(self):
+        principal = UserPrincipal(user_id="u1", partner_id="p1")
+        assert principal.role_ids == []
+        assert principal.department_ids == []
+        assert principal.is_admin is False
+
+    def test_agent_scope_defaults(self):
+        scope = AgentScope()
+        assert scope.read_classification_max == Classification.OPEN
+        assert scope.write_classification_max == Classification.INTERNAL
+
+    def test_access_policy_inherit_disallows_custom_scope(self):
+        policy = AccessPolicy(
+            classification=Classification.INTERNAL,
+            inheritance_mode=InheritanceMode.INHERIT,
+            allowed_role_ids=["engineering"],
+        )
+        assert policy.validate_custom_scope() is False
+
+    def test_access_policy_cannot_weaken_parent_classification(self):
+        policy = AccessPolicy(classification=Classification.INTERNAL)
+        assert policy.validate_transition_from_parent(Classification.RESTRICTED) is False
+
+    def test_agent_principal_keeps_scope(self):
+        principal = AgentPrincipal(agent_id="a1", owner_user_id="u1", partner_id="p1")
+        assert principal.scope.read_classification_max == Classification.OPEN
+
+
+# ──────────────────────────────────────────────
+# Relationship.verb field
+# ──────────────────────────────────────────────
+
+class TestRelationshipVerbField:
+    def test_verb_defaults_to_none(self):
+        rel = Relationship(
+            source_entity_id="a",
+            target_id="b",
+            type=RelationshipType.IMPACTS,
+            description="A impacts B",
+        )
+        assert rel.verb is None
+
+    def test_verb_can_be_set(self):
+        rel = Relationship(
+            source_entity_id="a",
+            target_id="b",
+            type=RelationshipType.IMPACTS,
+            description="A impacts B",
+            verb="校準",
+        )
+        assert rel.verb == "校準"
+
+    def test_verb_accepts_none_explicitly(self):
+        rel = Relationship(
+            source_entity_id="a",
+            target_id="b",
+            type=RelationshipType.ENABLES,
+            description="A enables B",
+            verb=None,
+        )
+        assert rel.verb is None
+
+    def test_verb_and_other_fields_coexist(self):
+        rel = Relationship(
+            source_entity_id="src-1",
+            target_id="tgt-1",
+            type=RelationshipType.DEPENDS_ON,
+            description="depends on",
+            id="rel-1",
+            confirmed_by_user=True,
+            verb="觸發",
+        )
+        assert rel.id == "rel-1"
+        assert rel.confirmed_by_user is True
+        assert rel.verb == "觸發"

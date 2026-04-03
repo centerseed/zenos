@@ -1457,6 +1457,7 @@ class OntologyService:
         target_id: str,
         rel_type: str,
         description: str,
+        verb: str | None = None,
     ) -> Relationship:
         """Add a directed relationship between two entities.
 
@@ -1501,6 +1502,7 @@ class OntologyService:
                     target_id=target_id,
                     type=rel_type,
                     description=description,
+                    verb=verb,
                 )
 
         # --- Dedup check ---
@@ -1513,8 +1515,59 @@ class OntologyService:
             target_id=target_id,
             type=rel_type,
             description=description,
+            verb=verb,
         )
         return await self._relationships.add(rel)
+
+    async def compute_impact_chain(
+        self, entity_id: str, max_depth: int = 5
+    ) -> list[dict]:
+        """BFS traverse outgoing relationship edges from entity_id.
+
+        Returns an ordered list of hops, each as a dict:
+            {from_id, from_name, verb, type, to_id, to_name}
+
+        Cycle-safe via a visited set of entity IDs.
+        Gracefully handles deleted entities by substituting the entity ID as name.
+        """
+        result: list[dict] = []
+        visited: set[str] = {entity_id}
+        # queue items: (current_entity_id, depth)
+        queue: list[tuple[str, int]] = [(entity_id, 0)]
+
+        while queue:
+            current_id, depth = queue.pop(0)
+            if depth >= max_depth:
+                continue
+
+            from_entity = await self._entities.get_by_id(current_id)
+            from_name = from_entity.name if from_entity else current_id
+
+            rels = await self._relationships.list_by_entity(current_id)
+            for rel in rels:
+                if rel.source_entity_id != current_id:
+                    continue  # only outgoing edges
+
+                to_id = rel.target_id
+                if to_id in visited:
+                    continue  # skip cycle-back edges
+
+                to_entity = await self._entities.get_by_id(to_id)
+                to_name = to_entity.name if to_entity else to_id
+
+                result.append({
+                    "from_id": current_id,
+                    "from_name": from_name,
+                    "verb": rel.verb,
+                    "type": rel.type,
+                    "to_id": to_id,
+                    "to_name": to_name,
+                })
+
+                visited.add(to_id)
+                queue.append((to_id, depth + 1))
+
+        return result
 
     async def upsert_document(self, data: dict) -> Entity:
         """Create or update a document as an entity(type="document").

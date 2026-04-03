@@ -23,6 +23,7 @@ interface GraphLink {
   source: string;
   target: string;
   type: Relationship["type"];
+  verb?: string | null;
 }
 
 interface KnowledgeGraphProps {
@@ -152,6 +153,7 @@ export default function KnowledgeGraph({
         source: r.sourceEntityId,
         target: r.targetId,
         type: r.type,
+        verb: r.verb ?? null,
       }));
 
     // Also draw parent→child edges from parentId hierarchy
@@ -336,6 +338,40 @@ export default function KnowledgeGraph({
     [hoveredNode]
   );
 
+  // Link canvas renderer: draw verb label at edge midpoint
+  const linkCanvasObject = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (link: any, ctx: CanvasRenderingContext2D) => {
+      const verb = (link as GraphLink).verb;
+      if (!verb) return;
+
+      const src = typeof link.source === "string" ? null : link.source;
+      const tgt = typeof link.target === "string" ? null : link.target;
+      if (!src || !tgt || src.x == null || src.y == null || tgt.x == null || tgt.y == null) return;
+
+      const midX = (src.x + tgt.x) / 2;
+      const midY = (src.y + tgt.y) / 2;
+
+      ctx.save();
+      ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      const textWidth = ctx.measureText(verb).width;
+      const padding = 2;
+      const bgW = textWidth + padding * 2;
+      const bgH = 14;
+
+      ctx.fillStyle = "rgba(15,15,15,0.75)";
+      ctx.fillRect(midX - bgW / 2, midY - bgH / 2, bgW, bgH);
+
+      ctx.fillStyle = "rgba(161,161,170,0.9)";
+      ctx.fillText(verb, midX, midY);
+      ctx.restore();
+    },
+    []
+  );
+
   // Tooltip: show full name + summary on hover
   const nodeLabel = useCallback(
     (node: GraphNode) => {
@@ -407,6 +443,8 @@ export default function KnowledgeGraph({
           };
           return labels[link.type] ?? link.type;
         }}
+        linkCanvasObject={linkCanvasObject}
+        linkCanvasObjectMode={() => "after"}
         linkCurvature={0.1}
         cooldownTicks={100}
         onNodeClick={handleNodeClick}

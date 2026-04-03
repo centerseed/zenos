@@ -296,6 +296,7 @@ async def _ensure_services() -> None:
             protocol_repo=protocol_repo,
             blindspot_repo=blindspot_repo,
             task_repo=task_repo,
+            governance_ai=_governance_ai,
         )
     if source_service is None:
         source_service = SourceService(
@@ -1096,6 +1097,8 @@ async def get(
         eid = result.entity.id
         active_entries = await entry_repo.list_by_entity(eid) if eid else []
         response["active_entries"] = [_serialize(e) for e in active_entries]
+        if eid:
+            response["impact_chain"] = await ontology_service.compute_impact_chain(eid)
         _schedule_tool_event("get", eid, None, None)
         return response
 
@@ -1516,6 +1519,7 @@ async def write(
                 target_id=data["target_entity_id"],
                 rel_type=data["type"],
                 description=data["description"],
+                verb=data.get("verb"),
             )
             response = _serialize(result)
             _audit_log(
@@ -1523,6 +1527,19 @@ async def write(
                 target={"collection": collection, "id": response.get("id")},
                 changes={"input": data},
             )
+            # Suggest verbs when caller did not provide one
+            if result.verb is None and governance_service is not None:
+                src_entity = await entity_repo.get_by_id(data["source_entity_id"])
+                tgt_entity = await entity_repo.get_by_id(data["target_entity_id"])
+                if src_entity is not None and tgt_entity is not None:
+                    suggested_verbs = await governance_service.suggest_relationship_verb(
+                        src_entity, tgt_entity
+                    )
+                    response["suggested_verbs"] = suggested_verbs
+                else:
+                    response["suggested_verbs"] = []
+            else:
+                response["suggested_verbs"] = []
             response["context_bundle"] = await _build_context_bundle(
                 linked_entity_ids=[data["source_entity_id"], data["target_entity_id"]],
             )

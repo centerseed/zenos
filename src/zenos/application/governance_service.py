@@ -6,8 +6,12 @@ in governance.py. Each method returns a governance result object.
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import Counter
+from typing import Any
+
+from pydantic import BaseModel as _PydanticBaseModel
 
 from zenos.domain.governance import (
     _L2_TECH_TERMS,
@@ -29,8 +33,11 @@ from zenos.domain.governance import (
 )
 from zenos.domain.models import (
     Blindspot,
+    Entity,
     EntityType,
+    QualityCheckItem,
     QualityReport,
+    Severity,
     StalenessWarning,
 )
 from zenos.domain.repositories import (
@@ -39,6 +46,11 @@ from zenos.domain.repositories import (
     ProtocolRepository,
     RelationshipRepository,
 )
+
+logger = logging.getLogger(__name__)
+
+# Graph topology constants
+LEVERAGE_THRESHOLD = 3  # out-degree >= this value flags a high-impact node
 
 
 class GovernanceService:
@@ -53,6 +65,7 @@ class GovernanceService:
         blindspot_repo: BlindspotRepository | None = None,
         task_repo=None,  # TaskRepository (duck typing to avoid circular import)
         tool_event_repo=None,  # ToolEventRepository (duck typing to avoid circular import)
+        governance_ai: Any = None,  # GovernanceAI (duck typing to avoid circular import)
     ) -> None:
         self._entities = entity_repo
         self._relationships = relationship_repo
@@ -60,6 +73,7 @@ class GovernanceService:
         self._blindspots = blindspot_repo
         self._tasks = task_repo
         self._tool_events = tool_event_repo
+        self._governance_ai = governance_ai
 
     async def _load_all_relationships(self, entities: list) -> list:
         """Collect all relationships by querying each entity's relationships."""
@@ -245,6 +259,207 @@ class GovernanceService:
 
         return proposals
 
+    async def analyze_graph_topology(self) -> list[dict]:
+        """Detect graph-topology blindspots: isolated nodes, leverage nodes, cycles, goal disconnects.
+
+        Returns a list of issue dicts, each with a 'type' field indicating the problem.
+        Non-DOCUMENT entities only.
+        """
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        relationships = await self._load_all_relationships(all_entities)
+
+        # Build graph structures
+        entity_map: dict[str, Entity] = {e.id: e for e in entities if e.id}
+        out_degree: dict[str, int] = {e.id: 0 for e in entities if e.id}
+        entity_set: set[str] = set()  # entity ids that appear in any relationship
+        adj: dict[str, list[str]] = {e.id: [] for e in entities if e.id}
+
+        for rel in relationships:
+            src = rel.source_entity_id
+            tgt = rel.target_id
+            entity_set.add(src)
+            entity_set.add(tgt)
+            if src in out_degree:
+                out_degree[src] += 1
+            if src in adj:
+                adj[src].append(tgt)
+
+        issues: list[dict] = []
+
+        # --- Isolated nodes ---
+        for entity in entities:
+            if not entity.id:
+                continue
+            if entity.id not in entity_set:
+                issues.append({
+                    "type": "isolated_node",
+                    "entity_id": entity.id,
+                    "entity_name": entity.name,
+                    "description": (
+                        f"「{entity.name}」沒有任何關聯，可能是孤立的知識節點或待整合的概念。"
+                    ),
+                })
+
+        # --- Leverage nodes (high out-degree, no docs) ---
+        for entity in entities:
+            if not entity.id:
+                continue
+            out_deg = out_degree.get(entity.id, 0)
+            if out_deg >= LEVERAGE_THRESHOLD:
+                issues.append({
+                    "type": "leverage_node_no_docs",
+                    "entity_id": entity.id,
+                    "entity_name": entity.name,
+                    "out_degree": out_deg,
+                    "description": (
+                        f"「{entity.name}」有 {out_deg} 條出邊，影響面廣，建議確認是否有文件記錄。"
+                    ),
+                })
+
+        # --- Circular dependencies (iterative DFS) ---
+        WHITE, GRAY, BLACK = 0, 1, 2
+        color: dict[str, int] = {e.id: WHITE for e in entities if e.id}
+        cycles_found: list[list[str]] = []
+
+        for start_id in list(color.keys()):
+            if color.get(start_id) != WHITE:
+                continue
+            if len(cycles_found) >= 3:
+                break
+            # Iterative DFS with explicit stack: (node_id, iterator_over_neighbors, path)
+            stack: list[tuple[str, int, list[str]]] = [(start_id, 0, [start_id])]
+            color[start_id] = GRAY
+            while stack and len(cycles_found) < 3:
+                node, idx, path = stack[-1]
+                neighbors = adj.get(node, [])
+                if idx < len(neighbors):
+                    stack[-1] = (node, idx + 1, path)
+                    nxt = neighbors[idx]
+                    if nxt not in color:
+                        continue
+                    if color[nxt] == GRAY:
+                        # Found a cycle — extract path from current path
+                        cycle_start = path.index(nxt)
+                        cycle_path = path[cycle_start:] + [nxt]
+                        cycle_names = [
+                            entity_map[n].name if n in entity_map else n
+                            for n in cycle_path
+                        ]
+                        cycles_found.append(cycle_names)
+                    elif color[nxt] == WHITE:
+                        color[nxt] = GRAY
+                        stack.append((nxt, 0, path + [nxt]))
+                else:
+                    color[node] = BLACK
+                    stack.pop()
+
+        for path in cycles_found:
+            issues.append({
+                "type": "circular_dependency",
+                "path": path,
+                "description": f"發現循環依賴：{' → '.join(path)}，可能造成邏輯矛盾。",
+            })
+
+        # --- Goal disconnected (L2 entity types that cannot reach any GOAL) ---
+        # Only MODULE is the current L2 type in the domain model.
+        _L2_TYPES = {EntityType.MODULE}
+        goal_ids = {e.id for e in entities if e.type == EntityType.GOAL and e.id}
+
+        for entity in entities:
+            if not entity.id:
+                continue
+            if entity.type not in _L2_TYPES:
+                continue
+            # BFS from entity following outgoing edges
+            visited: set[str] = set()
+            queue = [entity.id]
+            reached_goal = False
+            while queue:
+                current = queue.pop(0)
+                if current in visited:
+                    continue
+                visited.add(current)
+                if current in goal_ids:
+                    reached_goal = True
+                    break
+                for nxt in adj.get(current, []):
+                    if nxt not in visited:
+                        queue.append(nxt)
+            if not reached_goal:
+                issues.append({
+                    "type": "goal_disconnected",
+                    "entity_id": entity.id,
+                    "entity_name": entity.name,
+                    "description": (
+                        f"「{entity.name}」無法追溯到任何目標節點，可能是與公司目標脫節的知識孤島。"
+                    ),
+                })
+
+        return issues
+
+    async def suggest_relationship_verb(
+        self,
+        source_entity: Entity,
+        target_entity: Entity,
+    ) -> list[str]:
+        """Suggest Chinese verb phrases describing the relationship from source to target.
+
+        Uses GovernanceAI's LLM client. Returns empty list on any failure.
+        """
+        if self._governance_ai is None:
+            return []
+        llm = getattr(self._governance_ai, "_llm", None)
+        if llm is None:
+            return []
+
+        source_name = source_entity.name
+        target_name = target_entity.name
+        source_what = ", ".join(
+            source_entity.tags.what
+            if isinstance(source_entity.tags.what, list)
+            else [source_entity.tags.what]
+        ) if source_entity.tags.what else source_name
+        target_what = ", ".join(
+            target_entity.tags.what
+            if isinstance(target_entity.tags.what, list)
+            else [target_entity.tags.what]
+        ) if target_entity.tags.what else target_name
+
+        class _VerbSuggestion(_PydanticBaseModel):
+            verbs: list[str]
+
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an ontology assistant. "
+                    'Return a JSON object {"verbs": [...]} with 2-3 short Chinese verb phrases.'
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f'Two knowledge nodes: "{source_name}" (about: {source_what}) '
+                    f'and "{target_name}" (about: {target_what}).\n'
+                    "Suggest 2-3 short Chinese verb phrases (2-5 characters each) that best describe "
+                    "how the first node relates to the second.\n"
+                    "Examples: 校準, 觸發, 驅動, 限制, 依賴, 啟用, 支撐"
+                ),
+            },
+        ]
+
+        try:
+            result = llm.chat_structured(
+                messages=messages,
+                response_schema=_VerbSuggestion,
+                temperature=0.3,
+            )
+            return [str(v) for v in result.verbs if v][:3]
+        except Exception:
+            logger.warning("suggest_relationship_verb failed", exc_info=True)
+            return []
+
     async def run_quality_check(
         self,
         tasks: list | None = None,
@@ -283,7 +498,7 @@ class GovernanceService:
             except Exception:
                 tasks = None
 
-        return run_quality_check(
+        quality_report = run_quality_check(
             entities=entities,
             documents=documents,
             protocols=protocols,
@@ -292,6 +507,52 @@ class GovernanceService:
             tasks=tasks,
             entries_by_entity=entries_by_entity,
         )
+
+        # --- verb_completeness: add warning for entities with relationships but missing verbs ---
+        entity_ids_with_rels: dict[str, list] = {}
+        for rel in relationships:
+            entity_ids_with_rels.setdefault(rel.source_entity_id, []).append(rel)
+
+        total_rels = len(relationships)
+        verbed_rels = sum(1 for r in relationships if r.verb)
+        verb_rate = verbed_rels / total_rels if total_rels > 0 else 1.0
+
+        # Per-entity: entities with at least one relationship but zero verbs
+        entities_missing_verb: list[str] = []
+        entity_name_map = {e.id: e.name for e in entities if e.id}
+        for eid, rels in entity_ids_with_rels.items():
+            if rels and not any(r.verb for r in rels):
+                entities_missing_verb.append(entity_name_map.get(eid, eid))
+
+        verb_item = QualityCheckItem(
+            name="relationship_verb_completeness",
+            passed=len(entities_missing_verb) == 0,
+            detail=(
+                f"{len(entities_missing_verb)} 個節點的所有關聯均缺少動詞（verb）："
+                + ", ".join(f"'{n}'" for n in entities_missing_verb[:5])
+                + (f" ... (+{len(entities_missing_verb) - 5})" if len(entities_missing_verb) > 5 else "")
+                if entities_missing_verb
+                else f"所有關聯均有動詞標記（{verbed_rels}/{total_rels}）"
+            ),
+            weight=1,
+        )
+        # Add to warnings list (non-blocking, information only)
+        quality_report.warnings.append(verb_item)
+
+        # Partner-level: if overall verb fill rate < 50%, add a warning
+        if total_rels > 0 and verb_rate < 0.5:
+            partner_verb_item = QualityCheckItem(
+                name="partner_verb_fill_rate_low",
+                passed=True,  # warning only
+                detail=(
+                    f"整體關聯動詞填寫率 {verb_rate:.0%}（{verbed_rels}/{total_rels}），"
+                    "低於 50% 建議值，語意完整度不足。"
+                ),
+                weight=1,
+            )
+            quality_report.warnings.append(partner_verb_item)
+
+        return quality_report
 
     async def run_staleness_check(self) -> dict:
         """Detect staleness patterns across entities and documents.
@@ -471,18 +732,61 @@ class GovernanceService:
         """Infer blind spots by cross-referencing ontology layers.
 
         Fetches all entities and relationships, then delegates to
-        domain.governance.analyze_blindspots.
+        domain.governance.analyze_blindspots. Also runs graph topology analysis
+        and persists topology-derived blindspots via blindspot_repo.add().
         """
         all_entities = await self._entities.list_all()
         entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
         documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
         relationships = await self._load_all_relationships(all_entities)
 
-        return analyze_blindspots(
+        blindspots = analyze_blindspots(
             entities=entities,
             documents=documents,
             relationships=relationships,
         )
+
+        # Run graph topology analysis and persist results
+        topology_issues = await self.analyze_graph_topology()
+        if topology_issues and self._blindspots is not None:
+            existing_blindspots = await self._blindspots.list_all()
+            existing_descriptions = {b.description for b in existing_blindspots}
+            for issue in topology_issues:
+                if issue.get("description", "") in existing_descriptions:
+                    continue
+                issue_type = issue.get("type", "topology")
+                entity_id = issue.get("entity_id")
+                related_ids = [entity_id] if entity_id else []
+                # For circular_dependency, no single entity_id
+                if issue_type == "circular_dependency":
+                    severity = Severity.RED.value
+                    suggested_action = "檢查循環依賴的節點，重新設計關聯方向，消除邏輯矛盾。"
+                elif issue_type == "isolated_node":
+                    severity = Severity.YELLOW.value
+                    suggested_action = "為此節點建立至少一條關聯，或確認是否需要整合到現有概念。"
+                elif issue_type == "leverage_node_no_docs":
+                    severity = Severity.YELLOW.value
+                    suggested_action = "為此高影響節點補充說明文件，確保知識已記錄。"
+                else:  # goal_disconnected
+                    severity = Severity.YELLOW.value
+                    suggested_action = "為此節點建立通往目標節點的關聯路徑，確保與公司目標一致。"
+
+                topology_blindspot = Blindspot(
+                    description=issue.get("description", ""),
+                    severity=severity,
+                    related_entity_ids=related_ids,
+                    suggested_action=suggested_action,
+                )
+                try:
+                    persisted = await self._blindspots.add(topology_blindspot)
+                    blindspots.append(persisted)
+                except Exception:
+                    logger.warning("Failed to persist topology blindspot", exc_info=True)
+                    blindspots.append(topology_blindspot)
+                finally:
+                    existing_descriptions.add(topology_blindspot.description)
+
+        return blindspots
 
     async def compute_search_unused_for_partner(
         self,

@@ -55,7 +55,8 @@ export interface Relationship {
   id: string;
   sourceEntityId: string;
   targetId: string;
-  type: "depends_on" | "serves" | "owned_by" | "part_of" | "blocks" | "related_to";
+  type: "depends_on" | "serves" | "owned_by" | "part_of" | "blocks" | "related_to" | "impacts" | "enables";
+  verb?: string | null;
   description: string;
   confirmedByUser: boolean;
 }

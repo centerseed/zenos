@@ -311,6 +311,7 @@ def _row_to_relationship(row: asyncpg.Record) -> Relationship:
         type=row["type"],
         description=row["description"],
         confirmed_by_user=row["confirmed_by_user"],
+        verb=row.get("verb"),
     )
 
 
@@ -364,18 +365,19 @@ class SqlRelationshipRepository:
                 f"""
                 INSERT INTO {SCHEMA}.relationships (
                     id, partner_id, source_entity_id, target_entity_id,
-                    type, description, confirmed_by_user, created_at, updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+                    type, description, confirmed_by_user, created_at, updated_at, verb
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                 ON CONFLICT (id) DO UPDATE SET
                     source_entity_id=EXCLUDED.source_entity_id,
                     target_entity_id=EXCLUDED.target_entity_id,
                     type=EXCLUDED.type, description=EXCLUDED.description,
                     confirmed_by_user=EXCLUDED.confirmed_by_user,
-                    updated_at=EXCLUDED.updated_at
+                    updated_at=EXCLUDED.updated_at,
+                    verb=EXCLUDED.verb
                 WHERE relationships.partner_id = EXCLUDED.partner_id
                 """,
                 rel.id, pid, rel.source_entity_id, rel.target_id,
-                rel.type, rel.description, rel.confirmed_by_user, now, now,
+                rel.type, rel.description, rel.confirmed_by_user, now, now, rel.verb,
             )
         return rel
 
