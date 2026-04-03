@@ -922,6 +922,52 @@ async def activate_partner(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Endpoint: GET /api/audit-events
+# ──────────────────────────────────────────────
+
+
+async def list_audit_events(request: Request) -> Response:
+    """List audit events for caller's tenant. Admin only."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller or not caller.get("isAdmin"):
+        return _error_response("FORBIDDEN", "Admin access required", 403, request=request)
+
+    since_str = request.query_params.get("since")
+    until_str = request.query_params.get("until")
+    operation = request.query_params.get("operation")
+    actor_id = request.query_params.get("actor_id")
+    try:
+        limit = min(int(request.query_params.get("limit", "100")), 500)
+    except (ValueError, TypeError):
+        limit = 100
+
+    since = datetime.fromisoformat(since_str) if since_str else None
+    until = datetime.fromisoformat(until_str) if until_str else None
+
+    tenant_id = _same_tenant_id(caller_id, caller)
+
+    from zenos.infrastructure.sql_repo import SqlAuditEventRepository, get_pool
+    pool = await get_pool()
+    audit_repo = SqlAuditEventRepository(pool)
+    events = await audit_repo.list_events(
+        partner_id=tenant_id,
+        since=since,
+        until=until,
+        operation=operation,
+        actor_id=actor_id,
+        limit=limit,
+    )
+    return _json_response({"events": events}, request=request)
+
+
+# ──────────────────────────────────────────────
 # Route table
 # ──────────────────────────────────────────────
 
@@ -938,4 +984,5 @@ admin_routes = [
     Route("/api/partners/{id}/status", update_partner_status, methods=["PUT", "OPTIONS"]),
     Route("/api/partners/{id}/scope", update_partner_scope, methods=["PUT", "OPTIONS"]),
     Route("/api/entities/{id}/visibility", update_entity_visibility, methods=["PUT", "OPTIONS"]),
+    Route("/api/audit-events", list_audit_events, methods=["GET", "OPTIONS"]),
 ]

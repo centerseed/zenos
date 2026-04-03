@@ -245,6 +245,7 @@ source_adapter = GitHubAdapter()
 _governance_ai: GovernanceAI | None = None
 _usage_log_repo: SqlUsageLogRepository | None = None
 _tool_event_repo: SqlToolEventRepository | None = None
+_audit_repo: "SqlAuditEventRepository | None" = None
 
 
 async def _ensure_governance_ai() -> None:
@@ -646,7 +647,7 @@ def _audit_log(
     changes: dict | None = None,
     governance: dict | None = None,
 ) -> None:
-    """Emit structured governance audit logs to stdout/Cloud Logging."""
+    """Emit structured governance audit logs to stdout/Cloud Logging + SQL."""
     partner = _current_partner.get() or {}
     payload = {
         "event_type": event_type,
@@ -662,6 +663,42 @@ def _audit_log(
         "governance": governance or {},
     }
     logger.info("AUDIT_LOG %s", json.dumps(payload, ensure_ascii=False, default=str))
+
+    # Async SQL write (non-blocking, graceful degradation)
+    _schedule_audit_sql_write(payload)
+
+
+def _schedule_audit_sql_write(payload: dict) -> None:
+    """Schedule non-blocking SQL write. Never raises."""
+    try:
+        loop = asyncio.get_event_loop()
+        if not loop.is_running():
+            return
+        loop.create_task(_write_audit_event(payload))
+    except Exception:
+        pass  # Audit write scheduling must never crash the caller
+
+
+async def _write_audit_event(payload: dict) -> None:
+    """Write audit event to SQL. Failure only logs warning."""
+    global _audit_repo  # noqa: PLW0603
+    try:
+        if _audit_repo is None:
+            from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+            pool = await get_pool()
+            _audit_repo = SqlAuditEventRepository(pool)
+        event = {
+            "partner_id": payload.get("partner_id", ""),
+            "actor_id": payload.get("actor", {}).get("id", ""),
+            "actor_type": "partner",
+            "operation": payload.get("event_type", ""),
+            "resource_type": payload.get("target", {}).get("collection", ""),
+            "resource_id": payload.get("target", {}).get("id"),
+            "changes_json": payload.get("changes"),
+        }
+        await _audit_repo.create(event)
+    except Exception:
+        logger.warning("Audit SQL write failed", exc_info=True)
 
 
 # ===================================================================
