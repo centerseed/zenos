@@ -222,6 +222,25 @@ async def list_partners(request: Request) -> Response:
     return _json_response({"partners": partners}, request=request)
 
 
+async def list_departments(request: Request) -> Response:
+    """List department catalog for caller tenant."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller:
+        return _error_response("FORBIDDEN", "Partner profile not found", 403, request=request)
+
+    repo = await _ensure_partner_repo()
+    tenant_id = _same_tenant_id(caller_id, caller)
+    departments = await repo.list_departments(tenant_id)
+    return _json_response({"departments": departments}, request=request)
+
+
 # ──────────────────────────────────────────────
 # Endpoint: POST /api/partners/invite
 # ──────────────────────────────────────────────
@@ -263,8 +282,14 @@ async def invite_partner(request: Request) -> Response:
     shared_partner_id = caller.get("sharedPartnerId") or caller_id
     new_id = uuid.uuid4().hex
     authorized_entity_ids = caller.get("authorizedEntityIds", [])
+    roles_raw = body.get("roles", [])
+    department_raw = str(body.get("department", "all") or "all").strip() or "all"
+    if not isinstance(roles_raw, list) or any(not isinstance(role, str) for role in roles_raw):
+        return _error_response("INVALID_INPUT", "roles must be string[]", 400, request=request)
+    roles = sorted({role.strip() for role in roles_raw if role.strip()})
 
     repo = await _ensure_partner_repo()
+    await repo.create_department(shared_partner_id, department_raw)
     await repo.create({
         "id": new_id,
         "email": email,
@@ -275,6 +300,8 @@ async def invite_partner(request: Request) -> Response:
         "isAdmin": False,
         "sharedPartnerId": shared_partner_id,
         "invitedBy": caller.get("email", ""),
+        "roles": roles,
+        "department": department_raw,
         "createdAt": now,
         "updatedAt": now,
     })
@@ -301,10 +328,100 @@ async def invite_partner(request: Request) -> Response:
         "isAdmin": False,
         "status": "invited",
         "invitedBy": caller.get("email", ""),
+        "roles": roles,
+        "department": department_raw,
         "createdAt": now,
         "updatedAt": now,
     }
     return _json_response(partner_data, status_code=201, request=request)
+
+
+async def create_department(request: Request) -> Response:
+    """Create a department in the tenant catalog."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller or not caller.get("isAdmin"):
+        return _error_response("FORBIDDEN", "Admin access required", 403, request=request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    name = str(body.get("name", "")).strip()
+    if not name:
+        return _error_response("INVALID_INPUT", "Department name required", 400, request=request)
+
+    repo = await _ensure_partner_repo()
+    tenant_id = _same_tenant_id(caller_id, caller)
+    await repo.create_department(tenant_id, name)
+    departments = await repo.list_departments(tenant_id)
+    return _json_response({"departments": departments}, status_code=201, request=request)
+
+
+async def rename_department(request: Request) -> Response:
+    """Rename a department and cascade partner.department values."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller or not caller.get("isAdmin"):
+        return _error_response("FORBIDDEN", "Admin access required", 403, request=request)
+
+    old_name = request.path_params.get("name", "").strip()
+    if not old_name or old_name == "all":
+        return _error_response("INVALID_INPUT", "Department name required", 400, request=request)
+
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, Exception):
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    new_name = str(body.get("name", "")).strip()
+    if not new_name:
+        return _error_response("INVALID_INPUT", "New department name required", 400, request=request)
+
+    repo = await _ensure_partner_repo()
+    tenant_id = _same_tenant_id(caller_id, caller)
+    await repo.rename_department(tenant_id, old_name, new_name)
+    departments = await repo.list_departments(tenant_id)
+    return _json_response({"departments": departments}, request=request)
+
+
+async def delete_department(request: Request) -> Response:
+    """Delete a department and move affected partners to fallback."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    caller_id, caller = await _get_caller_partner(decoded)
+    if not caller or not caller.get("isAdmin"):
+        return _error_response("FORBIDDEN", "Admin access required", 403, request=request)
+
+    name = request.path_params.get("name", "").strip()
+    if not name or name == "all":
+        return _error_response("INVALID_INPUT", "Department name required", 400, request=request)
+
+    fallback_department = request.query_params.get("fallback", "all").strip() or "all"
+    repo = await _ensure_partner_repo()
+    tenant_id = _same_tenant_id(caller_id, caller)
+    await repo.create_department(tenant_id, fallback_department)
+    await repo.delete_department(tenant_id, name, fallback_department=fallback_department)
+    departments = await repo.list_departments(tenant_id)
+    return _json_response({"departments": departments}, request=request)
 
 
 # ──────────────────────────────────────────────
@@ -538,10 +655,17 @@ async def update_partner_scope(request: Request) -> Response:
 
     roles_raw = body.get("roles", [])
     department_raw = body.get("department", "all")
+    authorized_entity_ids_raw = body.get("authorized_entity_ids", None)
+
     if not isinstance(roles_raw, list) or any(not isinstance(r, str) for r in roles_raw):
         return _error_response("INVALID_INPUT", "roles must be string[]", 400, request=request)
     if not isinstance(department_raw, str) or not department_raw.strip():
         return _error_response("INVALID_INPUT", "department must be non-empty string", 400, request=request)
+    if authorized_entity_ids_raw is not None and (
+        not isinstance(authorized_entity_ids_raw, list)
+        or any(not isinstance(x, str) for x in authorized_entity_ids_raw)
+    ):
+        return _error_response("INVALID_INPUT", "authorized_entity_ids must be string[] or null", 400, request=request)
 
     roles = sorted({r.strip() for r in roles_raw if r.strip()})
     department = department_raw.strip()
@@ -551,12 +675,22 @@ async def update_partner_scope(request: Request) -> Response:
     if not target:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
 
-    if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
+    caller_tenant = _same_tenant_id(caller_id, caller)
+    if caller_tenant != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant scope change is not allowed", 403, request=request)
 
     now = datetime.now(timezone.utc)
-    await repo.update_fields(partner_id, {"roles": roles, "department": department, "updatedAt": now})
+    await repo.create_department(caller_tenant, department)
+    update_data: dict = {"roles": roles, "department": department, "updatedAt": now}
+    if authorized_entity_ids_raw is not None:
+        update_data["authorizedEntityIds"] = authorized_entity_ids_raw
+    await repo.update_fields(partner_id, update_data)
 
+    authorized_entity_ids = (
+        authorized_entity_ids_raw
+        if authorized_entity_ids_raw is not None
+        else target.get("authorizedEntityIds", [])
+    )
     return _json_response({
         "id": partner_id,
         "email": target["email"],
@@ -565,6 +699,7 @@ async def update_partner_scope(request: Request) -> Response:
         "status": target["status"],
         "roles": roles,
         "department": department,
+        "authorizedEntityIds": authorized_entity_ids,
         "invitedBy": target.get("invitedBy"),
         "createdAt": target.get("createdAt"),
         "updatedAt": now,
@@ -712,6 +847,10 @@ async def activate_partner(request: Request) -> Response:
 
 admin_routes = [
     Route("/api/partners", list_partners, methods=["GET", "OPTIONS"]),
+    Route("/api/departments", list_departments, methods=["GET", "OPTIONS"]),
+    Route("/api/departments", create_department, methods=["POST", "OPTIONS"]),
+    Route("/api/departments/{name:str}", rename_department, methods=["PUT", "OPTIONS"]),
+    Route("/api/departments/{name:str}", delete_department, methods=["DELETE", "OPTIONS"]),
     Route("/api/partners/invite", invite_partner, methods=["POST", "OPTIONS"]),
     Route("/api/partners/activate", activate_partner, methods=["POST", "OPTIONS"]),
     Route("/api/partners/{id}", delete_partner, methods=["DELETE", "OPTIONS"]),

@@ -114,12 +114,18 @@ class ApiKeyMiddleware:
         if key:
             partner = await _partner_validator.validate(key)
             if partner is not None:
-                from zenos.infrastructure.context import current_partner_id
+                from zenos.infrastructure.context import (
+                    current_partner_id,
+                    current_partner_authorized_entity_ids,
+                )
                 token = _current_partner.set(partner)
                 token_pid = current_partner_id.set(partner.get("sharedPartnerId") or partner.get("id", ""))
                 token_roles = current_partner_roles.set(list(partner.get("roles") or []))
                 token_department = current_partner_department.set(str(partner.get("department") or "all"))
                 token_admin = current_partner_is_admin.set(bool(partner.get("isAdmin", False)))
+                token_auth_ids = current_partner_authorized_entity_ids.set(
+                    list(partner.get("authorizedEntityIds") or [])
+                )
                 try:
                     return await self.app(scope, receive, send)
                 finally:
@@ -128,6 +134,7 @@ class ApiKeyMiddleware:
                     current_partner_roles.reset(token_roles)
                     current_partner_department.reset(token_department)
                     current_partner_is_admin.reset(token_admin)
+                    current_partner_authorized_entity_ids.reset(token_auth_ids)
             logger.warning(
                 "Auth rejected: key=%.8s... path=%s cache_size=%d",
                 key, path, len(_partner_validator._cache),
@@ -473,46 +480,78 @@ def _parse_entity_level(entity_level: str | None) -> int | None:
 def _is_entity_visible(entity: object) -> bool:
     """Centralized server-side visibility check for read paths."""
     partner = _current_partner.get() or {}
-    partner_id = str(partner.get("id") or "")
     is_admin = bool(partner.get("isAdmin", False))
     if is_admin:
         return True
 
     visibility = str(getattr(entity, "visibility", "public") or "public")
-    visible_to_roles = set(getattr(entity, "visible_to_roles", []) or [])
-    visible_to_members = set(getattr(entity, "visible_to_members", []) or [])
+
+    authorized_ids = list(partner.get("authorizedEntityIds") or [])
+    is_scoped = bool(authorized_ids)
+
+    if is_scoped:
+        # Scoped partner: L1 scope check is done at search/list level.
+        # At per-entity level, just check visibility.
+        return visibility == "public"
+
+    # Internal non-admin
+    # Department-based filter
     visible_to_departments = set(getattr(entity, "visible_to_departments", []) or [])
-    partner_roles = set(current_partner_roles.get() or [])
     partner_department = str(current_partner_department.get() or "all")
-
-    if visible_to_departments and partner_department not in visible_to_departments and "all" not in visible_to_departments:
+    if (
+        visible_to_departments
+        and partner_department not in visible_to_departments
+        and "all" not in visible_to_departments
+    ):
         return False
 
-    if visibility == "confidential":
-        return partner_id in visible_to_members
-
-    if visibility in {"restricted", "role-restricted"}:
-        if partner_id in visible_to_members:
-            return True
-        if visible_to_roles:
-            return bool(partner_roles & visible_to_roles)
+    if visibility in {"confidential", "restricted"}:
         return False
-
+    if visibility == "role-restricted":
+        partner_roles = set(current_partner_roles.get() or [])
+        visible_to_roles = set(getattr(entity, "visible_to_roles", []) or [])
+        return bool(partner_roles & visible_to_roles) if visible_to_roles else False
     return True
 
 
 async def _is_task_visible(task: object) -> bool:
-    """Task inherits most-restrictive visibility from linked entities.
+    """Task visibility check.
 
-    If ANY linked entity is invisible to the caller, the task is hidden.
-    Tasks with no linked entities are always visible (fail-open).
+    - Admin: always visible.
+    - Scoped partner: requires at least one linked entity in their L1 subtree.
+      Entity visibility (public/restricted) is NOT checked — any entity in scope
+      makes the task visible. Tasks with no linked entities are NOT visible.
+    - Internal non-admin: task hidden if ANY linked entity is invisible.
+      Tasks with no linked entities are always visible (fail-open).
     """
     try:
         linked = getattr(task, "linked_entities", None) or []
-        if not linked:
-            return True
         partner = _current_partner.get() or {}
         if partner.get("isAdmin", False):
+            return True
+
+        is_scoped = bool(partner.get("authorizedEntityIds"))
+
+        if is_scoped:
+            # Scoped partner: visible if at least one linked entity is in allowed_ids.
+            # Entity visibility is NOT applied here — scope membership is sufficient.
+            if not linked:
+                return False
+            authorized_ids = list(partner.get("authorizedEntityIds") or [])
+            all_entities_list = await entity_repo.list_all()
+            entity_map = {e.id: e for e in (all_entities_list or []) if e.id}
+            allowed: set[str] = set()
+            for l1_id in authorized_ids:
+                allowed |= _collect_subtree_ids(l1_id, entity_map)
+            for eid in linked:
+                if isinstance(eid, dict):
+                    eid = eid.get("id", "")
+                if eid and eid in allowed:
+                    return True
+            return False
+
+        # Internal non-admin: all linked entities must be visible
+        if not linked:
             return True
         for eid in linked:
             if isinstance(eid, dict):
@@ -551,13 +590,17 @@ async def _is_blindspot_visible(blindspot: object) -> bool:
 
     If ALL related entities are invisible, the blindspot is hidden.
     Blindspots with no related entities are always visible.
+    Scoped partners (clients) never see blindspots.
     """
     try:
-        related = getattr(blindspot, "related_entity_ids", None) or []
-        if not related:
-            return True
         partner = _current_partner.get() or {}
         if partner.get("isAdmin", False):
+            return True
+        # Scoped partners cannot see blindspots
+        if bool(partner.get("authorizedEntityIds")):
+            return False
+        related = getattr(blindspot, "related_entity_ids", None) or []
+        if not related:
             return True
         for eid in related:
             entity = await entity_repo.get_by_id(eid)
@@ -832,6 +875,16 @@ async def search(
             ) else None
             entities = await ontology_service.list_entities(type_filter=type_filter)
             entities = [e for e in entities if _is_entity_visible(e)]
+            # Apply L1 scope filter for scoped partners
+            _partner_ctx = _current_partner.get() or {}
+            _authorized_ids = list(_partner_ctx.get("authorizedEntityIds") or [])
+            if _authorized_ids:
+                all_entities_for_map = await ontology_service._entities.list_all()
+                _entity_map = {e.id: e for e in all_entities_for_map if e.id}
+                _allowed: set[str] = set()
+                for _l1_id in _authorized_ids:
+                    _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
+                entities = [e for e in entities if e.id in _allowed]
             # Apply level filter
             if max_level is not None:
                 entities = [e for e in entities if (e.level or 1) <= max_level]

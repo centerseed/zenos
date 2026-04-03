@@ -7,3 +7,4 @@ current_partner_id: ContextVar[str] = ContextVar("current_partner_id", default="
 current_partner_roles: ContextVar[list[str]] = ContextVar("current_partner_roles", default=[])
 current_partner_department: ContextVar[str] = ContextVar("current_partner_department", default="all")
 current_partner_is_admin: ContextVar[bool] = ContextVar("current_partner_is_admin", default=False)
+current_partner_authorized_entity_ids: ContextVar[list[str]] = ContextVar("current_partner_authorized_entity_ids", default=[])

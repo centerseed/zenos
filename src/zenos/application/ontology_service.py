@@ -194,12 +194,17 @@ class OntologyService:
         )
 
     @staticmethod
-    def is_entity_visible_for_partner(entity: Entity, partner: dict) -> bool:
+    def is_entity_visible_for_partner(
+        entity: Entity,
+        partner: dict,
+        entity_map: "dict[str, Entity] | None" = None,
+    ) -> bool:
         """Determine if a partner can see a given entity based on visibility rules.
 
         Args:
             entity: The entity to check visibility for.
-            partner: Partner dict with keys: isAdmin, id, roles, department.
+            partner: Partner dict with keys: isAdmin, id, roles, authorizedEntityIds.
+            entity_map: Optional full entity map for L1 scope checking (scoped partners).
 
         Returns:
             True if the partner has access, False otherwise.
@@ -207,31 +212,29 @@ class OntologyService:
         if partner.get("isAdmin"):
             return True
 
-        partner_id = str(partner.get("id") or "")
-        partner_roles = set(partner.get("roles") or [])
-        partner_department = str(partner.get("department") or "all")
-        visible_to_roles = set(entity.visible_to_roles or [])
-        visible_to_members = set(entity.visible_to_members or [])
-        visible_to_departments = set(entity.visible_to_departments or [])
+        authorized_ids = list(partner.get("authorizedEntityIds") or [])
+        is_scoped = bool(authorized_ids)
 
-        if (
-            visible_to_departments
-            and partner_department not in visible_to_departments
-            and "all" not in visible_to_departments
-        ):
-            return False
+        if is_scoped:
+            # Scoped partner (client): check L1 subtree scope then visibility
+            if entity_map is not None:
+                allowed: set[str] = set()
+                for l1_id in authorized_ids:
+                    allowed |= _collect_subtree_ids(l1_id, entity_map)
+                if entity.id not in allowed:
+                    return False
+            # Scoped partners can only see public entities
+            return entity.visibility == "public"
 
-        if entity.visibility == "confidential":
-            return partner_id in visible_to_members
-
-        if entity.visibility in {"restricted", "role-restricted"}:
-            if partner_id in visible_to_members:
-                return True
-            if visible_to_roles:
-                return bool(partner_roles & visible_to_roles)
-            return False
-
-        return True
+        # Internal non-admin members
+        visibility = entity.visibility
+        if visibility in {"confidential", "restricted"}:
+            return False  # admin-only
+        if visibility == "role-restricted":
+            partner_roles = set(partner.get("roles") or [])
+            visible_to_roles = set(entity.visible_to_roles or [])
+            return bool(partner_roles & visible_to_roles) if visible_to_roles else False
+        return True  # public
 
     @classmethod
     def _normalize_layer_decision(cls, layer_decision: object) -> dict:

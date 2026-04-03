@@ -1758,6 +1758,7 @@ class SqlPartnerRepository:
             "displayName": "display_name",
             "roles": "roles",
             "department": "department",
+            "authorizedEntityIds": "authorized_entity_ids",
             "updatedAt": "updated_at",
         }
         sets = []
