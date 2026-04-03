@@ -2383,13 +2383,15 @@ async def analyze(
     - 推斷盲點 → analyze(check_type="blindspot")
     - 只看 impacts 斷鏈 → analyze(check_type="impacts")
     - 只看文件一致性 → analyze(check_type="document_consistency")
+    - 分析能見度風險 → analyze(check_type="permission_risk")
 
     不要用這個工具的情境：
     - 搜尋或列出條目 → 用 search
     - 更新 ontology 內容 → 用 write
 
     Args:
-        check_type: "all" / "quality" / "staleness" / "blindspot" / "impacts" / "document_consistency"
+        check_type: "all" / "quality" / "staleness" / "blindspot" / "impacts" /
+                    "document_consistency" / "permission_risk"
 
     Returns:
         dict — 各 check_type 對應的子結構：
@@ -2397,6 +2399,7 @@ async def analyze(
                    含 L2 治理補充欄位（l2_impacts_repairs, l2_backfill_proposals, 等）
         - staleness: {warnings[{...}], count, document_consistency_warnings, document_consistency_count}
         - blindspots: {blindspots[{...}], count, task_signal_suggestions[{...}], task_signal_count}
+        - permission_risk: {isolation_score, overexposure_score, warnings[{...}], summary}
         - impacts: quality.l2_impacts_validity（掛在 quality 子結構下）
         - document_consistency: {document_consistency_warnings[{...}], document_consistency_count}
         - kpis: {total_items, unconfirmed_items, unconfirmed_ratio, blindspot_total,
@@ -2683,12 +2686,21 @@ async def analyze(
         except Exception:
             logger.warning("Impacts target validity check failed (impacts check_type)", exc_info=True)
 
+    if check_type in ("all", "permission_risk"):
+        from zenos.application.permission_risk_service import PermissionRiskService
+        risk_svc = PermissionRiskService(
+            entity_repo=ontology_service._entities,
+            task_repo=task_service._tasks,
+        )
+        results["permission_risk"] = await risk_svc.analyze_risk()
+
     if not results:
         return {
             "error": "INVALID_INPUT",
             "message": (
                 f"Unknown check_type '{check_type}'. "
-                "Use: all, quality, staleness, blindspot, impacts, document_consistency"
+                "Use: all, quality, staleness, blindspot, impacts, "
+                "document_consistency, permission_risk"
             ),
         }
 
