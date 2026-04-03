@@ -23,6 +23,7 @@ CORS: allows requests from the Dashboard origin.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -980,6 +981,43 @@ async def list_comments(request: Request) -> Response:
     return _json_response({"comments": comments}, request=request)
 
 
+async def _notify_task_owner_of_comment(task_obj: object, commenter_partner: dict, commenter_id: str, content: str) -> None:
+    """Fire-and-forget: notify the task owner when a comment is added.
+
+    Handles both dataclass Task and dict representations of task_obj.
+    Silently exits if owner cannot be found, is the commenter, or email fails.
+    """
+    from zenos.infrastructure.email_client import EmailService
+
+    try:
+        # Extract created_by — supports dataclass and dict
+        if isinstance(task_obj, dict):
+            task_creator_id = task_obj.get("created_by")
+            task_title = task_obj.get("title", "")
+        else:
+            task_creator_id = getattr(task_obj, "created_by", None)
+            task_title = getattr(task_obj, "title", "")
+
+        if not task_creator_id or task_creator_id == commenter_id:
+            return  # Don't notify self
+
+        await _ensure_repos()
+        owner = await _partner_repo.get_by_id(task_creator_id)
+        if not owner or not owner.get("email"):
+            return
+
+        commenter_name = commenter_partner.get("displayName") or commenter_partner.get("email", "")
+        email_service = EmailService()
+        await email_service.send_comment_notification(
+            to_email=owner["email"],
+            commenter_name=commenter_name,
+            task_title=task_title,
+            content=content,
+        )
+    except Exception:
+        logger.warning("Failed to send comment notification", exc_info=True)
+
+
 # ──────────────────────────────────────────────
 # Endpoint: POST /api/data/tasks/{taskId}/comments
 # ──────────────────────────────────────────────
@@ -1020,6 +1058,9 @@ async def create_comment(request: Request) -> Response:
 
     comment = await _comment_repo.create(task_id=task_id, partner_id=effective_id, content=content)
     logger.info("Created comment %s on task %s by partner %s", comment["id"], task_id, effective_id)
+
+    asyncio.ensure_future(_notify_task_owner_of_comment(task_obj, partner, effective_id, content))
+
     return _json_response({"comment": comment}, status_code=201, request=request)
 
 

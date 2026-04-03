@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -27,6 +28,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
+from zenos.infrastructure.email_client import EmailService
 from zenos.infrastructure.sql_repo import SqlPartnerRepository  # composition root
 
 logger = logging.getLogger(__name__)
@@ -246,6 +248,30 @@ async def list_departments(request: Request) -> Response:
 # ──────────────────────────────────────────────
 
 
+def _generate_sign_in_link(email: str) -> str:
+    """Generate a Firebase email sign-in link. Falls back to DASHBOARD_URL on error."""
+    dashboard_url = os.environ.get("DASHBOARD_URL", "https://zenos-naruvia.web.app")
+    try:
+        action_code_settings = firebase_auth.ActionCodeSettings(
+            url=f"{dashboard_url}/login?activate=1",
+            handle_code_in_app=False,
+        )
+        return firebase_auth.generate_sign_in_with_email_link(email, action_code_settings)
+    except Exception:
+        logger.warning("Failed to generate Firebase sign-in link for %s", email, exc_info=True)
+        return dashboard_url
+
+
+async def _send_invite_email(to_email: str, inviter_name: str, sign_in_link: str) -> bool:
+    """Send invite email. Returns bool indicating whether email was sent."""
+    email_service = EmailService()
+    return await email_service.send_invite_email(
+        to_email=to_email,
+        inviter_name=inviter_name,
+        sign_in_link=sign_in_link,
+    )
+
+
 async def invite_partner(request: Request) -> Response:
     """Create an invited partner doc. Admin only."""
     if request.method == "OPTIONS":
@@ -313,6 +339,13 @@ async def invite_partner(request: Request) -> Response:
             if authorized_entity_ids:
                 existing["authorizedEntityIds"] = authorized_entity_ids
             existing["id"] = existing_id
+            sign_in_link = _generate_sign_in_link(email)
+            email_sent = await _send_invite_email(
+                to_email=email,
+                inviter_name=caller.get("displayName") or caller.get("email", ""),
+                sign_in_link=sign_in_link,
+            )
+            existing["emailSent"] = email_sent
             return _json_response(existing, status_code=200, request=request)
 
     new_id = uuid.uuid4().hex
@@ -347,6 +380,13 @@ async def invite_partner(request: Request) -> Response:
         },
     )
 
+    sign_in_link = _generate_sign_in_link(email)
+    email_sent = await _send_invite_email(
+        to_email=email,
+        inviter_name=caller.get("displayName") or caller.get("email", ""),
+        sign_in_link=sign_in_link,
+    )
+
     partner_data = {
         "id": new_id,
         "email": email,
@@ -362,6 +402,7 @@ async def invite_partner(request: Request) -> Response:
         "createdAt": now,
         "updatedAt": now,
         "inviteExpiresAt": invite_expires_at,
+        "emailSent": email_sent,
     }
     return _json_response(partner_data, status_code=201, request=request)
 
