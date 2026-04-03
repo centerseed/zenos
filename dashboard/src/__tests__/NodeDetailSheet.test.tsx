@@ -29,6 +29,14 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: null, partner: null }),
+}));
+
+vi.mock("@/lib/api", () => ({
+  updateEntityVisibility: vi.fn(),
+}));
+
 import NodeDetailSheet from "@/components/NodeDetailSheet";
 
 afterEach(cleanup);
@@ -174,3 +182,39 @@ describe("NodeDetailSheet — quality signal badges", () => {
     expect(screen.queryByText("摘要待改善")).toBeNull();
   });
 });
+
+describe("NodeDetailSheet — External Sources label fallback", () => {
+  it("shows meaningful label when label differs from type", () => {
+    const entity = makeEntity({
+      sources: [{ uri: "https://github.com/org/repo/blob/main/CLAUDE.md", label: "CLAUDE.md Setup Guide", type: "github" }],
+    });
+    render(<NodeDetailSheet {...defaultProps} entity={entity} />);
+    expect(screen.getByText("CLAUDE.md Setup Guide")).toBeDefined();
+  });
+
+  it("extracts filename from URI when label equals type", () => {
+    const entity = makeEntity({
+      sources: [{ uri: "https://github.com/org/repo/blob/main/README.md", label: "github", type: "github" }],
+    });
+    render(<NodeDetailSheet {...defaultProps} entity={entity} />);
+    expect(screen.getByText("README.md")).toBeDefined();
+    expect(screen.queryByText("github")).toBeNull();
+  });
+
+  it("shows full URI when label equals type and URI is not a valid URL", () => {
+    const entity = makeEntity({
+      sources: [{ uri: "not-a-valid-url", label: "github", type: "github" }],
+    });
+    render(<NodeDetailSheet {...defaultProps} entity={entity} />);
+    expect(screen.getByText("not-a-valid-url")).toBeDefined();
+  });
+
+  it("shows last path segment when URI has nested path and label equals type", () => {
+    const entity = makeEntity({
+      sources: [{ uri: "https://github.com/org/repo/blob/main/docs/adr-001.md", label: "github", type: "github" }],
+    });
+    render(<NodeDetailSheet {...defaultProps} entity={entity} />);
+    expect(screen.getByText("adr-001.md")).toBeDefined();
+  });
+});
+

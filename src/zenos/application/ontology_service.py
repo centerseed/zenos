@@ -1610,7 +1610,7 @@ class OntologyService:
         if source_data and isinstance(source_data, dict):
             merged_source = {
                 "uri": source_data.get("uri", existing_source.get("uri", "")),
-                "label": source_data.get("adapter", existing_source.get("label", "")),
+                "label": source_data.get("label") or data.get("title") or existing_source.get("label", ""),
                 "type": source_data.get("type", existing_source.get("type", "")),
                 "status": "valid",
             }
