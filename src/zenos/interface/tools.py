@@ -1362,6 +1362,15 @@ async def write(
                         target={"collection": collection, "id": entity_id},
                         changes={"before": _before_visibility, "after": _after_visibility},
                     )
+            # Auto policy suggestion when visibility not specified
+            if "visibility" not in data:
+                try:
+                    from zenos.application.policy_suggestion_service import PolicySuggestionService
+                    _policy_svc = PolicySuggestionService(entity_repo=ontology_service._entities)
+                    suggestion = await _policy_svc.suggest(entity_id)
+                    response["policy_suggestion"] = suggestion
+                except Exception:
+                    pass  # never block write
             return response
 
         elif collection == "documents":
@@ -2790,6 +2799,36 @@ async def analyze(
             pass
 
     return results
+
+
+# ===================================================================
+# Tool: suggest_policy — suggest entity visibility policy
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def suggest_policy(
+    entity_id: str,
+) -> dict:
+    """根據 entity 的內容和位置，建議合適的 visibility。
+
+    使用時機：
+    - 在 capture 新 entity 時，不確定要設什麼 visibility
+    - 審查現有 entity 的權限是否合適
+
+    Args:
+        entity_id: 要建議 policy 的 entity ID
+
+    Returns:
+        dict — {entity_id, suggested_visibility, reason, risk_score}
+    """
+    await _ensure_services()
+    from zenos.application.policy_suggestion_service import PolicySuggestionService
+    svc = PolicySuggestionService(entity_repo=ontology_service._entities)
+    return await svc.suggest(entity_id)
 
 
 # ===================================================================
