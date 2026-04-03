@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
@@ -29,9 +30,17 @@ const STREAMABLE_HTTP_URL = `${MCP_SERVER_URL}/mcp`;
 
 function SetupPage() {
   const { partner } = useAuth();
+  const router = useRouter();
   const [activeSetupTab, setActiveSetupTab] = useState<SetupTab>("claude-code");
 
+  useEffect(() => {
+    if (partner && !partner.isAdmin) {
+      router.replace("/");
+    }
+  }, [partner, router]);
+
   if (!partner) return null;
+  if (!partner.isAdmin) return null;
 
   return (
     <div className="min-h-screen">
@@ -42,8 +51,8 @@ function SetupPage() {
           Set up your AI Agent
         </h2>
         <p className="text-muted-foreground mb-8">
-          Connect your AI agent to ZenOS so it has full context about your
-          projects.
+          Connect your AI agent to ZenOS with MCP first. Skills are optional
+          accelerators for setup, capture, and sync workflows.
         </p>
 
         {/* MCP Config */}
@@ -118,11 +127,12 @@ function SetupPage() {
               />
               <Step
                 number={4}
-                title="Install ZenOS Skills"
+                title="Optional: Install ZenOS Skills"
                 description={
                   <>
-                    Copy the prompt below and paste it into Claude Code. It
-                    will automatically download and install the ZenOS skills.
+                    You can already use ZenOS via MCP after step 3. If you want
+                    batch helpers (`/zenos-setup`, `/zenos-capture`, `/zenos-sync`),
+                    install skills using the prompt below.
                   </>
                 }
               />
@@ -135,7 +145,7 @@ function SetupPage() {
               <Step
                 number={5}
                 title="Restart Claude Code"
-                description="Close and reopen Claude Code for the MCP settings and skills to take effect."
+                description="Close and reopen Claude Code for MCP settings (and optional skills) to take effect."
               />
               <Step
                 number={6}
@@ -179,13 +189,12 @@ function SetupPage() {
               />
               <Step
                 number={2}
-                title="Add Skills"
+                title="Optional: Add Skills"
                 description={
                   <div className="space-y-2">
                     <p>
-                      In Claude.ai, click the &quot;+&quot; button → Skills →
-                      Upload a skill. Download each file below and upload it
-                      one by one.
+                      MCP is enough for daily search/get/read_source/write/confirm/task/analyze.
+                      Add skills only if you want workflow shortcuts for setup/capture/sync.
                     </p>
                     <ul className="mt-2 space-y-1">
                       {SKILL_URLS.map((skill) => (

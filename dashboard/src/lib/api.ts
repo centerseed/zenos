@@ -166,7 +166,7 @@ export async function getPartnerMe(token: string): Promise<Partner> {
 export async function updatePartnerScope(
   token: string,
   partnerId: string,
-  data: { roles: string[]; department: string }
+  data: { roles: string[]; department: string; authorizedEntityIds?: string[] }
 ): Promise<Partner> {
   const res = await fetch(`${API_BASE}/api/partners/${partnerId}/scope`, {
     method: "PUT",
@@ -178,6 +178,52 @@ export async function updatePartnerScope(
   });
   if (!res.ok) throw new Error(`API /api/partners/${partnerId}/scope: ${res.status}`);
   return hydrateDates(await res.json()) as Partner;
+}
+
+export async function getDepartments(token: string): Promise<string[]> {
+  const res = await apiFetch<{ departments: string[] }>("/api/departments", token);
+  return res.departments;
+}
+
+export async function createDepartment(token: string, name: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/api/departments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(`API /api/departments: ${res.status}`);
+  const data = await res.json();
+  return data.departments ?? [];
+}
+
+export async function renameDepartment(token: string, currentName: string, nextName: string): Promise<string[]> {
+  const res = await fetch(`${API_BASE}/api/departments/${encodeURIComponent(currentName)}`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name: nextName }),
+  });
+  if (!res.ok) throw new Error(`API /api/departments/${currentName}: ${res.status}`);
+  const data = await res.json();
+  return data.departments ?? [];
+}
+
+export async function deleteDepartment(token: string, name: string, fallback = "all"): Promise<string[]> {
+  const res = await fetch(
+    `${API_BASE}/api/departments/${encodeURIComponent(name)}?fallback=${encodeURIComponent(fallback)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  if (!res.ok) throw new Error(`API /api/departments/${name}: ${res.status}`);
+  const data = await res.json();
+  return data.departments ?? [];
 }
 
 export async function updateEntityVisibility(

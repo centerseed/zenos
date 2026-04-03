@@ -10,6 +10,7 @@ import { PulseBar } from "@/components/PulseBar";
 import { ProjectProgress } from "@/components/ProjectProgress";
 import { PeopleMatrix } from "@/components/PeopleMatrix";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
+import { MorningReport } from "@/components/MorningReport";
 import { LoadingState } from "@/components/LoadingState";
 import { getTasks, getProjectEntities, getAllEntities, createTask, updateTask, confirmTask } from "@/lib/api";
 import { RefreshCw, Plus } from "lucide-react";
@@ -47,7 +48,7 @@ function tabFilters(
   }
 }
 
-function TasksPage() {
+export function TasksPage() {
   const { user, partner } = useAuth();
   const [viewMode, setViewMode] = useState<ViewMode>("kanban");
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -63,6 +64,7 @@ function TasksPage() {
   const [newTaskCount, setNewTaskCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const prevTaskIdsRef = useRef<Set<string>>(new Set());
 
   // Initial load: all tasks + entities + partners list
@@ -295,10 +297,23 @@ function TasksPage() {
     });
   }, [tasks, partnerNames, filterStatuses, filterPriority, filterProject, partner?.displayName]);
 
+  // scoped partner with no authorized entities — not yet configured by admin
+  const isEmptyScoped =
+    !!partner && !partner.isAdmin && !loading && (partner.authorizedEntityIds?.length ?? 0) === 0;
+
   return (
     <div className="min-h-screen">
       <AppNav />
 
+      {isEmptyScoped && (
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-12 text-center">
+          <p className="text-muted-foreground">
+            您的帳號尚未設定存取空間，請聯繫管理員。
+          </p>
+        </main>
+      )}
+
+      {!isEmptyScoped && (
       <main id="main-content" className={`mx-auto px-4 sm:px-6 py-4 transition-all duration-300 ${viewMode === "kanban" ? "max-w-[1600px]" : "max-w-7xl"}`}>
         
         {/* Compressed Single Line Header */}
@@ -385,6 +400,14 @@ function TasksPage() {
           </div>
         </div>
 
+        {partner && !loading && (
+          <MorningReport
+            tasks={filteredTasks}
+            partnerId={partner.id}
+            onSelectTask={setSelectedTask}
+          />
+        )}
+
         {/* Pulse View */}
         {viewMode === "pulse" && (
           <>
@@ -435,6 +458,8 @@ function TasksPage() {
                 entityNames={entityNames}
                 entitiesById={entitiesById}
                 visibleStatuses={filterStatuses}
+                selectedTask={selectedTask}
+                onSelectTask={setSelectedTask}
                 onStatusChange={handleStatusChange}
                 onUpdateTask={handleUpdateTask}
                 onConfirmTask={handleConfirmTask}
@@ -443,6 +468,7 @@ function TasksPage() {
           </>
         )}
       </main>
+      )}
 
       <TaskCreateDialog
         isOpen={showCreateDialog}

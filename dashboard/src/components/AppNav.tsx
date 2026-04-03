@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useMemo, useState } from "react";
+import { APP_COPY } from "@/lib/i18n";
 
 const BASE_NAV_ITEMS = [
   { href: "/knowledge-map", label: "知識地圖" },
@@ -12,23 +13,33 @@ const BASE_NAV_ITEMS = [
   { href: "/clients", label: "客戶" },
 ];
 
-const ADMIN_NAV_ITEMS = [{ href: "/team", label: "Team" }];
+const SCOPED_NAV_ITEMS = [
+  { href: "/projects", label: "專案" },
+  { href: "/tasks", label: "任務" },
+];
 
-const TAIL_NAV_ITEMS = [{ href: "/setup", label: "Setup" }];
+const ADMIN_NAV_ITEMS = [{ href: "/team", label: APP_COPY.team }];
+
+const TAIL_NAV_ITEMS = [{ href: "/setup", label: APP_COPY.setup }];
 
 export function AppNav() {
   const pathname = usePathname();
   const { partner, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const isScoped = (partner?.authorizedEntityIds?.length ?? 0) > 0;
+
   const navItems = useMemo(() => {
+    if (isScoped) {
+      return SCOPED_NAV_ITEMS;
+    }
     const items = [...BASE_NAV_ITEMS];
     if (partner?.isAdmin) {
       items.push(...ADMIN_NAV_ITEMS);
     }
     items.push(...TAIL_NAV_ITEMS);
     return items;
-  }, [partner?.isAdmin]);
+  }, [partner?.isAdmin, isScoped]);
 
   if (!partner) return null;
 
@@ -64,14 +75,14 @@ export function AppNav() {
           </span>
           <button
             onClick={signOut}
-            className="hidden sm:inline text-sm text-muted-foreground hover:text-foreground cursor-pointer"
+            className="hidden sm:inline text-sm text-muted-foreground hover:text-foreground cursor-pointer active:scale-95 transition-transform"
           >
-            Sign out
+            {APP_COPY.signOut}
           </button>
           <button
             onClick={() => setMobileOpen((prev) => !prev)}
-            className="md:hidden inline-flex items-center justify-center h-8 w-8 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60"
-            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+            className="md:hidden inline-flex items-center justify-center h-8 w-8 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            aria-label={mobileOpen ? "關閉選單" : "開啟選單"}
             aria-expanded={mobileOpen}
           >
             {mobileOpen ? "✕" : "☰"}
@@ -102,9 +113,9 @@ export function AppNav() {
               <span className="text-sm text-muted-foreground">{partner.displayName}</span>
               <button
                 onClick={signOut}
-                className="text-sm text-muted-foreground hover:text-foreground cursor-pointer"
+                className="text-sm text-muted-foreground hover:text-foreground cursor-pointer active:scale-95 transition-transform"
               >
-                Sign out
+                {APP_COPY.signOut}
               </button>
             </div>
           </nav>

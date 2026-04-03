@@ -1,3 +1,5 @@
+import { NODE_TYPE_COPY } from "@/lib/i18n";
+
 export const NODE_TYPE_COLORS: Record<string, string> = {
   product: "#3B82F6",
   module: "#8B5CF6",
@@ -9,13 +11,7 @@ export const NODE_TYPE_COLORS: Record<string, string> = {
 };
 
 export const NODE_TYPE_LABELS: Record<string, string> = {
-  product: "Product",
-  module: "Module",
-  goal: "Goal",
-  role: "Role",
-  document: "Document",
-  project: "Project",
-  task: "Task",
+  ...NODE_TYPE_COPY,
 };
 
 export const DEFAULT_NODE_COLOR = "#6366F1";
