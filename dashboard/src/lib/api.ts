@@ -2,7 +2,7 @@
  * API layer — all data fetching goes through the ZenOS REST API.
  * Replaces direct Firestore SDK calls. All functions require a Firebase ID token.
  */
-import type { Entity, Relationship, Blindspot, Task, Partner, QualitySignals } from "@/types";
+import type { Entity, Relationship, Blindspot, Task, TaskComment, Partner, QualitySignals } from "@/types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
@@ -373,6 +373,53 @@ export async function confirmTask(
   if (!res.ok) throw new Error(`Confirm task failed: ${res.status}`);
   const body = await res.json();
   return hydrateDates(body.task ?? body) as Task;
+}
+
+/** Fetch comments for a task */
+export async function getTaskComments(token: string, taskId: string): Promise<TaskComment[]> {
+  const res = await apiFetch<{ comments: Array<{
+    id: string; task_id: string; partner_id: string; author_name: string; content: string; created_at: string;
+  }> }>(`/api/data/tasks/${taskId}/comments`, token);
+  return res.comments.map((c) => hydrateDates({
+    id: c.id,
+    taskId: c.task_id,
+    partnerId: c.partner_id,
+    authorName: c.author_name,
+    content: c.content,
+    createdAt: new Date(c.created_at),
+  }) as TaskComment);
+}
+
+/** Create a comment on a task */
+export async function createTaskComment(token: string, taskId: string, content: string): Promise<TaskComment> {
+  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/comments`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ content }),
+  });
+  if (!res.ok) throw new Error(`Create comment failed: ${res.status}`);
+  const body = await res.json();
+  const c = body.comment;
+  return hydrateDates({
+    id: c.id,
+    taskId: c.task_id,
+    partnerId: c.partner_id,
+    authorName: c.author_name ?? c.partner_id,
+    content: c.content,
+    createdAt: new Date(c.created_at),
+  }) as TaskComment;
+}
+
+/** Delete a task comment */
+export async function deleteTaskComment(token: string, taskId: string, commentId: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/comments/${commentId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Delete comment failed: ${res.status}`);
 }
 
 /** Delete a task attachment */

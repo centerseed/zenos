@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import Link from "next/link";
-import type { Entity, Task } from "@/types";
+import type { Entity, Task, TaskComment } from "@/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
 import { TaskAttachments } from "./TaskAttachments";
 import { useAuth } from "@/lib/auth";
+import { getTaskComments, createTaskComment, deleteTaskComment } from "@/lib/api";
 import {
   AlertTriangle,
   ArrowUp,
@@ -21,6 +22,8 @@ import {
   Clock,
   Check,
   ChevronDown,
+  Trash2,
+  MessageSquare,
 } from "lucide-react";
 
 interface TaskDetailDrawerProps {
@@ -235,6 +238,11 @@ export function TaskDetailDrawer({
   // Warning dialog state
   const [pendingStatusChange, setPendingStatusChange] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
+  // Comments state
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [newComment, setNewComment] = useState("");
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
 
   useEffect(() => {
     setLocalTask(task);
@@ -244,7 +252,43 @@ export function TaskDetailDrawer({
     setShowStatusDropdown(false);
     setPendingStatusChange(null);
     setWarningMessage(null);
+    setComments([]);
+    setCommentsError(null);
+    setNewComment("");
   }, [task]);
+
+  // Fetch comments when task and token are available
+  useEffect(() => {
+    if (!task?.id || !authToken) return;
+    getTaskComments(authToken, task.id)
+      .then(setComments)
+      .catch(() => setCommentsError("無法載入留言"));
+  }, [task?.id, authToken]);
+
+  const handleCommentSubmit = async () => {
+    const content = newComment.trim();
+    if (!content || !authToken || !localTask) return;
+    setCommentSubmitting(true);
+    try {
+      const created = await createTaskComment(authToken, localTask.id, content);
+      setComments((prev) => [...prev, created]);
+      setNewComment("");
+    } catch {
+      // Do not clear input on failure so user can retry
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const handleCommentDelete = async (commentId: string) => {
+    if (!authToken || !localTask) return;
+    try {
+      await deleteTaskComment(authToken, localTask.id, commentId);
+      setComments((prev) => prev.filter((c) => c.id !== commentId));
+    } catch {
+      // Silent failure — comment remains visible, user can retry
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -663,6 +707,83 @@ export function TaskDetailDrawer({
             )}
           </div>
         )}
+
+        {/* Comments section */}
+        <div className="p-4 border-t border-white/10 space-y-4">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.4)]" />
+            <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">留言</h3>
+            <MessageSquare className="w-3.5 h-3.5 text-white/40" />
+          </div>
+
+          {commentsError ? (
+            <p className="text-xs text-red-400">{commentsError}</p>
+          ) : comments.length === 0 ? (
+            <p className="text-xs text-muted-foreground">尚無留言</p>
+          ) : (
+            <div className="space-y-3">
+              {comments.map((comment) => {
+                const canDelete =
+                  partner?.isAdmin || (partner && partner.id === comment.partnerId);
+                return (
+                  <div key={comment.id} className="flex gap-2.5 group">
+                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
+                      <span className="text-[10px] font-bold text-blue-300">
+                        {comment.authorName.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-white/80">{comment.authorName}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {comment.createdAt.toLocaleString("zh-TW")}
+                          </span>
+                        </div>
+                        {canDelete && (
+                          <button
+                            onClick={() => handleCommentDelete(comment.id)}
+                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 transition-all"
+                            title="刪除留言"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-xs text-foreground/80 mt-0.5 leading-relaxed whitespace-pre-wrap">
+                        {comment.content}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* New comment input */}
+          <div className="space-y-2">
+            <textarea
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="新增留言..."
+              rows={2}
+              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none resize-none"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  handleCommentSubmit();
+                }
+              }}
+            />
+            <button
+              onClick={handleCommentSubmit}
+              disabled={!newComment.trim() || commentSubmitting}
+              className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {commentSubmitting ? "送出中..." : "送出留言"}
+            </button>
+          </div>
+        </div>
 
         {/* Warning dialog */}
         {warningMessage && (

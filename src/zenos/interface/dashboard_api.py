@@ -37,6 +37,7 @@ from zenos.domain.governance import compute_search_unused_signals, score_summary
 from zenos.domain.models import Blindspot, Entity, EntityType, Relationship, Task
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.sql_repo import (  # composition root
+    PostgresTaskCommentRepository,
     SqlBlindspotRepository,
     SqlEntityRepository,
     SqlPartnerRepository,
@@ -67,10 +68,11 @@ _blindspot_repo: SqlBlindspotRepository | None = None
 _task_repo: SqlTaskRepository | None = None
 _partner_repo: SqlPartnerRepository | None = None
 _tool_event_repo: SqlToolEventRepository | None = None
+_comment_repo: PostgresTaskCommentRepository | None = None
 
 
 async def _ensure_repos() -> None:
-    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo, _partner_repo, _tool_event_repo
+    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo, _partner_repo, _tool_event_repo, _comment_repo
     if _repos_ready:
         return
     pool = await get_pool()
@@ -80,6 +82,7 @@ async def _ensure_repos() -> None:
     _task_repo = SqlTaskRepository(pool)
     _partner_repo = SqlPartnerRepository(pool)
     _tool_event_repo = SqlToolEventRepository(pool)
+    _comment_repo = PostgresTaskCommentRepository(pool)
     _repos_ready = True
 
 
@@ -931,6 +934,144 @@ async def update_task(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Helper: build allowed_ids for scoped partner
+# ──────────────────────────────────────────────
+
+
+async def _get_allowed_ids_for_scoped_partner(partner: dict) -> set[str] | None:
+    """Return the set of allowed entity IDs for a scoped partner, or None if not scoped."""
+    if not _is_scoped_partner(partner):
+        return None
+    all_entities = await _entity_repo.list_all()
+    entity_map = {e.id: e for e in all_entities if e.id}
+    return _build_allowed_entity_ids(partner, entity_map)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: GET /api/data/tasks/{taskId}/comments
+# ──────────────────────────────────────────────
+
+
+async def list_comments(request: Request) -> Response:
+    """List all comments for a task."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_obj = await _task_repo.get_by_id(task_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not task_obj:
+        return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+    allowed_ids = await _get_allowed_ids_for_scoped_partner(partner)
+    if not await _is_task_visible_for_partner(task_obj, partner, allowed_ids=allowed_ids):
+        return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+    comments = await _comment_repo.list_by_task(task_id)
+    return _json_response({"comments": comments}, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: POST /api/data/tasks/{taskId}/comments
+# ──────────────────────────────────────────────
+
+
+async def create_comment(request: Request) -> Response:
+    """Add a comment to a task."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    content = (body.get("content") or "").strip()
+    if not content:
+        return _error_response("INVALID_INPUT", "content is required and cannot be empty", 400, request=request)
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_obj = await _task_repo.get_by_id(task_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not task_obj:
+        return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+    allowed_ids = await _get_allowed_ids_for_scoped_partner(partner)
+    if not await _is_task_visible_for_partner(task_obj, partner, allowed_ids=allowed_ids):
+        return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+    comment = await _comment_repo.create(task_id=task_id, partner_id=effective_id, content=content)
+    logger.info("Created comment %s on task %s by partner %s", comment["id"], task_id, effective_id)
+    return _json_response({"comment": comment}, status_code=201, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: DELETE /api/data/tasks/{taskId}/comments/{commentId}
+# ──────────────────────────────────────────────
+
+
+async def delete_comment(request: Request) -> Response:
+    """Delete a comment. Only the author or an admin may delete."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    comment_id = request.path_params.get("commentId")
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_obj = await _task_repo.get_by_id(task_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not task_obj:
+        return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+    allowed_ids = await _get_allowed_ids_for_scoped_partner(partner)
+    if not await _is_task_visible_for_partner(task_obj, partner, allowed_ids=allowed_ids):
+        return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
+
+    comment = await _comment_repo.get_by_id(comment_id)
+    if not comment:
+        return _error_response("NOT_FOUND", f"Comment '{comment_id}' not found", 404, request=request)
+
+    # Prevent lateral access: comment must belong to this task
+    if comment["task_id"] != task_id:
+        return _error_response("NOT_FOUND", f"Comment '{comment_id}' not found", 404, request=request)
+
+    is_author = comment["partner_id"] == effective_id
+    if not is_author and not partner.get("isAdmin"):
+        return _error_response("FORBIDDEN", "You do not have permission to delete this comment", 403, request=request)
+
+    await _comment_repo.delete(comment_id)
+    logger.info("Deleted comment %s from task %s by partner %s", comment_id, task_id, effective_id)
+    return Response(status_code=204, headers=dict(_cors_headers(request)))
+
+
+# ──────────────────────────────────────────────
 # Endpoint: POST /api/data/tasks/{taskId}/confirm
 # ──────────────────────────────────────────────
 
@@ -1057,6 +1198,9 @@ dashboard_routes = [
     Route("/api/data/blindspots", list_blindspots, methods=["GET", "OPTIONS"]),
     Route("/api/data/quality-signals", get_quality_signals, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/by-entity/{entityId}", list_tasks_by_entity, methods=["GET", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}/comments/{commentId}", delete_comment, methods=["DELETE", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}/comments", create_comment, methods=["POST", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}/comments", list_comments, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/confirm", confirm_task, methods=["POST", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/attachments/{attachmentId}", delete_task_attachment, methods=["DELETE", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/attachments", upload_task_attachment, methods=["POST", "OPTIONS"]),

@@ -162,3 +162,12 @@ export interface Task {
   updatedAt: Date;
   completedAt: Date | null;
 }
+
+export interface TaskComment {
+  id: string;
+  taskId: string;
+  partnerId: string;
+  authorName: string;
+  content: string;
+  createdAt: Date;
+}

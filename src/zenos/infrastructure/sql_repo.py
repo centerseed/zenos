@@ -1222,6 +1222,92 @@ class SqlTaskRepository:
 
 
 # ===================================================================
+# PostgresTaskCommentRepository
+# ===================================================================
+
+class PostgresTaskCommentRepository:
+    """CRUD operations for task comments."""
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def create(self, task_id: str, partner_id: str, content: str) -> dict:
+        """Create a comment and return its dict representation, including author_name."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""INSERT INTO {SCHEMA}.task_comments (task_id, partner_id, content)
+                    VALUES ($1, $2, $3)
+                    RETURNING id, task_id, partner_id, content, created_at""",
+                task_id, partner_id, content,
+            )
+            author_row = await conn.fetchrow(
+                f"SELECT display_name FROM {SCHEMA}.partners WHERE id = $1",
+                partner_id,
+            )
+        return {
+            "id": str(row["id"]),
+            "task_id": str(row["task_id"]),
+            "partner_id": row["partner_id"],
+            "content": row["content"],
+            "created_at": row["created_at"].isoformat(),
+            "author_name": author_row["display_name"] if author_row else partner_id,
+        }
+
+    async def list_by_task(self, task_id: str) -> list[dict]:
+        """Return all comments for a task, joined with partner display name, oldest-first."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT c.id, c.task_id, c.partner_id, c.content, c.created_at,
+                           COALESCE(NULLIF(p.display_name, ''), p.email, c.partner_id) AS author_name
+                    FROM {SCHEMA}.task_comments c
+                    LEFT JOIN {SCHEMA}.partners p ON c.partner_id = p.id
+                    WHERE c.task_id = $1
+                    ORDER BY c.created_at ASC""",
+                task_id,
+            )
+        return [
+            {
+                "id": str(r["id"]),
+                "task_id": str(r["task_id"]),
+                "partner_id": r["partner_id"],
+                "content": r["content"],
+                "author_name": r["author_name"] or r["partner_id"],
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in rows
+        ]
+
+    async def get_by_id(self, comment_id: str) -> dict | None:
+        """Return a single comment dict (includes partner_id for auth checks), or None."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""SELECT id, task_id, partner_id, content, created_at
+                    FROM {SCHEMA}.task_comments
+                    WHERE id = $1""",
+                comment_id,
+            )
+        if not row:
+            return None
+        return {
+            "id": str(row["id"]),
+            "task_id": str(row["task_id"]),
+            "partner_id": row["partner_id"],
+            "content": row["content"],
+            "created_at": row["created_at"].isoformat(),
+        }
+
+    async def delete(self, comment_id: str) -> bool:
+        """Delete a comment. Returns True if a row was deleted."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"DELETE FROM {SCHEMA}.task_comments WHERE id = $1",
+                comment_id,
+            )
+        # asyncpg execute returns "DELETE N" where N is row count
+        return result == "DELETE 1"
+
+
+# ===================================================================
 # PartnerKeyValidator (SQL version)
 # ===================================================================
 
