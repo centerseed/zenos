@@ -22,9 +22,9 @@ type: impacts, verb: 校準   → 跑步科學指標 [校準] Race Prediction
 type: impacts, verb: 觸發   → 跑步科學指標 [觸發] 行銷定位策略
 ```
 
-> **Server 端驗證：** `confirm` 時 Server 會強制驗證 impacts≥1，建立前須確保至少寫出一條具體影響。Agent 不需要再手動計數，但語意品質（影響描述是否清晰）仍由 agent 判斷。
+> **Phase 1 統一回傳格式：** 所有 MCP 回傳改為 `{status, data, warnings, suggestions, similar_items, context_bundle, governance_hints}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
 
-> **重複節點檢查：** `write` 回傳包含 `similar_items` 欄位，列出名稱或語意相近的既有 entity。建立前應檢查是否已有等效概念，避免 ontology 膨脹。
+> **Server 端驗證：** `confirm` 時 Server 強制驗證 impacts≥1。`write` 回傳 `similar_items` 列出相似 entity。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates` 列出需要更新的下游 entity。
 
 ## 影響鏈（impact_chain）
 `get(collection="entities", id=...)` 回傳包含 `impact_chain`（BFS 多跳，最多 5 跳）：

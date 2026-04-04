@@ -70,3 +70,15 @@ def validate_task_confirm(
     if task_status == "review" and not has_result:
         errors.append("review 狀態的任務必須有 result 才能 confirm")
     return errors, warnings
+
+
+def validate_document_frontmatter(data: dict) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    title = data.get("title") or data.get("name", "")
+    if not title or len(title.strip()) < 3:
+        errors.append("Document title 必須至少 3 個字元")
+    linked = data.get("linked_entity_ids") or data.get("parent_id")
+    if not linked:
+        warnings.append("Document 未關聯任何 entity，建議指定 parent_id 或 linked_entity_ids")
+    return errors, warnings

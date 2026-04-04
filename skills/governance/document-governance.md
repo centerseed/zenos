@@ -48,7 +48,9 @@ supersedes: null
 ---
 ```
 
-> **重複文件檢查：** `write` 回傳包含 `similar_items` 欄位，列出 doc_id 或標題相近的既有文件。建立新文件前應檢查，避免建立重複的語意代理。
+> **Phase 1 統一回傳格式：** 所有回傳改為 `{status, data, warnings, suggestions, similar_items, ...}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+> **重複文件檢查：** `write` 回傳 `similar_items` 列出相近的既有文件。建立前應檢查避免重複。
 
 > **原子取代：** 建立新版文件時，可在 `write` 的 data 中同時填入 `supersedes` 欄位，Server 會原子性地將舊文件標為 superseded，省去手動更新舊 entity 的步驟。
 

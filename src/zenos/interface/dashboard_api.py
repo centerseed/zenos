@@ -843,6 +843,7 @@ def _make_task_service() -> TaskService:
         task_repo=_task_repo,
         entity_repo=_entity_repo,
         blindspot_repo=_blindspot_repo,
+        relationship_repo=_relationship_repo,
     )
 
 

@@ -314,6 +314,7 @@ async def _ensure_services() -> None:
             entity_repo=entity_repo,
             blindspot_repo=blindspot_repo,
             governance_ai=_governance_ai,
+            relationship_repo=relationship_repo,
         )
 
 
@@ -458,6 +459,30 @@ def _build_governance_hints(
         "suggested_follow_up_tasks": suggested_follow_up_tasks or [],
         "similar_items": similar_items or [],
         "suggested_entity_updates": suggested_entity_updates or [],
+    }
+
+
+def _unified_response(
+    *,
+    status: str = "ok",
+    data: dict,
+    warnings: list[str] | None = None,
+    suggestions: list[dict] | None = None,
+    similar_items: list[dict] | None = None,
+    context_bundle: dict | None = None,
+    governance_hints: dict | None = None,
+    rejection_reason: str | None = None,
+) -> dict:
+    """Phase 1 unified response format for all MCP tool responses."""
+    return {
+        "status": status,
+        "data": data,
+        "warnings": warnings or [],
+        "suggestions": suggestions or [],
+        "similar_items": similar_items or [],
+        "context_bundle": context_bundle or {},
+        "governance_hints": governance_hints or {},
+        **({"rejection_reason": rejection_reason} if rejection_reason else {}),
     }
 
 
@@ -1344,24 +1369,21 @@ async def write(
                 _before_visibility = None
 
             result = await ontology_service.upsert_entity(data)
-            response = _serialize(result)
-            if result.warnings:
-                response["warnings"] = result.warnings
-            entity_id = response.get("entity", {}).get("id")
+            serialized = _serialize(result)
+            entity_id = serialized.get("entity", {}).get("id")
             _audit_log(
                 event_type="ontology.entity.upsert",
                 target={"collection": collection, "id": entity_id},
                 changes={"input": data},
                 governance={"warnings": result.warnings or []},
             )
-            response["context_bundle"] = await _build_context_bundle(
+            context_bundle = await _build_context_bundle(
                 linked_entity_ids=[entity_id] if entity_id else []
             )
-            response["governance_hints"] = _build_governance_hints(
+            governance_hints = _build_governance_hints(
                 warnings=result.warnings or [],
                 similar_items=result.similar_items,
             )
-            response["similar_items"] = result.similar_items or []
             # --- Visibility change audit ---
             if _before_visibility is not None:
                 result_entity = result.entity if hasattr(result, "entity") else None
@@ -1378,57 +1400,69 @@ async def write(
                         changes={"before": _before_visibility, "after": _after_visibility},
                     )
             # Auto policy suggestion when visibility not specified
+            policy_suggestion = None
             if "visibility" not in data:
                 try:
                     from zenos.application.policy_suggestion_service import PolicySuggestionService
                     _policy_svc = PolicySuggestionService(entity_repo=ontology_service._entities)
-                    suggestion = await _policy_svc.suggest(entity_id)
-                    response["policy_suggestion"] = suggestion
+                    policy_suggestion = await _policy_svc.suggest(entity_id)
                 except Exception:
                     pass  # never block write
-            return response
+            if policy_suggestion is not None:
+                serialized["policy_suggestion"] = policy_suggestion
+            return _unified_response(
+                data=serialized,
+                warnings=result.warnings or [],
+                similar_items=result.similar_items or [],
+                context_bundle=context_bundle,
+                governance_hints=governance_hints,
+            )
 
         elif collection == "documents":
             # Backward compat: collection="documents" now creates entity(type="document")
             if data.get("sync_mode"):
                 result = await ontology_service.sync_document_governance(data)
-                response = _serialize(result)
+                serialized = _serialize(result)
                 _audit_log(
                     event_type="ontology.document.sync",
-                    target={"collection": collection, "id": response.get("document_id")},
+                    target={"collection": collection, "id": serialized.get("document_id")},
                     changes={"input": data},
                 )
-                return response
+                return _unified_response(data=serialized)
             result = await ontology_service.upsert_document(data)
-            response = _serialize(result)
+            serialized = _serialize(result)
             _audit_log(
                 event_type="ontology.document.upsert",
-                target={"collection": collection, "id": response.get("id")},
+                target={"collection": collection, "id": serialized.get("id")},
                 changes={"input": data},
             )
-            linked_ids = response.get("linked_entity_ids") or data.get("linked_entity_ids") or []
-            response["context_bundle"] = await _build_context_bundle(linked_entity_ids=linked_ids)
-            response["governance_hints"] = _build_governance_hints()
-            return response
+            linked_ids = serialized.get("linked_entity_ids") or data.get("linked_entity_ids") or []
+            return _unified_response(
+                data=serialized,
+                context_bundle=await _build_context_bundle(linked_entity_ids=linked_ids),
+                governance_hints=_build_governance_hints(),
+            )
 
         elif collection == "protocols":
             result = await ontology_service.upsert_protocol(data)
-            response = _serialize(result)
+            serialized = _serialize(result)
             _audit_log(
                 event_type="ontology.protocol.upsert",
-                target={"collection": collection, "id": response.get("id")},
+                target={"collection": collection, "id": serialized.get("id")},
                 changes={"input": data},
             )
-            response["context_bundle"] = await _build_context_bundle(
-                linked_entity_ids=[response.get("entity_id")] if response.get("entity_id") else [],
-                protocol_id=response.get("id"),
+            return _unified_response(
+                data=serialized,
+                context_bundle=await _build_context_bundle(
+                    linked_entity_ids=[serialized.get("entity_id")] if serialized.get("entity_id") else [],
+                    protocol_id=serialized.get("id"),
+                ),
+                governance_hints=_build_governance_hints(),
             )
-            response["governance_hints"] = _build_governance_hints()
-            return response
 
         elif collection == "blindspots":
             result = await ontology_service.add_blindspot(data)
-            response = _serialize(result)
+            serialized = _serialize(result)
 
             # Red blindspots auto-create a draft task for immediate attention
             if result.severity == "red":
@@ -1452,26 +1486,35 @@ async def write(
                     None,
                 )
                 if duplicate_open is not None:
-                    response["auto_created_task"] = _serialize(duplicate_open)
-                    response["auto_task_skipped"] = "EXISTING_OPEN_TASK"
-                    response["context_bundle"] = await _build_context_bundle(
-                        linked_entity_ids=result.related_entity_ids,
-                        blindspot_id=result.id,
-                    )
-                    response["governance_hints"] = _build_governance_hints(
-                        suggested_follow_up_tasks=[{
-                            "id": duplicate_open.id,
-                            "title": duplicate_open.title,
-                            "reason": "existing_open_task_for_blindspot",
-                        }]
-                    )
                     _audit_log(
                         event_type="ontology.blindspot.upsert",
-                        target={"collection": collection, "id": response.get("id")},
+                        target={"collection": collection, "id": serialized.get("id")},
                         changes={"input": data},
                         governance={"auto_task": "skipped_existing_open"},
                     )
-                    return response
+                    return _unified_response(
+                        data={
+                            **serialized,
+                            "auto_created_task": _serialize(duplicate_open),
+                            "auto_task_skipped": "EXISTING_OPEN_TASK",
+                        },
+                        suggestions=[{
+                            "id": duplicate_open.id,
+                            "title": duplicate_open.title,
+                            "reason": "existing_open_task_for_blindspot",
+                        }],
+                        context_bundle=await _build_context_bundle(
+                            linked_entity_ids=result.related_entity_ids,
+                            blindspot_id=result.id,
+                        ),
+                        governance_hints=_build_governance_hints(
+                            suggested_follow_up_tasks=[{
+                                "id": duplicate_open.id,
+                                "title": duplicate_open.title,
+                                "reason": "existing_open_task_for_blindspot",
+                            }]
+                        ),
+                    )
 
                 # Infer assignee from related entities' who tag
                 assignee = None
@@ -1502,28 +1545,31 @@ async def write(
                     "assignee": assignee,
                 }
                 auto_task_result = await task_service.create_task(auto_task_data)
-                response["auto_created_task"] = _serialize(auto_task_result.task)
+                serialized["auto_created_task"] = _serialize(auto_task_result.task)
 
             _audit_log(
                 event_type="ontology.blindspot.upsert",
-                target={"collection": collection, "id": response.get("id")},
+                target={"collection": collection, "id": serialized.get("id")},
                 changes={"input": data},
             )
-            response["context_bundle"] = await _build_context_bundle(
+            context_bundle = await _build_context_bundle(
                 linked_entity_ids=result.related_entity_ids,
                 blindspot_id=result.id,
             )
             follow_ups = []
-            if "auto_created_task" in response and isinstance(response["auto_created_task"], dict):
+            auto_created = serialized.get("auto_created_task")
+            if isinstance(auto_created, dict):
                 follow_ups.append({
-                    "id": response["auto_created_task"].get("id"),
-                    "title": response["auto_created_task"].get("title"),
+                    "id": auto_created.get("id"),
+                    "title": auto_created.get("title"),
                     "reason": "blindspot_requires_action",
                 })
-            response["governance_hints"] = _build_governance_hints(
-                suggested_follow_up_tasks=follow_ups
+            return _unified_response(
+                data=serialized,
+                suggestions=follow_ups,
+                context_bundle=context_bundle,
+                governance_hints=_build_governance_hints(suggested_follow_up_tasks=follow_ups),
             )
-            return response
 
         elif collection == "relationships":
             result = await ontology_service.add_relationship(
@@ -1533,10 +1579,10 @@ async def write(
                 description=data["description"],
                 verb=data.get("verb"),
             )
-            response = _serialize(result)
+            serialized = _serialize(result)
             _audit_log(
                 event_type="ontology.relationship.upsert",
-                target={"collection": collection, "id": response.get("id")},
+                target={"collection": collection, "id": serialized.get("id")},
                 changes={"input": data},
             )
             # Suggest verbs when caller did not provide one
@@ -1547,16 +1593,18 @@ async def write(
                     suggested_verbs = await governance_service.suggest_relationship_verb(
                         src_entity, tgt_entity
                     )
-                    response["suggested_verbs"] = suggested_verbs
+                    serialized["suggested_verbs"] = suggested_verbs
                 else:
-                    response["suggested_verbs"] = []
+                    serialized["suggested_verbs"] = []
             else:
-                response["suggested_verbs"] = []
-            response["context_bundle"] = await _build_context_bundle(
-                linked_entity_ids=[data["source_entity_id"], data["target_entity_id"]],
+                serialized["suggested_verbs"] = []
+            return _unified_response(
+                data=serialized,
+                context_bundle=await _build_context_bundle(
+                    linked_entity_ids=[data["source_entity_id"], data["target_entity_id"]],
+                ),
+                governance_hints=_build_governance_hints(),
             )
-            response["governance_hints"] = _build_governance_hints()
-            return response
 
         elif collection == "entries":
             # Update status flow (e.g. supersede)
@@ -1564,42 +1612,48 @@ async def write(
                 new_status = data.get("status")
                 superseded_by = data.get("superseded_by")
                 if not new_status:
-                    return {"error": "INVALID_INPUT", "message": "entries 更新時 data 需提供 status"}
+                    return _unified_response(status="rejected", data={}, rejection_reason="entries 更新時 data 需提供 status")
                 valid_statuses = {"active", "superseded", "archived"}
                 if new_status not in valid_statuses:
-                    return {"error": "INVALID_INPUT", "message": f"status 必須是 {valid_statuses} 之一"}
+                    return _unified_response(status="rejected", data={}, rejection_reason=f"status 必須是 {valid_statuses} 之一")
                 if new_status == "superseded" and not superseded_by:
-                    return {"error": "INVALID_INPUT", "message": "status=superseded 時必填 superseded_by"}
+                    return _unified_response(status="rejected", data={}, rejection_reason="status=superseded 時必填 superseded_by")
                 archive_reason = data.get("archive_reason")
                 if new_status == "archived":
                     if not archive_reason:
-                        return {"error": "INVALID_INPUT", "message": "status=archived 時必填 archive_reason"}
+                        return _unified_response(status="rejected", data={}, rejection_reason="status=archived 時必填 archive_reason")
                     if archive_reason not in ("merged", "manual"):
-                        return {"error": "INVALID_INPUT", "message": "archive_reason 必須是 merged 或 manual"}
+                        return _unified_response(status="rejected", data={}, rejection_reason="archive_reason 必須是 merged 或 manual")
                 updated = await entry_repo.update_status(id, new_status, superseded_by, archive_reason)
                 if updated is None:
-                    return {"error": "NOT_FOUND", "message": f"Entry '{id}' not found"}
-                response = _serialize(updated)
-                response["context_bundle"] = await _build_context_bundle(
-                    linked_entity_ids=[response.get("entity_id")] if response.get("entity_id") else []
+                    return _unified_response(
+                        status="rejected",
+                        data={},
+                        rejection_reason=f"Entry '{id}' not found",
+                    )
+                serialized = _serialize(updated)
+                return _unified_response(
+                    data=serialized,
+                    context_bundle=await _build_context_bundle(
+                        linked_entity_ids=[serialized.get("entity_id")] if serialized.get("entity_id") else []
+                    ),
+                    governance_hints=_build_governance_hints(),
                 )
-                response["governance_hints"] = _build_governance_hints()
-                return response
 
             # Create new entry
             entity_id = data.get("entity_id")
             entry_type = data.get("type")
             content = data.get("content")
             if not entity_id or not entry_type or not content:
-                return {"error": "INVALID_INPUT", "message": "entries 必填：entity_id, type, content"}
+                return _unified_response(status="rejected", data={}, rejection_reason="entries 必填：entity_id, type, content")
             if not (1 <= len(content) <= 200):
-                return {"error": "INVALID_INPUT", "message": "content 必須 1-200 字元"}
+                return _unified_response(status="rejected", data={}, rejection_reason="content 必須 1-200 字元")
             valid_types = {"decision", "insight", "limitation", "change", "context"}
             if entry_type not in valid_types:
-                return {"error": "INVALID_INPUT", "message": f"type 必須是 {valid_types} 之一"}
+                return _unified_response(status="rejected", data={}, rejection_reason=f"type 必須是 {valid_types} 之一")
             context = data.get("context")
             if context and len(context) > 200:
-                return {"error": "INVALID_INPUT", "message": "context 最多 200 字元"}
+                return _unified_response(status="rejected", data={}, rejection_reason="context 最多 200 字元")
 
             partner_ctx = _current_partner.get() or {}
             pid = partner_ctx.get("id", "")
@@ -1621,29 +1675,32 @@ async def write(
                 target={"collection": collection, "id": result.id},
                 changes={"input": data},
             )
-            response = _serialize(result)
+            serialized = _serialize(result)
             active_count = await entry_repo.count_active_by_entity(entity_id, department=partner_department)
+            entry_warnings: list[str] = []
             if active_count >= 20:
-                response["warning"] = (
+                entry_warnings.append(
                     "此 entity 已達 20 條 active entries 上限，"
                     "建議執行 analyze(check_type='quality') 觸發歸納"
                 )
-            response["context_bundle"] = await _build_context_bundle(
-                linked_entity_ids=[entity_id]
+            return _unified_response(
+                data=serialized,
+                warnings=entry_warnings,
+                context_bundle=await _build_context_bundle(linked_entity_ids=[entity_id]),
+                governance_hints=_build_governance_hints(warnings=entry_warnings),
             )
-            response["governance_hints"] = _build_governance_hints(
-                warnings=[response["warning"]] if response.get("warning") else []
-            )
-            return response
 
         else:
-            return {
-                "error": "INVALID_INPUT",
-                "message": f"Unknown collection '{collection}'. "
-                f"Use: entities, documents, protocols, blindspots, relationships, entries",
-            }
+            return _unified_response(
+                status="rejected",
+                data={},
+                rejection_reason=(
+                    f"Unknown collection '{collection}'. "
+                    f"Use: entities, documents, protocols, blindspots, relationships, entries"
+                ),
+            )
     except (ValueError, KeyError, TypeError) as e:
-        return {"error": "INVALID_INPUT", "message": str(e)}
+        return _unified_response(status="rejected", data={}, rejection_reason=str(e))
 
 
 # ===================================================================
@@ -1732,28 +1789,25 @@ async def confirm(
                         source_task_id=id,
                     )
                     await entry_repo.create(entry)
-            response = await _enrich_task_result(result.task)
+            task_data = await _enrich_task_result(result.task)
             if result.cascade_updates:
-                response["cascadeUpdates"] = [
+                task_data["cascadeUpdates"] = [
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}
                     for c in result.cascade_updates
                 ]
-            response["context_bundle"] = await _build_context_bundle(
-                linked_entity_ids=[e.get("id") for e in response.get("linked_entities", []) if isinstance(e, dict)]
+            cascade_suggestions = [
+                {
+                    "id": c.task_id,
+                    "title": "follow-up task updated by cascade",
+                    "reason": c.reason,
+                }
+                for c in (result.cascade_updates or [])
+            ]
+            context_bundle = await _build_context_bundle(
+                linked_entity_ids=[e.get("id") for e in task_data.get("linked_entities", []) if isinstance(e, dict)]
                 or [e for e in getattr(result.task, "linked_entities", []) if isinstance(e, str)],
                 blindspot_id=getattr(result.task, "linked_blindspot", None),
             )
-            response["governance_hints"] = _build_governance_hints(
-                suggested_follow_up_tasks=[
-                    {
-                        "id": c.task_id,
-                        "title": "follow-up task updated by cascade",
-                        "reason": c.reason,
-                    }
-                    for c in (result.cascade_updates or [])
-                ]
-            )
-            response["suggested_actions"] = []  # Phase 0.5 placeholder — will be populated in Phase 1
             _audit_log(
                 event_type="task.confirm",
                 target={"collection": collection, "id": id},
@@ -1765,28 +1819,32 @@ async def confirm(
                     "entity_entries": entity_entries or [],
                 },
             )
-            return response
+            return _unified_response(
+                data=task_data,
+                suggestions=cascade_suggestions,
+                context_bundle=context_bundle,
+                governance_hints=_build_governance_hints(
+                    suggested_follow_up_tasks=cascade_suggestions,
+                    suggested_entity_updates=getattr(result, "suggested_entity_updates", None) or [],
+                ),
+            )
         else:
             result = await ontology_service.confirm(collection, id)
-            if isinstance(result, dict):
-                response = dict(result)
-            else:
-                response = result
-            response["context_bundle"] = await _build_context_bundle(
-                linked_entity_ids=[id] if collection == "entities" else []
-            )
-            response["governance_hints"] = _build_governance_hints()
+            confirm_data = dict(result) if isinstance(result, dict) else result
             _audit_log(
                 event_type="ontology.confirm",
                 target={"collection": collection, "id": id},
                 changes={"accepted": accepted},
             )
-            return response
+            return _unified_response(
+                data=confirm_data,
+                context_bundle=await _build_context_bundle(
+                    linked_entity_ids=[id] if collection == "entities" else []
+                ),
+                governance_hints=_build_governance_hints(),
+            )
     except ValueError as e:
-        error_msg = str(e)
-        if "not found" in error_msg.lower():
-            return {"error": "NOT_FOUND", "message": error_msg}
-        return {"error": "INVALID_INPUT", "message": error_msg}
+        return _unified_response(status="rejected", data={}, rejection_reason=str(e))
 
 
 # ===================================================================
@@ -1969,12 +2027,12 @@ async def _task_handler(
             merged["actor_partner_id"] = partner_ctx["id"]
         return merged
 
-    def _normalize_str_list(value: list[str] | str | None, field: str) -> list[str] | dict:
+    def _normalize_str_list(value: list[str] | str | None, field: str) -> list[str] | dict:  # dict = _unified_response(status="rejected")
         if value is None:
             return []
         if isinstance(value, list):
             if not all(isinstance(v, str) for v in value):
-                return {"error": "INVALID_INPUT", "message": f"{field} must be list[str]"}
+                return _unified_response(status="rejected", data={}, rejection_reason=f"{field} must be list[str]")
             return value
         if isinstance(value, str):
             text = value.strip()
@@ -1985,12 +2043,12 @@ async def _task_handler(
                 try:
                     parsed = json.loads(text)
                 except json.JSONDecodeError:
-                    return {"error": "INVALID_INPUT", "message": f"{field} must be list[str] or JSON array string"}
+                    return _unified_response(status="rejected", data={}, rejection_reason=f"{field} must be list[str] or JSON array string")
                 if not isinstance(parsed, list) or not all(isinstance(v, str) for v in parsed):
-                    return {"error": "INVALID_INPUT", "message": f"{field} must be list[str]"}
+                    return _unified_response(status="rejected", data={}, rejection_reason=f"{field} must be list[str]")
                 return parsed
-            return {"error": "INVALID_INPUT", "message": f"{field} must be list[str], not plain string"}
-        return {"error": "INVALID_INPUT", "message": f"{field} must be list[str]"}
+            return _unified_response(status="rejected", data={}, rejection_reason=f"{field} must be list[str], not plain string")
+        return _unified_response(status="rejected", data={}, rejection_reason=f"{field} must be list[str]")
 
     try:
         # Resolve partner context once — used for auto-filling created_by and project
@@ -1999,7 +2057,7 @@ async def _task_handler(
 
         if action == "create":
             if not title:
-                return {"error": "INVALID_INPUT", "message": "title is required for create"}
+                return _unified_response(status="rejected", data={}, rejection_reason="title is required for create")
             # In MCP context, creator identity must follow the authenticated
             # partner bound to the API key, not arbitrary caller input.
             if partner and partner.get("id"):
@@ -2008,7 +2066,7 @@ async def _task_handler(
                 # Backward-compat fallback for non-MCP/internal callers.
                 created_by = None
             if not created_by:
-                return {"error": "INVALID_INPUT", "message": "created_by is required for create"}
+                return _unified_response(status="rejected", data={}, rejection_reason="created_by is required for create")
 
             # Auto-fill project from partner's default_project if caller omits it
             effective_project = project or partner_default_project
@@ -2019,7 +2077,7 @@ async def _task_handler(
                 try:
                     parsed_due = datetime.fromisoformat(due_date)
                 except (ValueError, TypeError):
-                    return {"error": "INVALID_INPUT", "message": f"Invalid due_date format: {due_date}"}
+                    return _unified_response(status="rejected", data={}, rejection_reason=f"Invalid due_date format: {due_date}")
 
             normalized_description = _normalize_description_to_markdown(description)
             normalized_linked_entities = _normalize_str_list(linked_entities, "linked_entities")
@@ -2069,17 +2127,17 @@ async def _task_handler(
             if task_service is None:
                 await _ensure_services()
             task_result = await task_service.create_task(data)
-            response = _serialize(task_result.task)
+            task_data = _serialize(task_result.task)
             _audit_log(
                 event_type="task.create",
-                target={"collection": "tasks", "id": response.get("id")},
+                target={"collection": "tasks", "id": task_data.get("id")},
                 changes={"input": data},
             )
-            return response
+            return _unified_response(data=task_data)
 
         elif action == "update":
             if not id:
-                return {"error": "INVALID_INPUT", "message": "id is required for update"}
+                return _unified_response(status="rejected", data={}, rejection_reason="id is required for update")
 
             updates: dict = {}
             if status is not None:
@@ -2115,7 +2173,7 @@ async def _task_handler(
                 try:
                     updates["due_date"] = datetime.fromisoformat(due_date)
                 except (ValueError, TypeError):
-                    return {"error": "INVALID_INPUT", "message": f"Invalid due_date: {due_date}"}
+                    return _unified_response(status="rejected", data={}, rejection_reason=f"Invalid due_date: {due_date}")
             if plan_id is not None:
                 updates["plan_id"] = plan_id
             if plan_order is not None:
@@ -2150,26 +2208,41 @@ async def _task_handler(
             if task_service is None:
                 await _ensure_services()
             task_result = await task_service.update_task(id, updates)
-            response = _serialize(task_result.task)
+            task_data = _serialize(task_result.task)
             if task_result.cascade_updates:
-                response["cascadeUpdates"] = [
+                task_data["cascadeUpdates"] = [
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}
                     for c in task_result.cascade_updates
                 ]
+            cascade_suggestions = [
+                {
+                    "id": c.task_id,
+                    "title": "follow-up task updated by cascade",
+                    "reason": c.reason,
+                }
+                for c in (task_result.cascade_updates or [])
+            ]
             _audit_log(
                 event_type="task.update",
                 target={"collection": "tasks", "id": id},
                 changes={"updates": updates},
             )
-            return response
+            return _unified_response(
+                data=task_data,
+                suggestions=cascade_suggestions,
+                governance_hints=_build_governance_hints(
+                    suggested_follow_up_tasks=cascade_suggestions,
+                ),
+            )
 
         else:
-            return {
-                "error": "INVALID_INPUT",
-                "message": f"Unknown action '{action}'. Use: create, update",
-            }
+            return _unified_response(
+                status="rejected",
+                data={},
+                rejection_reason=f"Unknown action '{action}'. Use: create, update",
+            )
     except ValueError as e:
-        return {"error": "INVALID_INPUT", "message": str(e)}
+        return _unified_response(status="rejected", data={}, rejection_reason=str(e))
 
 
 @mcp.tool(

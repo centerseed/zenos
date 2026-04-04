@@ -35,14 +35,16 @@ mcp__zenos__task(
 )
 ```
 
-> **Server 端驗證：** Server 會驗證 title 長度（≥4 字元）並拒絕純名詞停用詞開頭的標題。Agent 不需要手動計字元，但「動詞開頭、語意明確」仍是 agent 的寫作責任。
+> **Phase 1 統一回傳格式：** 所有回傳改為 `{status, data, warnings, suggestions, ...}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+> **Server 端驗證：** Server 驗證 title 長度（≥4 字元）並拒絕停用詞開頭。`linked_entities` 不存在的 ID 會被 reject（不再 silently drop）。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates`。
 
 ### linked_entities 很重要
 
 - 每張票都應該掛 linked_entities，讓收到票的人/agent 自動獲得 context
 - linked_entities 必須是存在的 entity ID（先 search 找到 ID 再填）
 
-> **Server 端驗證：** Server 會驗證 linked_entities 中的每個 ID 是否存在，傳入不存在的 ID 會被拒絕。
+> **Server 端驗證（Phase 1 強化）：** `linked_entities` 中不存在的 ID 直接 reject（`status: "rejected"`），不再靜默忽略。建票前務必先 search 確認 ID 存在。
 
 ```python
 # 先找 entity ID

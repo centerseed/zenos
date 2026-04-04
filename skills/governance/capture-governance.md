@@ -1,6 +1,6 @@
 # 知識捕獲分層路由規則 v1.0（含完整範例）
 
-> **Server 端驗證：** 結構驗證（必填欄位、格式正確性）已移至 Server 端，agent 專注語意判斷——哪個層級、impacts 描述是否清晰、概念邊界是否合理。
+> **Phase 1 統一回傳格式：** 所有 MCP 回傳改為 `{status, data, warnings, ...}`。資料在 `response["data"]` 下，rejection 用 `response["status"] == "rejected"` 判斷。結構驗證已移至 Server 端，agent 專注語意判斷。
 
 ## 分層路由四步
 1. 是否是治理規則或跨角色共識？→ 是：L2 候選（走三問+impacts gate）

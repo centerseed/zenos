@@ -785,8 +785,9 @@ class TestWriteTool:
                 },
             )
 
-            assert result["entity"]["name"] == "Paceriz"
-            assert result.get("warnings") is None
+            assert result["status"] == "ok"
+            assert result["data"]["entity"]["name"] == "Paceriz"
+            assert result["warnings"] == []
             assert "context_bundle" in result
             assert "governance_hints" in result
 
@@ -819,6 +820,7 @@ class TestWriteTool:
                 },
             )
 
+            assert result["status"] == "ok"
             assert "warnings" in result
             assert "parent_id" in result["warnings"][0]
 
@@ -850,8 +852,8 @@ class TestWriteTool:
 
         result = await write(collection="foobar", data={})
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "Unknown collection" in result["message"]
+        assert result["status"] == "rejected"
+        assert "Unknown collection" in result["rejection_reason"]
 
     async def test_write_entity_missing_required_field(self):
         from zenos.interface.tools import write
@@ -861,7 +863,7 @@ class TestWriteTool:
 
             result = await write(collection="entities", data={})
 
-            assert result["error"] == "INVALID_INPUT"
+            assert result["status"] == "rejected"
 
     async def test_write_documents_sync_mode_routes_to_sync_api(self):
         from zenos.interface.tools import write
@@ -889,9 +891,10 @@ class TestWriteTool:
                 },
             )
 
-            assert result["operation"] == "rename"
-            assert result["dry_run"] is True
-            assert result["document_id"] == "doc-1"
+            assert result["status"] == "ok"
+            assert result["data"]["operation"] == "rename"
+            assert result["data"]["dry_run"] is True
+            assert result["data"]["document_id"] == "doc-1"
 
     async def test_write_relationship_success(self):
         from zenos.interface.tools import write
@@ -917,7 +920,8 @@ class TestWriteTool:
                 },
             )
 
-            assert result["type"] == "depends_on"
+            assert result["status"] == "ok"
+            assert result["data"]["type"] == "depends_on"
 
     async def test_write_relationship_missing_field(self):
         from zenos.interface.tools import write
@@ -927,7 +931,7 @@ class TestWriteTool:
             data={"source_entity_id": "ent-1"},  # missing target, type, description
         )
 
-        assert result["error"] == "INVALID_INPUT"
+        assert result["status"] == "rejected"
 
     async def test_write_red_blindspot_skips_duplicate_open_task(self):
         from zenos.interface.tools import write
@@ -955,8 +959,9 @@ class TestWriteTool:
                 },
             )
 
-            assert result["auto_task_skipped"] == "EXISTING_OPEN_TASK"
-            assert result["auto_created_task"]["id"] == "task-dup"
+            assert result["status"] == "ok"
+            assert result["data"]["auto_task_skipped"] == "EXISTING_OPEN_TASK"
+            assert result["data"]["auto_created_task"]["id"] == "task-dup"
             mock_ts.create_task.assert_not_called()
 
 
@@ -976,7 +981,8 @@ class TestConfirmTool:
             result = await confirm(collection="entities", id="ent-1")
 
             mock_os.confirm.assert_called_once_with("entities", "ent-1")
-            assert result["status"] == "confirmed"
+            assert result["status"] == "ok"
+            assert result["data"]["status"] == "confirmed"
             assert "context_bundle" in result
             assert "governance_hints" in result
 
@@ -989,7 +995,8 @@ class TestConfirmTool:
 
             result = await confirm(collection="entities", id="x")
 
-            assert result["error"] == "NOT_FOUND"
+            assert result["status"] == "rejected"
+            assert "not found" in result["rejection_reason"].lower()
 
     async def test_confirm_invalid_input(self):
         from zenos.interface.tools import confirm
@@ -1000,7 +1007,7 @@ class TestConfirmTool:
 
             result = await confirm(collection="entities", id="x")
 
-            assert result["error"] == "INVALID_INPUT"
+            assert result["status"] == "rejected"
 
     async def test_confirm_task_with_entity_entries_writes_entries_when_accepted(self):
         from zenos.interface.tools import confirm
@@ -1157,7 +1164,8 @@ class TestTaskTool:
                 priority="high",
             )
 
-            assert result["title"] == "Fix login"
+            assert result["status"] == "ok"
+            assert result["data"]["title"] == "Fix login"
 
     async def test_create_task_accepts_json_array_string_for_list_fields(self):
         from zenos.interface.tools import task
@@ -1183,16 +1191,16 @@ class TestTaskTool:
 
         result = await task(action="create", created_by="architect")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "title" in result["message"]
+        assert result["status"] == "rejected"
+        assert "title" in result["rejection_reason"]
 
     async def test_create_task_missing_created_by(self):
         from zenos.interface.tools import task
 
         result = await task(action="create", title="Fix login")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "created_by" in result["message"]
+        assert result["status"] == "rejected"
+        assert "created_by" in result["rejection_reason"]
 
     async def test_create_task_invalid_due_date(self):
         from zenos.interface.tools import task
@@ -1204,8 +1212,8 @@ class TestTaskTool:
             due_date="not-a-date",
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "due_date" in result["message"]
+        assert result["status"] == "rejected"
+        assert "due_date" in result["rejection_reason"]
 
     async def test_create_task_plain_description_auto_formats_to_markdown(self):
         from zenos.interface.tools import task
@@ -1315,23 +1323,24 @@ class TestTaskTool:
                 status="in_progress",
             )
 
-            assert result["status"] == "in_progress"
+            assert result["status"] == "ok"
+            assert result["data"]["status"] == "in_progress"
 
     async def test_update_task_missing_id(self):
         from zenos.interface.tools import task
 
         result = await task(action="update", status="in_progress")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "id" in result["message"]
+        assert result["status"] == "rejected"
+        assert "id" in result["rejection_reason"]
 
     async def test_unknown_action(self):
         from zenos.interface.tools import task
 
         result = await task(action="delete", title="X", created_by="Y")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "Unknown action" in result["message"]
+        assert result["status"] == "rejected"
+        assert "Unknown action" in result["rejection_reason"]
 
     async def test_update_task_invalid_status(self):
         from zenos.interface.tools import task
@@ -1342,7 +1351,7 @@ class TestTaskTool:
 
             result = await task(action="update", id="task-1", status="done")
 
-            assert result["error"] == "INVALID_INPUT"
+            assert result["status"] == "rejected"
 
 
 # ---------------------------------------------------------------------------
@@ -1650,11 +1659,11 @@ class TestWriteEntriesCollection:
             },
         )
 
-        assert "error" not in result
-        assert result["id"] == "entry-1"
-        assert result["type"] == "decision"
-        assert result["content"] == "We chose PostgreSQL for reliability"
-        assert "warning" not in result
+        assert result["status"] == "ok"
+        assert result["data"]["id"] == "entry-1"
+        assert result["data"]["type"] == "decision"
+        assert result["data"]["content"] == "We chose PostgreSQL for reliability"
+        assert result["warnings"] == []
         tools_mod.entry_repo.create.assert_called_once()
 
     async def test_write_entry_missing_entity_id(self):
@@ -1666,11 +1675,11 @@ class TestWriteEntriesCollection:
             data={"type": "decision", "content": "Some content"},
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "entity_id" in result["message"]
+        assert result["status"] == "rejected"
+        assert "entity_id" in result["rejection_reason"]
 
     async def test_write_entry_missing_content(self):
-        """write entries returns INVALID_INPUT when content is missing."""
+        """write entries returns rejected when content is missing."""
         from zenos.interface.tools import write
 
         result = await write(
@@ -1678,7 +1687,7 @@ class TestWriteEntriesCollection:
             data={"entity_id": "ent-1", "type": "decision"},
         )
 
-        assert result["error"] == "INVALID_INPUT"
+        assert result["status"] == "rejected"
 
     async def test_write_entry_content_too_long(self):
         """write entries rejects content exceeding 200 chars."""
@@ -1693,8 +1702,8 @@ class TestWriteEntriesCollection:
             },
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "200" in result["message"]
+        assert result["status"] == "rejected"
+        assert "200" in result["rejection_reason"]
 
     async def test_write_entry_empty_content(self):
         """write entries rejects empty content."""
@@ -1705,7 +1714,7 @@ class TestWriteEntriesCollection:
             data={"entity_id": "ent-1", "type": "decision", "content": ""},
         )
 
-        assert result["error"] == "INVALID_INPUT"
+        assert result["status"] == "rejected"
 
     async def test_write_entry_invalid_type(self):
         """write entries rejects unknown type value."""
@@ -1716,8 +1725,8 @@ class TestWriteEntriesCollection:
             data={"entity_id": "ent-1", "type": "unknown_type", "content": "some content"},
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "type" in result["message"]
+        assert result["status"] == "rejected"
+        assert "type" in result["rejection_reason"]
 
     async def test_write_entry_context_too_long(self):
         """write entries rejects context exceeding 200 chars."""
@@ -1733,8 +1742,8 @@ class TestWriteEntriesCollection:
             },
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "context" in result["message"]
+        assert result["status"] == "rejected"
+        assert "context" in result["rejection_reason"]
 
     async def test_write_entry_update_status_supersede(self):
         """write entries with id updates status for supersede flow."""
@@ -1750,9 +1759,9 @@ class TestWriteEntriesCollection:
             data={"status": "superseded", "superseded_by": "entry-2"},
         )
 
-        assert "error" not in result
-        assert result["status"] == "superseded"
-        assert result["superseded_by"] == "entry-2"
+        assert result["status"] == "ok"
+        assert result["data"]["status"] == "superseded"
+        assert result["data"]["superseded_by"] == "entry-2"
         tools_mod.entry_repo.update_status.assert_called_once_with(
             "entry-1", "superseded", "entry-2", None
         )
@@ -1770,7 +1779,8 @@ class TestWriteEntriesCollection:
             data={"status": "archived", "archive_reason": "manual"},
         )
 
-        assert result["error"] == "NOT_FOUND"
+        assert result["status"] == "rejected"
+        assert "not found" in result["rejection_reason"].lower()
 
     async def test_write_entry_archive_with_reason_success(self):
         """write entries with status=archived and archive_reason=manual succeeds."""
@@ -1786,15 +1796,15 @@ class TestWriteEntriesCollection:
             data={"status": "archived", "archive_reason": "manual"},
         )
 
-        assert "error" not in result
-        assert result["status"] == "archived"
-        assert result["archive_reason"] == "manual"
+        assert result["status"] == "ok"
+        assert result["data"]["status"] == "archived"
+        assert result["data"]["archive_reason"] == "manual"
         tools_mod.entry_repo.update_status.assert_called_once_with(
             "entry-1", "archived", None, "manual"
         )
 
     async def test_write_entry_archive_missing_reason(self):
-        """write entries with status=archived but no archive_reason returns INVALID_INPUT."""
+        """write entries with status=archived but no archive_reason returns rejected."""
         from zenos.interface.tools import write
 
         result = await write(
@@ -1803,11 +1813,11 @@ class TestWriteEntriesCollection:
             data={"status": "archived"},
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "archive_reason" in result["message"]
+        assert result["status"] == "rejected"
+        assert "archive_reason" in result["rejection_reason"]
 
     async def test_write_entry_archive_invalid_reason(self):
-        """write entries with invalid archive_reason returns INVALID_INPUT."""
+        """write entries with invalid archive_reason returns rejected."""
         from zenos.interface.tools import write
 
         result = await write(
@@ -1816,8 +1826,8 @@ class TestWriteEntriesCollection:
             data={"status": "archived", "archive_reason": "invalid_value"},
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "archive_reason" in result["message"]
+        assert result["status"] == "rejected"
+        assert "archive_reason" in result["rejection_reason"]
 
     async def test_write_entry_superseded_requires_superseded_by(self):
         """write entries with status=superseded requires superseded_by field."""
@@ -1829,8 +1839,8 @@ class TestWriteEntriesCollection:
             data={"status": "superseded"},
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "superseded_by" in result["message"]
+        assert result["status"] == "rejected"
+        assert "superseded_by" in result["rejection_reason"]
 
 
 # ===================================================================
@@ -1854,8 +1864,8 @@ class TestWriteEntriesSaturationWarning:
             data={"entity_id": "ent-1", "type": "decision", "content": "PostgreSQL chosen"},
         )
 
-        assert "error" not in result
-        assert "warning" not in result
+        assert result["status"] == "ok"
+        assert result["warnings"] == []
 
     async def test_write_entry_warning_when_at_limit(self):
         """write entries: warning returned when active count >= 20."""
@@ -1871,9 +1881,9 @@ class TestWriteEntriesSaturationWarning:
             data={"entity_id": "ent-1", "type": "decision", "content": "PostgreSQL chosen"},
         )
 
-        assert "error" not in result
-        assert "warning" in result
-        assert "analyze" in result["warning"]
+        assert result["status"] == "ok"
+        assert len(result["warnings"]) == 1
+        assert "analyze" in result["warnings"][0]
 
 
 # ===================================================================

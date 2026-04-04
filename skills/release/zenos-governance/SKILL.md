@@ -5,7 +5,7 @@ description: >
   「掃描結果不滿意，請自動修復」時使用。此 skill 會編排 zenos-setup、
   zenos-capture、zenos-sync 與 MCP tools（search/get/write/task/confirm/analyze），
   以最少人工介入完成治理閉環。適用於 Claude/ChatGPT/Gemini 等 agent 流程。
-version: 1.2.0
+version: 2.0.0
 ---
 
 # zenos-governance
@@ -19,16 +19,25 @@ version: 1.2.0
 - 增量優先：除首次建構外，禁止重複全量掃描。
 - 任務閉環：治理問題要轉成 task，交付後用 confirm 驗收。
 
-## 0.5) Server 端治理能力（Phase 0.5）
+## 0.5) Server 端治理能力（Phase 1 — Breaking Change）
 
-Server 現在會主動執行以下治理檢查，agent 不需重複驗證：
+**統一回傳格式**：所有 write/confirm/task 回傳改為：
+```json
+{"status": "ok|rejected", "data": {...}, "warnings": [], "suggestions": [], "similar_items": [], "context_bundle": {}, "governance_hints": {}}
+```
+- 資料在 `response["data"]` 下（不再是 top-level）
+- 錯誤用 `response["status"] == "rejected"` + `response["rejection_reason"]` 判斷
 
-- **結構驗證**：L2 confirm 時強制 impacts≥1；Task title 長度 + 停用詞檢查
-- **智慧去重**：write entity/document 回傳 `similar_items` 欄位，列出相似項目
-- **擴充回傳**：`governance_hints` 包含 `similar_items`、`stale_candidates`、`suggested_entity_updates`
-- **建議引擎**：confirm task 回傳 `suggested_actions`
+**Server 端驗證（強制 reject）：**
+- L2 confirm 時 impacts≥1
+- Task title 長度 + 停用詞
+- `linked_entities` 不存在的 ID 直接 reject（不再 silently drop）
 
-Agent 應讀取這些回傳欄位，據此決定下一步操作，而非自行重新檢查。
+**回饋引擎：**
+- `confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates` 列出下游需更新的 entity
+- write 回傳 `similar_items` 列出相似項目
+
+Agent 應解析統一格式，讀取回傳欄位據此行動。
 
 ## 1) 觸發條件
 

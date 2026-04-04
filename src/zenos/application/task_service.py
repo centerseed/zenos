@@ -6,7 +6,6 @@ context assembly, and cascade unblocking.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -73,6 +72,7 @@ class TaskResult:
     """Result of a task mutation, including any cascade side-effects."""
     task: Task
     cascade_updates: list[CascadeUpdate]
+    suggested_entity_updates: list[dict] | None = None
 
 
 class TaskService:
@@ -85,11 +85,13 @@ class TaskService:
         blindspot_repo: BlindspotRepository,
         document_repo: object | None = None,  # deprecated, kept for backward compat
         governance_ai: object | None = None,
+        relationship_repo: object | None = None,
     ) -> None:
         self._tasks = task_repo
         self._entities = entity_repo
         self._blindspots = blindspot_repo
         self._governance_ai = governance_ai
+        self._relationships = relationship_repo
 
     # ──────────────────────────────────────────
     # Create
@@ -138,19 +140,18 @@ class TaskService:
                 )
 
         linked_entities = []
+        missing_ids = []
         for eid in linked_entity_ids:
             entity = await self._entities.get_by_id(eid)
             if entity:
                 linked_entities.append(entity)
-
-        # Phase 0.5: warn on missing linked entities (don't reject)
-        if linked_entity_ids:
-            found_ids = {e.id for e in linked_entities}
-            missing = [eid for eid in linked_entity_ids if eid not in found_ids]
-            if missing:
-                logging.getLogger(__name__).warning(
-                    "Task linked_entities 包含不存在的 ID: %s", missing
-                )
+            else:
+                missing_ids.append(eid)
+        if missing_ids:
+            raise ValueError(
+                f"linked_entities 包含不存在的 entity ID: {', '.join(missing_ids)}。"
+                f"請先建立這些 entity 或移除無效 ID。"
+            )
 
         linked_blindspot_id = data.get("linked_blindspot")
         linked_blindspot = None
@@ -316,6 +317,21 @@ class TaskService:
             task.completed_at = datetime.utcnow()
             cascades = await self._cascade_unblock(task_id)
 
+            # Phase 1: feedback engine
+            suggested_entity_updates: list[dict] = []
+            if task.linked_entities and self._relationships:
+                for eid in task.linked_entities:
+                    rels = await self._relationships.list_by_entity(eid)
+                    for rel in rels:
+                        if rel.type in ("impacts", "depends_on"):
+                            target = await self._entities.get_by_id(rel.target_entity_id)
+                            if target:
+                                suggested_entity_updates.append({
+                                    "entity_id": target.id,
+                                    "entity_name": target.name,
+                                    "reason": f"任務 '{task.title}' 完成後，相關 entity '{target.name}' 可能需要更新",
+                                })
+
             # Resolve linked blindspot if present
             if task.linked_blindspot:
                 bs = await self._blindspots.get_by_id(task.linked_blindspot)
@@ -342,6 +358,12 @@ class TaskService:
                     confirmed_by_user=False,
                 )
                 await self._blindspots.add(bs_obj)
+
+            task.updated_at = datetime.utcnow()
+            if updated_by:
+                task.updated_by = updated_by
+            saved = await self._tasks.upsert(task)
+            return TaskResult(task=saved, cascade_updates=cascades, suggested_entity_updates=suggested_entity_updates)
         else:
             if not rejection_reason:
                 raise ValueError("rejection_reason is required when rejecting")
@@ -349,11 +371,11 @@ class TaskService:
             task.confirmed_by_creator = False
             task.rejection_reason = rejection_reason
 
-        task.updated_at = datetime.utcnow()
-        if updated_by:
-            task.updated_by = updated_by
-        saved = await self._tasks.upsert(task)
-        return TaskResult(task=saved, cascade_updates=cascades)
+            task.updated_at = datetime.utcnow()
+            if updated_by:
+                task.updated_by = updated_by
+            saved = await self._tasks.upsert(task)
+            return TaskResult(task=saved, cascade_updates=cascades, suggested_entity_updates=[])
 
     # ──────────────────────────────────────────
     # List

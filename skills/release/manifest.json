@@ -30,7 +30,7 @@
     },
     {
       "name": "zenos-governance",
-      "version": "1.2.0",
+      "version": "2.0.0",
       "path": "zenos-governance",
       "files": ["SKILL.md"],
       "owner": "Barry"

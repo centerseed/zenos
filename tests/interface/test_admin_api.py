@@ -152,8 +152,8 @@ class TestTaskCreatedByAutoFill:
             # created_by intentionally omitted, no partner context
         )
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "created_by" in result["message"]
+        assert result["status"] == "rejected"
+        assert "created_by" in result["rejection_reason"]
 
     async def test_superadmin_auto_fill(self):
         from zenos.interface.tools import _task_handler, _current_partner
