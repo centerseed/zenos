@@ -52,7 +52,7 @@ def _mock_entity(eid, name="test", etype="module"):
 def _mock_relationship(rel_type, target_id):
     r = MagicMock()
     r.type = rel_type
-    r.target_entity_id = target_id
+    r.target_id = target_id
     r.source_entity_id = "src"
     return r
 

@@ -329,7 +329,7 @@ class TaskService:
                         *[self._relationships.list_by_entity(eid) for eid in task.linked_entities]
                     )
                     target_ids = list({
-                        rel.target_entity_id
+                        rel.target_id
                         for rels in all_rels for rel in rels
                         if rel.type in ("impacts", "depends_on")
                     })
