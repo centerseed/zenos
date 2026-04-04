@@ -30,6 +30,9 @@ _WORKFLOW_FILES: list[str] = [
     "knowledge-sync.md",
     "setup.md",
     "governance-loop.md",
+    "feature.md",
+    "debug.md",
+    "triage.md",
 ]
 
 # agent skill 角色清單
@@ -44,6 +47,9 @@ _SLASH_COMMAND_SSOT: dict[str, str] = {
     "zenos-sync": "skills/workflows/knowledge-sync.md",
     "zenos-setup": "skills/workflows/setup.md",
     "zenos-governance": "skills/workflows/governance-loop.md",
+    "feature": "skills/workflows/feature.md",
+    "debug": "skills/workflows/debug.md",
+    "triage": "skills/workflows/triage.md",
 }
 
 

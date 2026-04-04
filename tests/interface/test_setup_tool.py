@@ -38,7 +38,8 @@ def skills_root(tmp_path: Path) -> Path:
     (governance / "task-governance.md").write_text("# Task Governance\ncontent here", encoding="utf-8")
 
     # workflow skills
-    for name in ["knowledge-capture.md", "knowledge-sync.md", "setup.md", "governance-loop.md"]:
+    for name in ["knowledge-capture.md", "knowledge-sync.md", "setup.md", "governance-loop.md",
+                  "feature.md", "debug.md", "triage.md"]:
         (workflows / name).write_text(f"# {name}\ncontent", encoding="utf-8")
 
     # manifest
@@ -149,7 +150,7 @@ class TestGetSkillFiles:
     def test_full_selection_returns_8_files(self):
         from zenos.interface.setup_content import get_skill_files
         files = get_skill_files("full")
-        assert len(files) == 8
+        assert len(files) == 11  # 4 governance + 7 workflow (agent roles optional, skipped when missing)
 
     def test_task_only_excludes_document_governance(self):
         from zenos.interface.setup_content import get_skill_files
@@ -189,7 +190,7 @@ class TestGetSlashCommands:
     def test_returns_4_commands(self):
         from zenos.interface.setup_content import get_slash_commands
         cmds = get_slash_commands()
-        assert len(cmds) == 4
+        assert len(cmds) == 7  # 4 zenos-* + feature + debug + triage
 
     def test_all_paths_under_claude_commands(self):
         from zenos.interface.setup_content import get_slash_commands
@@ -273,13 +274,13 @@ class TestSetupToolClaudeCode:
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code")
         assert "skill_files" in result["payload"]
-        assert len(result["payload"]["skill_files"]) == 8
+        assert len(result["payload"]["skill_files"]) == 11  # 4 governance + 7 workflow
 
     async def test_payload_has_slash_commands(self):
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code")
         assert "slash_commands" in result["payload"]
-        assert len(result["payload"]["slash_commands"]) == 4
+        assert len(result["payload"]["slash_commands"]) == 7  # 4 zenos-* + feature + debug + triage
 
     async def test_payload_has_claude_md_addition(self):
         from zenos.interface.tools import setup
