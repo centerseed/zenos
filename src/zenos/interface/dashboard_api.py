@@ -130,7 +130,13 @@ async def _auth_and_scope(request: Request) -> tuple[dict | None, str | None]:
 
 
 def _is_scoped_partner(partner: dict) -> bool:
-    """Return True if the partner is a scoped (external client) partner."""
+    """Return True if the partner is a scoped (external client) partner.
+
+    Admin partners are never scoped — they see everything regardless of
+    authorizedEntityIds.
+    """
+    if partner.get("isAdmin"):
+        return False
     return bool(partner.get("authorizedEntityIds"))
 
 

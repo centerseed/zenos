@@ -70,6 +70,7 @@ from zenos.infrastructure.sql_repo import (
     SqlTaskRepository,
     SqlToolEventRepository,
     SqlUsageLogRepository,
+    SqlWorkJournalRepository,
     get_pool,
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
@@ -251,6 +252,7 @@ _governance_ai: GovernanceAI | None = None
 _usage_log_repo: SqlUsageLogRepository | None = None
 _tool_event_repo: SqlToolEventRepository | None = None
 _audit_repo: "SqlAuditEventRepository | None" = None
+_journal_repo: SqlWorkJournalRepository | None = None
 
 
 async def _ensure_governance_ai() -> None:
@@ -272,6 +274,87 @@ async def _ensure_governance_ai() -> None:
         logger.info("GovernanceAI initialized with model: %s", llm_client.model)
     except Exception:
         logger.warning("GovernanceAI disabled: LLM client initialization failed", exc_info=True)
+
+
+async def _ensure_journal_repo() -> None:
+    """Lazily initialise SqlWorkJournalRepository after pool is available."""
+    global _journal_repo
+    if _journal_repo is not None:
+        return
+    pool = await get_pool()
+    _journal_repo = SqlWorkJournalRepository(pool)
+
+
+async def _compress_journal(partner_id: str) -> None:
+    """Compress old non-summary journal entries into a single summary row.
+
+    Keeps the most recent 9 originals intact; compresses any older originals
+    via LLM into a single is_summary=TRUE entry then deletes the originals.
+    On any failure, logs a warning and returns without raising.
+    """
+    try:
+        await _ensure_journal_repo()
+        assert _journal_repo is not None
+        async with _journal_repo._pool.acquire() as _conn:
+            total_originals: int = await _conn.fetchval(
+                "SELECT COUNT(*) FROM zenos.work_journal"
+                " WHERE partner_id = $1 AND is_summary = FALSE",
+                partner_id,
+            )
+        to_compress = total_originals - 9
+        if to_compress <= 0:
+            return
+        entries = await _journal_repo.list_oldest_originals(
+            partner_id=partner_id, limit=to_compress
+        )
+        if not entries:
+            return
+
+        formatted = "\n\n".join(
+            f"[{e['created_at']}] project={e['project']} flow={e['flow_type']}\n{e['summary']}"
+            for e in entries
+        )
+        prompt = (
+            f"以下是 {len(entries)} 則工作日誌，請壓縮成一則不超過 300 字的摘要。\n"
+            "保留：完成的功能、遺留問題、重要決策、涉及的專案與技術。\n"
+            "直接輸出摘要，無需前言。\n\n"
+            f"{formatted}"
+        )
+
+        from pydantic import BaseModel as _BaseModel
+
+        class _SummaryOut(_BaseModel):
+            summary: str
+
+        llm = create_llm_client()
+        result = llm.chat_structured(
+            messages=[{"role": "user", "content": prompt}],
+            response_schema=_SummaryOut,
+        )
+
+        as_of = datetime.now(tz=timezone.utc)
+
+        # Collect metadata from compressed entries
+        projects = list({e["project"] for e in entries if e["project"]})
+        flow_types = list({e["flow_type"] for e in entries if e["flow_type"]})
+        all_tags: list[str] = []
+        for e in entries:
+            all_tags.extend(e.get("tags") or [])
+        unique_tags = list(dict.fromkeys(all_tags))
+
+        ids = [str(e["id"]) for e in entries]
+        await _journal_repo.create_summary(
+            partner_id=partner_id,
+            summary=result.summary,
+            project=projects[0] if len(projects) == 1 else None,
+            flow_type=flow_types[0] if len(flow_types) == 1 else None,
+            tags=unique_tags,
+            as_of=as_of,
+        )
+        await _journal_repo.delete_by_ids(partner_id=partner_id, ids=ids)
+    except Exception:
+        logger.warning("_compress_journal failed, skipping compression", exc_info=True)
+
 
 # Services are wired lazily after _ensure_repos() runs.
 ontology_service: OntologyService | None = None
@@ -952,8 +1035,9 @@ async def search(
             entities = [e for e in entities if _is_entity_visible(e)]
             # Apply L1 scope filter for scoped partners
             _partner_ctx = _current_partner.get() or {}
+            _is_admin = bool(_partner_ctx.get("isAdmin", False))
             _authorized_ids = list(_partner_ctx.get("authorizedEntityIds") or [])
-            if _authorized_ids:
+            if _authorized_ids and not _is_admin:
                 all_entities_for_map = await ontology_service._entities.list_all()
                 _entity_map = {e.id: e for e in all_entities_for_map if e.id}
                 _allowed: set[str] = set()
@@ -2964,6 +3048,107 @@ async def suggest_policy(
     from zenos.application.policy_suggestion_service import PolicySuggestionService
     svc = PolicySuggestionService(entity_repo=ontology_service._entities)
     return await svc.suggest(entity_id)
+
+
+# ===================================================================
+# Work Journal tools: journal_write / journal_read
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"write"},
+)
+async def journal_write(
+    summary: str,
+    project: str | None = None,
+    flow_type: str | None = None,
+    tags: list[str] | None = None,
+) -> dict:
+    """記錄工作日誌條目。
+
+    使用時機：
+    - session 或 flow 結束時呼叫，記錄本次完成的工作、遺留問題、重要決策。
+    - 讓下次 session 開始時能快速恢復 context，減少用戶重新補充資訊的需要。
+
+    summary 會自動截斷至 100 字。超過 20 則日誌時，會自動觸發壓縮（舊條目合併為摘要）。
+
+    Args:
+        summary: 工作摘要（自動截斷至 100 字）
+        project: 相關專案名稱（選填）
+        flow_type: 工作類型，例如 feature/bugfix/review/research（選填）
+        tags: 標籤列表（選填）
+
+    Returns:
+        dict — {id, created_at, compressed: bool}
+    """
+    await _ensure_journal_repo()
+    assert _journal_repo is not None
+    partner_id = _current_partner_id.get()
+
+    # Truncate summary to 100 chars without rejecting
+    summary = summary[:100]
+
+    entry_id = await _journal_repo.create(
+        partner_id=partner_id,
+        summary=summary,
+        project=project,
+        flow_type=flow_type,
+        tags=tags or [],
+    )
+    count = await _journal_repo.count(partner_id=partner_id)
+    compressed = False
+    if count > 20:
+        await _compress_journal(partner_id)
+        compressed = True
+
+    return _unified_response(
+        data={"id": entry_id, "created_at": datetime.now(timezone.utc).isoformat(), "compressed": compressed}
+    )
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def journal_read(
+    limit: int = 10,
+    project: str | None = None,
+    flow_type: str | None = None,
+) -> dict:
+    """讀取近期工作日誌。
+
+    使用時機：
+    - session 開始時呼叫，快速回顧近期工作脈絡，取代讓用戶重新補充 context。
+    - 了解上次 session 完成了什麼、遺留哪些問題、有哪些重要決策。
+
+    Args:
+        limit: 回傳筆數上限（預設 10，最大 50）
+        project: 篩選特定專案（選填）
+        flow_type: 篩選特定工作類型（選填）
+
+    Returns:
+        dict — {entries: [...], count: int, total: int}
+        每個 entry 包含：id, created_at, project, flow_type, summary, tags, is_summary
+    """
+    await _ensure_journal_repo()
+    assert _journal_repo is not None
+    partner_id = _current_partner_id.get()
+
+    limit = min(limit, 50)
+    entries, total = await _journal_repo.list_recent(
+        partner_id=partner_id,
+        limit=limit,
+        project=project,
+        flow_type=flow_type,
+    )
+    # Convert datetime fields to ISO strings for JSON serialization
+    serialized = [
+        {**e, "created_at": e["created_at"].isoformat() if hasattr(e["created_at"], "isoformat") else e["created_at"]}
+        for e in entries
+    ]
+    return _unified_response(
+        data={"entries": serialized, "count": len(serialized), "total": total}
+    )
 
 
 # ===================================================================
