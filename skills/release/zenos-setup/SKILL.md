@@ -126,7 +126,28 @@ python .claude/skills/zenos-setup/scripts/setup.py \
 
 ---
 
-## Step 3：驗證設定
+## Step 3：安裝 ZenOS Agents
+
+將 ZenOS 角色 agents 安裝到 Claude Code 全域 agents 目錄，讓 `@architect`、`@developer` 等角色可在 Claude Code 中使用。
+
+```bash
+mkdir -p ~/.claude/agents
+cp skills/agents/*.md ~/.claude/agents/
+```
+
+執行後確認安裝的 agents：
+
+```bash
+ls ~/.claude/agents/
+```
+
+應出現：architect.md、debugger.md、designer.md、developer.md、marketing.md、pm.md、qa.md
+
+> 若 `skills/agents/` 不存在（非 ZenOS 專案目錄），跳過此步驟。
+
+---
+
+## Step 4：驗證設定
 
 設定完成後，詢問用戶是否要立刻驗證：
 
