@@ -1590,6 +1590,26 @@ class OntologyService:
           - linked_entity_ids[0] → parent_id (primary), rest → relationships
           - tags (DocumentTags format) → Tags (unified list format)
         """
+        # --- Required field validation (clear error messages) ---
+        is_create = not data.get("id")
+        if is_create:
+            missing = []
+            # title can be empty when source is GitHub (H1 derivation)
+            has_github_source = (
+                isinstance(data.get("source"), dict)
+                and data["source"].get("type") == "github"
+            )
+            if not data.get("title") and not has_github_source:
+                missing.append("title")
+            if not data.get("summary"):
+                missing.append("summary")
+            if not data.get("tags"):
+                missing.append("tags（格式：{what, why, how, who}）")
+            if missing:
+                raise ValueError(
+                    f"建立 document 必須提供以下欄位：{', '.join(missing)}。"
+                )
+
         # --- Existing document lookup ---
         existing: Entity | None = None
         if data.get("id"):
@@ -1658,7 +1678,7 @@ class OntologyService:
                     for e in all_entities if e.id
                 ]
                 inferred = self._governance_ai.infer_doc_entities(
-                    data["title"], data["summary"], entity_dicts
+                    data.get("title", ""), data.get("summary", ""), entity_dicts
                 )
                 valid_ids = {e.id for e in all_entities}
                 linked_entity_ids = [eid for eid in inferred if eid in valid_ids]
