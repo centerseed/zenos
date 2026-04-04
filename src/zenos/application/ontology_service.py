@@ -2244,3 +2244,37 @@ class OntologyService:
                 )
 
         return result
+
+    async def batch_update_document_sources(
+        self,
+        updates: list[dict],
+        *,
+        atomic: bool = False,
+    ) -> dict:
+        """Batch update source URIs for multiple document entities.
+
+        Args:
+            updates: List of {"document_id": str, "new_uri": str}
+            atomic: If True, all-or-nothing via DB transaction.
+
+        Returns:
+            {"updated": [...], "not_found": [...], "errors": [...]}
+        """
+        if len(updates) > 100:
+            raise ValueError(
+                f"Batch size {len(updates)} exceeds limit of 100. "
+                f"Split into smaller batches."
+            )
+        if not updates:
+            return {"updated": [], "not_found": [], "errors": []}
+
+        for i, item in enumerate(updates):
+            if "document_id" not in item or "new_uri" not in item:
+                raise ValueError(
+                    f"updates[{i}] must have 'document_id' and 'new_uri' keys. "
+                    f"Got: {list(item.keys())}"
+                )
+
+        return await self._entities.batch_update_source_uris(
+            updates, atomic=atomic
+        )

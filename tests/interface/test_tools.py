@@ -2072,3 +2072,99 @@ class TestGovernanceGuideTool:
         # No internal model details
         assert "gemini" not in content.lower()
         assert "flash" not in content.lower()
+
+
+class TestBatchUpdateSources:
+    """Tests for the batch_update_sources MCP tool."""
+
+    async def test_happy_path(self):
+        from zenos.interface.tools import batch_update_sources
+
+        mock_result = {
+            "updated": ["doc-1", "doc-2"],
+            "not_found": [],
+            "errors": [],
+        }
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.batch_update_document_sources = AsyncMock(return_value=mock_result)
+
+            result = await batch_update_sources(
+                updates=[
+                    {"document_id": "doc-1", "new_uri": "https://github.com/org/repo/blob/main/new/path1.md"},
+                    {"document_id": "doc-2", "new_uri": "https://github.com/org/repo/blob/main/new/path2.md"},
+                ],
+                atomic=False,
+            )
+
+            assert result["status"] == "ok"
+            assert result["data"]["updated"] == ["doc-1", "doc-2"]
+            assert result["data"]["not_found"] == []
+            assert result["data"]["errors"] == []
+            mock_os.batch_update_document_sources.assert_called_once()
+
+    async def test_partial_failure_non_atomic(self):
+        from zenos.interface.tools import batch_update_sources
+
+        mock_result = {
+            "updated": ["doc-1"],
+            "not_found": ["doc-missing"],
+            "errors": [],
+        }
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.batch_update_document_sources = AsyncMock(return_value=mock_result)
+
+            result = await batch_update_sources(
+                updates=[
+                    {"document_id": "doc-1", "new_uri": "https://github.com/org/repo/blob/main/new.md"},
+                    {"document_id": "doc-missing", "new_uri": "https://github.com/org/repo/blob/main/gone.md"},
+                ],
+                atomic=False,
+            )
+
+            assert result["status"] == "ok"
+            assert "doc-1" in result["data"]["updated"]
+            assert "doc-missing" in result["data"]["not_found"]
+
+    async def test_exceeds_batch_limit(self):
+        from zenos.interface.tools import batch_update_sources
+
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.batch_update_document_sources = AsyncMock(
+                side_effect=ValueError("Batch size 101 exceeds limit of 100")
+            )
+
+            result = await batch_update_sources(
+                updates=[{"document_id": f"doc-{i}", "new_uri": f"uri-{i}"} for i in range(101)],
+            )
+
+            assert result["status"] == "rejected"
+            assert "100" in result["rejection_reason"]
+
+    async def test_atomic_mode_passed_to_service(self):
+        from zenos.interface.tools import batch_update_sources
+
+        mock_result = {"updated": ["doc-1"], "not_found": [], "errors": []}
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.batch_update_document_sources = AsyncMock(return_value=mock_result)
+
+            await batch_update_sources(
+                updates=[{"document_id": "doc-1", "new_uri": "new-uri"}],
+                atomic=True,
+            )
+
+            mock_os.batch_update_document_sources.assert_called_once_with(
+                [{"document_id": "doc-1", "new_uri": "new-uri"}],
+                atomic=True,
+            )
+
+    async def test_empty_updates(self):
+        from zenos.interface.tools import batch_update_sources
+
+        mock_result = {"updated": [], "not_found": [], "errors": []}
+        with patch("zenos.interface.tools.ontology_service") as mock_os:
+            mock_os.batch_update_document_sources = AsyncMock(return_value=mock_result)
+
+            result = await batch_update_sources(updates=[])
+
+            assert result["status"] == "ok"
+            assert result["data"]["updated"] == []

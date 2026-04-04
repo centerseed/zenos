@@ -324,6 +324,82 @@ class SqlEntityRepository:
                 json.dumps(new_status), entity_id, pid,
             )
 
+    async def batch_update_source_uris(
+        self,
+        updates: list[dict],
+        *,
+        atomic: bool = False,
+    ) -> dict:
+        """Batch update sources[0].uri for multiple document entities.
+
+        Args:
+            updates: List of {"document_id": str, "new_uri": str}
+            atomic: If True, wrap in a transaction (all-or-nothing).
+
+        Returns:
+            {"updated": [...], "not_found": [...], "errors": [...]}
+        """
+        pid = _get_partner_id()
+        updated = []
+        not_found = []
+        errors = []
+
+        async def _do_updates(conn: asyncpg.Connection):
+            for item in updates:
+                doc_id = item["document_id"]
+                new_uri = item["new_uri"]
+                try:
+                    # Check entity exists and belongs to partner
+                    row = await conn.fetchrow(
+                        f"SELECT id, sources_json FROM {SCHEMA}.entities "
+                        f"WHERE id = $1 AND partner_id = $2",
+                        doc_id, pid,
+                    )
+                    if row is None:
+                        if atomic:
+                            raise ValueError(f"Document '{doc_id}' not found")
+                        not_found.append(doc_id)
+                        continue
+
+                    # Idempotent: check if URI already matches
+                    current_sources = json.loads(row["sources_json"]) if row["sources_json"] else []
+                    if current_sources and current_sources[0].get("uri") == new_uri:
+                        updated.append(doc_id)
+                        continue
+
+                    # Extract label from new_uri
+                    new_label = new_uri.rsplit("/", 1)[-1] if "/" in new_uri else new_uri
+
+                    # Update sources[0].uri and sources[0].label
+                    if current_sources:
+                        current_sources[0]["uri"] = new_uri
+                        current_sources[0]["label"] = new_label
+                    else:
+                        current_sources = [{"uri": new_uri, "label": new_label, "type": "github"}]
+
+                    await conn.execute(
+                        f"""UPDATE {SCHEMA}.entities
+                            SET sources_json = $1::jsonb,
+                                updated_at = now()
+                            WHERE id = $2 AND partner_id = $3""",
+                        json.dumps(current_sources), doc_id, pid,
+                    )
+                    updated.append(doc_id)
+                except Exception as exc:
+                    if atomic:
+                        raise
+                    errors.append({"document_id": doc_id, "error": str(exc)})
+
+        if atomic:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await _do_updates(conn)
+        else:
+            async with self._pool.acquire() as conn:
+                await _do_updates(conn)
+
+        return {"updated": updated, "not_found": not_found, "errors": errors}
+
     async def archive_entity(self, entity_id: str) -> None:
         """Archive an entity by setting its status to 'archived' (exits search space).
 

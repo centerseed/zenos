@@ -37,6 +37,10 @@ class EntityRepository(TypingProtocol):
 
     async def archive_entity(self, entity_id: str) -> None: ...
 
+    async def batch_update_source_uris(
+        self, updates: list[dict], *, atomic: bool = False,
+    ) -> dict: ...
+
 
 class RelationshipRepository(TypingProtocol):
     """Persistence interface for skeleton-layer relationships."""

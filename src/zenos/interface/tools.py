@@ -3228,6 +3228,72 @@ async def governance_guide(
 
 
 # ===================================================================
+# Batch update sources tool
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"write"},
+    annotations={"idempotentHint": True},
+)
+async def batch_update_sources(
+    updates: list[dict],
+    atomic: bool = False,
+) -> dict:
+    """批次更新多個 document 的 source URI。
+
+    大範圍文件重構（目錄搬移、rename）後，一次更新所有受影響的 document source URI，
+    不需要逐一呼叫 write。
+
+    使用時機：
+    - 目錄搬移後修復 broken URI → batch_update_sources(updates=[...])
+    - /zenos-sync 偵測到 rename 後套用修正 → batch_update_sources(updates=proposed_fixes, atomic=True)
+
+    不要用這個工具的情境：
+    - 更新單一 document 的其他欄位 → 用 write(collection="documents")
+    - 建立新 document → 用 write(collection="documents")
+
+    Args:
+        updates: 更新清單，每個元素為 {"document_id": "entity-id", "new_uri": "新的 source URI"}。
+                 上限 100 筆。
+        atomic: false（預設）= 逐筆獨立，partial failure 不阻斷其他更新。
+                true = PostgreSQL transaction 包住整批，任一失敗全部回滾。
+                用 sync rename 修正時建議 atomic=true。
+
+    Returns:
+        {status, data: {updated: [...], not_found: [...], errors: [...]}}
+    """
+    await _ensure_services()
+    try:
+        result = await ontology_service.batch_update_document_sources(
+            updates, atomic=atomic
+        )
+
+        _audit_log(
+            event_type="ontology.documents.batch_update_sources",
+            target={"collection": "documents", "count": len(updates)},
+            changes={"input": updates, "result": result},
+        )
+
+        return _unified_response(
+            data=result,
+            warnings=[],
+        )
+    except ValueError as exc:
+        return _unified_response(
+            status="rejected",
+            data={},
+            rejection_reason=str(exc),
+        )
+    except Exception as exc:
+        return _unified_response(
+            status="error",
+            data={},
+            rejection_reason=f"Unexpected error: {exc}",
+        )
+
+
+# ===================================================================
 # Setup tool
 # ===================================================================
 
