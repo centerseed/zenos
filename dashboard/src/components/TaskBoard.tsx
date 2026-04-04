@@ -22,6 +22,8 @@ interface TaskBoardProps {
   entityNames?: Record<string, string>;
   entitiesById?: Record<string, Entity>;
   visibleStatuses?: TaskStatus[];
+  selectedTask?: Task | null;
+  onSelectTask?: (task: Task | null) => void;
   onStatusChange?: (taskId: string, newStatus: string) => Promise<void>;
   onUpdateTask?: (taskId: string, updates: Record<string, unknown>) => Promise<void>;
   onConfirmTask?: (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => Promise<void>;
@@ -35,10 +37,10 @@ const DEFAULT_COLUMN_ORDER: TaskStatus[] = [
 ];
 
 const COLUMN_LABELS: Record<string, string> = {
-  todo: "TODO",
-  in_progress: "IN PROGRESS",
-  review: "REVIEW",
-  done: "DONE",
+  todo: "待處理",
+  in_progress: "進行中",
+  review: "審查中",
+  done: "已完成",
 };
 
 const COLUMN_HEADER_COLORS: Record<string, string> = {
@@ -103,7 +105,7 @@ function DroppableColumn({
       {isEmpty ? (
         <div className={`flex flex-col items-center justify-center py-12 transition-opacity ${isOver ? "opacity-60" : "opacity-30"}`}>
           <div className={`w-10 h-10 rounded-full border-2 border-dashed mb-3 ${isOver ? "border-primary/60" : "border-muted-foreground"}`} />
-          <p className="text-[10px] font-medium uppercase tracking-tighter">No tasks</p>
+          <p className="text-[10px] font-medium tracking-tight">目前沒有任務</p>
         </div>
       ) : children}
     </div>
@@ -117,15 +119,26 @@ export function TaskBoard({
   entityNames = {},
   entitiesById = {},
   visibleStatuses = [],
+  selectedTask: controlledSelectedTask,
+  onSelectTask,
   onStatusChange,
   onUpdateTask,
   onConfirmTask,
 }: TaskBoardProps) {
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [internalSelectedTask, setInternalSelectedTask] = useState<Task | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   // Warning dialog for bad status jumps
   const [pendingDrag, setPendingDrag] = useState<{ taskId: string; newStatus: string } | null>(null);
   const [dragWarning, setDragWarning] = useState<string | null>(null);
+
+  const selectedTask = controlledSelectedTask !== undefined ? controlledSelectedTask : internalSelectedTask;
+  const setSelectedTask = (task: Task | null) => {
+    if (onSelectTask) {
+      onSelectTask(task);
+      return;
+    }
+    setInternalSelectedTask(task);
+  };
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 

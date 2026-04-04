@@ -3,6 +3,7 @@
 import type { Task } from "@/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { extractFirstImage } from "./MarkdownRenderer";
+import { getOverdueDays, getTaskRiskBadges } from "@/lib/task-risk";
 import {
   AlertTriangle,
   ArrowUp,
@@ -10,7 +11,6 @@ import {
   ArrowDown,
   Layers,
   Calendar,
-  User,
   Bot,
 } from "lucide-react";
 
@@ -42,16 +42,11 @@ function formatDate(date: Date | null): string {
   });
 }
 
-function isOverdue(task: Task): boolean {
-  if (!task.dueDate) return false;
-  if (["done", "cancelled", "archived"].includes(task.status)) return false;
-  return task.dueDate.getTime() < Date.now();
-}
-
 export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
   const thumbnail = task.description ? extractFirstImage(task.description) : null;
-  const overdue = isOverdue(task);
+  const overdue = getOverdueDays(task) !== null;
   const dueDateStr = formatDate(task.dueDate);
+  const riskBadges = getTaskRiskBadges(task);
   
   const isAgentCreated = task.creatorName?.includes("agent") || task.createdBy?.includes("agent");
   const mainName = task.assigneeName || task.assignee || task.creatorName || task.createdBy || "Unassigned";
@@ -69,7 +64,7 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
 
   return (
     <Card
-      className={`relative overflow-hidden transition-all duration-300 cursor-pointer group border-white/10 hover:border-blue-500/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.6)] hover:-translate-y-0.5 ${
+      className={`relative overflow-hidden transition-all duration-300 cursor-pointer group border-white/10 hover:border-blue-500/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.6)] hover:-translate-y-0.5 active:scale-[0.985] ${
         overdue ? "bg-red-950/10" : "bg-[#141414]"
       }`}
       onClick={() => onSelect?.(task)}
@@ -118,6 +113,19 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
                 className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/20 font-bold tracking-tight"
               >
                 {entityNames[id] ?? id.slice(0, 6)}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {riskBadges.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {riskBadges.map((badge) => (
+              <span
+                key={badge.kind}
+                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-tight ${badge.className}`}
+              >
+                {badge.label}
               </span>
             ))}
           </div>
