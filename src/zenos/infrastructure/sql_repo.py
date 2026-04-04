@@ -287,6 +287,17 @@ class SqlEntityRepository:
             )
         return [_row_to_entity(r) for r in rows]
 
+    async def list_by_ids(self, entity_ids: list[str]) -> list[Entity]:
+        if not entity_ids:
+            return []
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.entities WHERE id = ANY($1) AND partner_id = $2",
+                entity_ids, pid,
+            )
+        return [_row_to_entity(r) for r in rows]
+
     async def list_by_parent(self, parent_id: str) -> list[Entity]:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:

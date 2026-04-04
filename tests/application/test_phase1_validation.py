@@ -25,6 +25,9 @@ def _make_service(entities=None, relationships=None):
     entity_repo.list_all = AsyncMock(
         return_value=list(entities.values()) if entities else []
     )
+    entity_repo.list_by_ids = AsyncMock(
+        side_effect=lambda ids: [entities[i] for i in ids if i in entities] if entities else []
+    )
     blindspot_repo = AsyncMock()
     blindspot_repo.add = AsyncMock(side_effect=lambda b, **kw: b)
     return TaskService(

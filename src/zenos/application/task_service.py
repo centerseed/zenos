@@ -6,6 +6,7 @@ context assembly, and cascade unblocking.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -321,20 +322,25 @@ class TaskService:
                 task.completed_at = datetime.utcnow()
                 cascades = await self._cascade_unblock(task_id, conn=uow.conn)
 
-                # Phase 1: feedback engine
+                # Phase 1: feedback engine (batch to avoid N+1)
                 suggested_entity_updates: list[dict] = []
                 if task.linked_entities and self._relationships:
-                    for eid in task.linked_entities:
-                        rels = await self._relationships.list_by_entity(eid)
-                        for rel in rels:
-                            if rel.type in ("impacts", "depends_on"):
-                                target = await self._entities.get_by_id(rel.target_entity_id)
-                                if target:
-                                    suggested_entity_updates.append({
-                                        "entity_id": target.id,
-                                        "entity_name": target.name,
-                                        "reason": f"任務 '{task.title}' 完成後，相關 entity '{target.name}' 可能需要更新",
-                                    })
+                    all_rels = await asyncio.gather(
+                        *[self._relationships.list_by_entity(eid) for eid in task.linked_entities]
+                    )
+                    target_ids = list({
+                        rel.target_entity_id
+                        for rels in all_rels for rel in rels
+                        if rel.type in ("impacts", "depends_on")
+                    })
+                    if target_ids:
+                        targets = await self._entities.list_by_ids(target_ids)
+                        for t in targets:
+                            suggested_entity_updates.append({
+                                "entity_id": t.id,
+                                "entity_name": t.name,
+                                "reason": f"任務 '{task.title}' 完成後，相關 entity '{t.name}' 可能需要更新",
+                            })
 
                 # Resolve linked blindspot if present
                 if task.linked_blindspot:
