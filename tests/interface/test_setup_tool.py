@@ -258,7 +258,7 @@ class TestSetupToolNoPlatform:
 
 
 class TestSetupToolClaudeCode:
-    """DC-2: setup(platform='claude_code') → skill_files + slash_commands + claude_md_addition."""
+    """DC-2: setup(platform='claude_code') → manifest + slash_commands + claude_md_addition."""
 
     async def test_action_is_install(self):
         from zenos.interface.tools import setup
@@ -270,11 +270,19 @@ class TestSetupToolClaudeCode:
         result = await setup(platform="claude_code")
         assert "bundle_version" in result
 
-    async def test_payload_has_skill_files(self):
+    async def test_has_manifest(self):
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code")
-        assert "skill_files" in result["payload"]
-        assert len(result["payload"]["skill_files"]) == 11  # 4 governance + 7 workflow
+        assert "manifest" in result
+        assert "skills" in result["manifest"]
+        assert isinstance(result["manifest"]["skills"], list)
+
+    async def test_payload_has_no_skill_files(self):
+        """skill_files should no longer be in payload (avoids token limit)."""
+        from zenos.interface.tools import setup
+        result = await setup(platform="claude_code")
+        assert "skill_files" not in result["payload"]
+        assert "skill_files" not in result
 
     async def test_payload_has_slash_commands(self):
         from zenos.interface.tools import setup
@@ -287,6 +295,13 @@ class TestSetupToolClaudeCode:
         result = await setup(platform="claude_code")
         assert "claude_md_addition" in result["payload"]
         assert len(result["payload"]["claude_md_addition"]) > 0
+
+    async def test_instructions_contain_github_fetch(self):
+        """Instructions must tell agent to fetch from GitHub."""
+        from zenos.interface.tools import setup
+        result = await setup(platform="claude_code")
+        instructions_text = " ".join(result["instructions"])
+        assert "github" in instructions_text.lower() or "WebFetch" in instructions_text
 
     async def test_platform_field(self):
         from zenos.interface.tools import setup
@@ -333,7 +348,7 @@ class TestSetupToolClaudeWeb:
 
 
 class TestSetupToolCodex:
-    """DC-4: setup(platform='codex') → skill_files + agents_md_addition."""
+    """DC-4: setup(platform='codex') → manifest + agents_md_addition."""
 
     async def test_action_is_install(self):
         from zenos.interface.tools import setup
@@ -345,17 +360,30 @@ class TestSetupToolCodex:
         result = await setup(platform="codex")
         assert "bundle_version" in result
 
-    async def test_payload_has_skill_files(self):
+    async def test_has_manifest(self):
         from zenos.interface.tools import setup
         result = await setup(platform="codex")
-        assert "skill_files" in result["payload"]
-        assert len(result["payload"]["skill_files"]) > 0
+        assert "manifest" in result
+        assert "skills" in result["manifest"]
+
+    async def test_payload_has_no_skill_files(self):
+        """skill_files should no longer be in payload."""
+        from zenos.interface.tools import setup
+        result = await setup(platform="codex")
+        assert "skill_files" not in result["payload"]
+        assert "skill_files" not in result
 
     async def test_payload_has_agents_md_addition(self):
         from zenos.interface.tools import setup
         result = await setup(platform="codex")
         assert "agents_md_addition" in result["payload"]
         assert len(result["payload"]["agents_md_addition"]) > 0
+
+    async def test_instructions_contain_github_fetch(self):
+        from zenos.interface.tools import setup
+        result = await setup(platform="codex")
+        instructions_text = " ".join(result["instructions"])
+        assert "github" in instructions_text.lower() or "WebFetch" in instructions_text
 
 
 class TestSetupToolUnsupportedPlatform:
@@ -411,35 +439,40 @@ class TestSetupToolBundleVersion:
 
 
 class TestSetupToolSkillSelection:
-    """DC-7: skill_selection='task_only' excludes document and l2 governance skills."""
+    """DC-7: skill_selection affects claude_md_addition governance lines."""
 
-    async def test_task_only_excludes_document_governance(self):
+    async def test_task_only_claude_md_excludes_document_governance(self):
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code", skill_selection="task_only")
-        skill_files = result["payload"]["skill_files"]
-        assert "skills/governance/document-governance.md" not in skill_files
-        assert "skills/governance/l2-knowledge-governance.md" not in skill_files
+        claude_md = result["payload"]["claude_md_addition"]
+        assert "document-governance.md" not in claude_md
+        assert "l2-knowledge-governance.md" not in claude_md
 
-    async def test_task_only_includes_task_governance(self):
+    async def test_task_only_claude_md_includes_task_governance(self):
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code", skill_selection="task_only")
-        skill_files = result["payload"]["skill_files"]
-        assert "skills/governance/task-governance.md" in skill_files
+        claude_md = result["payload"]["claude_md_addition"]
+        assert "task-governance.md" in claude_md
 
-    async def test_doc_task_excludes_l2(self):
+    async def test_doc_task_claude_md_excludes_l2(self):
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code", skill_selection="doc_task")
-        skill_files = result["payload"]["skill_files"]
-        assert "skills/governance/l2-knowledge-governance.md" not in skill_files
-        assert "skills/governance/document-governance.md" in skill_files
+        claude_md = result["payload"]["claude_md_addition"]
+        assert "l2-knowledge-governance.md" not in claude_md
+        assert "document-governance.md" in claude_md
 
-    async def test_full_includes_all_governance(self):
+    async def test_full_claude_md_includes_all_governance(self):
         from zenos.interface.tools import setup
         result = await setup(platform="claude_code", skill_selection="full")
-        skill_files = result["payload"]["skill_files"]
-        assert "skills/governance/document-governance.md" in skill_files
-        assert "skills/governance/l2-knowledge-governance.md" in skill_files
-        assert "skills/governance/task-governance.md" in skill_files
+        claude_md = result["payload"]["claude_md_addition"]
+        assert "document-governance.md" in claude_md
+        assert "l2-knowledge-governance.md" in claude_md
+        assert "task-governance.md" in claude_md
+
+    async def test_skill_selection_stored_in_response(self):
+        from zenos.interface.tools import setup
+        result = await setup(platform="claude_code", skill_selection="task_only")
+        assert result["skill_selection"] == "task_only"
 
 
 class TestSetupToolSkipOverview:
