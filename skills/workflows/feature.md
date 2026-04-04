@@ -1,15 +1,34 @@
+---
+name: feature
+description: >
+  從需求討論到任務建立的完整功能開發流程。PM 和 Architect 互相確認 Spec 後，才交付開發。
+  當使用者說「我有新功能要做」「幫我規劃這個功能」「寫 spec 然後開任務」「/feature」時使用。
+  流程：PM 訪談 → PM ↔ Architect 交叉確認 → Spec Reviewer 審查 → 用戶確認 → Architect 建任務。
+version: 1.0.0
+---
+
 # /feature — 功能開發流程
 
 從需求討論到任務建立的完整流程。PM 和 Architect 互相確認 Spec 後，才交付開發。
 
 ---
 
-## Phase 1：PM 需求訪談
+## Phase 1：PM 需求訪談 + 文件治理
 
 叫起 PM agent（依照 PM skill 流程）：
 - 與用戶訪談，釐清目標、用戶、範圍、優先級
 - 草擬 Feature Spec 各章節
 - 逐章讓用戶確認
+
+### Step 1.5：文件治理（必做）
+
+PM 草擬完成後，**必須按文件治理規則將 Spec 正式建檔**：
+
+1. **取得治理規則**：呼叫 `governance_guide(topic="document")` 取得最新文件規範
+2. **寫入檔案**：將 Spec 寫入 `docs/specs/SPEC-{slug}.md`，含標準 frontmatter（doc_id, type, ontology_entity, status=draft, version, date）
+3. **確認掛載 L2**：每份文件必須掛載到一個 L2 entity。找不到 L2？先用 `governance_guide(topic="entity")` 確認規則後建立 L2，再掛文件
+4. **註冊 ontology**：用 `write(collection="documents", data={...})` 註冊到 ZenOS，檢查回傳的 `similar_items` 確認無重複
+5. **若有重複**：不建新文件，改為更新既有文件（supersede 或 merge）
 
 ---
 
@@ -94,11 +113,16 @@ PM 將完整 Spec 呈給用戶逐章確認。
 
 ---
 
-## Phase 4：Architect 建立實作計畫
+## Phase 4：Architect 建立實作計畫（遵循任務治理）
 
 叫起 Architect agent（依照 Architect skill 流程）：
 - 讀取剛確認的 Spec
 - 技術設計
+- **建票前必須遵循任務治理規則**（呼叫 `governance_guide(topic="task")` 或讀 `skills/governance/task-governance.md`）：
+  1. **去重**：先 `search(collection="tasks", query="關鍵字")` 確認無重複票
+  2. **linked_entities**：先 `search(collection="entities")` 找到 ID，填入 `linked_entities`（server 會 reject 不存在的 ID）
+  3. **acceptance_criteria**：每張票必須有可驗收的 AC（`list[str]`）
+  4. **title**：動詞開頭（實作、修復、設計、調查…）
 - 建立 tasks（`mcp__zenos__task(action="create", ...)`）
 - 分配 plan_id + plan_order
 
@@ -106,6 +130,9 @@ PM 將完整 Spec 呈給用戶逐章確認。
 
 ## 完成條件
 
+- [ ] Spec 檔案已寫入 `docs/specs/` 並含標準 frontmatter
+- [ ] Spec 已用 `write(collection="documents")` 註冊 ontology
 - [ ] Spec 狀態為 `Approved`
 - [ ] 所有 P0 需求都有對應 task（status: todo）
 - [ ] 每個 task 有 linked_entities + acceptance_criteria
+- [ ] 建票前已執行去重檢查
