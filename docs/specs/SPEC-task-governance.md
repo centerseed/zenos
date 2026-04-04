@@ -177,6 +177,8 @@ Step 3：上傳成功後，將 `{ type, name, attachment_id }` 帶入 `task(acti
 > 規則內容透過 `governance_guide("task")` 提供給任何 MCP client。
 > 內部智慧邏輯（task 信號→blindspot 轉換、linked_entities 推薦、anti-pattern 偵測）不在本 spec 範圍，見 `SPEC-governance-feedback-loop`。
 > 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
+>
+> **分散治理模型（ADR-013）：** 本 spec 的規則分兩層執行——Agent 端負責撰寫 title / description / AC；Server 端負責動詞開頭檢查（reject）、AC 數量提醒（warning）、去重（回傳 similar）、linked_entities 存在性（reject）、狀態機強制（reject）、review 時 result 必填（reject）、知識反饋建議（suggested_feedback）。Server 端執法無法被 Agent 繞過。
 
 ## 背景與動機
 

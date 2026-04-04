@@ -221,9 +221,9 @@ class GovernanceAI:
         try:
             await self._usage_log_repo.write_usage_log(
                 partner_id=str(partner_id),
-                tool_name=str(payload.get("feature", "")),
-                entity_count=0,
-                token_count=int(payload.get("tokens_in", 0)),
+                feature=str(payload.get("feature", "")),
+                tokens_in=int(payload.get("tokens_in", 0)),
+                tokens_out=int(payload.get("tokens_out", 0)),
                 model=str(payload.get("model", "")),
             )
         except Exception:

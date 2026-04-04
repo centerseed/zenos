@@ -1,10 +1,10 @@
 ---
 type: SPEC
 id: SPEC-task-view-clarity
-status: Approved
+status: Under Review
 l2_entity: action-layer
 created: 2026-03-27
-updated: 2026-03-27
+updated: 2026-04-01
 ---
 
 # Feature Spec: Task 畫面可讀性與跨專案狀態清晰化
@@ -187,6 +187,36 @@ AC-R8:
 - `SPEC-task-governance`：沿用 task 狀態語義與驗收治理，不重定義生命周期。
 - `SPEC-partner-context-fix`：沿用 partner/project scope 前提，不重定義租戶隔離策略。
 
+### P0-5（R9）晨報（Morning Report）
+
+每位使用者進入 `/tasks` 時，第一屏頂部顯示個人化晨報區塊，只呈現與當前使用者相關的風險任務。
+
+顯示三個 bucket：
+- **即將到期**：assigned to me，due_date 在未來 3 天內，狀態非 done/cancelled/archived
+- **已逾期**：assigned to me，due_date < now，狀態非 done/cancelled/archived
+- **建的任務—無人動**：created by me，assignee 已指定，status 仍為 todo，updated_at 超過 48h
+
+AC-R9:
+1. Given 使用者登入，When 進入 `/tasks`，Then 晨報區塊顯示在第一屏，內容僅包含當前使用者相關任務。
+2. Given 晨報區塊，When 點擊任一任務，Then 開啟 TaskDetailDrawer。
+3. Given 使用者無任何到期、逾期、或停滯任務，When 進入 `/tasks`，Then 晨報顯示「今日無待處理風險」空態。
+4. Given 晨報中「建的任務—無人動」bucket，When 計算，Then 僅以 `updated_at > 48h 前` 且 `status = todo` 且 `assignee != null` 為條件，不包含無 assignee 的任務。
+
+### P0-6（R10）TaskCard 風險標記
+
+TaskCard 上直接顯示到期與停滯的視覺警示 badge，不需點開詳情即可判斷風險。
+
+- **逾期**：due_date < now，狀態非 done/cancelled/archived → 紅色「逾期 N 天」
+- **即將到期**：due_date 在未來 3 天內，狀態非 done/cancelled/archived → 橘色「N 天後到期」
+- **未開始**：status = todo，assignee 存在，updated_at > 48h → 灰色「未開始 Nh」
+
+AC-R10:
+1. Given task 的 due_date 在 2 天後，status = in_progress，When 在 Kanban 檢視，Then 卡片顯示橘色「2 天後到期」badge。
+2. Given task 的 due_date 在昨天，status = todo，When 在 Kanban 檢視，Then 卡片顯示紅色「逾期 1 天」badge。
+3. Given task status = todo，assignee 存在，updated_at = 72h 前，When 在 Kanban 檢視，Then 卡片顯示灰色「未開始 72h」badge。
+4. Given task 狀態為 done/cancelled/archived，When 在 Kanban 檢視，Then 不顯示任何風險 badge，無論 due_date 為何。
+
 ## Open Questions
 
 1. `review` 是否需要進一步拆分「待審核」與「被退回」顯示（目前以 `rejectionReason` 偵測）？此項列為 P2 後續討論，不阻塞本 spec。
+2. 晨報的「無人動 48h」門檻是否應可由用戶設定（例如 24h / 72h）？Phase 0 先固定 48h，後續討論。

@@ -14,6 +14,8 @@ updated: 2026-03-27
 > 規則內容透過 `governance_guide("document")` 提供給任何 MCP client。
 > 內部智慧邏輯（過時偵測演算法、關聯推斷、去重匹配）不在本 spec 範圍，見 `SPEC-governance-feedback-loop`。
 > 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
+>
+> **分散治理模型（ADR-013）：** 本 spec 的規則分兩層執行——Agent 端負責撰寫內容、填 frontmatter、判斷新建 vs 更新；Server 端負責 frontmatter 格式驗證（reject）、查重（回傳 similar）、ontology_entity 存在性（reject）、supersede 原子操作、狀態轉換合法性（reject）、Approved 品質閘（強制）。Server 端執法無法被 Agent 繞過。
 
 ## 背景與動機
 

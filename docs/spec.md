@@ -1,6 +1,6 @@
 # ZenOS 治理憲法（Governance Constitution）
 
-> 日期：2026-03-27
+> 日期：2026-04-04（更新：加入分散治理模型章節）
 > 狀態：Canonical SSOT
 > 定位：ZenOS 所有治理規則的最高原則。任何治理 spec 都必須遵循此框架。
 
@@ -188,6 +188,8 @@
      │
      ├─→ ② Server 端驗證（MCP tools）
      │     規則改了但驗證沒跟上 = 規則形同虛設。
+     │     依分散治理模型（ADR-013），Server 是結構執法的主要執行者。
+     │     Server 端 reject 的規則不依賴 Agent 自律。
      │
      ├─→ ③ Skills（Agent 行為）
      │     Skill 是 agent 執行治理規則的入口，必須與 spec 同步。
@@ -351,30 +353,86 @@ Skill 的品質門檻：
 
 ---
 
-## 六、演進路徑
+## 六、分散治理模型
+
+> **決策依據：** [`ADR-013-distributed-governance`](decisions/ADR-013-distributed-governance.md)
+
+### 核心原則
+
+**Agent 做語意判斷，Server 做結構執法。**
+
+治理責任明確分配到兩個執行層：
 
 ```
-Phase 0（現在）
-  規則以 prose 寫在 spec 文件中。
-  傳播靠人工 checklist。
-  Agent 靠讀 skill 遵循規則。
+┌─────────────────────────────────────────────────────────┐
+│ 治理責任分配                                               │
+│                                                          │
+│  Agent 端（需要 LLM）         Server 端（不需要 LLM）      │
+│  ─────────────────          ─────────────────────────   │
+│  • 理解內容、判斷分層          • 結構驗證（格式/欄位）        │
+│  • 撰寫 summary / impacts    • 狀態機合法性（reject）       │
+│  • 填寫欄位（frontmatter）    • 智慧去重（similar_items）   │
+│  • 回應 Server 的建議         • 傳播觸發（impacts 下游）    │
+│                               • 健康度計分（TBD 累積）      │
+│                               • 建議引擎（suggested_*）    │
+│                               • 品質閘（Approved 強制）    │
+└─────────────────────────────────────────────────────────┘
+```
 
-Phase 1（結構化）
-  觸發條件：protocols collection 首次建立，或傳播遺漏造成生產問題。
-  規則同時寫入 protocols collection（machine-readable）。
-  MCP tools 讀 protocol 做 server 端驗證。
-  Skill 可從 protocol 自動生成或校驗。
+### 各層具體分配
 
-Phase 2（自動治理）
+#### L2 知識節點
+
+| Agent 端 | Server 端 |
+|---------|---------|
+| 三問判斷、撰寫 summary、撰寫 impacts | impacts ≥ 1 檢查（reject）、verb 非空（reject）、重複偵測（回傳 similar）、stale 偵測（analyze）、entry 歸納觸發 |
+
+#### L3 文件
+
+| Agent 端 | Server 端 |
+|---------|---------|
+| 撰寫內容、填 frontmatter、判斷新建 vs 更新 | frontmatter 格式驗證（reject）、查重（回傳 similar）、ontology_entity 存在性（reject）、supersede 原子操作、狀態轉換合法性（reject）、Approved 品質閘 |
+
+#### Task
+
+| Agent 端 | Server 端 |
+|---------|---------|
+| 撰寫 title / description / AC | 動詞開頭檢查（reject）、AC 數量提醒（warning）、去重（回傳 similar）、linked_entities 存在性（reject）、狀態機強制（reject）、review 時 result 必填（reject）、知識反饋建議（suggested_feedback） |
+
+### 對 Skill 的影響
+
+- **現在：** Skill = 完整流程腳本（含格式驗證、狀態機邏輯），通常 100–300 行
+- **目標：** Skill = 語意判斷指引（判斷什麼是 L2、怎麼寫 impacts），< 50 行
+- **開放競爭策略：** Skill 開放可複製 → Agent 端指引；Server 驗證閉源 → 核心壁壘
+
+---
+
+## 七、演進路徑
+
+```
+Phase 0.5（當前推進）
+  豐富 MCP 回傳值：warnings、suggested_actions、similar_items。
+  Agent 開始讀取並回應 Server 的建議。
+  Skill 逐步精簡（移除已由 Server 驗證的規則）。
+
+Phase 1（Server 執法）
+  觸發條件：Phase 0.5 MCP 回傳值覆蓋率達到所有治理規則。
+  Server 端狀態機強制（非法轉換 reject）。
+  supersede 原子操作（一次呼叫完成舊→新）。
+  similar_items 在 write 時自動回傳。
+  Skill 精簡為 < 50 行純語意指引。
+
+Phase 2（智慧建議）
   觸發條件：Phase 1 穩定運行，且多個外部客戶導入。
-  analyze 自動偵測違規。
-  規則變更自動觸發傳播 pipeline。
-  Governance lint 成為 CI 的一部分。
+  analyze 自動建議修復方向。
+  Governance lint API（可整合 CI）。
+  治理 Dashboard（健康度可視化）。
+  suggested_feedback 自動從 task result 萃取知識建議。
 ```
 
 ---
 
-## 七、ZenOS 文件索引
+## 八、ZenOS 文件索引
 
 本文件（憲法）之下，ZenOS 的受治理文件分布如下：
 
@@ -388,6 +446,7 @@ Phase 2（自動治理）
 | [`ADR-007-entity-architecture`](decisions/ADR-007-entity-architecture.md) | ADR | Entity 架構決策（三層模型、Task 不是 entity） |
 | [`ADR-008-dashboard-multi-view`](decisions/ADR-008-dashboard-multi-view.md) | ADR | Dashboard 多 View 架構決策 |
 | [`ADR-009-permission-model`](decisions/ADR-009-permission-model.md) | ADR | 權限模型 Phase 0 設計（已被 SPEC-agent-aware-permission 取代） |
+| [`ADR-013-distributed-governance`](decisions/ADR-013-distributed-governance.md) | ADR | 分散治理模型（Agent 語意判斷 vs Server 結構執法） |
 
 ### 治理規則（本憲法的實例）
 
@@ -427,7 +486,7 @@ Phase 2（自動治理）
 
 ---
 
-## 八、完成定義
+## 九、完成定義
 
 1. 本文件已列入 `REF-active-spec-surface`。
 2. 現行三份治理 spec 的六維映射表通過交叉比對驗證。

@@ -17,7 +17,9 @@ updated: 2026-03-28
 
 **版本：** 1.2（2026-03-27）
 **作者：** PM
-**相關 ADR：** ADR-002（Knowledge Ontology North Star）
+**相關 ADR：** ADR-002（Knowledge Ontology North Star）、ADR-013（分散治理模型）
+
+> **分散治理模型（ADR-013）：** 本 spec 的規則分兩層執行——標注「Agent 端」的規則由 Agent 透過 Skill 執行（語意判斷）；標注「Server 端」的規則由 MCP Server 強制驗證（結構執法，無法被 Agent 繞過）。
 
 ---
 
