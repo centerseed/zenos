@@ -441,6 +441,9 @@ def _build_governance_hints(
     *,
     warnings: list[str] | None = None,
     suggested_follow_up_tasks: list[dict] | None = None,
+    similar_items: list[dict] | None = None,
+    stale_candidates: list[dict] | None = None,
+    suggested_entity_updates: list[dict] | None = None,
 ) -> dict:
     """Return additive governance hints for caller guidance."""
     warnings = warnings or []
@@ -451,8 +454,10 @@ def _build_governance_hints(
 
     return {
         "duplicate_signals": duplicate_signals,
-        "stale_candidates": [],
+        "stale_candidates": stale_candidates or [],
         "suggested_follow_up_tasks": suggested_follow_up_tasks or [],
+        "similar_items": similar_items or [],
+        "suggested_entity_updates": suggested_entity_updates or [],
     }
 
 
@@ -1353,8 +1358,10 @@ async def write(
                 linked_entity_ids=[entity_id] if entity_id else []
             )
             response["governance_hints"] = _build_governance_hints(
-                warnings=result.warnings or []
+                warnings=result.warnings or [],
+                similar_items=result.similar_items,
             )
+            response["similar_items"] = result.similar_items or []
             # --- Visibility change audit ---
             if _before_visibility is not None:
                 result_entity = result.entity if hasattr(result, "entity") else None
@@ -1746,6 +1753,7 @@ async def confirm(
                     for c in (result.cascade_updates or [])
                 ]
             )
+            response["suggested_actions"] = []  # Phase 0.5 placeholder — will be populated in Phase 1
             _audit_log(
                 event_type="task.confirm",
                 target={"collection": collection, "id": id},

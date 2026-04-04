@@ -22,6 +22,10 @@ type: impacts, verb: 校準   → 跑步科學指標 [校準] Race Prediction
 type: impacts, verb: 觸發   → 跑步科學指標 [觸發] 行銷定位策略
 ```
 
+> **Server 端驗證：** `confirm` 時 Server 會強制驗證 impacts≥1，建立前須確保至少寫出一條具體影響。Agent 不需要再手動計數，但語意品質（影響描述是否清晰）仍由 agent 判斷。
+
+> **重複節點檢查：** `write` 回傳包含 `similar_items` 欄位，列出名稱或語意相近的既有 entity。建立前應檢查是否已有等效概念，避免 ontology 膨脹。
+
 ## 影響鏈（impact_chain）
 `get(collection="entities", id=...)` 回傳包含 `impact_chain`（BFS 多跳，最多 5 跳）：
 ```

@@ -297,7 +297,12 @@ impact_chain: [
   {from_name: "Race Prediction", verb: "觸發", to_name: "行銷定位策略"}
 ]
 ```
-代表：定價模型改動 → 影響預測校準 → 最終觸發行銷策略調整""",
+代表：定價模型改動 → 影響預測校準 → 最終觸發行銷策略調整
+
+## Server 端驗證（Phase 0.5）
+- confirm entity 時，Server 會檢查是否有 ≥1 條有效 impacts relationship；不足會 reject 並回傳 IMPACTS_REQUIRED
+- write entity 回傳會包含 `similar_items` 欄位（相似 entity 列表），agent 應在確認建立前先檢查是否重複
+- 支援 `supersedes` 欄位，可在 write 時原子取代既有 entity（新建 + 標記舊 entity 為 superseded 一次完成）""",
     },
 
     "document": {
@@ -395,7 +400,10 @@ approved → superseded（被新版取代時，保留原文件，建立指向）
 - REF: 參考資料 —— 外部研究、競品分析、不可改變的參考
 - SC: Script / 腳本 —— 自動化腳本的說明文件
 
-選型準則：看受眾和目的，不看篇幅。一份短的「為什麼」= ADR，長的「怎麼做」= TD。""",
+選型準則：看受眾和目的，不看篇幅。一份短的「為什麼」= ADR，長的「怎麼做」= TD。
+
+## Server 端回傳（Phase 0.5）
+- write document 回傳會包含 `similar_items` 欄位（標題相似的既有文件列表），agent 應在建立前確認沒有重複文件。""",
 
         3: """# L3 文件治理規則 v1.0（含完整範例）
 
@@ -611,7 +619,12 @@ Task 完成後的知識應流回 ontology：
 - 與被阻塞依賴（blocked_by）的關係
 - linked_entities 的 staleness（對應 L2 是否過時）
 - 上次更新時間（越久未動越往前排）
-推薦結果僅供參考，人類可覆蓋。""",
+推薦結果僅供參考，人類可覆蓋。
+
+## Server 端驗證（Phase 0.5）
+- Task title 必須 ≥4 字元，且不能以名詞性停用詞開頭（如「的」「一個」等）；不符合會被 Server reject
+- linked_entities 中的 entity ID 必須實際存在；任何不存在的 ID 會被 Server reject 並回傳錯誤列表
+- confirm task 回傳會包含 `suggested_actions` 欄位，列出後續建議操作（如知識回寫、關聯 task）""",
 
         3: """# Task 治理規則 v1.0（含完整範例）
 

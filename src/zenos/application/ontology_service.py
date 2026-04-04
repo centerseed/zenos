@@ -16,6 +16,7 @@ from collections import Counter
 logger = logging.getLogger(__name__)
 
 from zenos.domain.governance import apply_tag_confidence, check_split_criteria, find_tech_terms_in_summary
+from zenos.domain.validation import find_similar_items
 from zenos.domain.source_uri_validator import validate_source_uri, BARE_DOMAIN_BLACKLIST
 from zenos.infrastructure.github_adapter import parse_github_url, GitHubAdapter
 from zenos.domain.models import (
@@ -64,6 +65,7 @@ class UpsertEntityResult:
     tag_confidence: TagConfidence
     split_recommendation: SplitRecommendation | None
     warnings: list[str] | None = None
+    similar_items: list[dict] | None = None
 
 
 @dataclass
@@ -1447,11 +1449,17 @@ class OntologyService:
             else:
                 warnings.append("GovernanceAI 關聯推斷失敗，未自動建立關係")
 
+        # Compute similar_items for duplicate detection hints
+        all_entities_for_sim = await self._entities.list_all()
+        items_for_sim = [{"id": e.id, "name": e.name} for e in all_entities_for_sim if e.id != saved.id]
+        similar = find_similar_items(saved.name, items_for_sim) or None
+
         return UpsertEntityResult(
             entity=saved,
             tag_confidence=tag_confidence,
             split_recommendation=split_rec,
             warnings=warnings or None,
+            similar_items=similar,
         )
 
     async def add_relationship(

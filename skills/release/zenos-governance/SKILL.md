@@ -5,7 +5,7 @@ description: >
   「掃描結果不滿意，請自動修復」時使用。此 skill 會編排 zenos-setup、
   zenos-capture、zenos-sync 與 MCP tools（search/get/write/task/confirm/analyze），
   以最少人工介入完成治理閉環。適用於 Claude/ChatGPT/Gemini 等 agent 流程。
-version: 1.1.0
+version: 1.2.0
 ---
 
 # zenos-governance
@@ -18,6 +18,17 @@ version: 1.1.0
 - 先結構後內容：先修 entity/relationship，再修摘要與標籤。
 - 增量優先：除首次建構外，禁止重複全量掃描。
 - 任務閉環：治理問題要轉成 task，交付後用 confirm 驗收。
+
+## 0.5) Server 端治理能力（Phase 0.5）
+
+Server 現在會主動執行以下治理檢查，agent 不需重複驗證：
+
+- **結構驗證**：L2 confirm 時強制 impacts≥1；Task title 長度 + 停用詞檢查
+- **智慧去重**：write entity/document 回傳 `similar_items` 欄位，列出相似項目
+- **擴充回傳**：`governance_hints` 包含 `similar_items`、`stale_candidates`、`suggested_entity_updates`
+- **建議引擎**：confirm task 回傳 `suggested_actions`
+
+Agent 應讀取這些回傳欄位，據此決定下一步操作，而非自行重新檢查。
 
 ## 1) 觸發條件
 

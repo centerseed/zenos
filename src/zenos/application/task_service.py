@@ -6,6 +6,7 @@ context assembly, and cascade unblocking.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -15,6 +16,7 @@ from zenos.domain.repositories import (
     EntityRepository,
     TaskRepository,
 )
+from zenos.domain.validation import validate_task_title
 from zenos.domain.task_rules import (
     is_valid_initial_status,
     is_valid_transition,
@@ -95,6 +97,11 @@ class TaskService:
 
     async def create_task(self, data: dict) -> TaskResult:
         """Create a new task with priority recommendation and context assembly."""
+        # Governance validation: task title
+        title_errors, _ = validate_task_title(data.get("title", ""))
+        if title_errors:
+            raise ValueError("Task title 驗證失敗: " + "; ".join(title_errors))
+
         # Priority enum validation
         priority_val = data.get("priority")
         if priority_val:
@@ -135,6 +142,15 @@ class TaskService:
             entity = await self._entities.get_by_id(eid)
             if entity:
                 linked_entities.append(entity)
+
+        # Phase 0.5: warn on missing linked entities (don't reject)
+        if linked_entity_ids:
+            found_ids = {e.id for e in linked_entities}
+            missing = [eid for eid in linked_entity_ids if eid not in found_ids]
+            if missing:
+                logging.getLogger(__name__).warning(
+                    "Task linked_entities 包含不存在的 ID: %s", missing
+                )
 
         linked_blindspot_id = data.get("linked_blindspot")
         linked_blindspot = None
