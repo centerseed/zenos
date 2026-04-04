@@ -1,6 +1,6 @@
 ---
 name: zenos-sync
-version: 3.0.0
+version: 3.1.0
 ---
 
 # Git 增量同步工作流程
@@ -12,6 +12,129 @@ version: 3.0.0
 - 專案已有初始 ontology（首次建構請用 `/zenos-capture {目錄}`）
 
 ## 步驟
+
+Step 0 預設在每次執行時先跑。若使用者執行 `/zenos-sync --audit` 或 `/zenos-sync audit`，則只跑 Step 0，不執行後續 Step 1–6。
+
+### Step 0：Source Audit（預設執行）
+
+#### 0.1 拉取所有有 sources 的項目
+
+```python
+mcp__zenos__search(collection="entities", limit=500)
+mcp__zenos__search(collection="documents", limit=500)
+```
+
+過濾出 `sources` 欄位非空的所有 entity 和 document。
+
+#### 0.2 逐項檢查 sources[]
+
+對每個項目的每一筆 source，依序做三項檢查：
+
+**a. label 檢查（bad_label）**
+
+條件：`label == "github"` 或 `label` 為空字串或 null
+
+修正方式：從 URI 尾段提取正確檔名。
+- 例：`https://github.com/.../blob/main/docs/SPEC-agent-system.md` → `SPEC-agent-system.md`
+- 例：`github:docs/SPEC-agent-system.md` → `SPEC-agent-system.md`
+
+分類為 `bad_label`，記錄原 label 和建議修正值。
+
+**b. URI 有效性檢查（broken / renamed）**
+
+僅對 `type=github` 且本地有對應 repo 的 source 執行。
+
+```bash
+# 從 URI 提取 path 部分，然後檢查是否存在
+git ls-files -- {path}
+
+# 若不存在，嘗試找改名記錄
+git log --follow --diff-filter=R --summary -- {path}
+```
+
+- 檔案存在 → 跳過
+- 檔案不存在，且 `git log --follow` 找到新路徑 → 分類為 `renamed`，記錄舊 URI 和新路徑
+- 檔案不存在，且找不到改名記錄 → 分類為 `broken`
+
+**c. 重複 source 檢查（duplicate）**
+
+在同一 parent entity 的所有 document 中，找出多筆 source 指向相同 URI 的情況。
+分類為 `duplicate`，列出所有重複項（entity id + document id + URI）。
+
+#### 0.3 產出稽核報告
+
+直接輸出到用戶：
+
+```
+Source Audit 結果
+─────────────────────────────────
+🔴 broken:    N 筆 — URI 指向已刪除的檔案（將自動清除）
+🟡 bad_label: N 筆 — label 將自動修正
+🟠 renamed:   N 筆 — URI 將自動更新為新路徑
+🟠 duplicate: N 筆 — 列出重複項供參考（不自動處理）
+✅ healthy:   N 筆
+```
+
+重複項列表範例：
+```
+duplicate 清單：
+  - entity "定價模型" → documents [doc-uuid-A, doc-uuid-B] 均指向 docs/SPEC-pricing.md
+```
+
+#### 0.4 自動修正
+
+依序執行修正，每筆修正後記錄結果：
+
+**bad_label**：更新 source 的 label 為從 URI 提取的檔名
+```python
+mcp__zenos__write(
+  collection="documents",  # 或 "entities"
+  data={
+    "id": "{item-id}",
+    "sources": [/* 更新後的 sources 陣列，label 已修正 */]
+  }
+)
+```
+
+**broken**：移除該 source
+- 若該 source 是 document 的唯一 source → 同時將 document status 改為 `archived`
+- 若 document 還有其他 source → 僅移除該筆 source
+
+```python
+mcp__zenos__write(
+  collection="documents",
+  data={
+    "id": "{doc-id}",
+    "sources": [/* 移除 broken source 後的陣列 */],
+    "status": "archived"  # 僅在唯一 source 被移除時加入
+  }
+)
+```
+
+**renamed**：更新 URI 和 label 為新路徑
+```python
+mcp__zenos__write(
+  collection="documents",
+  data={
+    "id": "{doc-id}",
+    "sources": [/* URI 更新為新路徑，label 更新為新檔名 */]
+  }
+)
+```
+
+**duplicate**：只報告，不自動處理。
+
+#### 0.5 顯示修正結果摘要
+
+```
+修正完成：
+  ✅ bad_label 已修正：N 筆
+  ✅ broken 已清除：N 筆（其中 M 筆 document 已標記為 archived）
+  ✅ renamed 已更新：N 筆
+  ⚠️  duplicate 需人工確認：N 筆（見上方清單）
+```
+
+---
 
 ### Step 1：掃描 git log 找最近變更
 

@@ -124,3 +124,28 @@ write(
 
 陷阱 3：supersede 時刪除舊文件
 → 不刪除，改 status=superseded。歷史決策需要可追溯。
+
+## Source 稽核規則
+
+### source.label 規範
+
+- **必須是實際檔名**，例如 `SPEC-agent-system.md`、`ADR-007-entity-architecture.md`
+- **不可只寫 type**：`"github"` 是無意義的 label，Dashboard 顯示時毫無資訊量
+- 若 label 為空或等於 type 名稱（如 "github"），視為 `bad_label`，應從 URI 尾段提取正確檔名
+
+提取規則：取 URI 最後一個 `/` 之後的部分作為 label。
+- `https://github.com/org/repo/blob/main/docs/SPEC-pricing.md` → `SPEC-pricing.md`
+- `github:docs/ADR-007-entity-architecture.md` → `ADR-007-entity-architecture.md`
+
+### source.uri 規範
+
+- 必須指向**有效的檔案位置**，不可指向已刪除或已改名的路徑
+- 對 `type=github` 的 source，可用 `git ls-files` 驗證路徑是否存在
+- 若檔案已改名，應更新 URI 為新路徑（可用 `git log --follow --diff-filter=R` 追蹤）
+- 若檔案已刪除且無改名記錄，應移除該 source；若為文件的唯一 source，應將文件 status 改為 `archived`
+
+### 稽核觸發時機
+
+每次執行 `/zenos-sync` 時，**Step 0: Source Audit 預設自動執行**，在正式增量同步前先完成 source 連結的清理。
+
+若只想執行稽核而不做增量同步，使用 `/zenos-sync --audit`。
