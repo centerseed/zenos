@@ -12,6 +12,16 @@ version: 0.2.0
 
 ## ZenOS 治理
 
+### 啟動時：建立 bug 追蹤任務前先搜尋
+
+```python
+# 確認是否已有相同 bug 的任務
+mcp__zenos__search(query="bug 關鍵字", collection="tasks", status="todo,in_progress")
+```
+
+若找到相同 bug → 更新現有 task，不重複建票。
+若無 → 建新 bug task。
+
 若當前專案有 `skills/governance/` 目錄且需要建票追蹤此 bug：
 
 ```python
@@ -44,6 +54,9 @@ mcp__zenos__task(
 
 > 若 `skills/governance/` 不存在，跳過 task 治理流程。
 > 最終驗收由 Architect 或 QA 透過 `confirm(collection="tasks")` 執行。
+
+> Debug 完成後若需要 code fix，建立新 task（status: todo）交給 Developer，而不是自己直接修（除非 bug 是單行 hotfix）。
+> Production hotfix 流程：Debugger 確認根因 → Developer 修復 → QA 驗收 → Architect 部署。
 
 ## Iron Law
 

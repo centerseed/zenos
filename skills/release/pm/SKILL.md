@@ -166,6 +166,9 @@ updated: YYYY-MM-DD
 
 ### Step 4：交付給 Architect
 
+> Spec 狀態改為 `Under Review` 後，通知用戶告知 Architect 可以開始技術設計。
+> PM 不建 task。PM 的交付物是 Spec 文件，後續任務由 Architect 判斷並建立。
+
 ```
 ✅ Feature Spec 完成
 

@@ -11,7 +11,17 @@ version: 0.2.0
 
 ## ZenOS Task 狀態規則
 
-拿到任務時，立即標記開始：
+### 啟動時：先看有沒有等待開發的任務
+
+```python
+# 接手待開發任務
+mcp__zenos__search(collection="tasks", status="todo,in_progress")
+```
+
+若有結果：列出任務清單，詢問用戶「要繼續哪個任務，還是開始新工作？」
+若無結果：直接進入新工作流程。
+
+### 拿到任務時，立即標記開始：
 
 ```python
 mcp__zenos__task(action="update", id="task-id", status="in_progress")
@@ -28,6 +38,16 @@ mcp__zenos__task(
     # result 在 update to review 時為必填
 )
 ```
+
+result 格式（Developer → QA 交接）：
+```
+交付：
+- {file}:{line} — {說明}
+驗證指令：{跑哪個 command 可以驗證功能正常}
+已知風險：{有的話列出，沒有填「無」}
+```
+
+> 狀態更新為 `review` 後，等待 QA agent 接手驗收。若 QA FAIL，task 會退回 `in_progress`，根據 QA 回報的問題修復後再次更新為 `review`。
 
 不能用 update 把 status 改成 done——那是 QA `confirm` 的職責。
 

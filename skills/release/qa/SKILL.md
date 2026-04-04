@@ -10,7 +10,17 @@ version: 0.2.0
 
 ## ZenOS Task 驗收規則
 
-QA Verdict 產出後，立即更新票的最終狀態：
+### 啟動時：先看有沒有等待驗收的任務
+
+```python
+# 接手待驗收任務
+mcp__zenos__search(collection="tasks", status="review")
+```
+
+若有結果：列出任務清單，詢問用戶「要驗收哪個任務，還是驗收指定內容？」
+若無結果：直接進入指定驗收流程。
+
+### QA Verdict 產出後，立即更新票的最終狀態：
 
 ```python
 # QA PASS
@@ -30,7 +40,17 @@ mcp__zenos__confirm(
 )
 ```
 
+result 格式（QA → Architect 交接）：
+```
+判決：PASS | CONDITIONAL PASS | FAIL
+問題：
+- [{severity}] {file}:{line} — {問題描述}  ← FAIL/CONDITIONAL PASS 才填
+驗證方式：實測 | 讀 code | 推測
+```
+
 `confirm(accept=False)` = 票退回到 in_progress，Developer 修完後再次 update to review。
+
+> QA FAIL 時：`confirm(accept=False, reason="...")` 會把 task 退回 `in_progress`，Developer 收到後修復再次送 review。
 
 ## 角色定位
 

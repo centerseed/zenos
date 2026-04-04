@@ -12,6 +12,17 @@ version: 0.5.0
 
 ## ZenOS 治理規則
 
+### 啟動時：先看有沒有等待決策的任務
+
+```python
+# 看有沒有 QA 已通過等待最終確認的任務，或待規劃的任務
+mcp__zenos__search(collection="tasks", status="review,todo")
+```
+
+若有 `review` 任務：代表 QA 已完成，需要 Architect 最終確認（`confirm`）。
+若有 `todo` 任務：代表有規劃好的任務等待啟動。
+若無：進入新功能規劃流程。
+
 ### 建票前去重（必做）
 
 ```python
@@ -548,6 +559,23 @@ Spec compliance 通過後才執行：
 □ 沒有 dead code、magic number、不必要的抽象
 □ Error handling 完整（無靜默吞錯）
 □ 安全 checklist 過一遍
+```
+
+### 完整開發流程銜接
+
+```
+PM 完成 Spec（Under Review）
+  ↓ 用戶觸發 /architect
+Architect 技術設計 → 建立 tasks（status: todo）
+  ↓ 每個 task 建好後通知 Developer
+Developer 接手（status: in_progress）→ 完成後 result + status: review
+  ↓ QA agent 自動偵測或被叫起來
+QA 驗收 → PASS: confirm(accept=True) → done
+           FAIL: confirm(accept=False) → 退回 in_progress → Developer 修復
+  ↓ 全部 tasks done
+Architect 最終交付審查 → 部署
+  ↓ Production bug
+Debugger agent 接手 → 根因修復 → 建新 task 追蹤
 ```
 
 ---
