@@ -138,11 +138,40 @@ mcp__zenos__write(
 
 ### Step 1：掃描 git log 找最近變更
 
+**1a. 一般變更（新增/修改）**
+
 ```bash
 git log --name-only --since="30 days ago" -- "docs/**/*.md" "src/**/*.py"
 ```
 
 列出最近 30 天修改過的文件清單。若指定外部專案路徑，先 `cd` 至該目錄再執行。
+
+**1b. 搬移/改名偵測（rename/move）**
+
+```bash
+git log --since="30 days ago" --diff-filter=R -M --summary -- "docs/**/*.md"
+```
+
+找出被搬移或改名的文件。特別注意以下模式：
+
+- **搬入 `archive/` 或 `docs/archive/`** → 該文件已被歸檔，ontology document 必須同步：
+  1. 將 document status 改為 `archived`
+  2. 清除該 document 的 sources（因為原路徑已失效）
+  3. 如果 document 有 linked entity，entity 的 sources 中指向該檔案的條目也要清除
+
+- **搬移到其他目錄（非 archive）** → 更新 source URI 和 label 為新路徑
+
+```python
+# 歸檔範例
+mcp__zenos__write(
+  collection="documents",
+  id="{doc-id}",
+  data={
+    "status": "archived",
+    "sources": []
+  }
+)
+```
 
 ### Step 2：讀取變更文件
 
