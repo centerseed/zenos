@@ -37,6 +37,7 @@ from zenos.application.task_service import TaskService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.models import Blindspot, Entity, EntityType, Relationship, Task
 from zenos.infrastructure.context import current_partner_id
+from zenos.infrastructure.unit_of_work import UnitOfWork
 from zenos.infrastructure.sql_repo import (  # composition root
     PostgresTaskCommentRepository,
     SqlBlindspotRepository,
@@ -844,6 +845,7 @@ def _make_task_service() -> TaskService:
         entity_repo=_entity_repo,
         blindspot_repo=_blindspot_repo,
         relationship_repo=_relationship_repo,
+        uow_factory=lambda: UnitOfWork(_task_repo._pool),
     )
 
 

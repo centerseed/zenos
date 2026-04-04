@@ -4,23 +4,35 @@ from zenos.application.task_service import TaskService
 from zenos.domain.validation import validate_document_frontmatter
 
 
+def _make_uow_factory():
+    """Create a mock UoW factory for testing."""
+    uow = MagicMock()
+    uow.conn = MagicMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=False)
+    return lambda: uow
+
+
 def _make_service(entities=None, relationships=None):
     task_repo = AsyncMock()
-    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.get_by_id = AsyncMock(return_value=None)
     entity_repo = AsyncMock()
     entity_repo.get_by_id = AsyncMock(
         side_effect=lambda eid: entities.get(eid) if entities else None
     )
+    entity_repo.upsert = AsyncMock(side_effect=lambda e, **kw: e)
     entity_repo.list_all = AsyncMock(
         return_value=list(entities.values()) if entities else []
     )
     blindspot_repo = AsyncMock()
+    blindspot_repo.add = AsyncMock(side_effect=lambda b, **kw: b)
     return TaskService(
         task_repo=task_repo,
         entity_repo=entity_repo,
         blindspot_repo=blindspot_repo,
         relationship_repo=relationships,
+        uow_factory=_make_uow_factory(),
     )
 
 

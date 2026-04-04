@@ -134,8 +134,14 @@ def _make_stateful_pool() -> tuple[MagicMock, dict[str, list[dict]]]:
         async def __aexit__(self, *a):
             pass
 
+        def __await__(self):
+            async def _r():
+                return conn
+            return _r().__await__()
+
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=_AsyncCtx())
+    pool.release = AsyncMock()
     return pool, store
 
 
@@ -364,8 +370,14 @@ class TestPartnerDataScope:
             async def __aexit__(self, *a):
                 pass
 
+            def __await__(self):
+                async def _r():
+                    return conn_spy
+                return _r().__await__()
+
         pool_spy = MagicMock()
         pool_spy.acquire = MagicMock(return_value=_AsyncCtx())
+        pool_spy.release = AsyncMock()
 
         repo = SqlEntityRepository(pool_spy)
 

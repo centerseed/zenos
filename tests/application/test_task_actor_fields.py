@@ -1,11 +1,20 @@
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from zenos.application.task_service import TaskService
 from zenos.domain.models import Task
+
+
+def _make_uow_factory():
+    """Create a mock UoW factory for testing."""
+    uow = MagicMock()
+    uow.conn = MagicMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=False)
+    return lambda: uow
 
 
 def _make_review_task(**overrides) -> Task:
@@ -63,12 +72,12 @@ async def test_update_and_confirm_set_updated_by():
     )
     task_repo = AsyncMock()
     task_repo.get_by_id = AsyncMock(return_value=existing)
-    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.list_blocked_by = AsyncMock(return_value=[])
     entity_repo = AsyncMock()
     blindspot_repo = AsyncMock()
 
-    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+    svc = TaskService(task_repo, entity_repo, blindspot_repo, uow_factory=_make_uow_factory())
 
     updated = await svc.update_task("task-1", {"description": "x", "updated_by": "actor-2"})
     assert updated.task.updated_by == "actor-2"
@@ -83,12 +92,12 @@ async def test_confirm_task_accepts_entity_entries_param_without_error():
     existing = _make_review_task()
     task_repo = AsyncMock()
     task_repo.get_by_id = AsyncMock(return_value=existing)
-    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.list_blocked_by = AsyncMock(return_value=[])
     entity_repo = AsyncMock()
     blindspot_repo = AsyncMock()
 
-    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+    svc = TaskService(task_repo, entity_repo, blindspot_repo, uow_factory=_make_uow_factory())
 
     entries = [
         {"entity_id": "ent-1", "type": "insight", "content": "Some valuable insight"},
@@ -134,12 +143,12 @@ async def test_confirm_task_entity_entries_none_is_backward_compatible():
     existing = _make_review_task()
     task_repo = AsyncMock()
     task_repo.get_by_id = AsyncMock(return_value=existing)
-    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.list_blocked_by = AsyncMock(return_value=[])
     entity_repo = AsyncMock()
     blindspot_repo = AsyncMock()
 
-    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+    svc = TaskService(task_repo, entity_repo, blindspot_repo, uow_factory=_make_uow_factory())
 
     result = await svc.confirm_task("task-review", accepted=True, updated_by="reviewer-1")
 

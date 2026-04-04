@@ -58,6 +58,7 @@ from zenos.application.ontology_service import OntologyService, _collect_subtree
 from zenos.application.source_service import SourceService
 from zenos.application.task_service import TaskService
 from zenos.infrastructure.llm_client import create_llm_client
+from zenos.infrastructure.unit_of_work import UnitOfWork
 from zenos.infrastructure.sql_repo import (
     SqlBlindspotRepository,
     SqlDocumentRepository,
@@ -315,6 +316,7 @@ async def _ensure_services() -> None:
             blindspot_repo=blindspot_repo,
             governance_ai=_governance_ai,
             relationship_repo=relationship_repo,
+            uow_factory=lambda: UnitOfWork(task_repo._pool),
         )
 
 

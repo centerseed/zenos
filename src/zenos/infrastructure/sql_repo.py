@@ -11,6 +11,7 @@ import json
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
 
@@ -78,6 +79,38 @@ def _get_partner_id() -> str:
     if not pid:
         raise RuntimeError("No partner_id in context")
     return pid
+
+
+# ---------------------------------------------------------------------------
+# Connection helpers
+# ---------------------------------------------------------------------------
+
+
+@asynccontextmanager
+async def _acquire(pool: asyncpg.Pool, conn: asyncpg.Connection | None):
+    """Yield an existing connection or acquire one from the pool."""
+    if conn is not None:
+        yield conn
+        return
+    c = await pool.acquire()
+    try:
+        yield c
+    finally:
+        await pool.release(c)
+
+
+@asynccontextmanager
+async def _acquire_with_tx(pool: asyncpg.Pool, conn: asyncpg.Connection | None):
+    """Like _acquire, but also starts a transaction when using a pool connection."""
+    if conn is not None:
+        yield conn
+        return
+    c = await pool.acquire()
+    try:
+        async with c.transaction():
+            yield c
+    finally:
+        await pool.release(c)
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +226,7 @@ class SqlEntityRepository:
                 )
         return [_row_to_entity(r) for r in rows]
 
-    async def upsert(self, entity: Entity) -> Entity:
+    async def upsert(self, entity: Entity, *, conn: asyncpg.Connection | None = None) -> Entity:
         pid = _get_partner_id()
         now = _now()
         entity.updated_at = now
@@ -208,8 +241,8 @@ class SqlEntityRepository:
             "who": entity.tags.who if isinstance(entity.tags.who, list) else [entity.tags.who],
         }
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(
+        async with _acquire(self._pool, conn) as _conn:
+            await _conn.execute(
                 f"""
                 INSERT INTO {SCHEMA}.entities (
                     id, partner_id, name, type, level, parent_id, status, summary,
@@ -354,14 +387,14 @@ class SqlRelationshipRepository:
             )
         return _row_to_relationship(row) if row else None
 
-    async def add(self, rel: Relationship) -> Relationship:
+    async def add(self, rel: Relationship, *, conn: asyncpg.Connection | None = None) -> Relationship:
         pid = _get_partner_id()
         now = _now()
         if rel.id is None:
             rel.id = _new_id()
 
-        async with self._pool.acquire() as conn:
-            await conn.execute(
+        async with _acquire(self._pool, conn) as _conn:
+            await _conn.execute(
                 f"""
                 INSERT INTO {SCHEMA}.relationships (
                     id, partner_id, source_entity_id, target_entity_id,
@@ -768,7 +801,7 @@ class SqlBlindspotRepository:
             links.setdefault(lr["blindspot_id"], []).append(lr["entity_id"])
         return [_row_to_blindspot(r, links.get(r["id"], [])) for r in rows]
 
-    async def add(self, blindspot: Blindspot) -> Blindspot:
+    async def add(self, blindspot: Blindspot, *, conn: asyncpg.Connection | None = None) -> Blindspot:
         pid = _get_partner_id()
         now = _now()
         if blindspot.created_at is None:  # type: ignore[comparison-overlap]
@@ -776,10 +809,9 @@ class SqlBlindspotRepository:
         if blindspot.id is None:
             blindspot.id = _new_id()
 
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    f"""
+        async with _acquire_with_tx(self._pool, conn) as _conn:
+            await _conn.execute(
+                f"""
                 INSERT INTO {SCHEMA}.blindspots (
                     id, partner_id, description, severity, suggested_action,
                     status, confirmed_by_user, created_at, updated_at
@@ -791,21 +823,21 @@ class SqlBlindspotRepository:
                     updated_at=EXCLUDED.updated_at
                 WHERE blindspots.partner_id = EXCLUDED.partner_id
                 """,
-                    blindspot.id, pid, blindspot.description, blindspot.severity,
-                    blindspot.suggested_action, blindspot.status,
-                    blindspot.confirmed_by_user, blindspot.created_at, now,
+                blindspot.id, pid, blindspot.description, blindspot.severity,
+                blindspot.suggested_action, blindspot.status,
+                blindspot.confirmed_by_user, blindspot.created_at, now,
+            )
+            # Sync blindspot_entities join table
+            await _conn.execute(
+                f"DELETE FROM {SCHEMA}.blindspot_entities WHERE blindspot_id = $1 AND partner_id = $2",
+                blindspot.id, pid,
+            )
+            if blindspot.related_entity_ids:
+                await _conn.executemany(
+                    f"INSERT INTO {SCHEMA}.blindspot_entities (blindspot_id, entity_id, partner_id)"
+                    f" VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                    [(blindspot.id, eid, pid) for eid in blindspot.related_entity_ids],
                 )
-                # Sync blindspot_entities join table
-                await conn.execute(
-                    f"DELETE FROM {SCHEMA}.blindspot_entities WHERE blindspot_id = $1 AND partner_id = $2",
-                    blindspot.id, pid,
-                )
-                if blindspot.related_entity_ids:
-                    await conn.executemany(
-                        f"INSERT INTO {SCHEMA}.blindspot_entities (blindspot_id, entity_id, partner_id)"
-                        f" VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-                        [(blindspot.id, eid, pid) for eid in blindspot.related_entity_ids],
-                    )
         return blindspot
 
     async def list_unconfirmed(self) -> list[Blindspot]:
@@ -962,7 +994,7 @@ class SqlTaskRepository:
             linked_entities, blocked_by = await self._fetch_task_relations(conn, task_id, pid)
         return _row_to_task(row, linked_entities, blocked_by)
 
-    async def upsert(self, task: Task) -> Task:
+    async def upsert(self, task: Task, *, conn: asyncpg.Connection | None = None) -> Task:
         pid = _get_partner_id()
         now = _now()
         task.updated_at = now
@@ -970,10 +1002,9 @@ class SqlTaskRepository:
             task.id = _new_id()
             task.created_at = now
 
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute(
-                    f"""
+        async with _acquire_with_tx(self._pool, conn) as _conn:
+            await _conn.execute(
+                f"""
                 INSERT INTO {SCHEMA}.tasks (
                     id, partner_id, title, description, status, priority,
                     priority_reason, assignee, assignee_role_id, created_by, updated_by,
@@ -1017,40 +1048,40 @@ class SqlTaskRepository:
                     completed_at=EXCLUDED.completed_at
                 WHERE tasks.partner_id = EXCLUDED.partner_id
                 """,
-                    task.id, pid, task.title, task.description, task.status,
-                    task.priority, task.priority_reason, task.assignee,
-                    task.assignee_role_id, task.created_by, task.updated_by,
-                    task.plan_id, task.plan_order, _dumps(task.depends_on_task_ids),
-                    task.linked_protocol, task.linked_blindspot,
-                    task.source_type, _dumps(task.source_metadata), task.context_summary, task.due_date,
-                    task.blocked_reason, _dumps(task.acceptance_criteria),
-                    task.completed_by, task.confirmed_by_creator,
-                    task.rejection_reason, task.result, task.project, task.project_id,
-                    _dumps(task.attachments),
-                    task.created_at, task.updated_at, task.completed_at,
+                task.id, pid, task.title, task.description, task.status,
+                task.priority, task.priority_reason, task.assignee,
+                task.assignee_role_id, task.created_by, task.updated_by,
+                task.plan_id, task.plan_order, _dumps(task.depends_on_task_ids),
+                task.linked_protocol, task.linked_blindspot,
+                task.source_type, _dumps(task.source_metadata), task.context_summary, task.due_date,
+                task.blocked_reason, _dumps(task.acceptance_criteria),
+                task.completed_by, task.confirmed_by_creator,
+                task.rejection_reason, task.result, task.project, task.project_id,
+                _dumps(task.attachments),
+                task.created_at, task.updated_at, task.completed_at,
+            )
+            # Sync task_entities join table
+            await _conn.execute(
+                f"DELETE FROM {SCHEMA}.task_entities WHERE task_id = $1 AND partner_id = $2",
+                task.id, pid,
+            )
+            if task.linked_entities:
+                await _conn.executemany(
+                    f"INSERT INTO {SCHEMA}.task_entities (task_id, entity_id, partner_id)"
+                    f" VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                    [(task.id, eid, pid) for eid in task.linked_entities],
                 )
-                # Sync task_entities join table
-                await conn.execute(
-                    f"DELETE FROM {SCHEMA}.task_entities WHERE task_id = $1 AND partner_id = $2",
-                    task.id, pid,
+            # Sync task_blockers join table
+            await _conn.execute(
+                f"DELETE FROM {SCHEMA}.task_blockers WHERE task_id = $1 AND partner_id = $2",
+                task.id, pid,
+            )
+            if task.blocked_by:
+                await _conn.executemany(
+                    f"INSERT INTO {SCHEMA}.task_blockers (task_id, blocker_task_id, partner_id)"
+                    f" VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+                    [(task.id, bid, pid) for bid in task.blocked_by],
                 )
-                if task.linked_entities:
-                    await conn.executemany(
-                        f"INSERT INTO {SCHEMA}.task_entities (task_id, entity_id, partner_id)"
-                        f" VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-                        [(task.id, eid, pid) for eid in task.linked_entities],
-                    )
-                # Sync task_blockers join table
-                await conn.execute(
-                    f"DELETE FROM {SCHEMA}.task_blockers WHERE task_id = $1 AND partner_id = $2",
-                    task.id, pid,
-                )
-                if task.blocked_by:
-                    await conn.executemany(
-                        f"INSERT INTO {SCHEMA}.task_blockers (task_id, blocker_task_id, partner_id)"
-                        f" VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-                        [(task.id, bid, pid) for bid in task.blocked_by],
-                    )
         return task
 
     async def find_task_by_attachment_id(self, attachment_id: str) -> Task | None:

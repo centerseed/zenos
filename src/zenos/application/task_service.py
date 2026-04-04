@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from zenos.domain.models import Blindspot, EntityType, Task, TaskPriority, TaskStatus
 from zenos.domain.repositories import (
@@ -86,12 +87,14 @@ class TaskService:
         document_repo: object | None = None,  # deprecated, kept for backward compat
         governance_ai: object | None = None,
         relationship_repo: object | None = None,
+        uow_factory: Any | None = None,
     ) -> None:
         self._tasks = task_repo
         self._entities = entity_repo
         self._blindspots = blindspot_repo
         self._governance_ai = governance_ai
         self._relationships = relationship_repo
+        self._uow_factory = uow_factory
 
     # ──────────────────────────────────────────
     # Create
@@ -312,57 +315,58 @@ class TaskService:
         cascades: list[CascadeUpdate] = []
 
         if accepted:
-            task.status = TaskStatus.DONE
-            task.confirmed_by_creator = True
-            task.completed_at = datetime.utcnow()
-            cascades = await self._cascade_unblock(task_id)
+            async with self._uow_factory() as uow:
+                task.status = TaskStatus.DONE
+                task.confirmed_by_creator = True
+                task.completed_at = datetime.utcnow()
+                cascades = await self._cascade_unblock(task_id, conn=uow.conn)
 
-            # Phase 1: feedback engine
-            suggested_entity_updates: list[dict] = []
-            if task.linked_entities and self._relationships:
-                for eid in task.linked_entities:
-                    rels = await self._relationships.list_by_entity(eid)
-                    for rel in rels:
-                        if rel.type in ("impacts", "depends_on"):
-                            target = await self._entities.get_by_id(rel.target_entity_id)
-                            if target:
-                                suggested_entity_updates.append({
-                                    "entity_id": target.id,
-                                    "entity_name": target.name,
-                                    "reason": f"任務 '{task.title}' 完成後，相關 entity '{target.name}' 可能需要更新",
-                                })
+                # Phase 1: feedback engine
+                suggested_entity_updates: list[dict] = []
+                if task.linked_entities and self._relationships:
+                    for eid in task.linked_entities:
+                        rels = await self._relationships.list_by_entity(eid)
+                        for rel in rels:
+                            if rel.type in ("impacts", "depends_on"):
+                                target = await self._entities.get_by_id(rel.target_entity_id)
+                                if target:
+                                    suggested_entity_updates.append({
+                                        "entity_id": target.id,
+                                        "entity_name": target.name,
+                                        "reason": f"任務 '{task.title}' 完成後，相關 entity '{target.name}' 可能需要更新",
+                                    })
 
-            # Resolve linked blindspot if present
-            if task.linked_blindspot:
-                bs = await self._blindspots.get_by_id(task.linked_blindspot)
-                if bs and bs.status != "resolved":
-                    bs.status = "resolved"
-                    await self._blindspots.add(bs)  # re-add to persist
+                # Resolve linked blindspot if present
+                if task.linked_blindspot:
+                    bs = await self._blindspots.get_by_id(task.linked_blindspot)
+                    if bs and bs.status != "resolved":
+                        bs.status = "resolved"
+                        await self._blindspots.add(bs, conn=uow.conn)
 
-            # Mark related document entities as stale when entities are outdated
-            if mark_stale_entity_ids:
-                for eid in mark_stale_entity_ids:
-                    child_entities = await self._entities.list_by_parent(eid)
-                    for child in child_entities:
-                        if child.type == EntityType.DOCUMENT and child.status != "stale":
-                            child.status = "stale"
-                            await self._entities.upsert(child)
+                # Mark related document entities as stale when entities are outdated
+                if mark_stale_entity_ids:
+                    for eid in mark_stale_entity_ids:
+                        child_entities = await self._entities.list_by_parent(eid)
+                        for child in child_entities:
+                            if child.type == EntityType.DOCUMENT and child.status != "stale":
+                                child.status = "stale"
+                                await self._entities.upsert(child, conn=uow.conn)
 
-            # Create new blindspot discovered during task completion
-            if new_blindspot:
-                bs_obj = Blindspot(
-                    description=new_blindspot.get("description", ""),
-                    severity=new_blindspot.get("severity", "yellow"),
-                    related_entity_ids=new_blindspot.get("related_entity_ids", []),
-                    suggested_action=new_blindspot.get("suggested_action", ""),
-                    confirmed_by_user=False,
-                )
-                await self._blindspots.add(bs_obj)
+                # Create new blindspot discovered during task completion
+                if new_blindspot:
+                    bs_obj = Blindspot(
+                        description=new_blindspot.get("description", ""),
+                        severity=new_blindspot.get("severity", "yellow"),
+                        related_entity_ids=new_blindspot.get("related_entity_ids", []),
+                        suggested_action=new_blindspot.get("suggested_action", ""),
+                        confirmed_by_user=False,
+                    )
+                    await self._blindspots.add(bs_obj, conn=uow.conn)
 
-            task.updated_at = datetime.utcnow()
-            if updated_by:
-                task.updated_by = updated_by
-            saved = await self._tasks.upsert(task)
+                task.updated_at = datetime.utcnow()
+                if updated_by:
+                    task.updated_by = updated_by
+                saved = await self._tasks.upsert(task, conn=uow.conn)
             return TaskResult(task=saved, cascade_updates=cascades, suggested_entity_updates=suggested_entity_updates)
         else:
             if not rejection_reason:
@@ -417,7 +421,12 @@ class TaskService:
     # Internal helpers
     # ──────────────────────────────────────────
 
-    async def _cascade_unblock(self, completed_task_id: str) -> list[CascadeUpdate]:
+    async def _cascade_unblock(
+        self,
+        completed_task_id: str,
+        *,
+        conn: object | None = None,
+    ) -> list[CascadeUpdate]:
         """When a task completes, unblock tasks that were waiting for it."""
         blocked_tasks = await self._tasks.list_blocked_by(completed_task_id)
         cascades: list[CascadeUpdate] = []
@@ -430,7 +439,7 @@ class TaskService:
             if not bt.blocked_by and bt.status == TaskStatus.IN_PROGRESS:
                 bt.blocked_reason = None
                 bt.updated_at = datetime.utcnow()
-                await self._tasks.upsert(bt)
+                await self._tasks.upsert(bt, conn=conn)
                 cascades.append(CascadeUpdate(
                     task_id=bt.id or "",
                     change="in_progress (unblocked)",
@@ -439,7 +448,7 @@ class TaskService:
             else:
                 # Still blocked by other tasks, just remove the completed one
                 bt.updated_at = datetime.utcnow()
-                await self._tasks.upsert(bt)
+                await self._tasks.upsert(bt, conn=conn)
 
         return cascades
 

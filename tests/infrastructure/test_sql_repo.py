@@ -64,20 +64,11 @@ def _make_pool(fetchrow=None, fetch=None, execute=None, executemany=None):
 
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=_AsyncContextManager(conn))
+    pool.release = AsyncMock()
     return pool, conn
 
 
-class _AsyncContextManager:
-    """Minimal async context manager wrapping a value."""
-
-    def __init__(self, value):
-        self._value = value
-
-    async def __aenter__(self):
-        return self._value
-
-    async def __aexit__(self, *args):
-        pass
+from tests.conftest import AsyncContextManager as _AsyncContextManager
 
 
 # ─────────────────────────────────────────────────────────────────────────────

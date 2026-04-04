@@ -27,15 +27,7 @@ from zenos.infrastructure.sql_repo import SqlToolEventRepository
 PARTNER_ID = "partner_test_123"
 
 
-class _AsyncContextManager:
-    def __init__(self, value):
-        self._value = value
-
-    async def __aenter__(self):
-        return self._value
-
-    async def __aexit__(self, *args):
-        pass
+from tests.conftest import AsyncContextManager as _AsyncContextManager
 
 
 def _make_pool(fetch=None, execute=None):
