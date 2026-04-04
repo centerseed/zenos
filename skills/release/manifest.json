@@ -83,6 +83,27 @@
       "path": "debugger",
       "files": ["SKILL.md"],
       "owner": "Barry"
+    },
+    {
+      "name": "feature",
+      "version": "1.0.0",
+      "path": "workflows/feature",
+      "files": ["feature.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "debug",
+      "version": "1.0.0",
+      "path": "workflows/debug",
+      "files": ["debug.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "triage",
+      "version": "1.0.0",
+      "path": "workflows/triage",
+      "files": ["triage.md"],
+      "owner": "Barry"
     }
   ]
 }
