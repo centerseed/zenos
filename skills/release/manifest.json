@@ -30,7 +30,7 @@
     },
     {
       "name": "zenos-governance",
-      "version": "1.0.0",
+      "version": "1.2.0",
       "path": "zenos-governance",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -74,6 +74,13 @@
       "name": "qa",
       "version": "0.2.0",
       "path": "qa",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "debugger",
+      "version": "0.1.0",
+      "path": "debugger",
       "files": ["SKILL.md"],
       "owner": "Barry"
     }

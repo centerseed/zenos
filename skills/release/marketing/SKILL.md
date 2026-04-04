@@ -9,16 +9,40 @@ version: 0.2.0
 
 # Marketing（通用）
 
-## ZenOS 治理（按需讀取）
+## ZenOS 治理規則
 
-若當前專案有 `skills/governance/` 目錄（透過 `/zenos-setup` 安裝），
-且需要撰寫受治理文件（landing page spec、content strategy doc 等），**必須先用 Read tool 讀取文件治理規則**：
+### 文件 Frontmatter（必填）
 
-| 操作場景 | SSOT 文件 | 何時讀取 |
-|----------|-----------|---------|
-| 寫正式行銷文件 | `skills/governance/document-governance.md` | 寫之前 |
+```yaml
+---
+doc_id: {type}-{slug}
+title: 標題
+type: SPEC | ADR | TD | REF
+ontology_entity: 對應 L2 entity slug（不確定填 TBD）
+status: draft
+version: "0.1"
+date: YYYY-MM-DD
+supersedes: null
+---
+```
 
-> 若 `skills/governance/` 不存在，跳過治理流程。
+### 寫完文件後同步 ZenOS
+
+```python
+mcp__zenos__write(
+    collection="documents",
+    data={
+        "doc_id": "SPEC-feature-slug",
+        "title": "標題",
+        "type": "SPEC",  # SPEC | ADR | TD | REF
+        "ontology_entity": "entity-slug",
+        "status": "draft",
+        "source": {"uri": "docs/specs/SPEC-feature-slug.md"},
+    }
+)
+```
+
+> 若 MCP 不可用（未設定或連線失敗），跳過治理流程。
 
 ## 角色定位
 

@@ -8,16 +8,29 @@ version: 0.2.0
 
 # QA（通用）
 
-## ZenOS 治理（按需讀取）
+## ZenOS Task 驗收規則
 
-若當前專案有 `skills/governance/` 目錄（透過 `/zenos-setup` 安裝），
-執行對應操作前**必須先用 Read tool 讀取該文件完整內容**再執行：
+QA Verdict 產出後，立即更新票的最終狀態：
 
-| 操作場景 | SSOT 文件 | 何時讀取 |
-|----------|-----------|---------|
-| 驗收 task、判斷 AC 通過標準 | `skills/governance/task-governance.md` | 驗收前 |
+```python
+# QA PASS
+mcp__zenos__confirm(
+    collection="tasks",
+    id="task-id",
+    accept=True,
+    result="QA Verdict: PASS。所有 P0 通過，X 項測試全過，無 Critical 問題。"
+)
 
-> 若 `skills/governance/` 不存在，跳過治理流程。
+# QA FAIL
+mcp__zenos__confirm(
+    collection="tasks",
+    id="task-id",
+    accept=False,
+    result="QA Verdict: FAIL。Critical: AC2 未達標，缺少錯誤路徑測試，需退回 Developer 修復。"
+)
+```
+
+`confirm(accept=False)` = 票退回到 in_progress，Developer 修完後再次 update to review。
 
 ## 角色定位
 
@@ -51,6 +64,22 @@ version: 0.2.0
 ### 4. 不跳過部署驗證
 
 > 如果 scope 包含部署，部署後的服務可用性是 QA 的驗收範圍。
+
+### 5. 整合測試優先於 Unit Test Mock
+
+> Unit test 告訴你「程式邏輯對不對」，整合測試告訴你「系統真的能不能用」。兩者都要，但整合測試不能省。
+
+- 跨越 API boundary 的流程 → 必須有整合測試（不是 mock 掉 API）
+- DB 操作 → 用真實 test DB，不要 mock repository
+- 發現某功能只有 mock 測試、沒有整合測試 → 標記為 Major 問題
+
+### 6. 前端驗收必須用真實瀏覽器或 App，不得用 unit test 替代
+
+> 「component render 沒有 crash」不等於「用戶可以完成操作」。
+
+- Web 功能 → 必須用 Playwright 或等效工具開真實瀏覽器測試
+- Mobile 功能 → 必須在模擬器或真機上測試
+- 「程式碼看起來正確」不算前端驗收
 
 ---
 
@@ -121,6 +150,21 @@ Architect 會給你：
 
 記錄結果：通過數、失敗數、失敗的具體 test case。
 
+### Step 3.5：測試類型決策
+
+對每個待驗收的功能，明確判斷用哪種測試：
+
+| 情境 | 測試類型 | 不可用替代 |
+|------|---------|-----------|
+| 純邏輯函式 | Unit test | - |
+| Service 呼叫 Service | Integration test（真實依賴） | 不可 mock service |
+| API endpoint → DB | Integration test | 不可 mock DB |
+| 用戶操作 UI 流程 | E2E（Playwright/Appium） | 不可用 component test 替代 |
+| Auth/payment/資料刪除 | E2E，太重要不能只靠 unit | - |
+| LLM prompt 行為 | Eval 或 dry-run | 不可 mock LLM 回傳 |
+
+**判斷原則：** mock 越少，測試可信度越高。如果 mock 掉的東西在現實中可能出錯，就不應該 mock 它。
+
 ### Step 4：場景測試
 
 按 Architect 給的 P0/P1 場景逐一測試。
@@ -132,6 +176,25 @@ Architect 會給你：
 **P1 場景（應該通過）：**
 - 逐一執行，記錄結果
 - P1 失敗不影響整體判定，但必須在 Verdict 裡列出
+
+### Step 4.5：為每個發現的 Bug 寫回歸測試
+
+每個驗收過程中發現的 bug（即使 Developer 已修復），QA 必須補一個回歸測試：
+
+```
+回歸測試必須包含：
+1. 觸發 bug 的精確前置條件（exact precondition）
+2. 觸發動作
+3. 正確行為的 assert（不是「不 crash」，是具體的值/狀態）
+
+格式：
+# Regression: ISSUE-描述 — {什麼壞了}
+# Found by QA on {date}
+def test_regression_{issue}():
+    ...
+```
+
+沒有回歸測試的 bug fix = 這個 bug 還會回來。
 
 ### Step 5：產出 QA Verdict
 

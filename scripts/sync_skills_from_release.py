@@ -19,6 +19,7 @@ SKILLS = (
     "marketing",
     "pm",
     "qa",
+    "debugger",
 )
 
 

@@ -18,6 +18,27 @@ version: 1.0.0
 
 ---
 
+## Step 0：偵測 MCP 連線狀態
+
+**在問用戶任何設定問題之前，先偵測 MCP 是否已設定。**
+
+執行：
+```python
+mcp__zenos__search(query="ZenOS", collection="entities")
+```
+
+**結果判斷：**
+
+| 結果 | 代表 | 下一步 |
+|------|------|--------|
+| 成功回傳（不論有無資料）| MCP 已設定且連線正常 | 跳過 Step 1–2，直接進 **Step 3** |
+| 失敗（connection error / timeout）| 可能是 server 冷啟動 | 告知用戶「稍等 5 秒，ZenOS server 啟動中...」，等待 5 秒後再試一次 |
+| 重試仍失敗 | MCP 尚未設定或 token 錯誤 | 繼續 Step 1 |
+
+> MCP 第一次連線可能因 Cloud Run 冷啟動而需要 5-10 秒，不要立刻判定「未設定」。
+
+---
+
 ## Step 1：確認使用模式
 
 先問用戶：

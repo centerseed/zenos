@@ -156,6 +156,8 @@ P2 需求：{n} 項
 開放問題：{n} 項
 
 下一步：Architect 接手做技術設計
+
+> PM 不建 task。行動項目記錄在「開放問題」section，由 Architect 判斷是否開 task。
 ```
 
 ---

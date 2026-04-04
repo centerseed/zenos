@@ -32,6 +32,12 @@ _WORKFLOW_FILES: list[str] = [
     "governance-loop.md",
 ]
 
+# agent skill 角色清單
+_AGENT_ROLES: list[str] = [
+    "architect", "developer", "qa", "pm",
+    "designer", "marketing", "debugger",
+]
+
 # slash command → SSOT skill 對應
 _SLASH_COMMAND_SSOT: dict[str, str] = {
     "zenos-capture": "skills/workflows/knowledge-capture.md",
@@ -128,6 +134,10 @@ def _get_skill_files_cached(selection: str) -> dict[str, str]:
     for filename in _WORKFLOW_FILES:
         path = skills_root / "workflows" / filename
         result[f"skills/workflows/{filename}"] = path.read_text(encoding="utf-8")
+    for role in _AGENT_ROLES:
+        path = skills_root / "release" / role / "SKILL.md"
+        if path.exists():
+            result[f"skills/release/{role}/SKILL.md"] = path.read_text(encoding="utf-8")
     return result
 
 

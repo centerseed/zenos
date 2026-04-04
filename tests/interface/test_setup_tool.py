@@ -320,6 +320,9 @@ class TestSetupToolClaudeWeb:
         # Must contain references to the three governance capabilities
         assert "文件" in instructions or "document" in instructions.lower()
         assert "任務" in instructions or "task" in instructions.lower()
+        assert "MCP-first" in instructions
+        assert "read_source" in instructions
+        assert "analyze" in instructions
 
     async def test_payload_has_project_documents_tip(self):
         from zenos.interface.tools import setup
