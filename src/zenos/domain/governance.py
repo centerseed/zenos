@@ -2022,3 +2022,47 @@ def score_summary_quality(
         "marketing_ratio": round(marketing_ratio, 4),
         "quality_score": quality_score,
     }
+
+
+# ---------------------------------------------------------------------------
+# Invalid document title detection (Task 20/40)
+# ---------------------------------------------------------------------------
+
+_BARE_DOMAIN_TITLES: frozenset[str] = frozenset({
+    "github", "notion", "drive", "wiki", "confluence"
+})
+
+
+def detect_invalid_document_titles(entities: list[Entity]) -> list[dict]:
+    """Return invalid document entities with bare-domain or empty titles.
+
+    An entity is considered invalid when:
+    - title (entity.name) is empty/None, OR
+    - title matches a bare source-type domain name (case-insensitive).
+
+    Returns a list of dicts with keys:
+        entity_id, current_title, source_uri, linked_entity_ids
+    """
+    invalid: list[dict] = []
+    for doc in entities:
+        title = (doc.name or "").strip().lower()
+        if title and title not in _BARE_DOMAIN_TITLES:
+            continue
+
+        source_uri = ""
+        if doc.sources:
+            source_uri = doc.sources[0].get("uri", "")
+
+        linked_ids: list[str] = []
+        if doc.parent_id:
+            linked_ids.append(doc.parent_id)
+
+        invalid.append({
+            "entity_id": doc.id,
+            "current_title": doc.name or "",
+            "source_uri": source_uri,
+            "linked_entity_ids": linked_ids,
+        })
+
+    return invalid
+

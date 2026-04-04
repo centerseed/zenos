@@ -16,7 +16,8 @@ from collections import Counter
 logger = logging.getLogger(__name__)
 
 from zenos.domain.governance import apply_tag_confidence, check_split_criteria, find_tech_terms_in_summary
-from zenos.domain.source_uri_validator import validate_source_uri
+from zenos.domain.source_uri_validator import validate_source_uri, BARE_DOMAIN_BLACKLIST
+from zenos.infrastructure.github_adapter import parse_github_url, GitHubAdapter
 from zenos.domain.models import (
     Blindspot,
     Document,
@@ -149,6 +150,7 @@ class OntologyService:
         protocol_repo: ProtocolRepository,
         blindspot_repo: BlindspotRepository,
         governance_ai: object | None = None,
+        source_adapter: GitHubAdapter | None = None,
     ) -> None:
         self._entities = entity_repo
         self._relationships = relationship_repo
@@ -156,6 +158,7 @@ class OntologyService:
         self._protocols = protocol_repo
         self._blindspots = blindspot_repo
         self._governance_ai = governance_ai
+        self._source_adapter = source_adapter
 
     # ──────────────────────────────────────────
     # Internal helpers
@@ -1688,6 +1691,15 @@ class OntologyService:
             tags = tags_data
 
         doc_title = str(data.get("title", existing.name if existing else "")).strip()
+
+        # --- Title validation and auto-derivation ---
+        doc_title = await self._resolve_document_title(
+            doc_title=doc_title,
+            source_type=source_data.get("type", "") if isinstance(source_data, dict) else "",
+            source_uri=source_uri,
+            sources=sources,
+        )
+
         # Document titles sometimes carry file hints like "(CLAUDE.md)".
         # Keep title semantics but normalize the entity name to satisfy global naming rules.
         doc_entity_name = re.sub(r"\s*\([^)]+\)$", "", doc_title).strip() or doc_title
@@ -1726,6 +1738,78 @@ class OntologyService:
                 remove_stale=True,
             )
         return saved
+
+    async def _resolve_document_title(
+        self,
+        doc_title: str,
+        source_type: str,
+        source_uri: str,
+        sources: list[dict],
+    ) -> str:
+        """Validate and auto-derive a document title.
+
+        Rules (applied in order):
+        1. Bare-domain blacklist: raise ValueError if title is a bare source-type name.
+        2. Empty title + GitHub source with valid URL: try H1 from .md file, fallback to filename.
+        3. Empty title + non-GitHub source: raise ValueError.
+
+        Returns the resolved title string.
+        """
+        # doc_title is already stripped by caller
+        normalized = doc_title.lower()
+
+        # Rule 1: Bare domain blacklist
+        if normalized in BARE_DOMAIN_BLACKLIST:
+            raise ValueError(
+                f"Document title {doc_title!r} is not descriptive — "
+                "title 不得為 source type 名稱或裸域名。"
+                f"請提供具體的文件名稱，例如：「{doc_title.title()} 文件規範」"
+            )
+
+        # Rule 2/3: Empty title
+        if not doc_title:
+            if source_type == "github" and source_uri:
+                return await self._derive_github_title(source_uri, sources)
+            raise ValueError(
+                "Document title is required. "
+                "title 不得為空，請提供文件名稱。"
+            )
+
+        return doc_title
+
+    async def _derive_github_title(self, source_uri: str, sources: list[dict]) -> str:
+        """Derive a document title from a GitHub source URI.
+
+        For .md files: attempts to read the file and extract the first H1 heading.
+        Falls back to filename. On 404, sets sources[0]['status'] = 'stale'.
+        """
+        # Extract filename from path as baseline fallback
+        try:
+            _, _, path, _ = parse_github_url(source_uri)
+            filename = path.rsplit("/", 1)[-1]
+        except ValueError:
+            filename = source_uri.rsplit("/", 1)[-1] or "untitled"
+
+        # Only attempt H1 extraction for .md files
+        if not filename.endswith(".md") or self._source_adapter is None:
+            return filename
+
+        try:
+            content = await self._source_adapter.read_content(source_uri)
+            for line in content.splitlines():
+                m = re.match(r"^#\s+(.+)", line)
+                if m:
+                    return m.group(1).strip()
+            # No H1 found — fallback to filename
+            return filename
+        except FileNotFoundError:
+            logger.warning("GitHub source 404 for %r — marking stale, using filename", source_uri)
+            if sources:
+                sources[0]["status"] = "stale"
+            return filename
+        except Exception:
+            logger.warning("Failed to read GitHub source %r for H1 extraction", source_uri, exc_info=True)
+            return filename
 
     async def sync_document_governance(self, data: dict) -> DocumentSyncResult:
         """Perform governance-safe batch sync for document lifecycle operations."""

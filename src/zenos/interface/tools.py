@@ -47,7 +47,11 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 from zenos.application.governance_ai import GovernanceAI
-from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
+from zenos.domain.governance import (
+    compute_search_unused_signals,
+    detect_invalid_document_titles,
+    score_summary_quality,
+)
 from zenos.domain.models import EntityEntry
 from zenos.application.governance_service import GovernanceService
 from zenos.application.ontology_service import OntologyService, _collect_subtree_ids
@@ -288,6 +292,7 @@ async def _ensure_services() -> None:
             protocol_repo=protocol_repo,
             blindspot_repo=blindspot_repo,
             governance_ai=_governance_ai,
+            source_adapter=source_adapter,
         )
     if governance_service is None:
         governance_service = GovernanceService(
@@ -2410,6 +2415,7 @@ async def analyze(
     - 只看 impacts 斷鏈 → analyze(check_type="impacts")
     - 只看文件一致性 → analyze(check_type="document_consistency")
     - 分析能見度風險 → analyze(check_type="permission_risk")
+    - 找無效文件條目 → analyze(check_type="invalid_documents")
 
     不要用這個工具的情境：
     - 搜尋或列出條目 → 用 search
@@ -2417,7 +2423,7 @@ async def analyze(
 
     Args:
         check_type: "all" / "quality" / "staleness" / "blindspot" / "impacts" /
-                    "document_consistency" / "permission_risk"
+                    "document_consistency" / "permission_risk" / "invalid_documents"
 
     Returns:
         dict — 各 check_type 對應的子結構：
@@ -2428,6 +2434,8 @@ async def analyze(
         - permission_risk: {isolation_score, overexposure_score, warnings[{...}], summary}
         - impacts: quality.l2_impacts_validity（掛在 quality 子結構下）
         - document_consistency: {document_consistency_warnings[{...}], document_consistency_count}
+        - invalid_documents: {items[{entity_id, current_title, source_uri, linked_entity_ids,
+                             proposed_title, action}], count}
         - kpis: {total_items, unconfirmed_items, unconfirmed_ratio, blindspot_total,
                  duplicate_blindspots, duplicate_blindspot_rate, median_confirm_latency_days,
                  active_l2_missing_impacts, weekly_review_required}（check_type="all" 時包含）
@@ -2720,13 +2728,40 @@ async def analyze(
         )
         results["permission_risk"] = await risk_svc.analyze_risk()
 
+    if check_type in ("all", "invalid_documents"):
+        all_doc_entities = await ontology_service._entities.list_all(type_filter="document")
+        invalid_docs = detect_invalid_document_titles(all_doc_entities)
+        # Task 40: enrich each item with proposed_title and action
+        from zenos.domain.source_uri_validator import GITHUB_BLOB_PATTERN
+        for doc in invalid_docs:
+            source_uri = doc["source_uri"]
+            if source_uri and GITHUB_BLOB_PATTERN.match(source_uri):
+                try:
+                    from zenos.infrastructure.github_adapter import parse_github_url
+                    _, _, path, _ = parse_github_url(source_uri)
+                    proposed_title = path.rsplit("/", 1)[-1]
+                except Exception:
+                    proposed_title = None
+                doc["proposed_title"] = proposed_title
+                doc["action"] = "propose_title"
+            elif not source_uri or not source_uri.startswith("http"):
+                doc["proposed_title"] = None
+                doc["action"] = "auto_archive"
+            else:
+                doc["proposed_title"] = None
+                doc["action"] = "manual_review"
+        results["invalid_documents"] = {
+            "items": invalid_docs,
+            "count": len(invalid_docs),
+        }
+
     if not results:
         return {
             "error": "INVALID_INPUT",
             "message": (
                 f"Unknown check_type '{check_type}'. "
                 "Use: all, quality, staleness, blindspot, impacts, "
-                "document_consistency, permission_risk"
+                "document_consistency, permission_risk, invalid_documents"
             ),
         }
 

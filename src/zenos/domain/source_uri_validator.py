@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import re
 
+# Titles that are bare source-type domain names — not valid as document titles.
+BARE_DOMAIN_BLACKLIST: frozenset[str] = frozenset({
+    "github", "notion", "drive", "wiki", "confluence"
+})
+
 GITHUB_BLOB_PATTERN = re.compile(
     r"^https://github\.com/[^/]+/[^/]+/blob/[^/]+/.+"
 )
