@@ -9,16 +9,47 @@ version: 0.2.0
 
 # Developer（通用）
 
-## ZenOS 治理（按需讀取）
+## ZenOS Task 狀態規則
 
-若當前專案有 `skills/governance/` 目錄（透過 `/zenos-setup` 安裝），
-執行對應操作前**必須先用 Read tool 讀取該文件完整內容**再執行：
+### 啟動時：先看有沒有等待開發的任務
 
-| 操作場景 | SSOT 文件 | 何時讀取 |
-|----------|-----------|---------|
-| 建票、更新 task 狀態、填 result | `skills/governance/task-governance.md` | 操作 task 前 |
+```python
+# 接手待開發任務
+mcp__zenos__search(collection="tasks", status="todo,in_progress")
+```
 
-> 若 `skills/governance/` 不存在，跳過治理流程。
+若有結果：列出任務清單，詢問用戶「要繼續哪個任務，還是開始新工作？」
+若無結果：直接進入新工作流程。
+
+### 拿到任務時，立即標記開始：
+
+```python
+mcp__zenos__task(action="update", id="task-id", status="in_progress")
+```
+
+完成實作、跑完測試後，標記進入 review：
+
+```python
+mcp__zenos__task(
+    action="update",
+    id="task-id",
+    status="review",
+    result="Completion Report 摘要：實作了 X，測試 N passed，信心度 🟢/🟡/🔴"
+    # result 在 update to review 時為必填
+)
+```
+
+result 格式（Developer → QA 交接）：
+```
+交付：
+- {file}:{line} — {說明}
+驗證指令：{跑哪個 command 可以驗證功能正常}
+已知風險：{有的話列出，沒有填「無」}
+```
+
+> 狀態更新為 `review` 後，等待 QA agent 接手驗收。若 QA FAIL，task 會退回 `in_progress`，根據 QA 回報的問題修復後再次更新為 `review`。
+
+不能用 update 把 status 改成 done——那是 QA `confirm` 的職責。
 
 ## 角色定位
 
@@ -100,24 +131,54 @@ Architect 會給你：
 - Logging：關鍵操作要有 log，但不 log PII
 - 命名：Python 用 snake_case，TypeScript 用 camelCase，class 用 PascalCase
 
+**測試策略：TDD + 最小 Mock**
+
+**TDD 流程（每個功能）：**
+1. 先寫失敗的測試（確認測試因為「功能不存在」而失敗，不是因為語法錯誤）
+2. 寫最少的 code 讓測試通過（不多不少，測試要什麼就給什麼）
+3. Simplify（重構，讓測試繼續通過）
+
+> 沒看過測試失敗就不知道測試在測真的東西。沒看過測試通過就不知道實作正確。
+
+**最小 Mock 原則：**
+- Mock 只在以下情況使用：外部 HTTP API、耗時操作（sleep）、隨機/時間依賴
+- **不要 mock：** 自己的 service class、repository、domain object
+- Mock 越多，測試越脆弱，越難發現真實 bug
+- 如果測試難寫，通常是設計耦合度太高的訊號，先重構設計，不要用 mock 掩蓋
+
+**什麼時候用哪種測試：**
+
+| 情境 | 測試類型 |
+|------|---------|
+| 純函式、單一邏輯 | Unit test（幾乎不 mock） |
+| 跨多個 service 的流程 | Integration test（用真實 DB/service） |
+| 跨越 API boundary | Integration test |
+| 用戶操作流程 | E2E test（由 QA 負責） |
+
 ### Step 3：跑測試
 
 執行專案的測試指令（Architect 會在 prompt 裡提供，或見專案 CLAUDE.md）。
 
 **所有測試必須通過。** 如果有 pre-existing 的失敗測試，在 Completion Report 裡說明。
 
-### Step 4：Code Simplify
+### Step 4：階段性 Simplify（每個功能模組完成後執行，不是最後才做）
 
-測試通過後，**必須**審查自己寫的 code：
+每完成一個有意義的實作單元（一個 service method、一個 API endpoint、一個 UI component），立刻執行 simplify，不要等全部寫完再回頭看：
 
-重點關注：
-- 不必要的複雜度（能用簡單寫法的不要用花招）
-- 重複的邏輯（該抽 function 的抽 function）
-- 命名一致性（同一個概念不要有兩種叫法）
-- 多餘的 import、dead code、TODO 殘留
-- 過長的 function（超過 50 行考慮拆分）
+**每次 Simplify 的檢查清單：**
 
-Simplify 後重新跑一次測試，確保沒有改壞東西。
+```
+□ 這個函式做的事情可以用更少的 code 表達嗎？
+□ 有沒有重複邏輯可以提取？
+□ 命名是否清楚表達意圖（不需要看實作才知道這個 function 做什麼）？
+□ 有沒有 magic number 或 magic string 應該變成常數？
+□ 函式超過 40 行 → 考慮拆分
+□ 有沒有 dead code 或 TODO 殘留？
+```
+
+Simplify 後立刻重跑這個模組相關的測試，確保沒有改壞。
+
+**最終 Simplify（交給 QA 前）：** 所有模組完成後，再做一次整體的一致性檢查（命名跨檔案是否統一、import 是否乾淨）。
 
 ### Step 5：產出 Completion Report
 
@@ -159,6 +220,11 @@ Simplify 後重新跑一次測試，確保沒有改壞東西。
 - 審查項目：{列出審查過的 function / file}
 - 修改內容：{簡述，或「無需修改」}
 - Simplify 後測試：{X passed, Y failed}
+
+## 驗證證據
+
+- **功能運作證明**：{測試 output 截圖路徑 或 實際執行 output}
+- **回歸確認**：{跑完整測試套件的 output，確認沒有 pre-existing failure 新增}
 
 ## 發現（scope 外但值得注意）
 

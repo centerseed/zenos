@@ -3212,10 +3212,16 @@ async def governance_guide(
             "message": f"level 必須是 1/2/3，收到：{level}",
         }
 
+    _topic_versions = {
+        "entity": "1.1",
+        "document": "1.1",
+        "task": "2.0",
+        "capture": "1.0",
+    }
     return {
         "topic": topic,
         "level": level,
-        "version": "1.0",
+        "version": _topic_versions.get(topic, "1.0"),
         "content": GOVERNANCE_RULES[topic][level],
     }
 

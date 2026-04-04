@@ -13,11 +13,16 @@ Structure: dict[topic][level] -> str
 
 GOVERNANCE_RULES: dict[str, dict[int, str]] = {
     "entity": {
-        1: """# L2 知識節點治理規則 v1.0
+        1: """# L2 知識節點治理規則 v1.1
 
 ## 什麼是 L2 Entity
 L2 Entity = 公司共識概念。改了它，不同角色（工程師、行銷、老闆）都會受影響。
 不是技術模組的文件索引，而是值得被治理傳播追蹤的概念。
+
+## Phase 1 統一回傳格式
+所有 MCP 回傳改為 `{status, data, warnings, suggestions, similar_items, context_bundle, governance_hints}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**Server 端驗證：** `confirm` 時 Server 強制驗證 impacts≥1。`write` 回傳 `similar_items` 列出相似 entity。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates` 列出需要更新的下游 entity。
 
 ## 三問 + impacts 門檻（全通過才能建 L2）
 
@@ -63,11 +68,16 @@ stale → confirmed（重新補齊有效 impacts）
 - 回答「X 改了會影響什麼」時，優先讀 impact_chain，不需要逐跳手動 get
 - 例：`[A →校準→ B →觸發→ C]` 代表 A 間接影響到 C""",
 
-        2: """# L2 知識節點治理規則 v1.0（完整版）
+        2: """# L2 知識節點治理規則 v1.1（完整版）
 
 ## 什麼是 L2 Entity
 L2 Entity = 公司共識概念。改了它，不同角色（工程師、行銷、老闆）都會受影響。
 不是技術模組的文件索引，而是值得被治理傳播追蹤的概念。
+
+## Phase 1 統一回傳格式
+所有 MCP 回傳改為 `{status, data, warnings, suggestions, similar_items, context_bundle, governance_hints}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**Server 端驗證：** `confirm` 時 Server 強制驗證 impacts≥1。`write` 回傳 `similar_items` 列出相似 entity。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates` 列出需要更新的下游 entity。
 
 ## 三問 + impacts 門檻（全通過才能建 L2）
 
@@ -152,11 +162,16 @@ BFS 多跳遍歷出邊，最多 5 跳，格式 `[{from_id, from_name, verb, type
 - 回答跨節點的問題時，先展開 impact_chain 確認語意鏈是否相關
 - 例：`[A →校準→ B →觸發→ C]` 表示 A 的改動最終傳播到 C""",
 
-        3: """# L2 知識節點治理規則 v1.0（含完整範例）
+        3: """# L2 知識節點治理規則 v1.1（含完整範例）
 
 ## 什麼是 L2 Entity
 L2 Entity = 公司共識概念。改了它，不同角色（工程師、行銷、老闆）都會受影響。
 不是技術模組的文件索引，而是值得被治理傳播追蹤的概念。
+
+## Phase 1 統一回傳格式
+所有 MCP 回傳改為 `{status, data, warnings, suggestions, similar_items, context_bundle, governance_hints}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**Server 端驗證：** `confirm` 時 Server 強制驗證 impacts≥1。`write` 回傳 `similar_items` 列出相似 entity。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates` 列出需要更新的下游 entity。
 
 ## 三問 + impacts 門檻（全通過才能建 L2）
 
@@ -306,7 +321,7 @@ impact_chain: [
     },
 
     "document": {
-        1: """# L3 文件治理規則 v1.0
+        1: """# L3 文件治理規則 v1.1
 
 ## 文件的定位
 L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
@@ -337,7 +352,7 @@ approved → superseded（被新版取代時，保留原文件，建立指向）
 - REF: 參考資料（競品分析、研究報告等）
 - SC: Script / 腳本文件""",
 
-        2: """# L3 文件治理規則 v1.0（完整版）
+        2: """# L3 文件治理規則 v1.1（完整版）
 
 ## 文件的定位
 L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
@@ -363,6 +378,12 @@ date: 2026-01-01
 supersedes: null                    # 被此文件取代的文件 ID（如有）
 ---
 ```
+
+**Phase 1 統一回傳格式：** 所有回傳改為 `{status, data, warnings, suggestions, similar_items, ...}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**重複文件檢查：** `write` 回傳 `similar_items` 列出相近的既有文件。建立前應檢查避免重複。
+
+**原子取代：** 建立新版文件時，可在 `write` 的 data 中同時填入 `supersedes` 欄位，Server 會原子性地將舊文件標為 superseded，省去手動更新舊 entity 的步驟。
 
 ## 生命週期
 draft → under_review → approved（正式文件）
@@ -403,9 +424,31 @@ approved → superseded（被新版取代時，保留原文件，建立指向）
 選型準則：看受眾和目的，不看篇幅。一份短的「為什麼」= ADR，長的「怎麼做」= TD。
 
 ## Server 端回傳（Phase 0.5）
-- write document 回傳會包含 `similar_items` 欄位（標題相似的既有文件列表），agent 應在建立前確認沒有重複文件。""",
+- write document 回傳會包含 `similar_items` 欄位（標題相似的既有文件列表），agent 應在建立前確認沒有重複文件。
 
-        3: """# L3 文件治理規則 v1.0（含完整範例）
+## Source 稽核規則
+
+### source.label 規範
+- **必須是實際檔名**，例如 `SPEC-agent-system.md`、`ADR-007-entity-architecture.md`
+- **不可只寫 type**：`"github"` 是無意義的 label，Dashboard 顯示時毫無資訊量
+- 若 label 為空或等於 type 名稱（如 "github"），視為 `bad_label`，應從 URI 尾段提取正確檔名
+
+提取規則：取 URI 最後一個 `/` 之後的部分作為 label。
+- `https://github.com/org/repo/blob/main/docs/SPEC-pricing.md` → `SPEC-pricing.md`
+- `github:docs/ADR-007-entity-architecture.md` → `ADR-007-entity-architecture.md`
+
+### source.uri 規範
+- 必須指向**有效的檔案位置**，不可指向已刪除或已改名的路徑
+- 對 `type=github` 的 source，可用 `git ls-files` 驗證路徑是否存在
+- 若檔案已改名，應更新 URI 為新路徑（可用 `git log --follow --diff-filter=R` 追蹤）
+- 若檔案已刪除且無改名記錄，應移除該 source；若為文件的唯一 source，應將文件 status 改為 `archived`
+
+### 稽核觸發時機
+每次執行 `/zenos-sync` 時，**Step 0: Source Audit 預設自動執行**，在正式增量同步前先完成 source 連結的清理。
+
+若只想執行稽核而不做增量同步，使用 `/zenos-sync --audit`。""",
+
+        3: """# L3 文件治理規則 v1.1（含完整範例）
 
 ## 文件的定位
 L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
@@ -454,6 +497,12 @@ date: 2026-03-01
 supersedes: null
 ---
 ```
+
+**Phase 1 統一回傳格式：** 所有回傳改為 `{status, data, warnings, suggestions, similar_items, ...}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**重複文件檢查：** `write` 回傳 `similar_items` 列出相近的既有文件。建立前應檢查避免重複。
+
+**原子取代：** 建立新版文件時，可在 `write` 的 data 中同時填入 `supersedes` 欄位，Server 會原子性地將舊文件標為 superseded，省去手動更新舊 entity 的步驟。
 
 ## Supersede 操作步驟（完整流程）
 
@@ -524,15 +573,42 @@ write(
 → 每份文件都是某個 L2 概念的具體化。找不到 L2？先建 L2 再掛文件。
 
 陷阱 3：supersede 時刪除舊文件
-→ 不刪除，改 status=superseded。歷史決策需要可追溯。""",
+→ 不刪除，改 status=superseded。歷史決策需要可追溯。
+
+## Source 稽核規則
+
+### source.label 規範
+- **必須是實際檔名**，例如 `SPEC-agent-system.md`、`ADR-007-entity-architecture.md`
+- **不可只寫 type**：`"github"` 是無意義的 label，Dashboard 顯示時毫無資訊量
+- 若 label 為空或等於 type 名稱（如 "github"），視為 `bad_label`，應從 URI 尾段提取正確檔名
+
+提取規則：取 URI 最後一個 `/` 之後的部分作為 label。
+- `https://github.com/org/repo/blob/main/docs/SPEC-pricing.md` → `SPEC-pricing.md`
+- `github:docs/ADR-007-entity-architecture.md` → `ADR-007-entity-architecture.md`
+
+### source.uri 規範
+- 必須指向**有效的檔案位置**，不可指向已刪除或已改名的路徑
+- 對 `type=github` 的 source，可用 `git ls-files` 驗證路徑是否存在
+- 若檔案已改名，應更新 URI 為新路徑（可用 `git log --follow --diff-filter=R` 追蹤）
+- 若檔案已刪除且無改名記錄，應移除該 source；若為文件的唯一 source，應將文件 status 改為 `archived`
+
+### 稽核觸發時機
+每次執行 `/zenos-sync` 時，**Step 0: Source Audit 預設自動執行**，在正式增量同步前先完成 source 連結的清理。
+
+若只想執行稽核而不做增量同步，使用 `/zenos-sync --audit`。""",
     },
 
     "task": {
-        1: """# Task 治理規則 v1.0
+        1: """# Task 治理規則 v2.0
 
 ## Task 的定位
 Task 不是 entity，是 ontology 的 output path——從知識洞察產生的具體行動。
 每個 task 必須連結回 ontology（linked_entities），讓執行者自動獲得相關 context。
+
+## Phase 1 統一回傳格式
+所有回傳改為 `{status, data, warnings, suggestions, ...}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**Server 端驗證：** Server 驗證 title 長度（≥4 字元）並拒絕停用詞開頭。`linked_entities` 不存在的 ID 直接 reject（不再靜默忽略）。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates`。`confirm` 成功後回傳包含 `suggested_actions` 欄位，列出後續建議動作。
 
 ## 建票最小規範
 - title: 動詞開頭（「實作 X」「設計 Y」「修復 Z」）
@@ -564,11 +640,16 @@ todo → in_progress → review → done
 - linked_entities 為空
 - 完成後不更新 result""",
 
-        2: """# Task 治理規則 v1.0（完整版）
+        2: """# Task 治理規則 v2.0（完整版）
 
 ## Task 的定位
 Task 不是 entity，是 ontology 的 output path——從知識洞察產生的具體行動。
 每個 task 必須連結回 ontology（linked_entities），讓執行者自動獲得相關 context。
+
+## Phase 1 統一回傳格式
+所有回傳改為 `{status, data, warnings, suggestions, ...}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**Server 端驗證：** Server 驗證 title 長度（≥4 字元）並拒絕停用詞開頭。`linked_entities` 不存在的 ID 直接 reject（不再靜默忽略）。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates`。`confirm` 成功後回傳包含 `suggested_actions` 欄位，列出後續建議動作。
 
 ## 建票最小規範
 - title: 動詞開頭（「實作 X」「設計 Y」「修復 Z」）
@@ -621,12 +702,22 @@ Task 完成後的知識應流回 ontology：
 - 上次更新時間（越久未動越往前排）
 推薦結果僅供參考，人類可覆蓋。
 
-## Server 端驗證（Phase 0.5）
+## Server 端驗證（Phase 0.5 / Phase 1）
 - Task title 必須 ≥4 字元，且不能以名詞性停用詞開頭（如「的」「一個」等）；不符合會被 Server reject
-- linked_entities 中的 entity ID 必須實際存在；任何不存在的 ID 會被 Server reject 並回傳錯誤列表
-- confirm task 回傳會包含 `suggested_actions` 欄位，列出後續建議操作（如知識回寫、關聯 task）""",
+- linked_entities 中的 entity ID 必須實際存在；任何不存在的 ID 會被 Server reject 並回傳錯誤列表（不再靜默忽略）
+- confirm task 回傳會包含 `suggested_actions` 欄位，列出後續建議操作（如知識回寫、關聯 task）
 
-        3: """# Task 治理規則 v1.0（含完整範例）
+## 各角色操作時機速查
+
+| 角色 | 時機 | 操作 |
+|------|------|------|
+| Architect | 開票時 | `task(action="create")`，掛 linked_entities |
+| Developer | 拿到任務 | `task(action="update", status="in_progress")` |
+| Developer | 完成實作 | `task(action="update", status="review", result="Completion Report 摘要")` |
+| QA | PASS | `confirm(collection="tasks", accept=True, result="QA 摘要")` |
+| QA | FAIL | `confirm(collection="tasks", accept=False, result="退回原因")` |""",
+
+        3: """# Task 治理規則 v2.0（含完整範例）
 
 ## Task 的定位
 Task 不是 entity，是 ontology 的 output path——從知識洞察產生的具體行動。
@@ -718,7 +809,22 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 | description 缺三段結構 | 執行者缺少背景，容易做錯方向 |
 | linked_entities 為空 | 切斷 task 與知識層的連結，失去 ontology 價值 |
 | 完成後不更新 result | 知識無法流回 ontology，形成知識黑洞 |
-| 直接 write status=done | 繞過驗收流程，AC 可能未達成 |""",
+| 直接 write status=done | 繞過驗收流程，AC 可能未達成 |
+
+## Phase 1 統一回傳格式
+所有回傳改為 `{status, data, warnings, suggestions, ...}`。資料在 `response["data"]` 下，錯誤用 `response["status"] == "rejected"` 判斷。
+
+**Server 端驗證：** Server 驗證 title 長度（≥4 字元）並拒絕停用詞開頭。`linked_entities` 不存在的 ID 直接 reject（不再靜默忽略）。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates`。`confirm` 成功後回傳包含 `suggested_actions` 欄位，列出後續建議動作。
+
+## 各角色操作時機速查
+
+| 角色 | 時機 | 操作 |
+|------|------|------|
+| Architect | 開票時 | `task(action="create")`，掛 linked_entities |
+| Developer | 拿到任務 | `task(action="update", status="in_progress")` |
+| Developer | 完成實作 | `task(action="update", status="review", result="Completion Report 摘要")` |
+| QA | PASS | `confirm(collection="tasks", accept=True, result="QA 摘要")` |
+| QA | FAIL | `confirm(collection="tasks", accept=False, result="退回原因")` |""",
     },
 
     "capture": {

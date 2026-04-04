@@ -144,16 +144,6 @@ write(
 - 若檔案已改名，應更新 URI 為新路徑（可用 `git log --follow --diff-filter=R` 追蹤）
 - 若檔案已刪除且無改名記錄，應移除該 source；若為文件的唯一 source，應將文件 status 改為 `archived`
 
-### 歸檔流程（搬入 archive/ 時的必要操作）
-
-當文件從 `docs/specs/`、`docs/designs/` 等目錄搬到 `docs/archive/` 時，**必須同步更新 ontology**：
-
-1. 找到對應的 document entity：`search(collection="documents", query="{檔名}")`
-2. 更新 status 為 `archived`，清除 sources：`write(id="{doc-id}", data={"status": "archived", "sources": []})`
-3. 若 parent entity 的 sources 也指向該檔案，一併清除
-
-**不能只搬 git 不動 ontology。** `/zenos-sync` Step 1b 會自動偵測 rename 並處理，但如果手動搬檔案卻沒跑 sync，ontology 就會出現 broken source。
-
 ### 稽核觸發時機
 
 每次執行 `/zenos-sync` 時，**Step 0: Source Audit 預設自動執行**，在正式增量同步前先完成 source 連結的清理。

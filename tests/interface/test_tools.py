@@ -1950,7 +1950,7 @@ class TestGovernanceGuideTool:
 
         assert result["topic"] == "entity"
         assert result["level"] == 1
-        assert result["version"] == "1.0"
+        assert result["version"] == "1.1"
         assert isinstance(result["content"], str)
         assert len(result["content"]) > 0
 
@@ -1976,7 +1976,8 @@ class TestGovernanceGuideTool:
         assert "error" not in result
         assert result["topic"] == topic
         assert result["level"] == level
-        assert result["version"] == "1.0"
+        assert isinstance(result["version"], str)
+        assert len(result["version"]) > 0
         assert isinstance(result["content"], str)
         assert len(result["content"]) >= 100, (
             f"Content for {topic} level={level} is too short: {len(result['content'])} chars"

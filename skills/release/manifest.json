@@ -5,7 +5,7 @@
     "owner": "Barry",
     "repository": "https://github.com/centerseed/zenos"
   },
-  "published_at": "2026-03-27",
+  "published_at": "2026-04-04",
   "skills": [
     {
       "name": "zenos-setup",
@@ -23,7 +23,7 @@
     },
     {
       "name": "zenos-sync",
-      "version": "2.0.1",
+      "version": "3.1.0",
       "path": "zenos-sync",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -88,21 +88,21 @@
       "name": "feature",
       "version": "1.0.0",
       "path": "workflows/feature",
-      "files": ["feature.md"],
+      "files": ["SKILL.md"],
       "owner": "Barry"
     },
     {
       "name": "debug",
       "version": "1.0.0",
       "path": "workflows/debug",
-      "files": ["debug.md"],
+      "files": ["SKILL.md"],
       "owner": "Barry"
     },
     {
       "name": "triage",
       "version": "1.0.0",
       "path": "workflows/triage",
-      "files": ["triage.md"],
+      "files": ["SKILL.md"],
       "owner": "Barry"
     }
   ]

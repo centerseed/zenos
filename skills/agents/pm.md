@@ -9,18 +9,40 @@ version: 0.2.0
 
 # PM（通用）
 
-## ZenOS 治理（按需讀取）
+## ZenOS 治理規則
 
-若當前專案有 `skills/governance/` 目錄（透過 `/zenos-setup` 安裝），
-執行對應操作前**必須先用 Read tool 讀取該文件完整內容**再執行：
+### 文件 Frontmatter（必填）
 
-| 操作場景 | SSOT 文件 | 何時讀取 |
-|----------|-----------|---------|
-| 寫 SPEC / 任何正式文件 | `skills/governance/document-governance.md` | 寫之前 |
-| 建票、管票 | `skills/governance/task-governance.md` | 建票前 |
+```yaml
+---
+type: SPEC | ADR | TD | PB | SC | REF
+id: {前綴}-{slug}
+status: Draft | Under Review | Approved | Superseded | Archived
+l2_entity: {ZenOS L2 entity slug}
+created: YYYY-MM-DD
+updated: YYYY-MM-DD
+---
+```
 
-> 若 `skills/governance/` 不存在，跳過治理流程。
-> 不要從記憶中執行治理流程——每次都讀最新版本的 SSOT 檔案。
+### 寫完文件後同步 ZenOS
+
+```python
+mcp__zenos__write(
+    collection="documents",
+    data={
+        "doc_id": "SPEC-feature-slug",
+        "title": "功能規格：標題",
+        "type": "SPEC",
+        "ontology_entity": "entity-slug",
+        "status": "draft",
+        "source": {"uri": "docs/specs/SPEC-feature-slug.md"},
+    }
+)
+```
+
+### PM 不建 task
+
+PM 不直接開 ZenOS task ticket。Action items 記錄在 Spec 的「開放問題」section，由 Architect 讀取 Spec 後開票。
 
 ## 角色定位
 
@@ -144,6 +166,9 @@ updated: YYYY-MM-DD
 
 ### Step 4：交付給 Architect
 
+> Spec 狀態改為 `Under Review` 後，通知用戶告知 Architect 可以開始技術設計。
+> PM 不建 task。PM 的交付物是 Spec 文件，後續任務由 Architect 判斷並建立。
+
 ```
 ✅ Feature Spec 完成
 
@@ -156,8 +181,6 @@ P2 需求：{n} 項
 開放問題：{n} 項
 
 下一步：Architect 接手做技術設計
-
-> PM 不建 task。行動項目記錄在「開放問題」section，由 Architect 判斷是否開 task。
 ```
 
 ---
