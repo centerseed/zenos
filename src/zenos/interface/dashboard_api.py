@@ -620,8 +620,15 @@ async def list_tasks_by_entity(request: Request) -> Response:
     finally:
         current_partner_id.reset(token)
 
+    # Build allowed_ids for scoped partners
+    allowed_ids: set[str] | None = None
+    if _is_scoped_partner(partner):
+        all_entities = await _entity_repo.list_all()
+        entity_map = {e.id: e for e in all_entities if e.id}
+        allowed_ids = _build_allowed_entity_ids(partner, entity_map)
+
     # Filter tasks by linked entity visibility
-    visible_tasks = [t for t in tasks if await _is_task_visible_for_partner(t, partner)]
+    visible_tasks = [t for t in tasks if await _is_task_visible_for_partner(t, partner, allowed_ids=allowed_ids)]
 
     return _json_response({"tasks": [_task_to_dict(t) for t in visible_tasks]}, request=request)
 

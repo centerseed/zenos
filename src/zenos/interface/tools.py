@@ -2583,6 +2583,7 @@ async def analyze(
     - 只看文件一致性 → analyze(check_type="document_consistency")
     - 分析能見度風險 → analyze(check_type="permission_risk")
     - 找無效文件條目 → analyze(check_type="invalid_documents")
+    - 清理孤立關聯 → analyze(check_type="orphaned_relationships")
 
     不要用這個工具的情境：
     - 搜尋或列出條目 → 用 search
@@ -2590,7 +2591,8 @@ async def analyze(
 
     Args:
         check_type: "all" / "quality" / "staleness" / "blindspot" / "impacts" /
-                    "document_consistency" / "permission_risk" / "invalid_documents"
+                    "document_consistency" / "permission_risk" / "invalid_documents" /
+                    "orphaned_relationships"
 
     Returns:
         dict — 各 check_type 對應的子結構：
@@ -2922,13 +2924,21 @@ async def analyze(
             "count": len(invalid_docs),
         }
 
+    if check_type in ("all", "orphaned_relationships"):
+        try:
+            orphan_result = await ontology_service.remove_orphaned_relationships()
+            results["orphaned_relationships"] = orphan_result
+        except Exception:
+            logger.warning("Orphaned relationships check failed", exc_info=True)
+
     if not results:
         return {
             "error": "INVALID_INPUT",
             "message": (
                 f"Unknown check_type '{check_type}'. "
                 "Use: all, quality, staleness, blindspot, impacts, "
-                "document_consistency, permission_risk, invalid_documents"
+                "document_consistency, permission_risk, invalid_documents, "
+                "orphaned_relationships"
             ),
         }
 
@@ -3084,6 +3094,8 @@ async def journal_write(
     await _ensure_journal_repo()
     assert _journal_repo is not None
     partner_id = _current_partner_id.get()
+    if not partner_id:
+        return _unified_response(status="rejected", data={}, rejection_reason="No authenticated partner context")
 
     # Truncate summary to 100 chars without rejecting
     summary = summary[:100]
@@ -3133,8 +3145,10 @@ async def journal_read(
     await _ensure_journal_repo()
     assert _journal_repo is not None
     partner_id = _current_partner_id.get()
+    if not partner_id:
+        return _unified_response(status="rejected", data={}, rejection_reason="No authenticated partner context")
 
-    limit = min(limit, 50)
+    limit = max(1, min(limit, 50))
     entries, total = await _journal_repo.list_recent(
         partner_id=partner_id,
         limit=limit,

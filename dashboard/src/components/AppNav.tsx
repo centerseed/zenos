@@ -27,7 +27,7 @@ export function AppNav() {
   const { partner, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const isScoped = (partner?.authorizedEntityIds?.length ?? 0) > 0;
+  const isScoped = !partner?.isAdmin && (partner?.authorizedEntityIds?.length ?? 0) > 0;
 
   const navItems = useMemo(() => {
     if (isScoped) {
