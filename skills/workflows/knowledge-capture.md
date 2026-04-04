@@ -100,6 +100,16 @@ mcp__zenos__task(
 mcp__zenos__confirm(batch_id="...", action="approve")
 ```
 
+### Step 7：記錄工作日誌
+
+```python
+mcp__zenos__journal_write(
+  summary="zenos-capture：{捕獲了什麼概念/文件，幾個 L2/L3，涉及哪個專案}",
+  flow_type="capture",
+  project="{專案名稱（如知道）}"
+)
+```
+
 ## MCP Tools 使用
 
 - `mcp__zenos__search(collection=..., query=...)` — 查詢現有 entity，避免重複建立

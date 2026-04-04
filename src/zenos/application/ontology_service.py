@@ -579,6 +579,39 @@ class OntologyService:
         removed = await remover(source_id, target_id, rel_type)
         return bool(removed)
 
+    async def remove_orphaned_relationships(self) -> dict:
+        """Find and delete relationships pointing to non-existent entities.
+
+        Returns:
+            dict with keys "removed" (list of orphaned rel dicts) and "count" (int).
+        """
+        list_all_rels = getattr(self._relationships, "list_all", None)
+        if list_all_rels is None:
+            return {"removed": [], "count": 0}
+
+        all_relationships = await list_all_rels()
+        all_entities = await self._entities.list_all()
+        entity_ids: set[str] = {e.id for e in all_entities if e.id}
+
+        removed = []
+        for rel in all_relationships:
+            source_missing = rel.source_entity_id not in entity_ids
+            target_missing = rel.target_id not in entity_ids
+            if source_missing or target_missing:
+                success = await self._remove_relationship(
+                    rel.source_entity_id, rel.target_id, rel.type
+                )
+                if success:
+                    removed.append({
+                        "source_entity_id": rel.source_entity_id,
+                        "target_id": rel.target_id,
+                        "type": rel.type,
+                        "reason": (
+                            "source_missing" if source_missing else "target_missing"
+                        ),
+                    })
+        return {"removed": removed, "count": len(removed)}
+
     async def _sync_document_linkage_relationships(
         self,
         *,
@@ -1693,7 +1726,10 @@ class OntologyService:
 
         # Build sources list from legacy source field
         existing_source = (existing.sources[0] if existing and existing.sources else {})
-        sources: list[dict] = list(existing.sources) if existing else []
+        if data.get("clear_sources"):
+            sources: list[dict] = []
+        else:
+            sources: list[dict] = list(existing.sources) if existing else []
         if source_data and isinstance(source_data, dict):
             merged_source = {
                 "uri": source_data.get("uri", existing_source.get("uri", "")),
@@ -1882,6 +1918,7 @@ class OntologyService:
 
         if operation == "archive":
             update_payload.setdefault("status", "archived")
+            update_payload["clear_sources"] = True  # 標記需要清空 sources
         if operation == "supersede":
             successor_id = str(data.get("superseded_by_id", "")).strip()
             if not successor_id:

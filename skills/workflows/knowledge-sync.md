@@ -61,6 +61,15 @@ git log --follow --diff-filter=R --summary -- {path}
 在同一 parent entity 的所有 document 中，找出多筆 source 指向相同 URI 的情況。
 分類為 `duplicate`，列出所有重複項（entity id + document id + URI）。
 
+**d. Orphaned relationship 檢查**
+
+```python
+mcp__zenos__analyze(check_type="orphaned_relationships")
+```
+
+自動清理指向不存在 entity 的 relationship。
+結果納入 Step 0.3 稽核報告。
+
 #### 0.3 產出稽核報告
 
 直接輸出到用戶：
@@ -72,6 +81,7 @@ Source Audit 結果
 🟡 bad_label: N 筆 — label 將自動修正
 🟠 renamed:   N 筆 — URI 將自動更新為新路徑
 🟠 duplicate: N 筆 — 列出重複項供參考（不自動處理）
+🔴 orphaned:  N 筆 — 指向不存在 entity 的 relationship（已自動清除）
 ✅ healthy:   N 筆
 ```
 
@@ -132,6 +142,7 @@ mcp__zenos__write(
   ✅ broken 已清除：N 筆（其中 M 筆 document 已標記為 archived）
   ✅ renamed 已更新：N 筆
   ⚠️  duplicate 需人工確認：N 筆（見上方清單）
+  ✅ orphaned 已清除：N 筆
 ```
 
 ---
@@ -244,6 +255,16 @@ mcp__zenos__write(
 
 ```python
 mcp__zenos__confirm(batch_id="...", action="approve")
+```
+
+### Step 7：記錄工作日誌
+
+```python
+mcp__zenos__journal_write(
+  summary="zenos-sync：{同步了哪些文件變更，稽核結果摘要，涉及哪個專案}",
+  flow_type="sync",
+  project="{專案名稱（如知道）}"
+)
 ```
 
 ## MCP Tools 使用
