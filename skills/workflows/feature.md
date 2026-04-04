@@ -128,6 +128,32 @@ PM 將完整 Spec 呈給用戶逐章確認。
 
 ---
 
+## Phase 5：Architect 調度實作與驗證
+
+Architect 是實作階段的主控角色，按 plan_order 逐張 task 執行：
+
+### 5.1 派工 Developer
+- 叫起 Developer subagent，傳入 task 的 description + acceptance_criteria
+- Developer 更新狀態：`task(action="update", id=X, status="in_progress")`
+- Developer 完成後：`task(action="update", id=X, status="review", result="完成摘要")`
+
+### 5.2 Architect 驗證交付
+Developer 提交 review 後，**Architect 必須親自驗證**：
+- 逐條比對 acceptance_criteria，確認實作符合 task 要求
+- 確認無 regression、blast radius 可控
+- **PASS**：交給 QA 驗收
+- **FAIL**：退回 Developer，附上具體不符合的 AC 項目
+
+### 5.3 QA 驗收
+Architect 確認後，叫起 QA subagent：
+- 依照 acceptance_criteria 執行測試驗證
+- PASS：`confirm(collection="tasks", id=X, accept=True, result="QA 摘要")`
+- FAIL：`confirm(collection="tasks", id=X, accept=False, result="退回原因")` → 退回 Developer，重走 5.1
+
+每張 task 走完 5.1→5.2→5.3 才進入下一張。
+
+---
+
 ## 完成條件
 
 - [ ] Spec 檔案已寫入 `docs/specs/` 並含標準 frontmatter
@@ -136,3 +162,5 @@ PM 將完整 Spec 呈給用戶逐章確認。
 - [ ] 所有 P0 需求都有對應 task（status: todo）
 - [ ] 每個 task 有 linked_entities + acceptance_criteria
 - [ ] 建票前已執行去重檢查
+- [ ] 所有 P0 task 狀態為 `done`（QA 驗收通過）
+- [ ] 程式碼已 commit & push
