@@ -24,9 +24,9 @@ version: 1.0.0
 
 PM 草擬完成後，**必須按文件治理規則將 Spec 正式建檔**：
 
-1. **取得治理規則**：呼叫 `governance_guide(topic="document")` 取得最新文件規範
+1. **取得治理規則**：讀取 `skills/governance/document-governance.md` 取得文件規範
 2. **寫入檔案**：將 Spec 寫入 `docs/specs/SPEC-{slug}.md`，含標準 frontmatter（doc_id, type, ontology_entity, status=draft, version, date）
-3. **確認掛載 L2**：每份文件必須掛載到一個 L2 entity。找不到 L2？先用 `governance_guide(topic="entity")` 確認規則後建立 L2，再掛文件
+3. **確認掛載 L2**：每份文件必須掛載到一個 L2 entity。找不到 L2？先讀 `skills/governance/l2-knowledge-governance.md` 確認規則後建立 L2，再掛文件
 4. **註冊 ontology**：用 `write(collection="documents", data={...})` 註冊到 ZenOS，檢查回傳的 `similar_items` 確認無重複
 5. **若有重複**：不建新文件，改為更新既有文件（supersede 或 merge）
 
@@ -118,7 +118,7 @@ PM 將完整 Spec 呈給用戶逐章確認。
 叫起 Architect agent（依照 Architect skill 流程）：
 - 讀取剛確認的 Spec
 - 技術設計
-- **建票前必須遵循任務治理規則**（呼叫 `governance_guide(topic="task")` 或讀 `skills/governance/task-governance.md`）：
+- **建票前必須遵循任務治理規則**（讀 `skills/governance/task-governance.md`）：
   1. **去重**：先 `search(collection="tasks", query="關鍵字")` 確認無重複票
   2. **linked_entities**：先 `search(collection="entities")` 找到 ID，填入 `linked_entities`（server 會 reject 不存在的 ID）
   3. **acceptance_criteria**：每張票必須有可驗收的 AC（`list[str]`）

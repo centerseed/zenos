@@ -56,25 +56,15 @@ cd dashboard && npm run build && firebase deploy --only hosting
 
 ## ZenOS 治理技能
 
-治理規則的 SSOT 是 MCP server 端的 `governance_guide` tool。
-執行治理相關操作前，呼叫對應 topic 取得最新規則：
-
-| 操作場景 | 呼叫方式 |
-|----------|---------|
-| 寫文件（SPEC/ADR/TD 等） | `governance_guide(topic="document", level=2)` |
-| 建立 L2 概念、寫 impacts | `governance_guide(topic="entity", level=2)` |
-| 建立或驗收任務 | `governance_guide(topic="task", level=2)` |
-| 知識捕獲（判斷分層） | `governance_guide(topic="capture", level=2)` |
-
-> 若 MCP 不可用（未設定或連線失敗），跳過治理流程。
-
-## ZenOS 治理技能
-
 若當前專案有 `skills/governance/` 目錄（透過 `/zenos-setup` 安裝），
 執行對應操作前**必須先用 Read tool 讀取該文件完整內容**再執行：
 
-- 寫文件前讀：`skills/governance/document-governance.md`
-- 建立 L2 概念前讀：`skills/governance/l2-knowledge-governance.md`
-- 建立任務前讀：`skills/governance/task-governance.md`
+| 操作場景 | 讀取文件 |
+|----------|---------|
+| 寫文件（SPEC/ADR/TD 等） | `skills/governance/document-governance.md` |
+| 建立 L2 概念、寫 impacts | `skills/governance/l2-knowledge-governance.md` |
+| 建立任務 | `skills/governance/task-governance.md` |
+| 知識捕獲（判斷分層） | `skills/governance/capture-governance.md` |
 
 > 若 `skills/governance/` 不存在，跳過治理流程。
+> Local skill 由 `/zenos-setup` 從 SSOT 拉取更新。
