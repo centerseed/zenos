@@ -42,6 +42,31 @@ function getTypeColor(type: string): string {
   return NODE_TYPE_COLORS[type] ?? DEFAULT_NODE_COLOR;
 }
 
+function wrapLabelLines(
+  ctx: CanvasRenderingContext2D,
+  label: string,
+  maxWidth: number
+): string[] {
+  if (!label) return [""];
+
+  const chars = Array.from(label);
+  const lines: string[] = [];
+  let currentLine = "";
+
+  for (const char of chars) {
+    const nextLine = currentLine + char;
+    if (currentLine && ctx.measureText(nextLine).width > maxWidth) {
+      lines.push(currentLine);
+      currentLine = char;
+    } else {
+      currentLine = nextLine;
+    }
+  }
+
+  if (currentLine) lines.push(currentLine);
+  return lines;
+}
+
 export default function KnowledgeGraph({
   entities,
   relationships,
@@ -283,24 +308,27 @@ export default function KnowledgeGraph({
       ctx.shadowBlur = 0;
       ctx.shadowColor = "transparent";
 
-      // Label — larger font, with background for readability
+      // Label — full entity name with wrapping for readability
       const fontSize = Math.max(12 / globalScale, 3);
       ctx.font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
       ctx.textAlign = "center";
-      ctx.textBaseline = "top";
+      ctx.textBaseline = "middle";
 
-      // Truncate long names
-      const maxChars = 10;
-      const displayLabel = label.length > maxChars ? label.slice(0, maxChars) + "…" : label;
+      const maxLabelWidth = Math.max(radius * 6, 72 / globalScale);
+      const lines = wrapLabelLines(ctx, label, maxLabelWidth);
+      const lineHeight = fontSize + 2;
+      const blockHeight = lines.length * lineHeight;
+      const textY = y + radius + 6;
+      const textWidths = lines.map((line) => ctx.measureText(line).width);
+      const textWidth = Math.max(...textWidths, 0);
 
-      // Text background for readability
-      const textWidth = ctx.measureText(displayLabel).width;
-      const textY = y + radius + 3;
       ctx.fillStyle = "rgba(10,10,11,0.7)";
-      ctx.fillRect(x - textWidth / 2 - 2, textY - 1, textWidth + 4, fontSize + 2);
+      ctx.fillRect(x - textWidth / 2 - 4, textY - 2, textWidth + 8, blockHeight + 4);
 
       ctx.fillStyle = isHovered ? "#FFFFFF" : "#FAFAFA";
-      ctx.fillText(displayLabel, x, textY);
+      lines.forEach((line, index) => {
+        ctx.fillText(line, x, textY + (index * lineHeight) + (lineHeight / 2));
+      });
 
       ctx.restore();
     },
@@ -386,42 +414,13 @@ export default function KnowledgeGraph({
     [hoveredNode, hoveredSidebarNodeId, focusedNodeId, pathEdgeKeys]
   );
 
-  // Link canvas renderer: draw verb label at edge midpoint (only when a node is selected)
+  // Keep links visually clean; relationship semantics stay in the detail sheet.
   const linkCanvasObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (link: any, ctx: CanvasRenderingContext2D) => {
-      const verb = (link as GraphLink).verb;
-      if (!verb) return;
-
-      const src = typeof link.source === "string" ? null : link.source;
-      const tgt = typeof link.target === "string" ? null : link.target;
-      if (!src || !tgt || src.x == null || src.y == null || tgt.x == null || tgt.y == null) return;
-
-      const isPathEdge = pathEdgeKeys.has(`${src.id}->${tgt.id}`);
-      // Only show verb label when this edge is connected to the focused node or part of the selected path
-      if (!isPathEdge && (!focusedNodeId || (src.id !== focusedNodeId && tgt.id !== focusedNodeId))) return;
-
-      const midX = (src.x + tgt.x) / 2;
-      const midY = (src.y + tgt.y) / 2;
-
-      ctx.save();
-      ctx.font = "9px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-
-      const textWidth = ctx.measureText(verb).width;
-      const padding = 2;
-      const bgW = textWidth + padding * 2;
-      const bgH = 14;
-
-      ctx.fillStyle = "rgba(15,15,15,0.75)";
-      ctx.fillRect(midX - bgW / 2, midY - bgH / 2, bgW, bgH);
-
-      ctx.fillStyle = "rgba(161,161,170,0.9)";
-      ctx.fillText(verb, midX, midY);
-      ctx.restore();
+    (_link: any, _ctx: CanvasRenderingContext2D) => {
+      return;
     },
-    [focusedNodeId, pathEdgeKeys]
+    []
   );
 
   // Tooltip: show full name + summary on hover
@@ -495,17 +494,7 @@ export default function KnowledgeGraph({
           }
           return "rgba(255,255,255,0.12)";
         }}
-        linkLabel={(link: GraphLink) => {
-          const labels: Record<string, string> = {
-            part_of: "屬於",
-            depends_on: "依賴",
-            serves: "服務",
-            owned_by: "負責人",
-            blocks: "阻塞",
-            related_to: "相關",
-          };
-          return labels[link.type] ?? link.type;
-        }}
+        linkLabel={() => ""}
         linkCanvasObject={linkCanvasObject}
         linkCanvasObjectMode={() => "after"}
         linkCurvature={0.1}

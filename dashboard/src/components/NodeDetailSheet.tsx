@@ -425,7 +425,7 @@ export default function NodeDetailSheet({
   const hasDocs = categorizedDocs.specs.length > 0 || categorizedDocs.adrs.length > 0 || categorizedDocs.sources.length > 0;
 
   return (
-    <Sheet open={!!entity} onOpenChange={(open) => !open && onClose()}>
+    <Sheet open={!!entity} onOpenChange={(open) => !open && onClose()} modal={false}>
       <SheetContent
         side="right"
         showOverlay={false}
