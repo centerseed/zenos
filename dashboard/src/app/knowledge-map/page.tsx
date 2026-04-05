@@ -10,10 +10,11 @@ import {
   getAllEntities,
   getAllBlindspots,
   getAllRelationships,
+  getEntityContext,
   getTasks,
   getQualitySignals,
 } from "@/lib/api";
-import type { Entity, Blindspot, Relationship, Task, QualitySignals } from "@/types";
+import type { Entity, Blindspot, Relationship, Task, QualitySignals, ImpactChainHop } from "@/types";
 import { NODE_TYPE_COLORS, NODE_TYPE_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
@@ -133,9 +134,12 @@ function KnowledgeMapContent() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [qualitySignals, setQualitySignals] = useState<QualitySignals>({ search_unused: [], summary_poor: [] });
   const [loading, setLoading] = useState(true);
+  const [impactChain, setImpactChain] = useState<ImpactChainHop[]>([]);
+  const [reverseImpactChain, setReverseImpactChain] = useState<ImpactChainHop[]>([]);
   
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
+  const [selectedPathIds, setSelectedPathIds] = useState<string[]>([]);
   const [hoveredSidebarNodeId, setHoveredSidebarNodeId] = useState<string | null>(null);
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -166,6 +170,7 @@ function KnowledgeMapContent() {
           if (exists) {
             setSelectedId(targetId);
             setFocusedNodeId(targetId);
+            setSelectedPathIds([targetId]);
           }
         }
       } catch (err) {
@@ -175,6 +180,36 @@ function KnowledgeMapContent() {
     }
     load();
   }, [user, partner, targetId]);
+
+  useEffect(() => {
+    if (!user || !selectedId) {
+      setImpactChain([]);
+      setReverseImpactChain([]);
+      return;
+    }
+
+    const activeUser = user;
+    const entityId = selectedId;
+    let cancelled = false;
+    async function loadEntityContext() {
+      try {
+        const token = await activeUser.getIdToken();
+        const context = await getEntityContext(token, entityId);
+        if (cancelled) return;
+        setImpactChain(context?.impact_chain ?? []);
+        setReverseImpactChain(context?.reverse_impact_chain ?? []);
+      } catch {
+        if (cancelled) return;
+        setImpactChain([]);
+        setReverseImpactChain([]);
+      }
+    }
+
+    loadEntityContext();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, selectedId]);
 
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.id, e])), [entities]);
   const blindspotsByEntity = useMemo(() => {
@@ -190,6 +225,49 @@ function KnowledgeMapContent() {
   }, [blindspots]);
 
   const selectedEntity = useMemo(() => selectedId ? entityMap.get(selectedId) ?? null : null, [selectedId, entityMap]);
+  const relationshipMap = useMemo(() => {
+    const map = new Map<string, Relationship>();
+    for (const rel of relationships) {
+      map.set(`${rel.sourceEntityId}->${rel.targetId}`, rel);
+    }
+    return map;
+  }, [relationships]);
+
+  const canStepToNode = useCallback((fromId: string, toId: string) => (
+    relationships.some((rel) =>
+      (rel.sourceEntityId === fromId && rel.targetId === toId) ||
+      (rel.sourceEntityId === toId && rel.targetId === fromId)
+    )
+  ), [relationships]);
+
+  const buildPathRelationships = useCallback((pathIds: string[]) => {
+    const hops: Relationship[] = [];
+    for (let i = 0; i < pathIds.length - 1; i += 1) {
+      const fromId = pathIds[i];
+      const toId = pathIds[i + 1];
+      const forward = relationshipMap.get(`${fromId}->${toId}`);
+      const reverse = relationshipMap.get(`${toId}->${fromId}`);
+      if (forward) hops.push(forward);
+      else if (reverse) hops.push(reverse);
+    }
+    return hops;
+  }, [relationshipMap]);
+
+  const navigateToEntity = useCallback((entity: Entity, mode: "replace" | "extend" = "replace") => {
+    setSelectedId(entity.id);
+    setFocusedNodeId(entity.id);
+    setSelectedPathIds((prev) => {
+      if (mode === "replace" || prev.length === 0) return [entity.id];
+
+      const existingIndex = prev.indexOf(entity.id);
+      if (existingIndex >= 0) return prev.slice(0, existingIndex + 1);
+
+      const lastId = prev[prev.length - 1];
+      if (canStepToNode(lastId, entity.id)) return [...prev, entity.id];
+
+      return [entity.id];
+    });
+  }, [canStepToNode]);
 
   // Filter entities based on focusProduct
   const filteredEntities = useMemo(() => {
@@ -206,11 +284,60 @@ function KnowledgeMapContent() {
     return entities.filter(e => focusIds.has(e.id));
   }, [entities, focusProduct]);
 
+  const selectedPathEntities = useMemo(
+    () => selectedPathIds.map((id) => entityMap.get(id)).filter(Boolean) as Entity[],
+    [selectedPathIds, entityMap]
+  );
+
+  const selectedPathRelationships = useMemo(
+    () => buildPathRelationships(selectedPathIds),
+    [buildPathRelationships, selectedPathIds]
+  );
+
   const handleSelect = useCallback((e: Entity) => {
-    setSelectedId(prev => {
-      const next = prev === e.id ? null : e.id;
-      setFocusedNodeId(next);
-      return next;
+    navigateToEntity(e, selectedPathIds.length > 0 ? "extend" : "replace");
+  }, [navigateToEntity, selectedPathIds.length]);
+
+  const handleCloseDetail = useCallback(() => {
+    setSelectedId(null);
+    setFocusedNodeId(null);
+    setSelectedPathIds([]);
+  }, []);
+
+  const handleFocusNode = useCallback((id: string) => {
+    const target = entityMap.get(id);
+    if (target) navigateToEntity(target, "extend");
+  }, [entityMap, navigateToEntity]);
+
+  const handleLinkSelect = useCallback((sourceId: string, targetId: string) => {
+    setSelectedPathIds((prev) => {
+      if (prev.length === 0) {
+        setSelectedId(targetId);
+        setFocusedNodeId(targetId);
+        return [sourceId, targetId];
+      }
+
+      const sourceIndex = prev.indexOf(sourceId);
+      const targetIndex = prev.indexOf(targetId);
+      let nextPath: string[];
+      let nextFocusId = targetId;
+
+      if (sourceIndex >= 0 && targetIndex === -1) {
+        nextPath = [...prev.slice(0, sourceIndex + 1), targetId];
+        nextFocusId = targetId;
+      } else if (targetIndex >= 0 && sourceIndex === -1) {
+        nextPath = [...prev.slice(0, targetIndex + 1), sourceId];
+        nextFocusId = sourceId;
+      } else if (sourceIndex >= 0 && targetIndex >= 0) {
+        nextPath = prev.slice(0, Math.max(sourceIndex, targetIndex) + 1);
+        nextFocusId = nextPath[nextPath.length - 1];
+      } else {
+        nextPath = [sourceId, targetId];
+      }
+
+      setSelectedId(nextFocusId);
+      setFocusedNodeId(nextFocusId);
+      return nextPath;
     });
   }, []);
 
@@ -245,8 +372,10 @@ function KnowledgeMapContent() {
               relationships={relationships}
               blindspotsByEntity={blindspotsByEntity}
               onNodeClick={handleSelect}
+              onLinkClick={handleLinkSelect}
               hoveredSidebarNodeId={hoveredSidebarNodeId}
               focusedNodeId={focusedNodeId}
+              selectedPathIds={selectedPathIds}
               detailPanelOpen={!!selectedEntity}
             />
           </main>
@@ -256,15 +385,16 @@ function KnowledgeMapContent() {
               entity={selectedEntity}
               entities={entities}
               relationships={relationships}
+              selectedPathEntities={selectedPathEntities}
+              selectedPathRelationships={selectedPathRelationships}
               blindspots={blindspotsByEntity.get(selectedEntity.id) ?? []}
               tasks={tasks}
               qualitySignals={qualitySignals}
-              onClose={() => { setSelectedId(null); setFocusedNodeId(null); }}
+              impactChain={impactChain}
+              reverseImpactChain={reverseImpactChain}
+              onClose={handleCloseDetail}
               onHoverNode={setHoveredSidebarNodeId}
-              onFocusNode={(id) => {
-                const target = entityMap.get(id);
-                if (target) handleSelect(target);
-              }}
+              onFocusNode={handleFocusNode}
             />
           )}
         </div>

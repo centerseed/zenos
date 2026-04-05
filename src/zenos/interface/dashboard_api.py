@@ -423,7 +423,26 @@ async def get_entity(request: Request) -> Response:
     elif not OntologyService.is_entity_visible_for_partner(entity, partner):
         return _error_response("NOT_FOUND", f"Entity {entity_id} not found", 404, request=request)
 
-    return _json_response({"entity": _entity_to_dict(entity)}, request=request)
+    ontology_service = OntologyService(
+        _entity_repo,
+        _relationship_repo,
+        None,
+        None,
+        None,
+    )
+    impact_chain, reverse_impact_chain = await asyncio.gather(
+        ontology_service.compute_impact_chain(entity_id, direction="forward"),
+        ontology_service.compute_impact_chain(entity_id, direction="reverse"),
+    )
+
+    return _json_response(
+        {
+            "entity": _entity_to_dict(entity),
+            "impact_chain": impact_chain,
+            "reverse_impact_chain": reverse_impact_chain,
+        },
+        request=request,
+    )
 
 
 # ──────────────────────────────────────────────

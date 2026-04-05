@@ -61,6 +61,15 @@ export interface Relationship {
   confirmedByUser: boolean;
 }
 
+export interface ImpactChainHop {
+  from_id: string;
+  from_name: string;
+  to_id: string;
+  to_name: string;
+  type: Relationship["type"];
+  verb?: string | null;
+}
+
 export interface Blindspot {
   id: string;
   description: string;

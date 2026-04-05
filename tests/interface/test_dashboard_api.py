@@ -253,10 +253,16 @@ class TestGetEntity:
              patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
              patch("zenos.interface.dashboard_api._ensure_repos"), \
              patch("zenos.interface.dashboard_api._entity_repo") as mock_repo, \
+             patch("zenos.interface.dashboard_api._relationship_repo") as mock_rel_repo, \
+             patch("zenos.interface.dashboard_api.OntologyService") as mock_ontology_service, \
              patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
             mock_repo.get_by_id = AsyncMock(return_value=entity)
+            mock_rel_repo.list_by_entity = AsyncMock(return_value=[])
             mock_ctx.set = MagicMock(return_value="token")
             mock_ctx.reset = MagicMock()
+            mock_service = MagicMock()
+            mock_service.compute_impact_chain = AsyncMock(side_effect=[[{"to_id": "e2"}], [{"from_id": "root"}]])
+            mock_ontology_service.return_value = mock_service
 
             resp = await get_entity(request)
 
@@ -264,6 +270,8 @@ class TestGetEntity:
         import json
         body = json.loads(resp.body)
         assert body["entity"]["id"] == "e1"
+        assert body["impact_chain"] == [{"to_id": "e2"}]
+        assert body["reverse_impact_chain"] == [{"from_id": "root"}]
 
     async def test_returns_404_for_confidential_entity_without_membership(self):
         from zenos.interface.dashboard_api import get_entity

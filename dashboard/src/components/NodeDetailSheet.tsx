@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useCallback, useEffect } from "react";
-import type { Entity, Relationship, Blindspot, Task, QualitySignals } from "@/types";
+import type { Entity, Relationship, Blindspot, Task, QualitySignals, Partner, ImpactChainHop } from "@/types";
 import {
   Sheet,
   SheetContent,
@@ -16,11 +16,15 @@ import {
   NODE_TYPE_LABELS,
 } from "@/lib/constants";
 import { useAuth } from "@/lib/auth";
-import { updateEntityVisibility } from "@/lib/api";
+import { getDepartments, getPartners, updateEntityVisibility } from "@/lib/api";
 
 interface NodeDetailSheetProps {
   entity: Entity | null;
   relationships: Relationship[];
+  selectedPathEntities?: Entity[];
+  selectedPathRelationships?: Relationship[];
+  impactChain?: ImpactChainHop[];
+  reverseImpactChain?: ImpactChainHop[];
   blindspots: Blindspot[];
   entities: Entity[];
   tasks: Task[];
@@ -57,9 +61,138 @@ const VISIBILITY_COLORS: Record<Entity["visibility"], string> = {
   confidential: "bg-red-500/15 text-red-400 border-red-500/30",
 };
 
+const DEFAULT_ROLE_OPTIONS = [
+  "engineering",
+  "marketing",
+  "product",
+  "sales",
+  "finance",
+  "hr",
+  "ops",
+];
+
+function normalizeOption(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function parseCommaSeparated(value: string) {
+  return Array.from(new Set(value.split(",").map(normalizeOption).filter(Boolean)));
+}
+
+function formatMemberLabel(partner: Partner) {
+  return partner.displayName?.trim() || partner.email || partner.id;
+}
+
+function MultiSelectField({
+  label,
+  hint,
+  options,
+  value,
+  onToggle,
+  manualValue,
+  manualLabel,
+  manualPlaceholder,
+  onManualChange,
+}: {
+  label: string;
+  hint?: string;
+  options: Array<{ value: string; label: string; description?: string }>;
+  value: string[];
+  onToggle: (item: string) => void;
+  manualValue?: string;
+  manualLabel?: string;
+  manualPlaceholder?: string;
+  onManualChange?: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <label className="text-[10px] text-foreground/40 block">{label}</label>
+        {hint && <span className="text-[10px] text-foreground/25">{hint}</span>}
+      </div>
+
+      {value.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {value.map((item) => {
+            const match = options.find((option) => option.value === item);
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => onToggle(item)}
+                className="inline-flex items-center gap-1 rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[10px] text-cyan-100 transition-colors hover:border-cyan-300/50 hover:bg-cyan-400/15"
+              >
+                <span>{match?.label ?? item}</span>
+                <span className="text-cyan-200/60">×</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded-md border border-dashed border-border/70 px-3 py-2 text-[10px] text-foreground/30">
+          No selection
+        </div>
+      )}
+
+      {options.length > 0 && (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {options.map((option) => {
+            const checked = value.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => onToggle(option.value)}
+                aria-pressed={checked}
+                className={`rounded-lg border px-3 py-2 text-left transition-colors ${
+                  checked
+                    ? "border-cyan-400/40 bg-cyan-400/10 text-foreground"
+                    : "border-border bg-card/60 text-foreground/65 hover:border-foreground/25 hover:text-foreground"
+                }`}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs font-medium">{option.label}</span>
+                  <span
+                    className={`inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] ${
+                      checked
+                        ? "border-cyan-300/60 bg-cyan-300/20 text-cyan-100"
+                        : "border-border/80 text-transparent"
+                    }`}
+                  >
+                    ✓
+                  </span>
+                </div>
+                {option.description && (
+                  <p className="mt-1 text-[10px] text-foreground/35">{option.description}</p>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {onManualChange && (
+        <div className="space-y-1">
+          <label className="text-[10px] text-foreground/35 block">{manualLabel ?? "Additional values"}</label>
+          <input
+            value={manualValue ?? ""}
+            onChange={(e) => onManualChange(e.target.value)}
+            placeholder={manualPlaceholder}
+            className="w-full bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-foreground/20"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function NodeDetailSheet({
   entity,
   relationships,
+  selectedPathEntities = [],
+  selectedPathRelationships = [],
+  impactChain = [],
+  reverseImpactChain = [],
   blindspots,
   entities,
   tasks,
@@ -83,6 +216,8 @@ export default function NodeDetailSheet({
   });
   const [savingVis, setSavingVis] = useState(false);
   const [visError, setVisError] = useState<string | null>(null);
+  const [partnerOptions, setPartnerOptions] = useState<Partner[]>([]);
+  const [departmentOptions, setDepartmentOptions] = useState<string[]>([]);
 
   // Reset form when entity changes
   useEffect(() => {
@@ -98,18 +233,51 @@ export default function NodeDetailSheet({
     }
   }, [entity?.id]);
 
+  useEffect(() => {
+    if (!user || !isAdmin) return;
+
+    let cancelled = false;
+
+    const loadPermissionOptions = async () => {
+      try {
+        const token = await user.getIdToken();
+        const [partnersRes, departmentsRes] = await Promise.allSettled([
+          getPartners(token),
+          getDepartments(token),
+        ]);
+
+        if (cancelled) return;
+
+        if (partnersRes.status === "fulfilled") {
+          setPartnerOptions(partnersRes.value);
+        }
+
+        if (departmentsRes.status === "fulfilled") {
+          setDepartmentOptions(departmentsRes.value);
+        }
+      } catch (error) {
+        console.error("Failed to load permission options:", error);
+      }
+    };
+
+    void loadPermissionOptions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isAdmin]);
+
   const handleSaveVisibility = useCallback(async () => {
     if (!entity || !user) return;
     setSavingVis(true);
     setVisError(null);
     try {
       const token = await user.getIdToken();
-      const parseList = (s: string) => s.split(",").map((x) => x.trim()).filter(Boolean);
       await updateEntityVisibility(token, entity.id, {
         visibility: visForm.visibility,
-        visible_to_roles: parseList(visForm.visibleToRoles),
-        visible_to_members: parseList(visForm.visibleToMembers),
-        visible_to_departments: parseList(visForm.visibleToDepartments),
+        visible_to_roles: parseCommaSeparated(visForm.visibleToRoles),
+        visible_to_members: parseCommaSeparated(visForm.visibleToMembers),
+        visible_to_departments: parseCommaSeparated(visForm.visibleToDepartments),
       });
       setEditingVisibility(false);
     } catch (err) {
@@ -118,6 +286,72 @@ export default function NodeDetailSheet({
       setSavingVis(false);
     }
   }, [entity, user, visForm]);
+
+  const roleOptions = useMemo(() => {
+    const collected = new Set(DEFAULT_ROLE_OPTIONS);
+    for (const partnerOption of partnerOptions) {
+      for (const role of partnerOption.roles ?? []) {
+        const normalized = normalizeOption(role);
+        if (normalized) collected.add(normalized);
+      }
+    }
+    for (const role of parseCommaSeparated(visForm.visibleToRoles)) {
+      collected.add(role);
+    }
+    return Array.from(collected)
+      .sort()
+      .map((role) => ({ value: role, label: role }));
+  }, [partnerOptions, visForm.visibleToRoles]);
+
+  const availableDepartmentOptions = useMemo(() => {
+    const collected = new Set<string>();
+    for (const department of departmentOptions) {
+      const normalized = normalizeOption(department);
+      if (normalized && normalized !== "all") collected.add(normalized);
+    }
+    for (const partnerOption of partnerOptions) {
+      const normalized = normalizeOption(partnerOption.department ?? "");
+      if (normalized && normalized !== "all") collected.add(normalized);
+    }
+    for (const department of parseCommaSeparated(visForm.visibleToDepartments)) {
+      if (department !== "all") collected.add(department);
+    }
+    return Array.from(collected)
+      .sort()
+      .map((department) => ({ value: department, label: department }));
+  }, [departmentOptions, partnerOptions, visForm.visibleToDepartments]);
+
+  const memberOptions = useMemo(() => {
+    const map = new Map<string, { value: string; label: string; description?: string }>();
+    for (const partnerOption of partnerOptions) {
+      map.set(partnerOption.id, {
+        value: partnerOption.id,
+        label: formatMemberLabel(partnerOption),
+        description: partnerOption.department ? `${partnerOption.department} · ${partnerOption.email}` : partnerOption.email,
+      });
+    }
+    for (const memberId of parseCommaSeparated(visForm.visibleToMembers)) {
+      if (!map.has(memberId)) {
+        map.set(memberId, { value: memberId, label: memberId });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [partnerOptions, visForm.visibleToMembers]);
+
+  const toggleCsvItem = useCallback((field: "visibleToRoles" | "visibleToDepartments" | "visibleToMembers", item: string) => {
+    setVisForm((current) => {
+      const next = new Set(parseCommaSeparated(current[field]));
+      if (next.has(item)) {
+        next.delete(item);
+      } else {
+        next.add(item);
+      }
+      return {
+        ...current,
+        [field]: Array.from(next).join(", "),
+      };
+    });
+  }, []);
 
   const isSearchUnused = useMemo(
     () => entity != null && (qualitySignals?.search_unused ?? []).some((s) => s.entity_id === entity.id),
@@ -135,6 +369,30 @@ export default function NodeDetailSheet({
     return relationships.filter(
       (r) => r.sourceEntityId === entity.id || r.targetId === entity.id
     );
+  }, [entity, relationships]);
+
+  const reversePropagationChain = useMemo(() => {
+    if (!entity) return [];
+
+    const visited = new Set<string>([entity.id]);
+    const queue: Array<{ nodeId: string; depth: number }> = [{ nodeId: entity.id, depth: 0 }];
+    const hops: Relationship[] = [];
+
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) break;
+      if (current.depth >= 5) continue;
+
+      for (const rel of relationships) {
+        if (rel.targetId !== current.nodeId) continue;
+        if (visited.has(rel.sourceEntityId)) continue;
+        visited.add(rel.sourceEntityId);
+        hops.push(rel);
+        queue.push({ nodeId: rel.sourceEntityId, depth: current.depth + 1 });
+      }
+    }
+
+    return hops;
   }, [entity, relationships]);
 
   // Action Layer: Tasks
@@ -218,6 +476,122 @@ export default function NodeDetailSheet({
             </div>
 
             <div className="flex flex-col gap-8 p-6">
+              {(selectedPathEntities.length > 1 || impactChain.length > 0 || reverseImpactChain.length > 0) && (
+                <section>
+                  <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/40 mb-3 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-400" />
+                    Path Explorer
+                  </h3>
+
+                  {selectedPathEntities.length > 0 && (
+                    <div className="space-y-2">
+                      <div className="text-[10px] font-medium text-fuchsia-300/70 uppercase">Selected Path</div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {selectedPathEntities.map((pathEntity, index) => (
+                          <div key={pathEntity.id} className="contents">
+                            <button
+                              onClick={() => onFocusNode?.(pathEntity.id)}
+                              onMouseEnter={() => onHoverNode?.(pathEntity.id)}
+                              onMouseLeave={() => onHoverNode?.(null)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-foreground/5 border border-border/40 hover:bg-foreground/10 text-xs text-foreground/75"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[pathEntity.type] }} />
+                              {pathEntity.name}
+                            </button>
+                            {index < selectedPathEntities.length - 1 && (
+                              <span className="text-[10px] text-fuchsia-300/50">
+                                {selectedPathRelationships[index]?.verb ?? "→"}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2 mt-4">
+                    <div className="text-[10px] font-medium text-emerald-300/70 uppercase">Forward Propagation</div>
+                    {impactChain.length === 0 ? (
+                      <p className="text-xs text-foreground/30 italic">No downstream propagation chain</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {impactChain.map((hop, index) => {
+                          const target = entityMap.get(hop.to_id);
+                          return (
+                            <div key={`${hop.from_id}-${hop.to_id}-${index}`} className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2">
+                              <div className="flex flex-wrap items-center gap-1.5 text-xs text-foreground/75">
+                                <span className="text-foreground/45">{hop.from_name}</span>
+                                <span className="text-[10px] text-emerald-300/60">{hop.verb ?? hop.type}</span>
+                                {target ? (
+                                  <button
+                                    onClick={() => onFocusNode?.(target.id)}
+                                    onMouseEnter={() => onHoverNode?.(target.id)}
+                                    onMouseLeave={() => onHoverNode?.(null)}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:bg-foreground/10"
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[target.type] }} />
+                                    {target.name}
+                                  </button>
+                                ) : (
+                                  <span className="italic text-foreground/40">{hop.to_name}</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-2 mt-4">
+                    <div className="text-[10px] font-medium text-blue-300/70 uppercase">Reverse Propagation</div>
+                    {reverseImpactChain.length === 0 ? (
+                      <p className="text-xs text-foreground/30 italic">No upstream propagation chain</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {reverseImpactChain.map((hop, index) => {
+                          const source = entityMap.get(hop.from_id);
+                          const target = entityMap.get(hop.to_id);
+                          return (
+                            <div key={`${hop.from_id}-${hop.to_id}-${index}-reverse`} className="rounded-md border border-blue-500/20 bg-blue-500/5 p-2">
+                              <div className="flex flex-wrap items-center gap-1.5 text-xs text-foreground/75">
+                                {source ? (
+                                  <button
+                                    onClick={() => onFocusNode?.(source.id)}
+                                    onMouseEnter={() => onHoverNode?.(source.id)}
+                                    onMouseLeave={() => onHoverNode?.(null)}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:bg-foreground/10"
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[source.type] }} />
+                                    {source.name}
+                                  </button>
+                                ) : (
+                                  <span className="italic text-foreground/40">{hop.from_name}</span>
+                                )}
+                                <span className="text-[10px] text-blue-300/60">{hop.verb ?? hop.type}</span>
+                                {target ? (
+                                  <button
+                                    onClick={() => onFocusNode?.(target.id)}
+                                    onMouseEnter={() => onHoverNode?.(target.id)}
+                                    onMouseLeave={() => onHoverNode?.(null)}
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:bg-foreground/10"
+                                  >
+                                    <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[target.type] }} />
+                                    {target.name}
+                                  </button>
+                                ) : (
+                                  <span className="italic text-foreground/40">{hop.to_name}</span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              )}
+
               {/* v2-impacts-debug */}
               {/* Action Layer (Tasks) */}
               <section>
@@ -521,36 +895,45 @@ export default function NodeDetailSheet({
                             <option key={v} value={v}>{v} — {VISIBILITY_LABELS[v].split("—")[1]?.trim()}</option>
                           ))}
                         </select>
+                        <p className="mt-1 text-[10px] text-foreground/30">
+                          Choose the exposure model first, then pick the exact audiences below.
+                        </p>
                       </div>
                       {visForm.visibility !== "public" && (
                         <>
-                          <div>
-                            <label className="text-[10px] text-foreground/40 block mb-1">Visible to Roles</label>
-                            <input
-                              value={visForm.visibleToRoles}
-                              onChange={(e) => setVisForm((f) => ({ ...f, visibleToRoles: e.target.value }))}
-                              placeholder="engineering, finance, hr"
-                              className="w-full bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-foreground/20"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] text-foreground/40 block mb-1">Visible to Departments</label>
-                            <input
-                              value={visForm.visibleToDepartments}
-                              onChange={(e) => setVisForm((f) => ({ ...f, visibleToDepartments: e.target.value }))}
-                              placeholder="finance, hr"
-                              className="w-full bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-foreground/20"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] text-foreground/40 block mb-1">Visible to Members (Partner IDs)</label>
-                            <input
-                              value={visForm.visibleToMembers}
-                              onChange={(e) => setVisForm((f) => ({ ...f, visibleToMembers: e.target.value }))}
-                              placeholder="partner-id-1, partner-id-2"
-                              className="w-full bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-foreground/20"
-                            />
-                          </div>
+                          <MultiSelectField
+                            label="Visible to Roles"
+                            hint="Toggle predefined roles"
+                            options={roleOptions}
+                            value={parseCommaSeparated(visForm.visibleToRoles)}
+                            onToggle={(item) => toggleCsvItem("visibleToRoles", item)}
+                            manualValue={visForm.visibleToRoles}
+                            manualLabel="Additional roles"
+                            manualPlaceholder="engineering, finance, hr"
+                            onManualChange={(value) => setVisForm((f) => ({ ...f, visibleToRoles: value }))}
+                          />
+                          <MultiSelectField
+                            label="Visible to Departments"
+                            hint="Pulled from current org departments"
+                            options={availableDepartmentOptions}
+                            value={parseCommaSeparated(visForm.visibleToDepartments)}
+                            onToggle={(item) => toggleCsvItem("visibleToDepartments", item)}
+                            manualValue={visForm.visibleToDepartments}
+                            manualLabel="Additional departments"
+                            manualPlaceholder="finance, hr"
+                            onManualChange={(value) => setVisForm((f) => ({ ...f, visibleToDepartments: value }))}
+                          />
+                          <MultiSelectField
+                            label="Visible to Members"
+                            hint="Pick exact partner accounts"
+                            options={memberOptions}
+                            value={parseCommaSeparated(visForm.visibleToMembers)}
+                            onToggle={(item) => toggleCsvItem("visibleToMembers", item)}
+                            manualValue={visForm.visibleToMembers}
+                            manualLabel="Additional member IDs"
+                            manualPlaceholder="partner-id-1, partner-id-2"
+                            onManualChange={(value) => setVisForm((f) => ({ ...f, visibleToMembers: value }))}
+                          />
                         </>
                       )}
                       {visError && (

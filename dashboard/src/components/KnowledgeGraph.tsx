@@ -31,8 +31,10 @@ interface KnowledgeGraphProps {
   relationships: Relationship[];
   blindspotsByEntity: Map<string, Blindspot[]>;
   onNodeClick: (entity: Entity) => void;
+  onLinkClick?: (sourceId: string, targetId: string) => void;
   hoveredSidebarNodeId?: string | null;
   focusedNodeId?: string | null;
+  selectedPathIds?: string[];
   detailPanelOpen?: boolean;
 }
 
@@ -45,8 +47,10 @@ export default function KnowledgeGraph({
   relationships,
   blindspotsByEntity,
   onNodeClick,
+  onLinkClick,
   hoveredSidebarNodeId,
   focusedNodeId,
+  selectedPathIds = [],
   detailPanelOpen = false,
 }: KnowledgeGraphProps) {
   const [mounted, setMounted] = useState(false);
@@ -201,6 +205,18 @@ export default function KnowledgeGraph({
     return connected;
   }, [hoveredNode, hoveredSidebarNodeId, focusedNodeId, graphData.links]);
 
+  const pathNodeIds = useMemo(() => new Set(selectedPathIds), [selectedPathIds]);
+  const pathEdgeKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (let i = 0; i < selectedPathIds.length - 1; i += 1) {
+      const source = selectedPathIds[i];
+      const target = selectedPathIds[i + 1];
+      keys.add(`${source}->${target}`);
+      keys.add(`${target}->${source}`);
+    }
+    return keys;
+  }, [selectedPathIds]);
+
   // Node canvas renderer
   const nodeCanvasObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -217,10 +233,11 @@ export default function KnowledgeGraph({
       const isHoveredOnGraph = hoveredNode === nodeId;
       const isHoveredOnSidebar = hoveredSidebarNodeId === nodeId;
       const isFocused = focusedNodeId === nodeId;
-      const isHovered = isHoveredOnGraph || isHoveredOnSidebar || isFocused;
+      const isInPath = pathNodeIds.has(nodeId);
+      const isHovered = isHoveredOnGraph || isHoveredOnSidebar || isFocused || isInPath;
 
       const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
-      const isDimmed = activeNodeId !== null && !connectedNodes.has(nodeId);
+      const isDimmed = activeNodeId !== null && !connectedNodes.has(nodeId) && !isInPath;
 
       ctx.save();
 
@@ -258,8 +275,8 @@ export default function KnowledgeGraph({
       ctx.fill();
 
       // Subtle border ring
-      ctx.strokeStyle = "rgba(255,255,255,0.15)";
-      ctx.lineWidth = 0.5;
+      ctx.strokeStyle = isInPath ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.15)";
+      ctx.lineWidth = isInPath ? 1.8 : 0.5;
       ctx.stroke();
 
       // Reset shadow for label
@@ -287,7 +304,7 @@ export default function KnowledgeGraph({
 
       ctx.restore();
     },
-    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, connectedNodes]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, connectedNodes, pathNodeIds]
   );
 
   // Pointer area for click detection
@@ -322,14 +339,27 @@ export default function KnowledgeGraph({
     []
   );
 
+  const handleLinkClick = useCallback(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (link: any) => {
+      const sourceId = typeof link.source === "string" ? link.source : link.source?.id;
+      const targetId = typeof link.target === "string" ? link.target : link.target?.id;
+      if (sourceId && targetId) {
+        onLinkClick?.(sourceId, targetId);
+      }
+    },
+    [onLinkClick]
+  );
+
   // Link color: highlight connected links on hover
   const linkColor = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any) => {
       const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
-      if (!activeNodeId) return "rgba(255,255,255,0.12)";
       const src = typeof link.source === "string" ? link.source : link.source?.id;
       const tgt = typeof link.target === "string" ? link.target : link.target?.id;
+      if (pathEdgeKeys.has(`${src}->${tgt}`)) return "rgba(255,255,255,0.9)";
+      if (!activeNodeId) return "rgba(255,255,255,0.12)";
       if (src === activeNodeId || tgt === activeNodeId) {
         return hoveredNode || hoveredSidebarNodeId
           ? "rgba(255,255,255,0.6)"
@@ -337,22 +367,23 @@ export default function KnowledgeGraph({
       }
       return "rgba(255,255,255,0.04)";
     },
-    [hoveredNode, hoveredSidebarNodeId, focusedNodeId]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, pathEdgeKeys]
   );
 
   const linkWidth = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any) => {
       const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
-      if (!activeNodeId) return 1;
       const src = typeof link.source === "string" ? link.source : link.source?.id;
       const tgt = typeof link.target === "string" ? link.target : link.target?.id;
+      if (pathEdgeKeys.has(`${src}->${tgt}`)) return 3;
+      if (!activeNodeId) return 1;
       if (src === activeNodeId || tgt === activeNodeId) {
         return hoveredNode || hoveredSidebarNodeId ? 2 : 2.4;
       }
       return 0.5;
     },
-    [hoveredNode, hoveredSidebarNodeId, focusedNodeId]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, pathEdgeKeys]
   );
 
   // Link canvas renderer: draw verb label at edge midpoint (only when a node is selected)
@@ -366,8 +397,9 @@ export default function KnowledgeGraph({
       const tgt = typeof link.target === "string" ? null : link.target;
       if (!src || !tgt || src.x == null || src.y == null || tgt.x == null || tgt.y == null) return;
 
-      // Only show verb label when this edge is connected to the focused node
-      if (!focusedNodeId || (src.id !== focusedNodeId && tgt.id !== focusedNodeId)) return;
+      const isPathEdge = pathEdgeKeys.has(`${src.id}->${tgt.id}`);
+      // Only show verb label when this edge is connected to the focused node or part of the selected path
+      if (!isPathEdge && (!focusedNodeId || (src.id !== focusedNodeId && tgt.id !== focusedNodeId))) return;
 
       const midX = (src.x + tgt.x) / 2;
       const midY = (src.y + tgt.y) / 2;
@@ -389,7 +421,7 @@ export default function KnowledgeGraph({
       ctx.fillText(verb, midX, midY);
       ctx.restore();
     },
-    [focusedNodeId]
+    [focusedNodeId, pathEdgeKeys]
   );
 
   // Tooltip: show full name + summary on hover
@@ -478,8 +510,9 @@ export default function KnowledgeGraph({
         linkCanvasObjectMode={() => "after"}
         linkCurvature={0.1}
         cooldownTicks={100}
-        onNodeClick={handleNodeClick}
-        onNodeHover={handleNodeHover}
+          onNodeClick={handleNodeClick}
+          onLinkClick={handleLinkClick}
+          onNodeHover={handleNodeHover}
         enableZoomInteraction={true}
         enablePanInteraction={true}
         warmupTicks={50}

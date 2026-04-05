@@ -2,7 +2,7 @@
  * API layer — all data fetching goes through the ZenOS REST API.
  * Replaces direct Firestore SDK calls. All functions require a Firebase ID token.
  */
-import type { Entity, Relationship, Blindspot, Task, TaskComment, Partner, QualitySignals } from "@/types";
+import type { Entity, Relationship, Blindspot, Task, TaskComment, Partner, QualitySignals, ImpactChainHop } from "@/types";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
@@ -54,6 +54,24 @@ export async function getEntity(
   try {
     const res = await apiFetch<{ entity: Entity }>(`/api/data/entities/${entityId}`, token);
     return res.entity;
+  } catch {
+    return null;
+  }
+}
+
+export interface EntityContextResponse {
+  entity: Entity;
+  impact_chain: ImpactChainHop[];
+  reverse_impact_chain: ImpactChainHop[];
+}
+
+/** Fetch a single entity together with impact chain context */
+export async function getEntityContext(
+  token: string,
+  entityId: string
+): Promise<EntityContextResponse | null> {
+  try {
+    return await apiFetch<EntityContextResponse>(`/api/data/entities/${entityId}`, token);
   } catch {
     return null;
   }
@@ -161,6 +179,11 @@ export async function getTasksByEntity(
 export async function getPartnerMe(token: string): Promise<Partner> {
   const res = await apiFetch<{ partner: Partner }>("/api/partner/me", token);
   return res.partner;
+}
+
+export async function getPartners(token: string): Promise<Partner[]> {
+  const res = await apiFetch<{ partners: Partner[] }>("/api/partners", token);
+  return res.partners ?? [];
 }
 
 export async function updatePartnerScope(
