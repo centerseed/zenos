@@ -16,7 +16,7 @@ version: 0.2.0
 
 ```python
 # 1. 讀最近 bugfix 日誌，了解近期修過什麼、避免重複調查
-mcp__zenos__journal_read(project="{ZENOS_PROJECT}", limit=10, flow_type="bugfix")
+mcp__zenos__journal_read(limit=10, flow_type="bugfix")
 
 # 2. 確認是否已有相同 bug 的任務
 mcp__zenos__search(query="bug 關鍵字", collection="tasks", status="todo,in_progress")

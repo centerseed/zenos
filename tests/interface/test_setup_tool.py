@@ -505,6 +505,45 @@ class TestSetupToolSkipOverview:
         assert "governance_overview" not in result
 
 
+class TestSetupManifestOnly:
+    """Ticket 36c5afc2: Confirm mcp__zenos__setup returns manifest, not raw SKILL.md content."""
+
+    async def test_claude_code_no_skill_files_in_response(self):
+        """No skill_files key anywhere in the response dict."""
+        from zenos.interface.tools import setup
+        result = await setup(platform="claude_code", skip_overview=True)
+        assert "skill_files" not in result
+        assert "skill_files" not in result.get("payload", {})
+
+    async def test_codex_no_skill_files_in_response(self):
+        from zenos.interface.tools import setup
+        result = await setup(platform="codex", skip_overview=True)
+        assert "skill_files" not in result
+        assert "skill_files" not in result.get("payload", {})
+
+    async def test_instructions_reference_github_raw_url(self):
+        """Instructions must tell agent to fetch from GitHub raw URL, not inline."""
+        from zenos.interface.tools import setup
+        result = await setup(platform="claude_code", skip_overview=True)
+        instructions_text = " ".join(result["instructions"])
+        assert "raw.githubusercontent.com" in instructions_text
+
+    async def test_manifest_skills_have_path_and_version_but_no_content(self):
+        """Each skill entry in manifest has path and version but NOT content."""
+        from zenos.interface.tools import setup
+        result = await setup(platform="claude_code", skip_overview=True)
+        for skill in result["manifest"]["skills"]:
+            assert "path" in skill, f"Skill {skill.get('name')} missing 'path'"
+            assert "version" in skill, f"Skill {skill.get('name')} missing 'version'"
+            assert "content" not in skill, f"Skill {skill.get('name')} should not have 'content'"
+
+    async def test_codex_manifest_skills_no_content(self):
+        from zenos.interface.tools import setup
+        result = await setup(platform="codex", skip_overview=True)
+        for skill in result["manifest"]["skills"]:
+            assert "content" not in skill
+
+
 class TestSetupToolInvalidSkillSelection:
     """DC-9: invalid skill_selection → error response."""
 

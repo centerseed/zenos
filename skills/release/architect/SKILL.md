@@ -16,7 +16,7 @@ version: 0.5.0
 
 ```python
 # 1. 讀最近工作日誌，了解上次做到哪、有什麼決策脈絡
-mcp__zenos__journal_read(project="{ZENOS_PROJECT}", limit=10)
+mcp__zenos__journal_read(limit=10)
 
 # 2. 看有沒有 QA 已通過等待最終確認的任務，或待規劃的任務
 mcp__zenos__search(collection="tasks", status="review,todo")

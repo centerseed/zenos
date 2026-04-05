@@ -1,196 +1,176 @@
 ---
 name: zenos-setup
 description: >
-  ZenOS 初始化設定——引導用戶輸入 API token，自動寫入 MCP 設定檔，
-  完成後即可使用 /zenos-capture 和 /zenos-sync。
-  僅在使用者明確說「/zenos-setup」「初次設定 ZenOS」「我還沒設定 MCP token」
-  「幫我連接 ZenOS 服務」時使用。
-  注意：「更新 skill」「同步 skill」「修改 skill」不應觸發此 skill。
-version: 1.0.0
+  ZenOS 初始化與更新設定——偵測 MCP 連線狀態，安裝/更新 skills，設定專案。
+  當使用者明確說「/zenos-setup」「初次設定 ZenOS」「我還沒設定 MCP token」
+  「幫我連接 ZenOS 服務」「更新 ZenOS skills」時使用。
+version: 2.0.0
 ---
 
-# /zenos-setup — ZenOS 初始化設定
-
-歡迎使用 ZenOS！這個 skill 會幫你完成 MCP 連線設定，
-設定完成後你就能用 `/zenos-capture` 把任何專案的知識建入 ontology。
+# /zenos-setup — ZenOS 初始化與更新
 
 整個過程大約 2 分鐘。
 
 ---
 
-## Step 0：偵測 MCP 連線狀態
+## Step 0：偵測 mcp.json
 
-**在問用戶任何設定問題之前，先偵測 MCP 是否已設定。**
+讀取 `.claude/mcp.json`：
 
-執行：
-```python
-mcp__zenos__search(query="ZenOS", collection="entities")
-```
-
-**結果判斷：**
-
-| 結果 | 代表 | 下一步 |
+| 狀態 | 模式 | 下一步 |
 |------|------|--------|
-| 成功回傳（不論有無資料）| MCP 已設定且連線正常 | 跳過 Step 1–2，直接進 **Step 3** |
-| 失敗（connection error / timeout）| 可能是 server 冷啟動 | 告知用戶「稍等 5 秒，ZenOS server 啟動中...」，等待 5 秒後再試一次 |
-| 重試仍失敗 | MCP 尚未設定或 token 錯誤 | 繼續 Step 1 |
-
-> MCP 第一次連線可能因 Cloud Run 冷啟動而需要 5-10 秒，不要立刻判定「未設定」。
+| 不存在 | 初次設定 | → Step 1 |
+| 存在，有 zenos server | 更新模式 | 從 URL 解析 project（不問 token）→ 跳到 Step 2 |
 
 ---
 
-## Step 1：確認使用模式
+## Step 1：初次設定（僅初次）
 
-先問用戶：
-
-```
-你要設定哪種模式？
-
-[1] Cloud 模式（推薦）
-    連到 ZenOS 雲端服務，需要 API token
-    適合：一般用戶、行銷夥伴、客戶
-
-[2] 本地開發模式
-    在本機跑 ZenOS MCP server，需要 GCP + GitHub 憑證
-    適合：ZenOS 開發者
-
-請輸入 1 或 2：
-```
-
----
-
-## Step 2A：Cloud 模式設定
-
-**問用戶要 API token：**
+問用戶要 API token：
 
 ```
 請輸入你的 ZenOS API token：
-（從 ZenOS 管理員或 https://zenos.app/settings 取得）
+（從 ZenOS 管理員取得）
 ```
 
-等用戶貼上 token 後，執行：
+收到 token 後執行：
 
 ```bash
-python .claude/skills/zenos-setup/scripts/setup.py --token {用戶輸入的 token}
+python .claude/skills/zenos-setup/scripts/setup.py --token TOKEN
 ```
 
-**如果 script 成功：**
+> 不帶 `--project`，先完成連線。
+
+提示用戶：
+
 ```
-✅ 設定完成！
-
-已寫入 .claude/mcp.json：
-  zenos (Cloud) → https://zenos-mcp-xxx.run.app/mcp
-
-下一步：
-1. 重啟 Claude Code（Cmd+R 或關掉重開）
-2. 重啟後輸入 /zenos-capture 開始使用
+設定完成！請重啟 Claude Code（Cmd+Shift+P → Reload），重啟後再次執行 /zenos-setup 繼續安裝 skills。
 ```
 
-**如果 script 失敗（Python 不在路徑等）：**
-手動引導用戶建立 `.claude/mcp.json`：
+**重啟後再次執行 /zenos-setup 時，Step 0 會偵測到 mcp.json 存在，自動進入 Step 2。**
+
+---
+
+## Step 2：取 manifest + 安裝 skills
+
+呼叫：
+
+```python
+mcp__zenos__setup(platform="claude_code", skip_overview=True)
+```
+
+從回傳的 `manifest.skills` 取得 skill 清單。
+
+### 版本比對
+
+讀取 `.claude/zenos-versions.json`（若存在）：
 
 ```json
 {
-  "mcpServers": {
-    "zenos": {
-      "type": "http",
-      "url": "https://zenos-mcp-165893875709.asia-east1.run.app/mcp?api_key={TOKEN}"
-    }
-  }
+  "zenos-setup": "1.0.0",
+  "zenos-capture": "2.1.0"
 }
 ```
 
-把 `{TOKEN}` 替換成用戶輸入的 token，存到專案根目錄的 `.claude/mcp.json`。
+- 存在 → 只更新版本號有變的 skills
+- 不存在 → 全部安裝
 
----
+### 下載 skills
 
-## Step 2B：本地開發模式設定
-
-依序問用戶：
-
-```
-1. Google Cloud Project ID（如 zenos-naruvia）：
-2. GitHub Personal Access Token（ghp_ 開頭）：
-3. Python venv 路徑（預設 .venv/bin/python，直接 Enter 跳過）：
-```
-
-收集完後執行：
+對每個需要更新的 skill，用 Bash curl 從 GitHub raw URL 下載：
 
 ```bash
-python .claude/skills/zenos-setup/scripts/setup.py \
-  --local \
-  --gcp-project {GCP_PROJECT} \
-  --github-token {GITHUB_TOKEN} \
-  --venv-python {VENV_PYTHON}
+curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/{skill.path}/SKILL.md
 ```
+
+### Governance 檔案
+
+Governance 檔案（`skills/governance/`）每次都重新下載，不比對版本。
+從 response 的 `payload.claude_md_addition` 取得 CLAUDE.md 應加入的治理段落。
+
+### Addon-aware merge
+
+安裝 skill 到 `.claude/skills/{role}/SKILL.md` 時：
+
+1. 檢查目標檔案是否存在
+2. 若存在：找 `<!-- ZENOS_ADDON_SECTION_START -->` 標記
+   - 找到 → 保留該標記到檔案結尾的所有內容（addon section）
+   - 未找到 → addon section 視為不存在
+3. 將新版 SKILL.md 內容 + 保留的 addon section 合併寫入
+4. 若目標檔案不存在：寫入新版內容 + 標準 addon loading section：
+
+```markdown
+<!-- ZENOS_ADDON_SECTION_START -->
+## 專案 Addon Skills
+
+若 `skills/addons/{role}/` 目錄存在，在開始任何任務前，
+用 Read tool 讀取該目錄下所有 .md 文件，按各 addon 的 `trigger` 條件套用。
+
+若 `skills/addons/all/` 目錄存在，也讀取其中所有文件。
+<!-- ZENOS_ADDON_SECTION_END -->
+```
+
+### Slash commands
+
+將 response 的 `payload.slash_commands` 中每個 key-value 寫入 `.claude/commands/` 目錄。
+只寫 project-level（`.claude/commands/`），絕對不寫 `~/.claude/commands/`。
+
+### 寫入版本記錄
+
+安裝完成後，將所有 skill 的 name → version 寫入 `.claude/zenos-versions.json`。
 
 ---
 
-## Step 3：安裝 ZenOS Agents
+## Step 3：Agent 安裝 + Project 設定
 
-將 ZenOS 角色 agents 安裝到 Claude Code 全域 agents 目錄，讓 `@architect`、`@developer` 等角色可在 Claude Code 中使用。
+### 列出可用 projects
 
-> 若 `skills/agents/` 不存在（非 ZenOS 專案目錄），跳過此步驟。
-
-### Step 3a：確認專案名稱
-
-詢問用戶：
-
-```
-這個專案在 ZenOS 的 project name 是什麼？
-（用於 journal 篩選，讓 agent 只看到此專案的日誌，例如：zenos、paceriz）
+```python
+mcp__zenos__search(collection="entities", entity_level="L1")
 ```
 
-若 CLAUDE.md 或 `.claude/` 目錄中已有可辨識的專案名稱，直接提示用戶確認即可。
+| 結果 | 處理 |
+|------|------|
+| 有結果 | 顯示清單讓用戶選擇 → 執行 `python .claude/skills/zenos-setup/scripts/setup.py --update --project 選擇的名稱` |
+| 無結果 | 告知：「目前沒有專案，先跳過。建立第一個專案後再執行 /zenos-setup 設定 project。」 |
 
-### Step 3b：複製並注入 project name
+### 安裝 agents
+
+將 `skills/agents/*.md` 複製到 `~/.claude/agents/`（generic，不注入 project name）：
 
 ```bash
 mkdir -p ~/.claude/agents
-
-for f in skills/agents/*.md; do
-  fname=$(basename "$f")
-  sed 's/{ZENOS_PROJECT}/{PROJECT_NAME}/g' "$f" > ~/.claude/agents/"$fname"
-done
+cp skills/agents/*.md ~/.claude/agents/
 ```
 
-將 `{PROJECT_NAME}` 替換為用戶輸入的實際專案名稱後執行。
-
-執行後確認安裝的 agents：
-
-```bash
-ls ~/.claude/agents/
-```
-
-應出現：architect.md、debugger.md、designer.md、developer.md、marketing.md、pm.md、qa.md
-
-確認 project name 已正確注入（以 architect 為例）：
-
-```bash
-grep "journal_read" ~/.claude/agents/architect.md
-```
-
-應顯示 `project="<你輸入的名稱>"` 而非 `{ZENOS_PROJECT}`。
+> Agents 是 generic 的，不需要注入 project name。
 
 ---
 
-## Step 4：驗證設定
+## Step 4：完成摘要
 
-設定完成後，詢問用戶是否要立刻驗證：
+顯示：
 
 ```
-要現在驗證設定是否正確嗎？（需要先重啟 Claude Code）
+ZenOS Setup 完成！
 
-重啟後輸入：
-  /zenos-capture               ← 從當前對話捕獲知識（快速測試）
-  /zenos-capture /path/to/dir  ← 掃描整個專案目錄建構 ontology
+已更新 skills：
+- zenos-capture: 2.1.0 → 2.2.0
+- zenos-sync: 3.1.0 → 3.2.0
+（未變更的不顯示）
+
+Project: {選擇的專案名稱 或 「未設定」}
+
+可用指令：
+  /zenos-capture    — 捕獲知識
+  /zenos-sync       — 同步變更
+  /zenos-governance — 治理掃描
 ```
 
 ---
 
 ## 注意事項
 
-- **token 不進 git**：`.claude/mcp.json` 應在 `.gitignore` 中（如果用戶有 git repo）
-- **token 安全**：token 只存在本機的 mcp.json，不會傳到其他地方
-- **多專案**：每個 Claude Code 專案可以有自己的 `.claude/mcp.json`，token 各自獨立
-- **全域設定**：如果要在所有專案都能用，把 mcp.json 放到 `~/.claude/mcp.json`
+- **token 不進 git**：`.claude/mcp.json` 應在 `.gitignore` 中
+- **更新模式不問 token**：token 已在 mcp.json 中，只更新 skills 和 project
+- **重啟才生效**：MCP 設定變更後需重啟 Claude Code
