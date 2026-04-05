@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
+import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-library/react";
 import type { Entity, QualitySignals } from "@/types";
 
 // Mock Radix Sheet — renders children without portal behavior
@@ -29,17 +29,36 @@ vi.mock("next/link", () => ({
   ),
 }));
 
+const authState = {
+  user: null as null | { getIdToken: () => Promise<string> },
+  partner: null as null | { isAdmin: boolean },
+};
+
+const updateEntityVisibilityMock = vi.fn();
+const getPartnersMock = vi.fn();
+const getDepartmentsMock = vi.fn();
+
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: null, partner: null }),
+  useAuth: () => authState,
 }));
 
 vi.mock("@/lib/api", () => ({
-  updateEntityVisibility: vi.fn(),
+  updateEntityVisibility: (...args: unknown[]) => updateEntityVisibilityMock(...args),
+  getPartners: (...args: unknown[]) => getPartnersMock(...args),
+  getDepartments: (...args: unknown[]) => getDepartmentsMock(...args),
 }));
 
 import NodeDetailSheet from "@/components/NodeDetailSheet";
 
 afterEach(cleanup);
+
+beforeEach(() => {
+  authState.user = null;
+  authState.partner = null;
+  updateEntityVisibilityMock.mockReset();
+  getPartnersMock.mockReset();
+  getDepartmentsMock.mockReset();
+});
 
 function makeEntity(overrides: Partial<Entity> = {}): Entity {
   return {
@@ -218,3 +237,57 @@ describe("NodeDetailSheet — External Sources label fallback", () => {
   });
 });
 
+describe("NodeDetailSheet — permission editor", () => {
+  it("renders selectable permission options for admins and saves normalized arrays", async () => {
+    authState.user = {
+      getIdToken: vi.fn().mockResolvedValue("token-123"),
+    };
+    authState.partner = { isAdmin: true };
+    getPartnersMock.mockResolvedValue([
+      {
+        id: "partner-1",
+        email: "alice@example.com",
+        displayName: "Alice",
+        apiKey: "key", // pragma: allowlist secret
+        authorizedEntityIds: [],
+        isAdmin: false,
+        status: "active",
+        roles: ["engineering"],
+        department: "finance",
+        invitedBy: null,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      },
+    ]);
+    getDepartmentsMock.mockResolvedValue(["finance", "hr"]);
+    updateEntityVisibilityMock.mockResolvedValue(undefined);
+
+    render(<NodeDetailSheet {...defaultProps} entity={makeEntity({ visibility: "restricted" })} />);
+
+    fireEvent.click(screen.getByText("Edit"));
+    fireEvent.change(screen.getByRole("combobox"), { target: { value: "restricted" } });
+
+    expect(await screen.findByText("Choose the exposure model first, then pick the exact audiences below.")).toBeDefined();
+    const rolesField = screen.getByText("Visible to Roles").closest("div")?.parentElement as HTMLElement;
+    const departmentsField = screen.getByText("Visible to Departments").closest("div")?.parentElement as HTMLElement;
+    const membersField = screen.getByText("Visible to Members").closest("div")?.parentElement as HTMLElement;
+
+    expect(within(rolesField).getByRole("button", { name: /engineering/i })).toBeDefined();
+    expect(within(departmentsField).getByRole("button", { name: /^finance/i })).toBeDefined();
+    expect(within(membersField).getByRole("button", { name: /Alice/i })).toBeDefined();
+
+    fireEvent.click(within(rolesField).getByRole("button", { name: /engineering/i }));
+    fireEvent.click(within(departmentsField).getByRole("button", { name: /^finance/i }));
+    fireEvent.click(within(membersField).getByRole("button", { name: /Alice/i }));
+    fireEvent.click(screen.getByText("Save"));
+
+    await waitFor(() => {
+      expect(updateEntityVisibilityMock).toHaveBeenCalledWith("token-123", "entity-1", {
+        visibility: "restricted",
+        visible_to_roles: ["engineering"],
+        visible_to_members: ["partner-1"],
+        visible_to_departments: ["finance"],
+      });
+    });
+  });
+});
