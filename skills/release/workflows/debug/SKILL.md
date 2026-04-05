@@ -91,8 +91,24 @@ Architect 確認：
 
 ---
 
+## 寫入 Work Journal（必做）
+
+修復完成後，記錄本次工作摘要：
+
+```python
+mcp__zenos__journal_write(
+    summary="修復 {bug 描述}：根因 {file:line}，{修復方式摘要}",
+    project="{專案名}",
+    flow_type="bugfix",
+    tags=["{模組名}"]
+)
+```
+
+---
+
 ## 完成條件
 
 - [ ] 根因有 file:line 定位
 - [ ] 回歸測試存在且在修復前 FAIL、修復後 PASS
 - [ ] Architect 執行 confirm
+- [ ] Work journal 已寫入

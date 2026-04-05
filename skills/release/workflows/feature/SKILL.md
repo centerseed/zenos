@@ -113,8 +113,24 @@ PM 將完整 Spec 呈給用戶逐章確認。
 
 ---
 
+## Phase 6：寫入 Work Journal（必做）
+
+流程結束時，記錄本次工作摘要：
+
+```python
+mcp__zenos__journal_write(
+    summary="完成 {功能名稱}：{1-2 句摘要，含 Spec slug 和關鍵決策}",
+    project="{專案名}",
+    flow_type="feature",
+    tags=["{功能關鍵字}"]
+)
+```
+
+---
+
 ## 完成條件
 
 - [ ] Spec 狀態為 `Approved`
 - [ ] 所有 P0 需求都有對應 task（status: todo）
 - [ ] 每個 task 有 linked_entities + acceptance_criteria
+- [ ] Work journal 已寫入

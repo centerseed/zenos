@@ -464,6 +464,17 @@ write(collection="entries", id="{舊 entry ID}", data={
 待確認：呼叫 search(confirmed_only=false) 查看
 ```
 
+**寫入 Work Journal（模式 A/B/C 完成後都要做）：**
+
+```python
+mcp__zenos__journal_write(
+    summary="capture {來源描述}：{n} 個 entries + {n} 個 entities + {n} 個 documents",
+    project="{專案名}",
+    flow_type="capture",
+    tags=["{產品名}"]
+)
+```
+
 ---
 
 ## 核心原則

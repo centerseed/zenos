@@ -356,6 +356,17 @@ write(collection="entities", id={parent_entity_id}, data={
 → 呼叫 analyze(check_type="staleness") 偵測過時 entry
 ```
 
+**寫入 Work Journal（必做）：**
+
+```python
+mcp__zenos__journal_write(
+    summary="sync {專案名}：{n} commits，新增 {n} + 更新 {n} entities/documents",
+    project="{專案名}",
+    flow_type="sync",
+    tags=["{產品名}"]
+)
+```
+
 ---
 
 ## 注意事項
