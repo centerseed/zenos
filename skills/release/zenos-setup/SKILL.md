@@ -13,18 +13,32 @@ version: 2.0.0
 
 ---
 
-## Step 0：偵測 mcp.json
+## Step 0：自我更新 global skill
+
+**每次執行都先更新自己**，確保下次執行永遠是最新版本：
+
+```bash
+mkdir -p ~/.claude/skills/zenos-setup
+curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/zenos-setup/SKILL.md \
+  > ~/.claude/skills/zenos-setup/SKILL.md
+```
+
+> 這一步不影響當前執行（skill 已載入記憶體），但確保其他專案下次執行時拿到最新版。
+
+---
+
+## Step 1：偵測 mcp.json（決定模式）
 
 讀取 `.claude/mcp.json`：
 
 | 狀態 | 模式 | 下一步 |
 |------|------|--------|
-| 不存在 | 初次設定 | → Step 1 |
-| 存在，有 zenos server | 更新模式 | 從 URL 解析 project（不問 token）→ 跳到 Step 2 |
+| 不存在 | 初次設定 | → Step 2 |
+| 存在，有 zenos server | 更新模式 | 從 URL 解析 project（不問 token）→ 跳到 Step 3 |
 
 ---
 
-## Step 1：初次設定（僅初次）
+## Step 2：初次設定（僅初次）
 
 問用戶要 API token：
 
@@ -47,11 +61,11 @@ python .claude/skills/zenos-setup/scripts/setup.py --token TOKEN
 設定完成！請重啟 Claude Code（Cmd+Shift+P → Reload），重啟後再次執行 /zenos-setup 繼續安裝 skills。
 ```
 
-**重啟後再次執行 /zenos-setup 時，Step 0 會偵測到 mcp.json 存在，自動進入 Step 2。**
+**重啟後再次執行 /zenos-setup 時，Step 1 會偵測到 mcp.json 存在，自動進入 Step 3。**
 
 ---
 
-## Step 2：取 manifest + 安裝 skills
+## Step 3：取 manifest + 安裝 skills
 
 呼叫：
 
@@ -139,7 +153,7 @@ cp .claude/skills/zenos-setup/SKILL.md ~/.claude/skills/zenos-setup/SKILL.md
 
 ---
 
-## Step 3：Agent 安裝 + Project 設定
+## Step 4：Agent 安裝 + Project 設定
 
 ### 列出可用 projects
 
@@ -165,7 +179,7 @@ cp skills/agents/*.md ~/.claude/agents/
 
 ---
 
-## Step 4：完成摘要
+## Step 5：完成摘要
 
 顯示：
 
