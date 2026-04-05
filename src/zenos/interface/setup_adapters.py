@@ -151,7 +151,9 @@ def _build_agents_md_addition(selection: str) -> str:
 def _build_github_raw_base(manifest: dict) -> str:
     """從 manifest 取得 GitHub raw content base URL。"""
     repo = manifest.get("publisher", {}).get("repository", "https://github.com/centerseed/zenos")
-    return f"{repo}/raw/main"
+    # 用 raw.githubusercontent.com 避免 GitHub /raw/ 的 302 redirect
+    raw_repo = repo.replace("https://github.com/", "https://raw.githubusercontent.com/")
+    return f"{raw_repo}/main"
 
 
 def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
@@ -179,7 +181,7 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
         "instructions": [
             (
                 f"1. 從 GitHub 拉取最新 skills：對 manifest.skills 中每個 skill，"
-                f"用 WebFetch 從 {raw_base}/skills/release/{{skill.path}}/SKILL.md 下載內容"
+                f"用 Bash 執行 curl -sL {raw_base}/skills/release/{{skill.path}}/SKILL.md 下載內容"
             ),
             (
                 "2. 安裝 skill 文件（addon-aware merge）：\n"
@@ -261,7 +263,7 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
         "instructions": [
             (
                 f"1. 從 GitHub 拉取最新 skills：對 manifest.skills 中每個 skill，"
-                f"用 WebFetch 從 {raw_base}/skills/release/{{skill.path}}/SKILL.md 下載內容"
+                f"用 Bash 執行 curl -sL {raw_base}/skills/release/{{skill.path}}/SKILL.md 下載內容"
             ),
             (
                 "2. 安裝 skill 文件（addon-aware merge）：\n"
