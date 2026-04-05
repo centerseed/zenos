@@ -105,11 +105,37 @@ PM 將完整 Spec 呈給用戶逐章確認。
 
 ## Phase 4：Architect 建立實作計畫
 
+> 建票前必讀 `skills/governance/shared-rules.md` 的去重與 linked_entities 規則。
+
 叫起 Architect agent（依照 Architect skill 流程）：
 - 讀取剛確認的 Spec
 - 技術設計
-- 建立 tasks（`mcp__zenos__task(action="create", ...)`）
+- 建立 tasks（`mcp__zenos__task(action="create", ...)`）—— 建票前先去重
 - 分配 plan_id + plan_order
+
+---
+
+## Phase 5：Architect 調度實作與驗收
+
+Architect 是實作階段的主控角色，按 plan_order 逐張 task 執行：
+
+### 5.1 派工 Developer
+- 叫起 Developer subagent，傳入 task 的 description + acceptance_criteria
+- Developer 更新狀態：`task(action="update", id=X, status="in_progress")`
+- Developer 完成後：`task(action="update", id=X, status="review", result="完成摘要")`
+
+### 5.2 Architect 驗證交付
+- 逐條比對 acceptance_criteria，確認實作符合要求
+- 確認無 regression、blast radius 可控
+- PASS → 交 QA 驗收；FAIL → 退回 Developer，附具體不符合的 AC
+
+### 5.3 QA 驗收
+叫起 QA subagent：
+- 依照 acceptance_criteria 執行測試
+- PASS：`confirm(collection="tasks", id=X, accepted=True)`
+- FAIL：`confirm(collection="tasks", id=X, accepted=False, rejection_reason="退回原因")` → 退回 Developer，重走 5.1
+
+每張 task 走完 5.1→5.2→5.3 才進入下一張。
 
 ---
 

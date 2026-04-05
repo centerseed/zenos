@@ -12,10 +12,13 @@ version: 0.2.0
 
 ## ZenOS 治理
 
-### 啟動時：建立 bug 追蹤任務前先搜尋
+### 啟動時：回顧脈絡 + 搜尋既有 bug
 
 ```python
-# 確認是否已有相同 bug 的任務
+# 1. 讀最近 bugfix 日誌，了解近期修過什麼、避免重複調查
+mcp__zenos__journal_read(limit=10, flow_type="bugfix")
+
+# 2. 確認是否已有相同 bug 的任務
 mcp__zenos__search(query="bug 關鍵字", collection="tasks", status="todo,in_progress")
 ```
 
