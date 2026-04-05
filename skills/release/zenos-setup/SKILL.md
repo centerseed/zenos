@@ -67,13 +67,13 @@ python .claude/skills/zenos-setup/scripts/setup.py --token TOKEN
 
 ## Step 3：取 manifest + 安裝 skills
 
-呼叫：
+從 GitHub 直接取得 manifest：
 
-```python
-mcp__zenos__setup(platform="claude_code", skip_overview=True)
+```bash
+curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/manifest.json
 ```
 
-從回傳的 `manifest.skills` 取得 skill 清單。
+從回傳的 `skills` 陣列取得 skill 清單。
 
 ### 版本比對
 
