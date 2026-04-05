@@ -3348,17 +3348,15 @@ async def setup(
     skill_selection: str = "full",
     skip_overview: bool = False,
 ) -> dict:
-    """自助安裝 ZenOS 治理能力到你的 AI agent 平台。
+    """安裝或更新 ZenOS setup skill 到用戶的 AI agent 平台。
 
-    已完成 MCP 連線的用戶呼叫此 tool，即可取得 ZenOS skill 安裝指引。
+    用戶完成 MCP 連線後呼叫此 tool，取得安裝 setup skill 的 curl 指令。
+    Claude 執行該指令後，再告知用戶執行 /zenos-setup 完成完整安裝。
     支援：Claude Code、Claude Web UI、OpenAI Codex / ChatGPT。
-    不需要 DB 連線，不需要 partner key。
 
     使用時機：
-    - 首次設定 ZenOS 治理能力 → setup()（不帶參數，取得平台清單）
-    - 指定平台安裝 → setup(platform='claude_code')
-    - 更新 skill 到最新版 → setup(platform='claude_code', skip_overview=True)
-    - 只需要 Task 治理 → setup(platform='claude_code', skill_selection='task_only')
+    - 用戶說「安裝 ZenOS」「設定 ZenOS」「更新 ZenOS」→ setup(platform='claude_code')
+    - tool 回傳 curl 指令 → Claude 執行 → 告知用戶執行 /zenos-setup
 
     不需要用這個工具的情境：
     - MCP 連線設定（取得 API key、填入 MCP server URL）→ 這是前置條件，不在 setup 範圍
@@ -3368,17 +3366,14 @@ async def setup(
     Args:
         platform: 目標平台。claude_code / claude_web / codex（含 ChatGPT）。
                   不傳時回傳平台清單，讓 agent 詢問用戶後帶正確值再次呼叫。
-        skill_selection: 治理能力組合。
-            full=完整治理（L2 知識節點 + L3 文件 + Task），適合全功能使用。
-            doc_task=文件 + Task 治理，適合不需要深度知識建模的場景。
-            task_only=僅 Task 治理，適合只需要任務管理的場景。
+        skill_selection: 治理能力組合（claude_code 平台已無作用，保留供其他平台使用）。
         skip_overview: 跳過治理概要說明，適合更新操作（已熟悉 ZenOS 的用戶）。
 
     Returns:
-        platform=None → {"action": "ask_platform", "bundle_version": "...", "options": [...]}
-        platform valid → {"action": "install", "platform": "...", "payload": {...}}
-        platform invalid → {"error": "unsupported_platform", "supported_platforms": [...]}
-        skill_selection invalid → {"error": "invalid_skill_selection", "message": "..."}
+        platform=None → {"action": "ask_platform", "options": [...]}
+        claude_code → {"action": "install_setup_skill", "command": "curl ...", "next_step": "/zenos-setup"}
+        claude_web/codex → {"action": "install", "payload": {...}}
+        platform invalid → {"error": "unsupported_platform"}
     """
     from zenos.interface.setup_content import get_bundle_version
     from zenos.interface.setup_adapters import (

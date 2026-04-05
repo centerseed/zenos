@@ -157,56 +157,21 @@ def _build_github_raw_base(manifest: dict) -> str:
 
 
 def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
-    """組裝 claude_code 平台的完整 install response。
+    """組裝 claude_code 平台的 install response。
 
-    不再回傳 skill 檔案內容（避免超過 token 限制），
-    改為回傳 manifest + GitHub 安裝指引，讓 agent 自行 fetch。
+    只做一件事：回傳安裝/更新 setup skill 的 curl 指令。
+    後續安裝流程由 /zenos-setup skill 負責。
     """
-    bundle_version = get_bundle_version()
     manifest = get_manifest()
-    slash_commands = get_slash_commands()
-    claude_md_addition = _build_claude_md_addition(selection)
     raw_base = _build_github_raw_base(manifest)
+    setup_skill_url = f"{raw_base}/skills/release/zenos-setup/SKILL.md"
 
     response: dict = {
-        "action": "install",
+        "action": "install_setup_skill",
         "platform": "claude_code",
-        "bundle_version": bundle_version,
-        "skill_selection": selection,
-        "manifest": manifest,
-        "payload": {
-            "claude_md_addition": claude_md_addition,
-            "slash_commands": slash_commands,
-        },
-        "instructions": [
-            (
-                f"1. 從 GitHub 拉取最新 skills：對 manifest.skills 中每個 skill，"
-                f"用 Bash 執行 curl -sL {raw_base}/skills/release/{{skill.path}}/SKILL.md 下載內容"
-            ),
-            (
-                "2. 安裝 skill 文件（addon-aware merge）：\n"
-                "   a. 對於 skills/governance/ 和 skills/workflows/ 下的文件：直接寫入（無 addon 機制）\n"
-                "   b. 對於 skills/release/{role}/SKILL.md：\n"
-                "      - 先確認 .claude/skills/{role}/SKILL.md 是否存在\n"
-                "      - 若存在：讀取其內容，找 '<!-- ZENOS_ADDON_SECTION_START -->' 標記\n"
-                "        - 找到標記 → 保留標記到檔案結尾的所有內容（addon section）\n"
-                "        - 未找到 → 代表舊版薄殼，addon section 視為不存在\n"
-                "      - 將新版 SKILL.md 的內容 + addon section 合併後寫入 .claude/skills/{role}/SKILL.md\n"
-                "      - 若 .claude/skills/{role}/SKILL.md 不存在：直接寫入新版內容 + 標準 addon loading section（見下方模板）\n"
-                "   c. 標準 addon loading section 模板：\n"
-                "      ---\n"
-                "      <!-- ZENOS_ADDON_SECTION_START -->\n"
-                "      ## 專案 Addon Skills\n\n"
-                "      若 `skills/addons/{role}/` 目錄存在，在開始任何任務前，\n"
-                "      用 Read tool 讀取該目錄下所有 .md 文件，按各 addon 的 `trigger` 條件套用。\n\n"
-                "      若 `skills/addons/all/` 目錄存在，也讀取其中所有文件。\n"
-                "      <!-- ZENOS_ADDON_SECTION_END -->"
-            ),
-            "3. 在專案根目錄的 CLAUDE.md 加入 payload.claude_md_addition 的內容",
-            "4. 將 payload.slash_commands 中每個 key-value 寫入對應路徑（.claude/commands/）。⚠️ 只寫 project-level（.claude/commands/），絕對不要寫 ~/.claude/commands/（global）",
-            "5. 完成後呼叫 mcp__zenos__search(query='ZenOS', collection='entities') 驗證 MCP 連線",
-        ],
-        "verification_command": "mcp__zenos__search(query='ZenOS', collection='entities')",
+        "instruction": "執行以下指令安裝/更新 ZenOS setup skill，完成後執行 /zenos-setup 完成完整安裝：",
+        "command": f"mkdir -p ~/.claude/skills/zenos-setup && curl -sL {setup_skill_url} > ~/.claude/skills/zenos-setup/SKILL.md",
+        "next_step": "/zenos-setup",
     }
 
     if not skip_overview:
