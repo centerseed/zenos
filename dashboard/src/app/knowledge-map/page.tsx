@@ -247,6 +247,7 @@ function KnowledgeMapContent() {
               onNodeClick={handleSelect}
               hoveredSidebarNodeId={hoveredSidebarNodeId}
               focusedNodeId={focusedNodeId}
+              detailPanelOpen={!!selectedEntity}
             />
           </main>
 

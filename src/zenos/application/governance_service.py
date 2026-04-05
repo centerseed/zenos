@@ -274,6 +274,8 @@ class GovernanceService:
         out_degree: dict[str, int] = {e.id: 0 for e in entities if e.id}
         entity_set: set[str] = set()  # entity ids that appear in any relationship
         adj: dict[str, list[str]] = {e.id: [] for e in entities if e.id}
+        parent_map: dict[str, str] = {}
+        edge_pairs: set[tuple[str, str]] = set()
 
         for rel in relationships:
             src = rel.source_entity_id
@@ -284,6 +286,27 @@ class GovernanceService:
                 out_degree[src] += 1
             if src in adj:
                 adj[src].append(tgt)
+            edge_pairs.add((src, tgt))
+
+        # Include parent-child hierarchy as structural edges so topology analysis
+        # matches the graph users actually see in the dashboard.
+        for entity in entities:
+            if not entity.id or not entity.parent_id:
+                continue
+            src = entity.parent_id
+            tgt = entity.id
+            if src not in entity_map:
+                continue
+            if (src, tgt) in edge_pairs:
+                continue
+            entity_set.add(src)
+            entity_set.add(tgt)
+            if src in out_degree:
+                out_degree[src] += 1
+            if src in adj:
+                adj[src].append(tgt)
+            edge_pairs.add((src, tgt))
+            parent_map[tgt] = src
 
         issues: list[dict] = []
 
@@ -386,6 +409,9 @@ class GovernanceService:
                 for nxt in adj.get(current, []):
                     if nxt not in visited:
                         queue.append(nxt)
+                parent_id = parent_map.get(current)
+                if parent_id and parent_id not in visited:
+                    queue.append(parent_id)
             if not reached_goal:
                 issues.append({
                     "type": "goal_disconnected",

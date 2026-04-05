@@ -90,18 +90,22 @@
   }
   html {
     @apply font-sans;
+    background-color: #07101d;
     background:
       radial-gradient(circle at top right, rgba(54, 225, 202, 0.12), transparent 28%),
       radial-gradient(circle at top left, rgba(47, 121, 183, 0.18), transparent 24%),
       linear-gradient(180deg, #0b1b2c 0%, #07101d 55%, #050c17 100%);
+    overscroll-behavior-y: none;
   }
   body {
     @apply bg-background text-foreground;
+    background-color: #07101d;
     background:
       radial-gradient(circle at top right, rgba(54, 225, 202, 0.1), transparent 26%),
       radial-gradient(circle at 20% 20%, rgba(47, 121, 183, 0.16), transparent 20%),
       linear-gradient(180deg, rgba(12, 28, 44, 0.96) 0%, rgba(7, 16, 29, 0.98) 100%);
     min-height: 100vh;
+    overscroll-behavior-y: none;
   }
 
   ::selection {

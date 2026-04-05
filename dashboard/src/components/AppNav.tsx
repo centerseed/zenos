@@ -49,16 +49,22 @@ export function AppNav() {
         <div className="flex items-center gap-3 sm:gap-6">
           <Link
             href="/"
-            className="flex items-center rounded-md transition-opacity hover:opacity-95"
+            className="flex items-center gap-2 rounded-md transition-opacity hover:opacity-95"
             aria-label="ZenOS 首頁"
           >
             <img
-              src="/brand/zenos-logo-horizontal.png"
-              alt="ZenOS"
-              width={860}
+              src="/brand/zenos-mark.png"
+              alt=""
+              width={360}
               height={360}
-              className="h-9 w-auto sm:h-10"
+              className="h-8 w-8 rounded-[0.7rem] object-cover object-left shadow-[0_0_0_1px_rgba(23,49,77,0.65)] sm:h-9 sm:w-9"
             />
+            <span className="text-[1.55rem] font-semibold tracking-[-0.045em] leading-none text-foreground">
+              Zen
+              <span className="bg-[linear-gradient(135deg,#7af3e2_0%,#36e1ca_55%,#21c7b5_100%)] bg-clip-text text-transparent">
+                OS
+              </span>
+            </span>
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             {navItems.map(({ href, label }) => {

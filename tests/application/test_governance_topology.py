@@ -106,6 +106,18 @@ async def test_analyze_graph_topology_no_isolated_node_when_connected():
     assert len(isolated_issues) == 0
 
 
+async def test_analyze_graph_topology_parent_child_counts_as_connected():
+    """A child linked only by parent_id should not be treated as isolated."""
+    product = _entity(id="prod-1", name="Product", type=EntityType.PRODUCT)
+    module = _entity(id="mod-1", name="Nested Module", type="module", parent_id="prod-1")
+    service = _make_service([product, module], relationships=[])
+
+    issues = await service.analyze_graph_topology()
+
+    isolated_issues = [i for i in issues if i["type"] == "isolated_node"]
+    assert not any(i["entity_id"] == "mod-1" for i in isolated_issues)
+
+
 # ──────────────────────────────────────────────
 # analyze_graph_topology: leverage node
 # ──────────────────────────────────────────────
@@ -200,6 +212,20 @@ async def test_analyze_graph_topology_no_goal_disconnected_when_reachable():
     goal = _entity(id="goal-1", name="Revenue Goal", type=EntityType.GOAL)
     rel = _rel("mod-1", "goal-1")
     service = _make_service([module, goal], relationships=[rel])
+
+    issues = await service.analyze_graph_topology()
+
+    goal_issues = [i for i in issues if i["type"] == "goal_disconnected" and i["entity_id"] == "mod-1"]
+    assert len(goal_issues) == 0
+
+
+async def test_analyze_graph_topology_parent_path_to_goal_is_not_disconnected():
+    """A module should inherit a valid goal path through its parent hierarchy."""
+    goal = _entity(id="goal-1", name="North Star", type=EntityType.GOAL)
+    product = _entity(id="prod-1", name="Product", type=EntityType.PRODUCT)
+    module = _entity(id="mod-1", name="Child Module", type="module", parent_id="prod-1")
+    rel = _rel("prod-1", "goal-1")
+    service = _make_service([goal, product, module], relationships=[rel])
 
     issues = await service.analyze_graph_topology()
 

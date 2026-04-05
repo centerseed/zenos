@@ -33,6 +33,7 @@ interface KnowledgeGraphProps {
   onNodeClick: (entity: Entity) => void;
   hoveredSidebarNodeId?: string | null;
   focusedNodeId?: string | null;
+  detailPanelOpen?: boolean;
 }
 
 function getTypeColor(type: string): string {
@@ -46,6 +47,7 @@ export default function KnowledgeGraph({
   onNodeClick,
   hoveredSidebarNodeId,
   focusedNodeId,
+  detailPanelOpen = false,
 }: KnowledgeGraphProps) {
   const [mounted, setMounted] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -83,17 +85,6 @@ export default function KnowledgeGraph({
       setForceGraph(() => mod.default);
     });
   }, []);
-
-  // Smooth focus on node
-  useEffect(() => {
-    if (fgRef.current && focusedNodeId) {
-      const node = graphData.nodes.find((n) => n.id === focusedNodeId);
-      if (node && (node as any).x !== undefined) {
-        fgRef.current.centerAt((node as any).x, (node as any).y, 1000);
-        fgRef.current.zoom(2.5, 1000);
-      }
-    }
-  }, [focusedNodeId]);
 
   // Resize observer — keep canvas in sync when window resizes
   useEffect(() => {
@@ -176,20 +167,39 @@ export default function KnowledgeGraph({
     return { nodes, links };
   }, [entities, relationships, blindspotsByEntity]);
 
+  // Smooth focus on node; when detail panel is open, bias the node into the left visible area.
+  useEffect(() => {
+    if (fgRef.current && focusedNodeId) {
+      const node = graphData.nodes.find((n) => n.id === focusedNodeId);
+      if (node && (node as any).x !== undefined) {
+        const targetZoom = 2.15;
+        const panelWidth = detailPanelOpen ? Math.min(448, dimensions.width * 0.42) : 0;
+        const visibleWidth = dimensions.width - panelWidth;
+        const desiredScreenX = panelWidth > 0
+          ? Math.max(visibleWidth * 0.42, 220)
+          : dimensions.width / 2;
+        const xOffsetPx = (dimensions.width / 2) - desiredScreenX;
+        const targetCenterX = (node as any).x + xOffsetPx / targetZoom;
+        fgRef.current.centerAt(targetCenterX, (node as any).y, 700);
+        fgRef.current.zoom(targetZoom, 700);
+      }
+    }
+  }, [focusedNodeId, graphData.nodes, detailPanelOpen, dimensions.width]);
+
   // Connected node IDs for hover highlighting
   const connectedNodes = useMemo(() => {
-    const currentHover = hoveredNode || hoveredSidebarNodeId;
-    if (!currentHover) return new Set<string>();
+    const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
+    if (!activeNodeId) return new Set<string>();
     const connected = new Set<string>();
-    connected.add(currentHover);
+    connected.add(activeNodeId);
     for (const link of graphData.links) {
       const src = typeof link.source === "string" ? link.source : (link.source as unknown as GraphNode).id;
       const tgt = typeof link.target === "string" ? link.target : (link.target as unknown as GraphNode).id;
-      if (src === currentHover) connected.add(tgt);
-      if (tgt === currentHover) connected.add(src);
+      if (src === activeNodeId) connected.add(tgt);
+      if (tgt === activeNodeId) connected.add(src);
     }
     return connected;
-  }, [hoveredNode, hoveredSidebarNodeId, graphData.links]);
+  }, [hoveredNode, hoveredSidebarNodeId, focusedNodeId, graphData.links]);
 
   // Node canvas renderer
   const nodeCanvasObject = useCallback(
@@ -206,10 +216,11 @@ export default function KnowledgeGraph({
       
       const isHoveredOnGraph = hoveredNode === nodeId;
       const isHoveredOnSidebar = hoveredSidebarNodeId === nodeId;
-      const isHovered = isHoveredOnGraph || isHoveredOnSidebar;
-      
-      const activeHoverId = hoveredNode || hoveredSidebarNodeId;
-      const isDimmed = activeHoverId !== null && !connectedNodes.has(nodeId);
+      const isFocused = focusedNodeId === nodeId;
+      const isHovered = isHoveredOnGraph || isHoveredOnSidebar || isFocused;
+
+      const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
+      const isDimmed = activeNodeId !== null && !connectedNodes.has(nodeId);
 
       ctx.save();
 
@@ -276,7 +287,7 @@ export default function KnowledgeGraph({
 
       ctx.restore();
     },
-    [hoveredNode, hoveredSidebarNodeId, connectedNodes]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, connectedNodes]
   );
 
   // Pointer area for click detection
@@ -315,27 +326,33 @@ export default function KnowledgeGraph({
   const linkColor = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any) => {
-      if (!hoveredNode) return "rgba(255,255,255,0.12)";
+      const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
+      if (!activeNodeId) return "rgba(255,255,255,0.12)";
       const src = typeof link.source === "string" ? link.source : link.source?.id;
       const tgt = typeof link.target === "string" ? link.target : link.target?.id;
-      if (src === hoveredNode || tgt === hoveredNode) {
-        return "rgba(255,255,255,0.6)";
+      if (src === activeNodeId || tgt === activeNodeId) {
+        return hoveredNode || hoveredSidebarNodeId
+          ? "rgba(255,255,255,0.6)"
+          : "rgba(54,225,202,0.72)";
       }
       return "rgba(255,255,255,0.04)";
     },
-    [hoveredNode]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId]
   );
 
   const linkWidth = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any) => {
-      if (!hoveredNode) return 1;
+      const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
+      if (!activeNodeId) return 1;
       const src = typeof link.source === "string" ? link.source : link.source?.id;
       const tgt = typeof link.target === "string" ? link.target : link.target?.id;
-      if (src === hoveredNode || tgt === hoveredNode) return 2;
+      if (src === activeNodeId || tgt === activeNodeId) {
+        return hoveredNode || hoveredSidebarNodeId ? 2 : 2.4;
+      }
       return 0.5;
     },
-    [hoveredNode]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId]
   );
 
   // Link canvas renderer: draw verb label at edge midpoint (only when a node is selected)
@@ -434,7 +451,18 @@ export default function KnowledgeGraph({
         linkWidth={linkWidth}
         linkDirectionalArrowLength={4}
         linkDirectionalArrowRelPos={1}
-        linkDirectionalArrowColor={() => "rgba(255,255,255,0.25)"}
+        linkDirectionalArrowColor={(link: GraphLink) => {
+          const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
+          if (!activeNodeId) return "rgba(255,255,255,0.25)";
+          const src = typeof link.source === "string" ? link.source : (link.source as unknown as GraphNode)?.id;
+          const tgt = typeof link.target === "string" ? link.target : (link.target as unknown as GraphNode)?.id;
+          if (src === activeNodeId || tgt === activeNodeId) {
+            return hoveredNode || hoveredSidebarNodeId
+              ? "rgba(255,255,255,0.45)"
+              : "rgba(54,225,202,0.72)";
+          }
+          return "rgba(255,255,255,0.12)";
+        }}
         linkLabel={(link: GraphLink) => {
           const labels: Record<string, string> = {
             part_of: "屬於",

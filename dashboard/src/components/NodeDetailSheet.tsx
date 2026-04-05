@@ -170,6 +170,7 @@ export default function NodeDetailSheet({
     <Sheet open={!!entity} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         side="right"
+        showOverlay={false}
         className="bg-card border-border text-foreground overflow-y-auto sm:max-w-md p-0"
       >
         {entity && (
