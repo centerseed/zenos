@@ -195,6 +195,27 @@ cd {TARGET} && git log --since="{SINCE}" --name-only --pretty=format:"---commit 
 
 ---
 
+## Step 1.5：用 Impact Chain 確定影響範圍
+
+**對 Step 1 找到的每個高影響文件變更，查其對應 entity 的 impact_chain：**
+
+```python
+# 找到文件對應的 entity
+mcp__zenos__search(query="<文件名或模組名>", collection="entities")
+
+# 查 impact_chain 和 reverse_impact_chain
+mcp__zenos__get(collection="entities", name="<對應模組>")
+```
+
+**用途：**
+- `impact_chain`（下游）→ 這個文件變更可能連帶需要更新哪些下游 entity 的 summary/source？
+- `reverse_impact_chain`（上游）→ 上游有沒有同時在變更？如果有，可能需要合併同步
+- 在 Step 3 propose 更新時，自動把下游 entity 也列入候選清單（標記為「間接影響」）
+
+**例：** `SPEC-action-layer.md` 被修改 → 查 Action Layer 的 impact_chain → 發現下游有 L3 文件治理和 L3 Task治理規則 → 同步提示「這兩個模組的 source 可能也需要更新」
+
+---
+
 ## Step 2：判斷每個變更對 ontology 的影響
 
 ### 高影響（必須處理）

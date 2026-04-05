@@ -219,3 +219,103 @@ class TestComputeImpactChain:
 
         result = await svc.compute_impact_chain("a")
         assert result[0]["verb"] is None
+
+
+class TestReverseImpactChain:
+
+    @pytest.mark.asyncio
+    async def test_reverse_single_hop(self):
+        """B has incoming edge from A → reverse chain from B returns A."""
+        a = _make_entity("a", "Alpha")
+        b = _make_entity("b", "Beta")
+        rel_ab = _make_rel("a", "b", verb="校準")
+
+        entities = {"a": a, "b": b}
+        rels_by_entity = {
+            "a": [rel_ab],
+            "b": [rel_ab],  # list_by_entity returns both directions
+        }
+        svc = _build_service(entities, rels_by_entity)
+
+        result = await svc.compute_impact_chain("b", direction="reverse")
+        assert len(result) == 1
+        assert result[0]["from_id"] == "a"
+        assert result[0]["from_name"] == "Alpha"
+        assert result[0]["to_id"] == "b"
+        assert result[0]["to_name"] == "Beta"
+        assert result[0]["verb"] == "校準"
+
+    @pytest.mark.asyncio
+    async def test_reverse_multi_hop(self):
+        """A→B→C: reverse from C returns B→C and A→B."""
+        a = _make_entity("a", "Alpha")
+        b = _make_entity("b", "Beta")
+        c = _make_entity("c", "Gamma")
+        rel_ab = _make_rel("a", "b", verb="觸發")
+        rel_bc = _make_rel("b", "c", verb="驅動")
+
+        entities = {"a": a, "b": b, "c": c}
+        rels_by_entity = {
+            "a": [rel_ab],
+            "b": [rel_ab, rel_bc],
+            "c": [rel_bc],
+        }
+        svc = _build_service(entities, rels_by_entity)
+
+        result = await svc.compute_impact_chain("c", direction="reverse")
+        assert len(result) == 2
+        # BFS order: first hop is b→c, second is a→b
+        assert result[0]["from_id"] == "b"
+        assert result[0]["to_id"] == "c"
+        assert result[1]["from_id"] == "a"
+        assert result[1]["to_id"] == "b"
+
+    @pytest.mark.asyncio
+    async def test_reverse_empty_when_no_incoming(self):
+        """A node with no incoming edges returns empty reverse chain."""
+        a = _make_entity("a", "Alpha")
+        rel_ab = _make_rel("a", "b")
+
+        entities = {"a": a}
+        rels_by_entity = {"a": [rel_ab]}
+        svc = _build_service(entities, rels_by_entity)
+
+        result = await svc.compute_impact_chain("a", direction="reverse")
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_forward_unchanged_with_direction_param(self):
+        """Explicitly passing direction='forward' gives same result as default."""
+        a = _make_entity("a", "Alpha")
+        b = _make_entity("b", "Beta")
+        rel_ab = _make_rel("a", "b")
+
+        entities = {"a": a, "b": b}
+        rels_by_entity = {"a": [rel_ab], "b": []}
+        svc = _build_service(entities, rels_by_entity)
+
+        default = await svc.compute_impact_chain("a")
+        explicit = await svc.compute_impact_chain("a", direction="forward")
+        assert default == explicit
+
+    @pytest.mark.asyncio
+    async def test_both_direction_returns_union(self):
+        """direction='both' returns forward + reverse combined."""
+        a = _make_entity("a", "Alpha")
+        b = _make_entity("b", "Beta")
+        c = _make_entity("c", "Gamma")
+        rel_ab = _make_rel("a", "b")
+        rel_cb = _make_rel("c", "b")
+
+        entities = {"a": a, "b": b, "c": c}
+        rels_by_entity = {
+            "a": [rel_ab],
+            "b": [rel_ab, rel_cb],
+            "c": [rel_cb],
+        }
+        svc = _build_service(entities, rels_by_entity)
+
+        result = await svc.compute_impact_chain("b", direction="both")
+        # forward from b: nothing (b has no outgoing)
+        # reverse to b: a→b and c→b
+        assert len(result) == 2

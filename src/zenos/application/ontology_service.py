@@ -1552,6 +1552,10 @@ class OntologyService:
         # --- Dedup check ---
         existing = await self._relationships.find_duplicate(source_id, target_id, rel_type)
         if existing is not None:
+            # If caller provided a verb that differs from stored, patch verb and re-save
+            if verb is not None and existing.verb != verb:
+                existing.verb = verb
+                return await self._relationships.add(existing)
             return existing
 
         rel = Relationship(
@@ -1564,9 +1568,14 @@ class OntologyService:
         return await self._relationships.add(rel)
 
     async def compute_impact_chain(
-        self, entity_id: str, max_depth: int = 5
+        self, entity_id: str, max_depth: int = 5,
+        direction: str = "forward",
     ) -> list[dict]:
-        """BFS traverse outgoing relationship edges from entity_id.
+        """BFS traverse relationship edges from entity_id.
+
+        Args:
+            direction: "forward" (outgoing, default), "reverse" (incoming),
+                       or "both" (union of forward + reverse).
 
         Returns an ordered list of hops, each as a dict:
             {from_id, from_name, verb, type, to_id, to_name}
@@ -1574,9 +1583,13 @@ class OntologyService:
         Cycle-safe via a visited set of entity IDs.
         Gracefully handles deleted entities by substituting the entity ID as name.
         """
+        if direction == "both":
+            fwd = await self.compute_impact_chain(entity_id, max_depth, "forward")
+            rev = await self.compute_impact_chain(entity_id, max_depth, "reverse")
+            return fwd + rev
+
         result: list[dict] = []
         visited: set[str] = {entity_id}
-        # queue items: (current_entity_id, depth)
         queue: list[tuple[str, int]] = [(entity_id, 0)]
 
         while queue:
@@ -1584,34 +1597,166 @@ class OntologyService:
             if depth >= max_depth:
                 continue
 
-            from_entity = await self._entities.get_by_id(current_id)
-            from_name = from_entity.name if from_entity else current_id
+            current_entity = await self._entities.get_by_id(current_id)
+            current_name = current_entity.name if current_entity else current_id
 
             rels = await self._relationships.list_by_entity(current_id)
             for rel in rels:
-                if rel.source_entity_id != current_id:
-                    continue  # only outgoing edges
+                if direction == "forward":
+                    if rel.source_entity_id != current_id:
+                        continue
+                    next_id = rel.target_id
+                else:  # reverse
+                    if rel.target_id != current_id:
+                        continue
+                    next_id = rel.source_entity_id
 
-                to_id = rel.target_id
-                if to_id in visited:
-                    continue  # skip cycle-back edges
+                if next_id in visited:
+                    continue
 
-                to_entity = await self._entities.get_by_id(to_id)
-                to_name = to_entity.name if to_entity else to_id
+                next_entity = await self._entities.get_by_id(next_id)
+                next_name = next_entity.name if next_entity else next_id
 
-                result.append({
-                    "from_id": current_id,
-                    "from_name": from_name,
-                    "verb": rel.verb,
-                    "type": rel.type,
-                    "to_id": to_id,
-                    "to_name": to_name,
-                })
+                if direction == "forward":
+                    result.append({
+                        "from_id": current_id,
+                        "from_name": current_name,
+                        "verb": rel.verb,
+                        "type": rel.type,
+                        "to_id": next_id,
+                        "to_name": next_name,
+                    })
+                else:
+                    result.append({
+                        "from_id": next_id,
+                        "from_name": next_name,
+                        "verb": rel.verb,
+                        "type": rel.type,
+                        "to_id": current_id,
+                        "to_name": current_name,
+                    })
 
-                visited.add(to_id)
-                queue.append((to_id, depth + 1))
+                visited.add(next_id)
+                queue.append((next_id, depth + 1))
 
         return result
+
+    async def find_gaps(
+        self, gap_type: str = "all", scope_product: str | None = None,
+    ) -> dict:
+        """Find structural gaps in the ontology graph.
+
+        gap_type: orphan_entities | underconnected | all
+        scope_product: limit to entities under a specific product name
+        """
+        results: list[dict] = []
+
+        if gap_type in ("all", "orphan_entities"):
+            orphans = await self._relationships.find_orphan_entities()
+            for o in orphans:
+                if scope_product:
+                    entity = await self._entities.get_by_id(o["id"])
+                    if entity and entity.product != scope_product:
+                        continue
+                results.append({
+                    "type": "orphan",
+                    "entity_id": o["id"],
+                    "entity_name": o["name"],
+                    "entity_type": o["type"],
+                    "severity": "high" if o.get("level", 0) <= 2 else "medium",
+                    "suggestion": f"'{o['name']}' 沒有任何關聯，考慮補上 impacts/depends_on/part_of 關係，或確認是否需要保留",
+                })
+
+        if gap_type in ("all", "weak_semantics"):
+            all_entities = await self._entities.list_all()
+            weak_types = {"related_to"}
+            for ent in all_entities:
+                if ent.status == "archived" or ent.type in ("product", "project"):
+                    continue
+                if scope_product and ent.product != scope_product:
+                    continue
+                if not ent.id:
+                    continue
+                rels = await self._relationships.list_by_entity(ent.id)
+                if not rels:
+                    continue  # already caught by orphan check
+                rel_types = {r.type for r in rels}
+                if rel_types.issubset(weak_types):
+                    results.append({
+                        "type": "weak_semantics",
+                        "entity_id": ent.id,
+                        "entity_name": ent.name,
+                        "entity_type": ent.type,
+                        "relation_types": sorted(rel_types),
+                        "relation_count": len(rels),
+                        "severity": "high",
+                        "suggestion": f"'{ent.name}' 的所有關聯都是 related_to，缺少語意明確的 impacts/depends_on/part_of，考慮補上",
+                    })
+
+        if gap_type in ("all", "underconnected"):
+            all_entities = await self._entities.list_all()
+            for ent in all_entities:
+                if ent.status == "archived" or ent.type in ("product", "project"):
+                    continue
+                if scope_product and ent.product != scope_product:
+                    continue
+                if not ent.id:
+                    continue
+                rels = await self._relationships.list_by_entity(ent.id)
+                outgoing = [r for r in rels if r.source_entity_id == ent.id]
+                if len(outgoing) == 0 and len(rels) > 0:
+                    results.append({
+                        "type": "no_outgoing",
+                        "entity_id": ent.id,
+                        "entity_name": ent.name,
+                        "entity_type": ent.type,
+                        "incoming_count": len(rels),
+                        "severity": "low",
+                        "suggestion": f"'{ent.name}' 只有被引用但沒有主動關聯，考慮補上 outgoing 關係",
+                    })
+
+        summary = {}
+        for r in results:
+            summary[r["type"]] = summary.get(r["type"], 0) + 1
+
+        return {
+            "gaps": results,
+            "total": len(results),
+            "by_type": summary,
+        }
+
+    async def find_common_neighbors(
+        self, entity_a: str, entity_b: str,
+    ) -> dict:
+        """Find entities connected to both A and B.
+
+        entity_a/entity_b: entity ID or name.
+        """
+        # Resolve names to IDs
+        a_id = await self._resolve_entity_id(entity_a)
+        b_id = await self._resolve_entity_id(entity_b)
+        if not a_id:
+            raise ValueError(f"Entity '{entity_a}' not found")
+        if not b_id:
+            raise ValueError(f"Entity '{entity_b}' not found")
+
+        neighbors = await self._relationships.find_common_neighbors(a_id, b_id)
+        return {
+            "entity_a": {"id": a_id, "name": entity_a},
+            "entity_b": {"id": b_id, "name": entity_b},
+            "common_neighbors": neighbors,
+            "count": len(neighbors),
+        }
+
+    async def _resolve_entity_id(self, name_or_id: str) -> str | None:
+        """Resolve an entity name or ID to an ID."""
+        ent = await self._entities.get_by_id(name_or_id)
+        if ent:
+            return ent.id
+        ent = await self._entities.get_by_name(name_or_id)
+        if ent:
+            return ent.id
+        return None
 
     async def upsert_document(self, data: dict) -> Entity:
         """Create or update a document as an entity(type="document").

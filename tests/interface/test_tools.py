@@ -580,7 +580,8 @@ class TestGetTool:
             result = await get(collection="entities", name="Paceriz")
 
             assert result["entity"]["name"] == "Paceriz"
-            assert len(result["relationships"]) == 1
+            assert len(result["outgoing_relationships"]) == 1
+            assert len(result["incoming_relationships"]) == 0
 
     async def test_get_entity_by_id(self):
         from zenos.interface.tools import get

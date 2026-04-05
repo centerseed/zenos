@@ -185,6 +185,19 @@ Architect 會給你：
 
 **判斷原則：** mock 越少，測試可信度越高。如果 mock 掉的東西在現實中可能出錯，就不應該 mock 它。
 
+### Step 3.7：Impact Chain 覆蓋檢查（如有 ZenOS MCP 連線）
+
+**對照 impact_chain 確認驗收範圍是否完整：**
+
+```python
+mcp__zenos__get(collection="entities", name="<被修改的模組>")
+```
+
+從回傳中提取 `impact_chain`（下游影響）：
+- 對每個下游模組，確認是否有對應的測試場景
+- 如果 Architect 的 P0/P1 場景沒有覆蓋某個下游模組 → 在 Verdict 的「未測試的場景」標記：「⚠️ impact_chain 顯示 {下游模組} 可能受影響，但無對應測試場景」
+- 這不是自動 FAIL，但必須讓 Architect 知道驗收盲區
+
 ### Step 4：場景測試
 
 按 Architect 給的 P0/P1 場景逐一測試。

@@ -47,7 +47,24 @@ version: 0.1.0
 1. {前提 X — 原文未明說但必須成立}
 ```
 
-確認理解正確後再進入 Step 2。
+確認理解正確後再進入 Step 1.5。
+
+### Step 1.5：拉 ZenOS Impact Chain（如涉及具體模組/產品）
+
+**如果被挑戰的主張涉及具體的模組或產品，用 impact_chain 找二階效應：**
+
+```python
+mcp__zenos__get(collection="entities", name="<被討論的模組>")
+```
+
+從回傳中提取：
+- `impact_chain`（下游）→ 原始分析有沒有考慮到所有下游影響？
+- `reverse_impact_chain`（上游）→ 有沒有忽略上游依賴的風險？
+- 如果 impact_chain 深度 > 3 → 這個決策的 blast radius 可能被低估
+
+**這些資訊直接輸入 Step 2 的「二階效應」和「瓶頸轉移」視角。**
+
+**例外：** 如果被挑戰的主張是純概念性的（不涉及具體模組），跳過此步驟。
 
 ### Step 2：動態選擇挑戰視角
 

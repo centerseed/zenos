@@ -1214,12 +1214,25 @@ async def get(
         if not _is_entity_visible(result.entity):
             return {"error": "NOT_FOUND", "message": "Entity not found"}
         response = _serialize(result)
-        # Attach active entries so callers see the entity as a knowledge container
+        # Split relationships into outgoing/incoming for clearer graph navigation
         eid = result.entity.id
+        if result.relationships:
+            response["outgoing_relationships"] = [
+                _serialize(r) for r in result.relationships
+                if r.source_entity_id == eid
+            ]
+            response["incoming_relationships"] = [
+                _serialize(r) for r in result.relationships
+                if r.source_entity_id != eid
+            ]
+            # Remove flat list to avoid payload duplication
+            response.pop("relationships", None)
+        # Attach active entries so callers see the entity as a knowledge container
         active_entries = await entry_repo.list_by_entity(eid) if eid else []
         response["active_entries"] = [_serialize(e) for e in active_entries]
         if eid:
-            response["impact_chain"] = await ontology_service.compute_impact_chain(eid)
+            response["impact_chain"] = await ontology_service.compute_impact_chain(eid, direction="forward")
+            response["reverse_impact_chain"] = await ontology_service.compute_impact_chain(eid, direction="reverse")
         _schedule_tool_event("get", eid, None, None)
         return response
 
@@ -3388,6 +3401,95 @@ async def setup(
         "supported_platforms": sorted(_VALID_PLATFORMS),
         "bundle_version": bundle_version,
     }
+
+
+# ===================================================================
+# Tool: find_gaps — structural gap detection in ontology graph
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def find_gaps(
+    gap_type: str = "all",
+    scope_product: str | None = None,
+) -> dict:
+    """找出 ontology 中的結構性缺口——孤立節點、缺少關聯的節點。
+
+    這是 search/get 做不到的「負面查詢」：找出圖譜中「不存在的東西」。
+    用於定期健檢、發現 ontology 品質問題。
+
+    使用時機：
+    - 找孤立節點（沒有任何 relationship）→ find_gaps(gap_type="orphan_entities")
+    - 找只被引用但無主動關聯的節點 → find_gaps(gap_type="underconnected")
+    - 找語意品質差的節點（全是 related_to） → find_gaps(gap_type="weak_semantics")
+    - 全面掃描 → find_gaps()
+    - 限定在某產品下 → find_gaps(scope_product="ZenOS")
+
+    不要用這個工具的情境：
+    - 搜尋特定節點 → 用 search
+    - 查看特定節點的關係 → 用 get（會顯示 outgoing/incoming 分類）
+    - 品質分數和治理問題 → 用 analyze
+    - 查詢某個節點缺什麼 → 用 get 看它的 relationships，不是 find_gaps
+
+    Args:
+        gap_type: "all" / "orphan_entities" / "weak_semantics" / "underconnected"
+            - orphan_entities: 沒有任何 relationship 的非根節點
+            - weak_semantics: 所有關聯都是 related_to，缺少 impacts/depends_on 等語意明確的關係
+            - underconnected: 只有 incoming 沒有 outgoing 的節點
+        scope_product: 限定在某產品名稱下（例如 "ZenOS"）
+
+    Returns:
+        {gaps: [{type, entity_id, entity_name, severity, suggestion}], total, by_type}
+    """
+    await _ensure_services()
+    result = await ontology_service.find_gaps(gap_type, scope_product)
+    return _unified_response(data=result)
+
+
+# ===================================================================
+# Tool: common_neighbors — find shared connections between two entities
+# ===================================================================
+
+
+@mcp.tool(
+    tags={"read"},
+    annotations={"readOnlyHint": True},
+)
+async def common_neighbors(
+    entity_a: str,
+    entity_b: str,
+) -> dict:
+    """找出兩個節點的共同鄰居——同時與 A 和 B 有直接關聯的節點。
+
+    用於發現隱藏的關聯、找出交集、理解兩個概念之間的間接連結。
+    這是 search 做不到的「集合交集查詢」。
+
+    使用時機：
+    - 「A 和 B 有什麼共同關聯？」→ common_neighbors(entity_a="A", entity_b="B")
+    - 找兩個模組共同影響的下游 → common_neighbors(entity_a="模組A", entity_b="模組B")
+
+    不要用這個工具的情境：
+    - 只看單一節點的關係 → 用 get
+    - 看 A 到 B 的影響鏈 → 用 get 看 impact_chain
+
+    Args:
+        entity_a: 第一個節點的名稱或 ID
+        entity_b: 第二個節點的名稱或 ID
+
+    Returns:
+        {entity_a, entity_b, common_neighbors: [{neighbor_id, neighbor_name, edge_type_a, edge_type_b}], count}
+    """
+    await _ensure_services()
+    try:
+        result = await ontology_service.find_common_neighbors(entity_a, entity_b)
+    except ValueError as e:
+        return _unified_response(
+            status="rejected", data={}, rejection_reason=str(e)
+        )
+    return _unified_response(data=result)
 
 
 # ===================================================================

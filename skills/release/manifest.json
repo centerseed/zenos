@@ -5,7 +5,7 @@
     "owner": "Barry",
     "repository": "https://github.com/centerseed/zenos"
   },
-  "published_at": "2026-04-04",
+  "published_at": "2026-04-05",
   "skills": [
     {
       "name": "zenos-setup",
@@ -16,14 +16,14 @@
     },
     {
       "name": "zenos-capture",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "path": "zenos-capture",
       "files": ["SKILL.md"],
       "owner": "Barry"
     },
     {
       "name": "zenos-sync",
-      "version": "3.1.0",
+      "version": "3.2.0",
       "path": "zenos-sync",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -37,7 +37,7 @@
     },
     {
       "name": "architect",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "path": "architect",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -51,7 +51,7 @@
     },
     {
       "name": "developer",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "developer",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -65,14 +65,14 @@
     },
     {
       "name": "pm",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "pm",
       "files": ["SKILL.md"],
       "owner": "Barry"
     },
     {
       "name": "qa",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "path": "qa",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -107,7 +107,7 @@
     },
     {
       "name": "challenger",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "path": "challenger",
       "files": ["SKILL.md"],
       "owner": "Barry"

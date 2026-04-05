@@ -501,6 +501,57 @@ class SqlRelationshipRepository:
             )
         return rel
 
+    async def find_orphan_entities(self) -> list[dict]:
+        """Find entities with zero relationships (excluding product/project roots)."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT e.id, e.name, e.type, e.level
+                    FROM {SCHEMA}.entities e
+                    LEFT JOIN {SCHEMA}.relationships r
+                        ON (r.source_entity_id = e.id OR r.target_entity_id = e.id)
+                        AND r.partner_id = e.partner_id
+                    WHERE e.partner_id = $1
+                        AND e.type NOT IN ('product', 'project')
+                        AND e.status != 'archived'
+                        AND r.id IS NULL""",
+                pid,
+            )
+        return [dict(r) for r in rows]
+
+    async def find_common_neighbors(
+        self, entity_a_id: str, entity_b_id: str
+    ) -> list[dict]:
+        """Find entities that are directly connected to both A and B."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""WITH neighbors_a AS (
+                        SELECT CASE WHEN source_entity_id = $1 THEN target_entity_id
+                                    ELSE source_entity_id END AS neighbor_id,
+                               type AS edge_type_a
+                        FROM {SCHEMA}.relationships
+                        WHERE (source_entity_id = $1 OR target_entity_id = $1)
+                            AND partner_id = $3
+                    ),
+                    neighbors_b AS (
+                        SELECT CASE WHEN source_entity_id = $2 THEN target_entity_id
+                                    ELSE source_entity_id END AS neighbor_id,
+                               type AS edge_type_b
+                        FROM {SCHEMA}.relationships
+                        WHERE (source_entity_id = $2 OR target_entity_id = $2)
+                            AND partner_id = $3
+                    )
+                    SELECT a.neighbor_id, e.name AS neighbor_name,
+                           a.edge_type_a, b.edge_type_b
+                    FROM neighbors_a a
+                    JOIN neighbors_b b ON a.neighbor_id = b.neighbor_id
+                    JOIN {SCHEMA}.entities e ON e.id = a.neighbor_id AND e.partner_id = $3
+                    WHERE a.neighbor_id != $1 AND a.neighbor_id != $2""",
+                entity_a_id, entity_b_id, pid,
+            )
+        return [dict(r) for r in rows]
+
     async def remove(self, source_entity_id: str, target_id: str, rel_type: str) -> int:
         """Delete a relationship edge by source/target/type. Returns rowcount."""
         pid = _get_partner_id()

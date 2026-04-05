@@ -260,6 +260,25 @@ L2 概念層（entities）：
 
 ## 知識分析流程（模式 A / B 共用）
 
+### Step 0.5：查 Impact Chain 確定知識歸屬（如涉及具體模組）
+
+**捕獲到的知識應該掛到哪個 entity？用 impact_chain 判斷：**
+
+```python
+# 先搜尋最可能相關的 entity
+mcp__zenos__search(query="<知識相關關鍵字>", collection="entities")
+
+# 取得候選 entity 的 impact_chain
+mcp__zenos__get(collection="entities", name="<候選模組>")
+```
+
+**Impact chain 輔助歸屬判斷：**
+- 如果知識涉及「A 改了影響 B」→ 查 A 的 impact_chain 確認 B 是否在下游；若是，知識掛到 A（source），不是 B
+- 如果知識是 entry（decision/insight/change）→ 掛到 impact_chain 上最上游的相關 entity
+- 如果知識涉及新 relation → 查兩端的 impact_chain 確認新 relation 不重複既有路徑
+
+**例外：** MCP 不可用或知識不涉及具體模組時跳過。
+
 ### Step 1：識別有價值的知識
 
 **骨架層候選（需要人確認）**：
