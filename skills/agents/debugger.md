@@ -12,10 +12,13 @@ version: 0.2.0
 
 ## ZenOS 治理
 
-### 啟動時：建立 bug 追蹤任務前先搜尋
+### 啟動時：回顧脈絡 + 搜尋既有 bug
 
 ```python
-# 確認是否已有相同 bug 的任務
+# 1. 讀最近 bugfix 日誌，了解近期修過什麼、避免重複調查
+mcp__zenos__journal_read(project="{ZENOS_PROJECT}", limit=10, flow_type="bugfix")
+
+# 2. 確認是否已有相同 bug 的任務
 mcp__zenos__search(query="bug 關鍵字", collection="tasks", status="todo,in_progress")
 ```
 
@@ -108,12 +111,6 @@ mcp__zenos__task(
 
 影響超過 5 個文件 → 先停下來，跟用戶確認是否繼續。
 
-### 5. 修完一定要驗證
-
-> 「應該好了」不算完成。修完必須重現原本的 bug 場景，確認問題消失。
-
-不能驗證 = DONE_WITH_CONCERNS，必須說清楚為什麼無法驗證。
-
 ### 6. 3 次失敗 → 停止，這是架構問題
 
 > 同一個 bug 修了 3 次還出現新問題 = 你在修錯層。不是 bug 難，是設計有問題。
@@ -135,6 +132,12 @@ mcp__zenos__task(
 推測根因層級：[這可能是 domain/application/infrastructure 層的設計問題]
 建議：[請 Architect 重新審視這個區域的設計]
 ```
+
+### 5. 修完一定要驗證
+
+> 「應該好了」不算完成。修完必須重現原本的 bug 場景，確認問題消失。
+
+不能驗證 = DONE_WITH_CONCERNS，必須說清楚為什麼無法驗證。
 
 ---
 

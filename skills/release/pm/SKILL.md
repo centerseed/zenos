@@ -15,7 +15,7 @@ version: 0.2.0
 
 ```python
 # 讀最近日誌，了解產品方向、近期功能決策、進行中的 spec
-mcp__zenos__journal_read(limit=10, flow_type="feature")
+mcp__zenos__journal_read(project="{ZENOS_PROJECT}", limit=10, flow_type="feature")
 ```
 
 ### 文件 Frontmatter（必填）

@@ -126,7 +126,55 @@ python .claude/skills/zenos-setup/scripts/setup.py \
 
 ---
 
-## Step 3：驗證設定
+## Step 3：安裝 ZenOS Agents
+
+將 ZenOS 角色 agents 安裝到 Claude Code 全域 agents 目錄，讓 `@architect`、`@developer` 等角色可在 Claude Code 中使用。
+
+> 若 `skills/agents/` 不存在（非 ZenOS 專案目錄），跳過此步驟。
+
+### Step 3a：確認專案名稱
+
+詢問用戶：
+
+```
+這個專案在 ZenOS 的 project name 是什麼？
+（用於 journal 篩選，讓 agent 只看到此專案的日誌，例如：zenos、paceriz）
+```
+
+若 CLAUDE.md 或 `.claude/` 目錄中已有可辨識的專案名稱，直接提示用戶確認即可。
+
+### Step 3b：複製並注入 project name
+
+```bash
+mkdir -p ~/.claude/agents
+
+for f in skills/agents/*.md; do
+  fname=$(basename "$f")
+  sed 's/{ZENOS_PROJECT}/{PROJECT_NAME}/g' "$f" > ~/.claude/agents/"$fname"
+done
+```
+
+將 `{PROJECT_NAME}` 替換為用戶輸入的實際專案名稱後執行。
+
+執行後確認安裝的 agents：
+
+```bash
+ls ~/.claude/agents/
+```
+
+應出現：architect.md、debugger.md、designer.md、developer.md、marketing.md、pm.md、qa.md
+
+確認 project name 已正確注入（以 architect 為例）：
+
+```bash
+grep "journal_read" ~/.claude/agents/architect.md
+```
+
+應顯示 `project="<你輸入的名稱>"` 而非 `{ZENOS_PROJECT}`。
+
+---
+
+## Step 4：驗證設定
 
 設定完成後，詢問用戶是否要立刻驗證：
 
