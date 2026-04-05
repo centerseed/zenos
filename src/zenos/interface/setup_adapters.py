@@ -201,7 +201,7 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
                 "      <!-- ZENOS_ADDON_SECTION_END -->"
             ),
             "3. 在專案根目錄的 CLAUDE.md 加入 payload.claude_md_addition 的內容",
-            "4. 將 payload.slash_commands 中每個 key-value 寫入對應路徑（.claude/commands/）",
+            "4. 將 payload.slash_commands 中每個 key-value 寫入對應路徑（.claude/commands/）。⚠️ 只寫 project-level（.claude/commands/），絕對不要寫 ~/.claude/commands/（global）",
             "5. 完成後呼叫 mcp__zenos__search(query='ZenOS', collection='entities') 驗證 MCP 連線",
         ],
         "verification_command": "mcp__zenos__search(query='ZenOS', collection='entities')",

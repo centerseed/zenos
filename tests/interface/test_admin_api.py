@@ -101,6 +101,7 @@ class TestTaskCreatedByAutoFill:
         try:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
+                mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
                 result = await _task_handler(
                     action="create",
@@ -127,6 +128,7 @@ class TestTaskCreatedByAutoFill:
         try:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
+                mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
                 result = await _task_handler(
                     action="create",
@@ -166,6 +168,7 @@ class TestTaskCreatedByAutoFill:
         try:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
+                mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
                 result = await _task_handler(
                     action="create",

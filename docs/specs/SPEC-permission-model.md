@@ -1,10 +1,10 @@
 ---
 type: SPEC
 id: SPEC-permission-model
-status: Draft
-ontology_entity: TBD
+status: Under Review
+ontology_entity: 夥伴身份與邀請
 created: 2026-04-03
-updated: 2026-04-03
+updated: 2026-04-04
 ---
 
 # Feature Spec: Partner 權限模型
@@ -125,6 +125,64 @@ ZenOS 現有的 partner 模型假設所有 partner 都看到同一個 tenant 的
 - 細粒度的 per-entity per-partner 授權（`authorized_entity_ids` 不再用於單一 entity 控制）
 - Partner 自行管理自己的 `authorized_entity_ids`
 - L2 / L3 層級的獨立 scope 設定（scope 以 L1 為單位，L2/L3 繼承）
+
+---
+
+## 安全測試需求（給 QA 參考）
+
+本節定義在功能 AC 之外、必須通過的安全邊界測試場景。任何新實作或修改影響 auth/permission 路徑時，以下場景必須全部通過才算交付完成。
+
+### ST-1：無效 API Key 應被拒絕（P0）
+
+| 情境 | 預期結果 |
+|------|---------|
+| Bearer header 帶不存在的 api_key | HTTP 401，不洩漏錯誤細節 |
+| X-Api-Key header 帶格式正確但已停用的 key | HTTP 401 |
+| 完全不帶任何認證資訊 | HTTP 401 |
+| 帶 status=suspended 的 partner 的 key | HTTP 401 |
+
+**Acceptance Criteria**：
+- Given 任何無效/停用的 API key，When 呼叫任何 MCP tool 或 Dashboard API，Then 回傳 HTTP 401，回應 body 不包含內部錯誤訊息或 stack trace
+
+### ST-2：並發請求 ContextVar 隔離（P0）
+
+場景：Partner A 和 Partner B 同時打相同的查詢 endpoint。
+
+**Acceptance Criteria**：
+- Given 兩個不同 partner 的請求同時進入 server，When 請求完成，Then Partner A 的回應只包含 Partner A 的資料，Partner B 的回應只包含 Partner B 的資料
+- Given server 在處理 Partner A 的請求時拋出異常，When 異常被捕捉，Then ContextVar 必須被正確重置，不影響後續請求
+- 測試方式：使用 asyncio 同時發出 2 個請求，驗證回傳的 `partner_id` 不交叉
+
+### ST-3：跨租戶資料洩露（P0）
+
+**Acceptance Criteria**：
+- Given Partner A 持有合法 key，When 嘗試直接用 entity ID 存取屬於 Partner B 的 entity（GET by ID），Then 回傳空結果（非 403，以免洩漏存在性）
+- Given Scoped partner 的 `authorized_entity_ids = {product-abc}`，When 嘗試存取 `product-xyz` 下的任何資源，Then 回傳空結果
+- Given 任何 partner，When 執行 `search` 查詢，Then 結果集中不出現任何其他 tenant 的 entity/task/document
+
+### ST-4：Admin 權限提升防護（P1）
+
+**Acceptance Criteria**：
+- Given 非 admin partner，When 嘗試修改自己的 `is_admin = true`，Then 系統拒絕並回傳 403
+- Given 非 admin partner，When 嘗試修改他人的 `is_admin`，Then 系統拒絕並回傳 403
+- Given 非 admin partner，When 嘗試修改他人的 `authorized_entity_ids`，Then 系統拒絕並回傳 403
+
+### ST-5：Shared Partner 隔離（P1）
+
+**Acceptance Criteria**：
+- Given Partner A 與 Partner B 共享同一個 `shared_partner_id`，When Partner A 查詢，Then 只看到 shared_partner_id 對應 tenant 的資料，看不到其他 tenant 的資料
+- Given 兩個不同 tenant 各有自己的 admin，When 分別查詢，Then 資料完全隔離
+
+### 測試覆蓋要求
+
+以下測試檔案必須存在且全部通過：
+
+| 測試檔案 | 涵蓋場景 |
+|---------|---------|
+| `tests/interface/test_api_key_auth.py` | ST-1 全部情境 |
+| `tests/interface/test_concurrent_isolation.py` | ST-2 全部情境 |
+| `tests/interface/test_permission_isolation.py` | ST-3（已部分覆蓋，需補 cross-tenant by ID 測試）|
+| `tests/interface/test_permission_visibility.py` | ST-4 全部情境 |
 
 ---
 

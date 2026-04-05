@@ -338,7 +338,7 @@ export default function KnowledgeGraph({
     [hoveredNode]
   );
 
-  // Link canvas renderer: draw verb label at edge midpoint
+  // Link canvas renderer: draw verb label at edge midpoint (only when a node is selected)
   const linkCanvasObject = useCallback(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (link: any, ctx: CanvasRenderingContext2D) => {
@@ -349,11 +349,14 @@ export default function KnowledgeGraph({
       const tgt = typeof link.target === "string" ? null : link.target;
       if (!src || !tgt || src.x == null || src.y == null || tgt.x == null || tgt.y == null) return;
 
+      // Only show verb label when this edge is connected to the focused node
+      if (!focusedNodeId || (src.id !== focusedNodeId && tgt.id !== focusedNodeId)) return;
+
       const midX = (src.x + tgt.x) / 2;
       const midY = (src.y + tgt.y) / 2;
 
       ctx.save();
-      ctx.font = "12px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+      ctx.font = "9px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
@@ -369,7 +372,7 @@ export default function KnowledgeGraph({
       ctx.fillText(verb, midX, midY);
       ctx.restore();
     },
-    []
+    [focusedNodeId]
   );
 
   // Tooltip: show full name + summary on hover

@@ -593,6 +593,17 @@ async def update_partner_role(request: Request) -> Response:
     if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant role change is not allowed", 403, request=request)
 
+    # Prevent the last admin from demoting themselves, which would lock out the tenant.
+    if caller_id == partner_id and not is_admin:
+        tenant_id = _same_tenant_id(caller_id, caller)
+        all_partners = await repo.list_all_in_tenant(tenant_id)
+        active_admin_count = sum(
+            1 for p in all_partners
+            if p.get("isAdmin") and p.get("status") == "active"
+        )
+        if active_admin_count <= 1:
+            return _error_response("last_admin_cannot_demote", "Cannot demote the last admin in the tenant", 400, request=request)
+
     now = datetime.now(timezone.utc)
     await repo.update_fields(partner_id, {"isAdmin": is_admin, "updatedAt": now})
 

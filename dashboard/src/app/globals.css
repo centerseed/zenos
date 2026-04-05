@@ -49,49 +49,89 @@
 
 /* Dark-only theme: all variables set to dark values directly on :root */
 :root {
-    --background: #0A0A0B;
-    --foreground: #FAFAFA;
-    --card: #111113;
-    --card-foreground: #FAFAFA;
-    --card-border: #1F1F23;
-    --popover: #111113;
-    --popover-foreground: #FAFAFA;
-    --primary: #FAFAFA;
-    --primary-foreground: #0A0A0B;
-    --secondary: #1F1F23;
-    --secondary-foreground: #FAFAFA;
-    --muted: #1F1F23;
-    --muted-foreground: #71717A;
-    --accent: #1F1F23;
-    --accent-foreground: #FAFAFA;
+    --background: #07101d;
+    --foreground: #f7fbff;
+    --card: #0b1828;
+    --card-foreground: #f7fbff;
+    --card-border: #17314d;
+    --popover: #0a1726;
+    --popover-foreground: #f7fbff;
+    --primary: #36e1ca;
+    --primary-foreground: #04111d;
+    --secondary: #143150;
+    --secondary-foreground: #e9f7ff;
+    --muted: #0f2236;
+    --muted-foreground: #86a4c2;
+    --accent: #12395a;
+    --accent-foreground: #f1fbff;
     --destructive: #DC2626;
-    --border: #1F1F23;
-    --input: #1F1F23;
-    --ring: #71717A;
-    --chart-1: #3B82F6;
-    --chart-2: #10B981;
-    --chart-3: #F59E0B;
-    --chart-4: #EF4444;
-    --chart-5: #8B5CF6;
+    --border: #17314d;
+    --input: #102236;
+    --ring: #36e1ca;
+    --chart-1: #36e1ca;
+    --chart-2: #2f79b7;
+    --chart-3: #7af3e2;
+    --chart-4: #ef4444;
+    --chart-5: #1e4f7c;
     --radius: 0.625rem;
-    --sidebar: #111113;
-    --sidebar-foreground: #FAFAFA;
-    --sidebar-primary: #3B82F6;
-    --sidebar-primary-foreground: #FAFAFA;
-    --sidebar-accent: #1F1F23;
-    --sidebar-accent-foreground: #FAFAFA;
-    --sidebar-border: #1F1F23;
-    --sidebar-ring: #71717A;
+    --sidebar: #091423;
+    --sidebar-foreground: #f7fbff;
+    --sidebar-primary: #36e1ca;
+    --sidebar-primary-foreground: #04111d;
+    --sidebar-accent: #11304c;
+    --sidebar-accent-foreground: #f7fbff;
+    --sidebar-border: #17314d;
+    --sidebar-ring: #36e1ca;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
-  body {
-    @apply bg-background text-foreground;
-  }
   html {
     @apply font-sans;
+    background:
+      radial-gradient(circle at top right, rgba(54, 225, 202, 0.12), transparent 28%),
+      radial-gradient(circle at top left, rgba(47, 121, 183, 0.18), transparent 24%),
+      linear-gradient(180deg, #0b1b2c 0%, #07101d 55%, #050c17 100%);
+  }
+  body {
+    @apply bg-background text-foreground;
+    background:
+      radial-gradient(circle at top right, rgba(54, 225, 202, 0.1), transparent 26%),
+      radial-gradient(circle at 20% 20%, rgba(47, 121, 183, 0.16), transparent 20%),
+      linear-gradient(180deg, rgba(12, 28, 44, 0.96) 0%, rgba(7, 16, 29, 0.98) 100%);
+    min-height: 100vh;
+  }
+
+  ::selection {
+    background: rgba(54, 225, 202, 0.28);
+    color: #f7fbff;
+  }
+}
+
+@layer utilities {
+  .text-blue-400 {
+    color: #4adfd1 !important;
+  }
+
+  .hover\:text-blue-300:hover {
+    color: #86fff0 !important;
+  }
+
+  .bg-blue-900\/50 {
+    background-color: rgb(17 58 90 / 0.5) !important;
+  }
+
+  .bg-blue-900\/30 {
+    background-color: rgb(17 58 90 / 0.3) !important;
+  }
+
+  .border-blue-500\/30 {
+    border-color: rgb(54 225 202 / 0.3) !important;
+  }
+
+  .border-primary\/40 {
+    border-color: rgb(54 225 202 / 0.4) !important;
   }
 }

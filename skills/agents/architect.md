@@ -68,7 +68,7 @@ todo → in_progress → review → (confirm) → done
 ```
 
 - 改狀態到 `review` 時 result 為必填
-- **不能用 update 改成 done**，必須用 `confirm(accept=True)` 驗收
+- **不能用 update 改成 done**，必須用 `confirm(accepted=True)` 驗收
 
 ### 文件 Frontmatter（必填）
 
@@ -570,8 +570,8 @@ Architect 技術設計 → 建立 tasks（status: todo）
   ↓ 每個 task 建好後通知 Developer
 Developer 接手（status: in_progress）→ 完成後 result + status: review
   ↓ QA agent 自動偵測或被叫起來
-QA 驗收 → PASS: confirm(accept=True) → done
-           FAIL: confirm(accept=False) → 退回 in_progress → Developer 修復
+QA 驗收 → PASS: confirm(accepted=True) → done
+           FAIL: confirm(accepted=False) → 退回 in_progress → Developer 修復
   ↓ 全部 tasks done
 Architect 最終交付審查 → 部署
   ↓ Production bug

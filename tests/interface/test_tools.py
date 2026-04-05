@@ -1354,6 +1354,116 @@ class TestTaskTool:
 
             assert result["status"] == "rejected"
 
+    # ── Task 2: linked_entities=[] warning ──
+
+    async def test_create_task_empty_linked_entities_produces_warning(self):
+        """task create with no linked_entities should warn about missing ontology context."""
+        from zenos.interface.tools import _task_handler
+        from zenos.application.task_service import TaskResult
+
+        t = _make_task(linked_entities=[])
+        create_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+            mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
+
+            result = await _task_handler(
+                action="create",
+                title="Fix login",
+                created_by="architect",
+            )
+
+            assert result["status"] == "ok"
+            warning_texts = " ".join(result.get("warnings", []))
+            assert "linked_entities" in warning_texts
+            assert "ontology context" in warning_texts
+
+    async def test_create_task_with_linked_entities_no_empty_warning(self):
+        """task create with linked_entities set should NOT produce the empty-entities warning."""
+        from zenos.interface.tools import _task_handler
+        from zenos.application.task_service import TaskResult
+
+        entity_id = "ent-1"
+        t = _make_task(linked_entities=[entity_id])
+        create_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+            mock_ts.enrich_task = AsyncMock(return_value={
+                "expanded_entities": [{"id": entity_id, "name": "Paceriz", "summary": "s", "tags": {}, "status": "active"}],
+            })
+
+            result = await _task_handler(
+                action="create",
+                title="Fix login",
+                created_by="architect",
+                linked_entities=[entity_id],
+            )
+
+            assert result["status"] == "ok"
+            for w in result.get("warnings", []):
+                assert "linked_entities 為空" not in w
+
+    # ── Task 3: linked_entities return type consistency ──
+
+    async def test_create_task_linked_entities_returns_objects(self):
+        """task create should return linked_entities as list of objects, not IDs."""
+        from zenos.interface.tools import _task_handler
+        from zenos.application.task_service import TaskResult
+
+        entity_id = "ent-1"
+        t = _make_task(linked_entities=[entity_id])
+        create_result = TaskResult(task=t, cascade_updates=[])
+        expanded = [{"id": entity_id, "name": "Paceriz", "summary": "running coach", "tags": {}, "status": "active"}]
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+            mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": expanded})
+
+            result = await _task_handler(
+                action="create",
+                title="Fix login",
+                created_by="architect",
+                linked_entities=[entity_id],
+            )
+
+            assert result["status"] == "ok"
+            linked = result["data"]["linked_entities"]
+            assert isinstance(linked, list)
+            assert len(linked) == 1
+            assert isinstance(linked[0], dict)
+            assert linked[0]["id"] == entity_id
+            assert "name" in linked[0]
+
+    async def test_update_task_linked_entities_returns_objects(self):
+        """task update should return linked_entities as list of objects, not IDs."""
+        from zenos.interface.tools import _task_handler
+        from zenos.application.task_service import TaskResult
+
+        entity_id = "ent-1"
+        t = _make_task(id="task-1", linked_entities=[entity_id])
+        update_result = TaskResult(task=t, cascade_updates=[])
+        expanded = [{"id": entity_id, "name": "Paceriz", "summary": "running coach", "tags": {}, "status": "active"}]
+
+        with patch("zenos.interface.tools.task_service") as mock_ts:
+            mock_ts.update_task = AsyncMock(return_value=update_result)
+            mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": expanded})
+
+            result = await _task_handler(
+                action="update",
+                id="task-1",
+                status="in_progress",
+            )
+
+            assert result["status"] == "ok"
+            linked = result["data"]["linked_entities"]
+            assert isinstance(linked, list)
+            assert len(linked) == 1
+            assert isinstance(linked[0], dict)
+            assert linked[0]["id"] == entity_id
+            assert "name" in linked[0]
+
 
 # ---------------------------------------------------------------------------
 # Tool 7: analyze

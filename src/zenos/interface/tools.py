@@ -2226,13 +2226,18 @@ async def _task_handler(
             if task_service is None:
                 await _ensure_services()
             task_result = await task_service.create_task(data)
-            task_data = _serialize(task_result.task)
+            task_data = await _enrich_task_result(task_result.task)
             _audit_log(
                 event_type="task.create",
                 target={"collection": "tasks", "id": task_data.get("id")},
                 changes={"input": data},
             )
-            return _unified_response(data=task_data)
+            create_warnings: list[str] = []
+            if not task_result.task.linked_entities:
+                create_warnings.append(
+                    "linked_entities 為空：任務缺少 ontology context，governance_hints 將無法產生有效建議"
+                )
+            return _unified_response(data=task_data, warnings=create_warnings)
 
         elif action == "update":
             if not id:
@@ -2307,7 +2312,7 @@ async def _task_handler(
             if task_service is None:
                 await _ensure_services()
             task_result = await task_service.update_task(id, updates)
-            task_data = _serialize(task_result.task)
+            task_data = await _enrich_task_result(task_result.task)
             if task_result.cascade_updates:
                 task_data["cascadeUpdates"] = [
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}

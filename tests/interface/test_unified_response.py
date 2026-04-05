@@ -221,6 +221,7 @@ class TestTaskUnifiedFormat:
 
         with patch("zenos.interface.tools.task_service") as mock_ts:
             mock_ts.create_task = AsyncMock(return_value=create_result)
+            mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
             result = await task(
                 action="create",
@@ -244,6 +245,7 @@ class TestTaskUnifiedFormat:
 
         with patch("zenos.interface.tools.task_service") as mock_ts:
             mock_ts.update_task = AsyncMock(return_value=update_result)
+            mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
             result = await task(action="update", id="task-1", status="in_progress")
 

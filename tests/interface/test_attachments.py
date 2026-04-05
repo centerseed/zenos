@@ -214,6 +214,7 @@ class TestTaskWithAttachments:
         try:
             with patch("zenos.interface.tools.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
+                mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
                 result = await _task_handler(
                     action="create",
@@ -267,6 +268,7 @@ class TestTaskWithAttachments:
                 mock_ts._tasks = AsyncMock()
                 mock_ts._tasks.get_by_id = AsyncMock(return_value=old_task)
                 mock_ts.update_task = AsyncMock(return_value=update_result)
+                mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
                 result = await _task_handler(
                     action="update",

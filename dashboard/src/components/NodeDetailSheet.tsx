@@ -217,6 +217,7 @@ export default function NodeDetailSheet({
             </div>
 
             <div className="flex flex-col gap-8 p-6">
+              {/* v2-impacts-debug */}
               {/* Action Layer (Tasks) */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/40 mb-4 flex items-center gap-2">
@@ -316,6 +317,83 @@ export default function NodeDetailSheet({
                 )}
               </section>
 
+              {/* Impacts Layer */}
+              {(() => {
+                const impactsOut = relevantRels.filter(r => r.type === "impacts" && r.sourceEntityId === entity.id);
+                const impactsIn = relevantRels.filter(r => r.type === "impacts" && r.targetId === entity.id);
+                const impactsDraft = (entity.details as Record<string, unknown> | null)?.layer_decision as Record<string, unknown> | undefined;
+                const impactsDraftText = impactsDraft?.impacts_draft as string | undefined;
+                if (impactsOut.length === 0 && impactsIn.length === 0 && !impactsDraftText) return null;
+                return (
+                  <section>
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/40 mb-3 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                      Impacts
+                    </h3>
+                    <div className="space-y-3">
+                      {impactsOut.map(rel => {
+                        const target = entityMap.get(rel.targetId);
+                        return (
+                          <div key={rel.id} className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2.5 space-y-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-amber-400/60 font-medium">{rel.verb ?? "影響"}</span>
+                              {target ? (
+                                <button
+                                  onClick={() => onFocusNode?.(target.id)}
+                                  onMouseEnter={() => onHoverNode?.(target.id)}
+                                  onMouseLeave={() => onHoverNode?.(null)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[target.type] }} />
+                                  {target.name}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-foreground/40 italic">未知節點</span>
+                              )}
+                            </div>
+                            {rel.description && (
+                              <p className="text-[11px] text-foreground/60 leading-relaxed">{rel.description}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {impactsIn.map(rel => {
+                        const source = entityMap.get(rel.sourceEntityId);
+                        return (
+                          <div key={rel.id} className="rounded-md border border-blue-500/20 bg-blue-500/5 p-2.5 space-y-1.5">
+                            <div className="flex items-center gap-1.5">
+                              {source ? (
+                                <button
+                                  onClick={() => onFocusNode?.(source.id)}
+                                  onMouseEnter={() => onHoverNode?.(source.id)}
+                                  onMouseLeave={() => onHoverNode?.(null)}
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[source.type] }} />
+                                  {source.name}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-foreground/40 italic">未知節點</span>
+                              )}
+                              <span className="text-[10px] text-blue-400/60 font-medium">{rel.verb ? `${rel.verb}此節點` : "影響此節點"}</span>
+                            </div>
+                            {rel.description && (
+                              <p className="text-[11px] text-foreground/60 leading-relaxed">{rel.description}</p>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {impactsDraftText && impactsOut.length === 0 && (
+                        <div className="rounded-md border border-foreground/10 bg-foreground/5 p-2.5">
+                          <div className="text-[10px] text-foreground/40 font-medium mb-1">草稿 Impacts（尚未建立關聯）</div>
+                          <p className="text-[11px] text-foreground/50 leading-relaxed">{impactsDraftText}</p>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                );
+              })()}
+
               {/* Dependency Layer */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/40 mb-3">
@@ -326,8 +404,9 @@ export default function NodeDetailSheet({
                     { label: "Depends on", direction: "out", color: "text-blue-400/60" },
                     { label: "Serves", direction: "in", color: "text-emerald-400/60" },
                   ].map((dir) => {
-                    const filtered = relevantRels.filter(r => 
-                      dir.direction === "out" ? r.sourceEntityId === entity.id : r.targetId === entity.id
+                    const filtered = relevantRels.filter(r =>
+                      r.type !== "impacts" &&
+                      (dir.direction === "out" ? r.sourceEntityId === entity.id : r.targetId === entity.id)
                     );
                     if (filtered.length === 0) return null;
                     return (

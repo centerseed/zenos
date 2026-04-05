@@ -83,6 +83,21 @@ Challenger 執行完整流程：
 
 ---
 
+## Phase 4：寫入 Work Journal（必做）
+
+brainstorm 結束後，記錄本次工作摘要：
+
+```python
+mcp__zenos__journal_write(
+    summary="brainstorm {主題}：{升級版結論的一句話摘要}",
+    project="{專案名}",
+    flow_type="research",
+    tags=["{主題關鍵字}"]
+)
+```
+
+---
+
 ## 注意事項
 
 - Phase 1 和 Phase 2 之間**必須有用戶確認**，不能自動跑完

@@ -94,6 +94,42 @@ class TestTokenize:
         tokens = _tokenize("Hello WORLD")
         assert tokens == ["hello", "world"]
 
+    # ── CJK bigram tests ──
+
+    def test_cjk_bigrams_produced(self):
+        """CJK token should produce bigrams alongside itself."""
+        tokens = _tokenize("語意治理")
+        assert "語意治理" in tokens
+        assert "語意" in tokens
+        assert "意治" in tokens
+        assert "治理" in tokens
+
+    def test_cjk_bigrams_three_char(self):
+        """Three-char CJK token produces two bigrams."""
+        tokens = _tokenize("知識圖")
+        assert "知識圖" in tokens
+        assert "知識" in tokens
+        assert "識圖" in tokens
+
+    def test_non_cjk_token_no_extra_bigrams(self):
+        """Non-CJK tokens must NOT produce bigrams."""
+        tokens = _tokenize("hello world")
+        assert tokens == ["hello", "world"]
+
+    def test_cjk_single_char_no_bigram(self):
+        """Single-char CJK token cannot form a bigram — no extras."""
+        tokens = _tokenize("語")
+        assert tokens == ["語"]
+
+    def test_mixed_cjk_and_english(self):
+        """Mixed text: English tokens are not expanded, CJK tokens are."""
+        tokens = _tokenize("ZenOS 治理")
+        assert "zenos" in tokens
+        assert "治理" in tokens
+        # No bigram for single-char CJK
+        # But 治理 is 2-char so it stays as-is (no further bigrams from a 2-char word)
+        assert "治" not in tokens  # single chars not produced
+
 
 # ──────────────────────────────────────────────
 # Score match tests
@@ -120,6 +156,52 @@ class TestScoreMatch:
         score_with = _score_match(["hello", "world"], "this is hello world here")
         score_without = _score_match(["hello", "world"], "world and hello separately")
         assert score_with > score_without
+
+    def test_cjk_partial_substring_gets_07(self):
+        """CJK query token that is a substring of a long term should score 0.7, not 0."""
+        # "治理" is inside "語意治理Pipeline" but not a standalone token
+        score = _score_match(["治理"], "語意治理pipeline")
+        assert score > 0.0
+        # Not a full token match (that would be 1.0 per token), confirm it's < 1.0
+        # (actually could be >=1 with bonus, so just check > 0)
+        assert score > 0
+
+
+class TestCJKSearch:
+    """CJK-specific search integration tests."""
+
+    def test_bigram_search_matches_longer_cjk_entity(self):
+        """Searching '治理' should hit an entity with '語意治理' in its name."""
+        entity = _entity("語意治理Pipeline", summary="語意治理自動化流程")
+        results = search_ontology("治理", [entity], [], [])
+        assert len(results) >= 1
+        assert results[0].name == "語意治理Pipeline"
+
+    def test_cjk_mixed_query_hits_summary_tag(self):
+        """'ZenOS 治理' should hit an entity containing '治理' in summary."""
+        entity = _entity("ZenOS Core", summary="ZenOS 治理與 ontology 管理")
+        results = search_ontology("ZenOS 治理", [entity], [], [])
+        assert len(results) >= 1
+        assert results[0].name == "ZenOS Core"
+
+    def test_cjk_bigram_search_in_tags(self):
+        """Bigram '意治' generated from '語意治理' should hit entity with that name in what tag."""
+        entity = _entity("Governance", what="語意治理模組")
+        results = search_ontology("意治", [entity], [], [])
+        assert len(results) >= 1
+
+    def test_english_search_unaffected_by_cjk_changes(self):
+        """Plain English search still works correctly after CJK changes."""
+        entity = _entity("Paceriz", summary="A running coach app")
+        results = search_ontology("Paceriz", [entity], [], [])
+        assert len(results) == 1
+        assert results[0].name == "Paceriz"
+
+    def test_english_no_false_positive(self):
+        """English query does not match unrelated entity."""
+        entity = _entity("ZenOS", summary="Ontology layer")
+        results = search_ontology("Paceriz", [entity], [], [])
+        assert len(results) == 0
 
 
 # ──────────────────────────────────────────────

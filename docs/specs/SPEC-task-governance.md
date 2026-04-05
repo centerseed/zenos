@@ -147,7 +147,7 @@ Step 3：上傳成功後，將 `{ type, name, attachment_id }` 帶入 `task(acti
 |------|------|------|------|------|
 | `id` | string | 系統產生 | task 識別碼 | create 不需傳 |
 | `title` | string | 是 | 任務標題，動詞開頭 | 單一 outcome |
-| `description` | string | 建議 | 背景/問題/期望結果 | 建議 Markdown |
+| `description` | string | 建議 | 背景/問題/期望結果 | Server 會自動解析並重新格式化為結構化 Markdown，原始格式不保留 |
 | `status` | enum | 是 | `todo`/`in_progress`/`review`/`done`/`cancelled` | create 初始只能 `todo` |
 | `priority` | enum | 是 | `critical`/`high`/`medium`/`low` | 不傳由 server 推薦 |
 | `acceptance_criteria` | string[] | 建議 | 驗收條件（2-5 條） | 可觀察、可驗收 |

@@ -44,11 +44,21 @@ export function AppNav() {
   if (!partner) return null;
 
   return (
-    <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-12 flex items-center justify-between">
+    <header className="sticky top-0 z-50 border-b border-border/80 bg-background/72 backdrop-blur-xl">
+      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-3 sm:gap-6">
-          <Link href="/" className="text-lg font-bold text-foreground">
-            ZenOS
+          <Link
+            href="/"
+            className="flex items-center rounded-md transition-opacity hover:opacity-95"
+            aria-label="ZenOS 首頁"
+          >
+            <img
+              src="/brand/zenos-logo-horizontal.png"
+              alt="ZenOS"
+              width={860}
+              height={360}
+              className="h-9 w-auto sm:h-10"
+            />
           </Link>
           <nav className="hidden md:flex items-center gap-1">
             {navItems.map(({ href, label }) => {
@@ -57,10 +67,10 @@ export function AppNav() {
                 <Link
                   key={href}
                   href={href}
-                  className={`px-3 py-1.5 rounded text-sm transition-colors ${
+                  className={`rounded-md px-3 py-1.5 text-sm transition-all ${
                     isActive
-                      ? "bg-secondary text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                      ? "bg-primary/18 text-primary shadow-[inset_0_0_0_1px_rgba(54,225,202,0.2)]"
+                      : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
                   }`}
                 >
                   {label}
@@ -75,13 +85,13 @@ export function AppNav() {
           </span>
           <button
             onClick={signOut}
-            className="hidden sm:inline text-sm text-muted-foreground hover:text-foreground cursor-pointer active:scale-95 transition-transform"
+            className="hidden cursor-pointer text-sm text-muted-foreground transition-transform active:scale-95 hover:text-primary sm:inline"
           >
             {APP_COPY.signOut}
           </button>
           <button
             onClick={() => setMobileOpen((prev) => !prev)}
-            className="md:hidden inline-flex items-center justify-center h-8 w-8 rounded border border-border text-muted-foreground hover:text-foreground hover:bg-secondary/60 active:scale-95 transition-all"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/70 text-muted-foreground transition-all active:scale-95 hover:border-primary/30 hover:text-foreground hover:bg-secondary/60 md:hidden"
             aria-label={mobileOpen ? "關閉選單" : "開啟選單"}
             aria-expanded={mobileOpen}
           >
@@ -90,8 +100,8 @@ export function AppNav() {
         </div>
       </div>
       {mobileOpen && (
-        <div className="md:hidden border-t border-border bg-card">
-          <nav className="px-4 py-2 flex flex-col">
+        <div className="border-t border-border bg-card/95 md:hidden">
+          <nav className="flex flex-col px-4 py-2">
             {navItems.map(({ href, label }) => {
               const isActive = pathname.startsWith(href);
               return (
@@ -99,21 +109,21 @@ export function AppNav() {
                   key={href}
                   href={href}
                   onClick={() => setMobileOpen(false)}
-                  className={`px-3 py-2 rounded text-sm transition-colors ${
+                  className={`rounded-md px-3 py-2 text-sm transition-all ${
                     isActive
-                      ? "bg-secondary text-foreground"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/60"
+                      ? "bg-primary/18 text-primary shadow-[inset_0_0_0_1px_rgba(54,225,202,0.2)]"
+                      : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
                   }`}
                 >
                   {label}
                 </Link>
               );
             })}
-            <div className="mt-2 pt-2 border-t border-border flex items-center justify-between">
+            <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
               <span className="text-sm text-muted-foreground">{partner.displayName}</span>
               <button
                 onClick={signOut}
-                className="text-sm text-muted-foreground hover:text-foreground cursor-pointer active:scale-95 transition-transform"
+                className="cursor-pointer text-sm text-muted-foreground transition-transform active:scale-95 hover:text-primary"
               >
                 {APP_COPY.signOut}
               </button>

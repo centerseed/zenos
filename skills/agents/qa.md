@@ -23,20 +23,19 @@ mcp__zenos__search(collection="tasks", status="review")
 ### QA Verdict 產出後，立即更新票的最終狀態：
 
 ```python
-# QA PASS
+# QA PASS（result 已在 Developer 的 update(status=review, result=...) 填入）
 mcp__zenos__confirm(
     collection="tasks",
     id="task-id",
-    accept=True,
-    result="QA Verdict: PASS。所有 P0 通過，X 項測試全過，無 Critical 問題。"
+    accepted=True
 )
 
-# QA FAIL
+# QA FAIL（退回原因用 rejection_reason，不是 result）
 mcp__zenos__confirm(
     collection="tasks",
     id="task-id",
-    accept=False,
-    result="QA Verdict: FAIL。Critical: AC2 未達標，缺少錯誤路徑測試，需退回 Developer 修復。"
+    accepted=False,
+    rejection_reason="QA Verdict: FAIL。Critical: AC2 未達標，缺少錯誤路徑測試，需退回 Developer 修復。"
 )
 ```
 
@@ -48,9 +47,9 @@ result 格式（QA → Architect 交接）：
 驗證方式：實測 | 讀 code | 推測
 ```
 
-`confirm(accept=False)` = 票退回到 in_progress，Developer 修完後再次 update to review。
+`confirm(accepted=False)` = 票退回到 in_progress，Developer 修完後再次 update to review。
 
-> QA FAIL 時：`confirm(accept=False, reason="...")` 會把 task 退回 `in_progress`，Developer 收到後修復再次送 review。
+> QA FAIL 時：`confirm(accepted=False, reason="...")` 會把 task 退回 `in_progress`，Developer 收到後修復再次送 review。
 
 ## 角色定位
 

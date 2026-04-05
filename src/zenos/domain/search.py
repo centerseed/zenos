@@ -19,9 +19,26 @@ class SearchResult:
     ancestors: list[dict] | None = None  # filled by application layer for entity results
 
 
+_CJK_RANGE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _cjk_bigrams(token: str) -> list[str]:
+    """Generate bigrams from a CJK token.
+
+    E.g. "語意治理" → ["語意", "意治", "治理"]
+    """
+    return [token[i : i + 2] for i in range(len(token) - 1)]
+
+
 def _tokenize(text: str) -> list[str]:
-    """Split text into lowercase alphanumeric tokens."""
-    return [t for t in re.split(r"[\s\-_/.,;:!?()（）。，、；：！？「」『』\[\]{}]+", text.lower()) if t]
+    """Split text into lowercase tokens; CJK tokens also produce bigrams."""
+    raw_tokens = [t for t in re.split(r"[\s\-_/.,;:!?()（）。，、；：！？「」『』\[\]{}]+", text.lower()) if t]
+    result: list[str] = []
+    for token in raw_tokens:
+        result.append(token)
+        if _CJK_RANGE.search(token) and len(token) >= 2:
+            result.extend(_cjk_bigrams(token))
+    return result
 
 
 def _collect_searchable_text_entity(entity: Entity) -> str:
@@ -80,22 +97,30 @@ def _collect_searchable_text_protocol(protocol: Protocol) -> str:
 def _score_match(query_tokens: list[str], text: str) -> float:
     """Score how well query tokens match a text blob.
 
-    Scoring:
-      - Each token that appears in text contributes 1.0
-      - Bonus 0.5 for exact substring match (preserves word order)
-      - Normalize by number of query tokens
+    Scoring per query token:
+      - 1.0  if the token is a full token in the text
+      - 0.7  if the token is a substring of the full text (partial match)
+      - 0.0  otherwise
+    Plus a bonus 0.5 if the full joined query appears verbatim in the text.
+    Normalize by number of query tokens.
     """
     if not query_tokens:
         return 0.0
     text_lower = text.lower()
     text_tokens = set(_tokenize(text_lower))
 
-    hits = sum(1.0 for qt in query_tokens if qt in text_tokens)
+    token_score = 0.0
+    for qt in query_tokens:
+        if qt in text_tokens:
+            token_score += 1.0
+        elif qt in text_lower:
+            token_score += 0.7
+
     # Substring bonus: does the full query appear as-is?
     full_query = " ".join(query_tokens)
     substring_bonus = 0.5 if full_query in text_lower else 0.0
 
-    return (hits + substring_bonus) / len(query_tokens)
+    return (token_score + substring_bonus) / len(query_tokens)
 
 
 def search_ontology(

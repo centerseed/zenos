@@ -1,3 +1,12 @@
+---
+name: debug
+description: >
+  多角色協同的根因導向 Bug 修復流程。當使用者說「有 bug」「這個壞了」
+  「為什麼不正常」「修這個錯誤」時啟動。
+  流程：Debugger 分析 → Architect 驗證 → QA 設計重現測試 → Developer 修復 → Architect 確認。
+version: 1.0.0
+---
+
 # /debug — Bug 修復流程
 
 多角色協同的根因導向修復流程。任何一個角色都不能跳過自己的步驟。
@@ -82,8 +91,24 @@ Architect 確認：
 
 ---
 
+## 寫入 Work Journal（必做）
+
+修復完成後，記錄本次工作摘要：
+
+```python
+mcp__zenos__journal_write(
+    summary="修復 {bug 描述}：根因 {file:line}，{修復方式摘要}",
+    project="{專案名}",
+    flow_type="bugfix",
+    tags=["{模組名}"]
+)
+```
+
+---
+
 ## 完成條件
 
 - [ ] 根因有 file:line 定位
 - [ ] 回歸測試存在且在修復前 FAIL、修復後 PASS
 - [ ] Architect 執行 confirm
+- [ ] Work journal 已寫入

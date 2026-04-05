@@ -207,8 +207,11 @@ function KnowledgeMapContent() {
   }, [entities, focusProduct]);
 
   const handleSelect = useCallback((e: Entity) => {
-    setSelectedId(e.id);
-    setFocusedNodeId(e.id);
+    setSelectedId(prev => {
+      const next = prev === e.id ? null : e.id;
+      setFocusedNodeId(next);
+      return next;
+    });
   }, []);
 
   return (
@@ -255,7 +258,7 @@ function KnowledgeMapContent() {
               blindspots={blindspotsByEntity.get(selectedEntity.id) ?? []}
               tasks={tasks}
               qualitySignals={qualitySignals}
-              onClose={() => setSelectedId(null)}
+              onClose={() => { setSelectedId(null); setFocusedNodeId(null); }}
               onHoverNode={setHoveredSidebarNodeId}
               onFocusNode={(id) => {
                 const target = entityMap.get(id);
