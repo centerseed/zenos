@@ -1129,6 +1129,13 @@ async def search(
             )
             # Filter tasks by linked entity visibility
             visible_tasks = [t for t in tasks if await _is_task_visible(t)]
+            # Apply keyword filter if query provided
+            if query.strip():
+                q = query.lower()
+                visible_tasks = [
+                    t for t in visible_tasks
+                    if q in t.title.lower() or q in (t.description or "").lower()
+                ]
             results["tasks"] = [await _enrich_task_result(t) for t in visible_tasks]
 
         elif col == "entries":
@@ -2237,6 +2244,10 @@ async def _task_handler(
                 create_warnings.append(
                     "linked_entities 為空：任務缺少 ontology context，governance_hints 將無法產生有效建議"
                 )
+            if not effective_project:
+                create_warnings.append(
+                    "未指定 project：票已建立但無法被 search(project=...) 過濾找到，建議傳入 project 參數（如 'zenos'）"
+                )
             return _unified_response(data=task_data, warnings=create_warnings)
 
         elif action == "update":
@@ -3118,10 +3129,14 @@ async def journal_write(
     # Truncate summary to 100 chars without rejecting
     summary = summary[:100]
 
+    # Auto-fill project from partner context if caller omits it
+    _partner = _current_partner.get()
+    effective_project = project or (_partner.get("defaultProject", "") if _partner else "") or None
+
     entry_id = await _journal_repo.create(
         partner_id=partner_id,
         summary=summary,
-        project=project,
+        project=effective_project,
         flow_type=flow_type,
         tags=tags or [],
     )
@@ -3167,10 +3182,15 @@ async def journal_read(
         return _unified_response(status="rejected", data={}, rejection_reason="No authenticated partner context")
 
     limit = max(1, min(limit, 50))
+
+    # Auto-fill project from partner context if caller omits it
+    _partner = _current_partner.get()
+    effective_project = project or (_partner.get("defaultProject", "") if _partner else "") or None
+
     entries, total = await _journal_repo.list_recent(
         partner_id=partner_id,
         limit=limit,
-        project=project,
+        project=effective_project,
         flow_type=flow_type,
     )
     # Convert datetime fields to ISO strings for JSON serialization

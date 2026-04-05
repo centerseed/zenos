@@ -228,3 +228,137 @@ async def test_journal_read_serializes_datetime_to_string():
     created_at = result["data"]["entries"][0]["created_at"]
     assert isinstance(created_at, str)
     assert "2026-04-04" in created_at
+
+
+# ---------------------------------------------------------------------------
+# defaultProject auto-fill (QA regression tests)
+# ---------------------------------------------------------------------------
+
+_PARTNER_WITH_DEFAULT = {"id": _PARTNER_ID, "defaultProject": "zenos"}
+_PARTNER_NO_DEFAULT = {"id": _PARTNER_ID}
+
+
+async def test_journal_write_autofills_default_project():
+    """journal_write uses partner defaultProject when project not passed."""
+    import zenos.interface.tools as tools
+
+    repo = _make_journal_repo()
+    with (
+        patch.object(tools, "_journal_repo", repo),
+        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
+        patch.object(tools, "_current_partner_id") as mock_pid,
+        patch.object(tools, "_current_partner") as mock_partner,
+        patch.object(tools, "datetime") as mock_dt,
+    ):
+        mock_pid.get.return_value = _PARTNER_ID
+        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
+        mock_dt.now.return_value = _FIXED_TS
+
+        await tools.journal_write(summary="test auto-fill")
+
+    call_kwargs = repo.create.call_args[1]
+    assert call_kwargs["project"] == "zenos"
+
+
+async def test_journal_write_explicit_project_overrides_default():
+    """journal_write uses explicit project even when defaultProject exists."""
+    import zenos.interface.tools as tools
+
+    repo = _make_journal_repo()
+    with (
+        patch.object(tools, "_journal_repo", repo),
+        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
+        patch.object(tools, "_current_partner_id") as mock_pid,
+        patch.object(tools, "_current_partner") as mock_partner,
+        patch.object(tools, "datetime") as mock_dt,
+    ):
+        mock_pid.get.return_value = _PARTNER_ID
+        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
+        mock_dt.now.return_value = _FIXED_TS
+
+        await tools.journal_write(summary="override test", project="paceriz")
+
+    call_kwargs = repo.create.call_args[1]
+    assert call_kwargs["project"] == "paceriz"
+
+
+async def test_journal_write_no_default_project_passes_none():
+    """journal_write passes None when partner has no defaultProject and caller omits project."""
+    import zenos.interface.tools as tools
+
+    repo = _make_journal_repo()
+    with (
+        patch.object(tools, "_journal_repo", repo),
+        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
+        patch.object(tools, "_current_partner_id") as mock_pid,
+        patch.object(tools, "_current_partner") as mock_partner,
+        patch.object(tools, "datetime") as mock_dt,
+    ):
+        mock_pid.get.return_value = _PARTNER_ID
+        mock_partner.get.return_value = _PARTNER_NO_DEFAULT
+        mock_dt.now.return_value = _FIXED_TS
+
+        await tools.journal_write(summary="no default")
+
+    call_kwargs = repo.create.call_args[1]
+    assert call_kwargs["project"] is None
+
+
+async def test_journal_read_autofills_default_project():
+    """journal_read uses partner defaultProject when project not passed."""
+    import zenos.interface.tools as tools
+
+    repo = _make_journal_repo()
+    with (
+        patch.object(tools, "_journal_repo", repo),
+        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
+        patch.object(tools, "_current_partner_id") as mock_pid,
+        patch.object(tools, "_current_partner") as mock_partner,
+    ):
+        mock_pid.get.return_value = _PARTNER_ID
+        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
+
+        await tools.journal_read()
+
+    call_kwargs = repo.list_recent.call_args[1]
+    assert call_kwargs["project"] == "zenos"
+
+
+async def test_journal_read_explicit_project_overrides_default():
+    """journal_read uses explicit project even when defaultProject exists."""
+    import zenos.interface.tools as tools
+
+    repo = _make_journal_repo()
+    with (
+        patch.object(tools, "_journal_repo", repo),
+        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
+        patch.object(tools, "_current_partner_id") as mock_pid,
+        patch.object(tools, "_current_partner") as mock_partner,
+    ):
+        mock_pid.get.return_value = _PARTNER_ID
+        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
+
+        await tools.journal_read(project="paceriz")
+
+    call_kwargs = repo.list_recent.call_args[1]
+    assert call_kwargs["project"] == "paceriz"
+
+
+async def test_journal_read_no_default_project_passes_none():
+    """journal_read passes None when partner has no defaultProject and caller omits project."""
+    import zenos.interface.tools as tools
+
+    repo = _make_journal_repo()
+    with (
+        patch.object(tools, "_journal_repo", repo),
+        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
+        patch.object(tools, "_current_partner_id") as mock_pid,
+        patch.object(tools, "_current_partner") as mock_partner,
+    ):
+        mock_pid.get.return_value = _PARTNER_ID
+        mock_partner.get.return_value = _PARTNER_NO_DEFAULT
+
+        await tools.journal_read()
+
+    call_kwargs = repo.list_recent.call_args[1]
+    assert call_kwargs["project"] is None
