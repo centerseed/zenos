@@ -104,6 +104,20 @@
       "path": "workflows/triage",
       "files": ["SKILL.md"],
       "owner": "Barry"
+    },
+    {
+      "name": "challenger",
+      "version": "0.1.0",
+      "path": "challenger",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "brainstorm",
+      "version": "1.0.0",
+      "path": "workflows/brainstorm",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
     }
   ]
 }
