@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import sys
+from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse
 
 CLOUD_RUN_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
@@ -40,7 +41,7 @@ def _build_cloud_url(base_url: str, token: str, project: str = "") -> str:
     return f"{base_url}?{urlencode(params)}"
 
 
-def _parse_existing_url(url: str) -> tuple[str, str, str]:
+def _parse_existing_url(url: str) -> Tuple[str, str, str]:
     """Parse an existing MCP URL into (base_url, token, project).
 
     Returns:
@@ -69,7 +70,7 @@ def setup_cloud(token: str, url: str, project: str = "") -> None:
     print(f"   Config: {MCP_CONFIG_PATH}")
 
 
-def update_cloud(token: str | None, project: str | None) -> None:
+def update_cloud(token: Optional[str], project: Optional[str]) -> None:
     """Update existing cloud MCP config, preserving unspecified values."""
     config = load_existing(MCP_CONFIG_PATH)
     zenos = config.get("mcpServers", {}).get("zenos")
