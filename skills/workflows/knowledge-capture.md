@@ -260,6 +260,25 @@ L2 概念層（entities）：
 
 ## 知識分析流程（模式 A / B 共用）
 
+### Step 0.5：查 Impact Chain 確定知識歸屬（如涉及具體模組）
+
+**捕獲到的知識應該掛到哪個 entity？用 impact_chain 判斷：**
+
+```python
+# 先搜尋最可能相關的 entity
+mcp__zenos__search(query="<知識相關關鍵字>", collection="entities")
+
+# 取得候選 entity 的 impact_chain
+mcp__zenos__get(collection="entities", name="<候選模組>")
+```
+
+**Impact chain 輔助歸屬判斷：**
+- 如果知識涉及「A 改了影響 B」→ 查 A 的 impact_chain 確認 B 是否在下游；若是，知識掛到 A（source），不是 B
+- 如果知識是 entry（decision/insight/change）→ 掛到 impact_chain 上最上游的相關 entity
+- 如果知識涉及新 relation → 查兩端的 impact_chain 確認新 relation 不重複既有路徑
+
+**例外：** MCP 不可用或知識不涉及具體模組時跳過。
+
 ### Step 1：識別有價值的知識
 
 **骨架層候選（需要人確認）**：
@@ -445,18 +464,27 @@ write(collection="entries", id="{舊 entry ID}", data={
 待確認：呼叫 search(confirmed_only=false) 查看
 ```
 
+**寫入 Work Journal（模式 A/B/C 完成後都要做）：**
+
+```python
+mcp__zenos__journal_write(
+    summary="capture {來源描述}：{n} 個 entries + {n} 個 entities + {n} 個 documents",
+    project="{專案名}",
+    flow_type="capture",
+    tags=["{產品名}"]
+)
+```
+
 ---
 
 ## 核心原則
 
-- **Why/How 是意圖性維度**：AI 填的 Why/How 一律 draft，不直接 confirmed
-- **What/Who 是事實性維度**：AI 準確度高，可直接填入
+- **意圖性 vs 事實性維度**：Why/How 是意圖性維度，AI 填的一律 draft；What/Who 是事實性維度，AI 可直接填入
 - **Documents 不存原始內容**：document entity 只存語意摘要，原文留在來源（Git/Drive）。Entry 則是直接記錄知識內容
 - **首次建構先骨架後神經**：先確認實體結構，再大量建文件 entry
-- **快**：核心價值是在知識產生點捕獲，速度比完美更重要
-- **只記 code 裡沒有的知識**：entry 記的是決策脈絡、已知限制、重要變更——agent 讀 code 拿不到的東西。模組功能描述、API 介面這類 code 裡有的不記
+- **快，且只記 code 裡沒有的知識**：速度比完美重要。Entry 記決策脈絡、已知限制、重要變更——agent 讀 code 拿不到的東西
 - **100 字一個知識點**：entry content 上限 200 字元（~100 中文字）。寫不下代表要拆或粒度太大
-- **Entry 不需要確認**：entry 建了就是 active，沒有 draft→confirmed。品質靠 server 端 Internal 治理 API
+- **Entry 不需要確認**：建了就是 active，沒有 draft→confirmed。品質靠 server 端 Internal 治理 API
 
 ---
 
@@ -464,47 +492,22 @@ write(collection="entries", id="{舊 entry ID}", data={
 
 以下規則由 MCP Server 強制執行，write 操作違反時會回傳 ValueError 並告知正確值。
 
-### Entity 命名規則
-- **禁止括號標註**：不可用 `"訓練計畫 (Training Plan)"` 或 `"Training Plan Module (iOS)"`，直接用乾淨的名稱如 `"訓練計畫"` 或 `"Training Plan Module"`
-- 長度 2-80 字元，前後空白會被自動 strip
-- 同 type + name 不可重複（重複時 Server 會回傳既有 entity 的 ID，改用 update）
+### Entity
+- **命名**：禁止括號標註，長度 2-80 字元，同 type+name 不可重複（重複時回傳既有 ID）
+- **必填**：`type`（product/module/goal/role/project）、`status`（active/paused/completed/planned）、`tags`（四維 what/why/how/who）
+- **Module 的 `parent_id` 強制必填**，指向的 entity 必須已存在
 
-### Entity 必填驗證
-- `type` 必須是：`product` / `module` / `goal` / `role` / `project`
-- `status` 必須是：`active` / `paused` / `completed` / `planned`
-- `tags` 必須包含四維：`what` / `why` / `how` / `who`
-- **Module 的 `parent_id` 是強制必填**（不是 warning，是阻擋）
-- `parent_id` 指向的 entity 必須已經存在
+### Relationship
+- source/target entity 必須存在，`type`：`depends_on`/`serves`/`owned_by`/`part_of`/`blocks`/`related_to`/`impacts`/`enables`
+- L2 概念之間優先用 `impacts` 和 `enables`
 
-### Relationship 驗證
-- `source_entity_id` 和 `target_entity_id` 必須都是已存在的 entity
-- `type` 必須是：`depends_on` / `serves` / `owned_by` / `part_of` / `blocks` / `related_to` / `impacts` / `enables`
-- L2 概念之間優先使用 `impacts`（A 改了，B 必須跟著檢查）和 `enables`（A 讓 B 成為可能）
+### Document / Blindspot / Protocol
+- Document：`source.type`（github/gdrive/notion/upload）必填，`linked_entity_ids` 盡量帶，寫入前用 `source.uri` 查重
+- Blindspot：`severity`（red/yellow/green）必填，`related_entity_ids` 必須都存在
+- Protocol：`entity_id` 必須存在，`content` 必須含四維 what/why/how/who
 
-### Blindspot 驗證
-- `severity` 必須是：`red` / `yellow` / `green`
-- `related_entity_ids` 裡的每個 ID 必須都存在
-
-### Document 驗證
-- `source.type` 必須是：`github` / `gdrive` / `notion` / `upload`
-- `linked_entity_ids` 裡的每個 ID 必須都存在
-
-### Protocol 驗證
-- `entity_id` 必須是已存在的 entity
-- `content` 必須包含四維：`what` / `why` / `how` / `who`
-
-### Entry 驗證
-- `entity_id` 必須是已存在的 entity
-- `type` 必須是：`decision` / `insight` / `limitation` / `change` / `context`
-- `content` 必填，上限 200 字元（~100 中文字）
-- `context` 可選，上限 200 字元
-- `status` 必須是：`active` / `superseded` / `archived`
-- `status = superseded` 時 `superseded_by` 必填
+### Entry
+- `entity_id` 必須存在，`type`：decision/insight/limitation/change/context
+- `content` 必填（上限 200 字元），`context` 可選（上限 200 字元）
+- `status`：active/superseded/archived（superseded 時 `superseded_by` 必填）
 - 沒有 `confirmed_by_user`，建了就是 active
-
-### 建議的寫入順序
-1. 先建 product entity（拿到 ID）
-2. 再建 module entity（帶 parent_id 指向 product）
-3. 再建 relationships（source/target 都已存在）
-4. 建 documents（帶 linked_entity_ids + 寫入前用 source.uri 查重，已存在就跳過）
-5. 建 entries（帶 entity_id 指向已存在的 L2 entity）

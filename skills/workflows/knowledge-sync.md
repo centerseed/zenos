@@ -87,66 +87,12 @@ Source Audit 結果
 
 依序執行修正，每筆修正後記錄結果：
 
-**bad_label**：更新 source 的 label 為從 URI 提取的檔名
-```python
-mcp__zenos__write(
-  collection="documents",  # 或 "entities"
-  data={
-    "id": "{item-id}",
-    "sources": [/* 更新後的 sources 陣列，label 已修正 */]
-  }
-)
-```
+修正方式（都透過 `mcp__zenos__write` 更新 sources 陣列）：
 
-**broken**：移除該 source
-- 若該 source 是 document 的唯一 source → 同時將 document status 改為 `archived`
-- 若 document 還有其他 source → 僅移除該筆 source
-
-```python
-mcp__zenos__write(
-  collection="documents",
-  data={
-    "id": "{doc-id}",
-    "sources": [/* 移除 broken source 後的陣列 */],
-    "status": "archived"  # 僅在唯一 source 被移除時加入
-  }
-)
-```
-
-**renamed**：使用 `batch_update_sources` 批次更新（不再逐一呼叫 write）
-
-1. 從 Step 0.2 收集所有 `renamed` 項目，組成 `proposed_fixes`：
-```python
-proposed_fixes = [
-    {"document_id": "{doc-id-1}", "new_uri": "https://github.com/.../new/path1.md"},
-    {"document_id": "{doc-id-2}", "new_uri": "https://github.com/.../new/path2.md"},
-    # ...
-]
-```
-
-2. 呈現給用戶審閱：
-```
-── Rename Proposed Fixes（{N} 筆）────────────────
-[1] {doc-name}
-    舊: {old_uri}
-    新: {new_uri}
-[2] ...
-────────────────────────────────────────────────
-確認套用全部？（「全部」/選擇編號/「略過」/手動修改後再確認）
-```
-
-3. 用戶確認後，一次呼叫 `batch_update_sources` 套用：
-```python
-mcp__zenos__batch_update_sources(
-  updates=proposed_fixes,  # 用戶可能已修改部分條目
-  atomic=True              # rename 修正應為原子操作
-)
-```
-
-> **注意**：只有在 ZenOS ontology 中有對應 document 的 rename 才列入 `proposed_fixes`。
-> 沒有對應 document 的 rename（檔案從未被 write 過）不列入，只在報告中提示。
-
-**duplicate**：只報告，不自動處理。
+- **bad_label**：更新 label 為從 URI 提取的檔名
+- **broken**：移除該 source（若為 document 唯一 source，同時將 status 改為 `archived`）
+- **renamed**：更新 URI 和 label 為新路徑
+- **duplicate**：只報告，不自動處理
 
 ### 0.5 顯示修正結果摘要
 
@@ -214,6 +160,27 @@ cd {TARGET} && git log --since="{SINCE}" --name-only --pretty=format:"---commit 
   源碼（*.py等）：{n} 個
   配置文件     ：{n} 個（跳過）
 ```
+
+---
+
+## Step 1.5：用 Impact Chain 確定影響範圍
+
+**對 Step 1 找到的每個高影響文件變更，查其對應 entity 的 impact_chain：**
+
+```python
+# 找到文件對應的 entity
+mcp__zenos__search(query="<文件名或模組名>", collection="entities")
+
+# 查 impact_chain 和 reverse_impact_chain
+mcp__zenos__get(collection="entities", name="<對應模組>")
+```
+
+**用途：**
+- `impact_chain`（下游）→ 這個文件變更可能連帶需要更新哪些下游 entity 的 summary/source？
+- `reverse_impact_chain`（上游）→ 上游有沒有同時在變更？如果有，可能需要合併同步
+- 在 Step 3 propose 更新時，自動把下游 entity 也列入候選清單（標記為「間接影響」）
+
+**例：** `SPEC-action-layer.md` 被修改 → 查 Action Layer 的 impact_chain → 發現下游有 L3 文件治理和 L3 Task治理規則 → 同步提示「這兩個模組的 source 可能也需要更新」
 
 ---
 
@@ -357,6 +324,17 @@ write(collection="entities", id={parent_entity_id}, data={
 → 呼叫 analyze(check_type="staleness") 偵測過時 entry
 ```
 
+**寫入 Work Journal（必做）：**
+
+```python
+mcp__zenos__journal_write(
+    summary="sync {專案名}：{n} commits，新增 {n} + 更新 {n} entities/documents",
+    project="{專案名}",
+    flow_type="sync",
+    tags=["{產品名}"]
+)
+```
+
 ---
 
 ## 注意事項
@@ -369,30 +347,10 @@ write(collection="entities", id={parent_entity_id}, data={
 
 ---
 
-## MCP Server 驗證規則（違反會被阻擋）
+## MCP Server 驗證規則（摘要）
 
-以下規則由 MCP Server 強制執行，write 操作違反時會回傳 ValueError 並告知正確值。
-
-### Entity 命名規則
-- **禁止括號標註**：不可用 `"訓練計畫 (Training Plan)"` 或 `"Training Plan Module (iOS)"`
-- 長度 2-80 字元，前後空白自動 strip
-- 同 type + name 不可重複（Server 會回傳既有 ID，改用 update）
-
-### Entity 必填驗證
-- `type`：`product` / `module` / `goal` / `role` / `project` / `document`
-- `status`：`active` / `paused` / `completed` / `planned`
-- `tags` 必須含四維：`what` / `why` / `how` / `who`
-- **Module 的 `parent_id` 強制必填**，且指向的 entity 必須已存在
-
-### Relationship / Blindspot / Document / Protocol / Entry
-- Relationship：source/target entity 必須存在，type 必須是合法 enum
-- Blindspot：severity 必須是 `red` / `yellow` / `green`，related_entity_ids 必須都存在
-- Document：source.type 必須是 `github` / `gdrive` / `notion` / `upload`。linked_entity_ids 盡量帶上（你掃描時知道屬於誰）。寫入前用 source.uri 查重，已存在就跳過
-- Protocol：entity_id 必須存在，content 必須含 what/why/how/who
-- Entry：entity_id 必須存在，type 必須是 `decision` / `insight` / `limitation` / `change` / `context`，content 上限 200 字元，沒有 confirmed_by_user
-
-### 寫入順序（建議）
-1. 先建 product entity → 2. 建 module（帶 parent_id）→ 3. 建 relationships → 4. 建 documents（帶 linked_entity_ids + source.uri 查重）→ 5. 建 entries（帶 entity_id 指向已存在的 L2）
-
-### Sync 不主動產出 entries
-Entries 記的是「code 裡沒有的知識」。Sync 的來源是 git log（code 變更），agent 讀 git log 就能看到。Entry 由 `/zenos-capture`（對話捕獲）或 task 完成流程產出。
+- Entity：type/status/tags(四維) 必填，module 的 parent_id 必填，命名禁止括號
+- Document：source.type 必填，linked_entity_ids 盡量帶，寫入前用 source.uri 查重
+- 寫入順序：product → module → relationships → documents → entries
+- Sync 不主動產出 entries（entries 由 `/zenos-capture` 或 task 完成流程產出）
+- 完整驗證規則見 `zenos-capture/SKILL.md`「MCP Server 驗證規則」段落

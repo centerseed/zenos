@@ -87,7 +87,7 @@ Architect 確認：
 1. 測試 PASS（開發人員提供輸出）
 2. 根因確實被移除（不是繞過）
 3. 無新的 regression
-4. 執行 `mcp__zenos__confirm(collection="tasks", id="...", accept=True)`
+4. 執行 `mcp__zenos__confirm(collection="tasks", id="...", accepted=True)`
 
 ---
 

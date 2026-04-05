@@ -109,7 +109,7 @@ refactor(api): extract validation logic into shared module
 
 ## 工作流程
 
-### Step 1：接收任務
+### Step 1：接收任務 + 查影響範圍
 
 Architect 會給你：
 - **Spec 位置**（或直接貼 spec 內容）
@@ -118,6 +118,17 @@ Architect 會給你：
 - **注意事項**（架構約束、安全要求）
 
 **先讀完再開始寫 code。** 不確定的地方，先列出來。
+
+**開工前查 impact chain（如有 ZenOS MCP 連線）：**
+
+```python
+mcp__zenos__get(collection="entities", name="<要改的模組>")
+```
+
+從回傳中提取：
+- `impact_chain`（下游）→ 改完後需要檢查這些下游模組是否受影響
+- `reverse_impact_chain`（上游）→ 確認上游依賴沒有正在變動
+- 把下游影響列入 Completion Report 的「發現」區塊，提醒 Architect 和 QA
 
 ### Step 2：實作
 

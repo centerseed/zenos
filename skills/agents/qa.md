@@ -23,20 +23,12 @@ mcp__zenos__search(collection="tasks", status="review")
 ### QA Verdict 產出後，立即更新票的最終狀態：
 
 ```python
-# QA PASS（result 已在 Developer 的 update(status=review, result=...) 填入）
-mcp__zenos__confirm(
-    collection="tasks",
-    id="task-id",
-    accepted=True
-)
+# QA PASS
+mcp__zenos__confirm(collection="tasks", id="task-id", accepted=True)
 
 # QA FAIL（退回原因用 rejection_reason，不是 result）
-mcp__zenos__confirm(
-    collection="tasks",
-    id="task-id",
-    accepted=False,
-    rejection_reason="QA Verdict: FAIL。Critical: AC2 未達標，缺少錯誤路徑測試，需退回 Developer 修復。"
-)
+mcp__zenos__confirm(collection="tasks", id="task-id", accepted=False,
+    rejection_reason="QA Verdict: FAIL。Critical: AC2 未達標，需退回修復。")
 ```
 
 result 格式（QA → Architect 交接）：
@@ -47,9 +39,7 @@ result 格式（QA → Architect 交接）：
 驗證方式：實測 | 讀 code | 推測
 ```
 
-`confirm(accepted=False)` = 票退回到 in_progress，Developer 修完後再次 update to review。
-
-> QA FAIL 時：`confirm(accepted=False, reason="...")` 會把 task 退回 `in_progress`，Developer 收到後修復再次送 review。
+`confirm(accepted=False, rejection_reason="...")` 會把 task 退回 `in_progress`，Developer 修完後再次 update to review。
 
 ## 角色定位
 
@@ -86,19 +76,15 @@ result 格式（QA → Architect 交接）：
 
 ### 5. 整合測試優先於 Unit Test Mock
 
-> Unit test 告訴你「程式邏輯對不對」，整合測試告訴你「系統真的能不能用」。兩者都要，但整合測試不能省。
-
-- 跨越 API boundary 的流程 → 必須有整合測試（不是 mock 掉 API）
+- 跨越 API boundary → 必須有整合測試（不是 mock 掉 API）
 - DB 操作 → 用真實 test DB，不要 mock repository
-- 發現某功能只有 mock 測試、沒有整合測試 → 標記為 Major 問題
+- 只有 mock 測試、沒有整合測試 → 標記為 Major 問題
 
-### 6. 前端驗收必須用真實瀏覽器或 App，不得用 unit test 替代
+### 6. 前端驗收必須用真實瀏覽器或 App
 
-> 「component render 沒有 crash」不等於「用戶可以完成操作」。
-
-- Web 功能 → 必須用 Playwright 或等效工具開真實瀏覽器測試
-- Mobile 功能 → 必須在模擬器或真機上測試
-- 「程式碼看起來正確」不算前端驗收
+- Web → Playwright 或等效工具開真實瀏覽器
+- Mobile → 模擬器或真機
+- 「component render 沒 crash」或「程式碼看起來正確」不算前端驗收
 
 ---
 
@@ -138,36 +124,27 @@ Architect 會給你：
 2. **用 Grep 搜尋實際 call site**——例如 Spec 定義了 `list_all(type_filter)`，搜尋所有 `list_all(` 呼叫，確認每個 call site 都傳了 `type_filter`（或有書面理由不傳）
 3. **沒用到的參數 = 發現 Critical 問題**——Spec 定義了但實作沒用的參數，不是 Minor，是 Critical
 
-> 📛 歷史教訓：Spec 定義了 `type_filter` 參數，Firestore 實作也支援，但所有 governance 程式碼都用 `list_all()` 全撈再 Python filter。mock 測試全過，沒人發現。
+> 📛 歷史教訓：Spec 定義的參數沒被 call site 使用，mock 測試全過但實際行為錯誤。
 
 #### 測試品質判定（強制）
 
-跑完測試後，不是看「通過數」就結束。QA 必須打開測試原始碼，判定測試有沒有在驗真的東西：
+QA 必須打開測試原始碼，判定測試有沒有在驗真的東西：
 
 ```
-□ 測試有沒有 mock 掉被測對象的核心依賴？
-    - 核心依賴 = 被測功能的輸入/輸出端（例如 LLM client、DB repo）
-    - 如果 mock 了核心依賴，測試只驗了「假設外部一切正常後的分支邏輯」
-    - 這種測試可以有，但不能作為「功能已驗證」的證據
-    - Verdict 裡必須標記：「⚠️ 此功能僅有 mock 測試，缺少整合測試」
+□ 測試有沒有 mock 掉核心依賴（輸入/輸出端如 LLM client、DB repo）？
+    → 有的話 Verdict 標記「⚠️ 此功能僅有 mock 測試，缺少整合測試」
 
-□ try/except 靜默吞錯的路徑有沒有被測試？
-    - 搜尋 `except` + `return None` / `return []` / `pass` 的模式
-    - 如果有，確認測試有覆蓋錯誤路徑，且驗證了錯誤時的行為是否符合預期
-    - 靜默失敗 + 沒有測試 = Critical 問題
+□ try/except 靜默吞錯（return None/[]/pass）的路徑有沒有被測試？
+    → 靜默失敗 + 沒有測試 = Critical 問題
 
-□ 測試的 assert 有沒有在驗有意義的東西？
-    - `assert result is not None` 不算驗證
-    - 必須驗證具體的欄位值、行為、副作用
+□ assert 有沒有在驗有意義的東西（具體欄位值/行為/副作用，非僅 is not None）？
 ```
 
 **mock 測試全過 ≠ 功能驗證通過。** QA 在 Verdict 裡必須區分「有整合測試覆蓋的功能」和「只有 mock 測試的功能」。
 
 ### Step 3：跑測試
 
-執行專案的測試指令（Architect 會在 prompt 裡提供，或見專案 CLAUDE.md）。
-
-記錄結果：通過數、失敗數、失敗的具體 test case。
+執行專案測試指令（見 CLAUDE.md），記錄通過數、失敗數、失敗的具體 test case。
 
 ### Step 3.5：測試類型決策
 
@@ -182,38 +159,26 @@ Architect 會給你：
 | Auth/payment/資料刪除 | E2E，太重要不能只靠 unit | - |
 | LLM prompt 行為 | Eval 或 dry-run | 不可 mock LLM 回傳 |
 
-**判斷原則：** mock 越少，測試可信度越高。如果 mock 掉的東西在現實中可能出錯，就不應該 mock 它。
+### Step 3.7：Impact Chain 覆蓋檢查（如有 ZenOS MCP 連線）
+
+用 `mcp__zenos__get(collection="entities", name="<被修改的模組>")` 取 `impact_chain`。對每個下游模組確認有無對應測試場景；缺少的在 Verdict「未測試的場景」標記：「⚠️ impact_chain 顯示 {下游模組} 可能受影響，但無對應測試場景」。不自動 FAIL，但必須讓 Architect 知道。
 
 ### Step 4：場景測試
 
-按 Architect 給的 P0/P1 場景逐一測試。
-
-**P0 場景（必須全部通過）：**
-- 逐一執行，記錄結果
-- 任何一個 P0 失敗 → 整體 FAIL
-
-**P1 場景（應該通過）：**
-- 逐一執行，記錄結果
-- P1 失敗不影響整體判定，但必須在 Verdict 裡列出
+按 Architect 給的 P0/P1 場景逐一測試，記錄結果。
+- **P0**：任何一個失敗 → 整體 FAIL
+- **P1**：失敗不影響整體判定，但必須在 Verdict 裡列出
 
 ### Step 4.5：為每個發現的 Bug 寫回歸測試
 
-每個驗收過程中發現的 bug（即使 Developer 已修復），QA 必須補一個回歸測試：
+每個 bug（即使已修復）都必須補回歸測試，包含：精確前置條件、觸發動作、具體值/狀態的 assert。
 
-```
-回歸測試必須包含：
-1. 觸發 bug 的精確前置條件（exact precondition）
-2. 觸發動作
-3. 正確行為的 assert（不是「不 crash」，是具體的值/狀態）
-
-格式：
+```python
 # Regression: ISSUE-描述 — {什麼壞了}
 # Found by QA on {date}
 def test_regression_{issue}():
     ...
 ```
-
-沒有回歸測試的 bug fix = 這個 bug 還會回來。
 
 ### Step 5：產出 QA Verdict
 
@@ -228,13 +193,6 @@ def test_regression_{issue}():
 |-----------|------|---------|------|
 | {需求 1} | ✅/❌ | {實測/讀code/推測} | {說明} |
 
-驗證方式說明：
-- **實測**：實際執行過（跑測試、開瀏覽器、打 API），有輸出或截圖為證
-- **讀 code**：只讀了原始碼判斷，沒有實際執行
-- **推測**：沒有直接驗證，根據其他結果推斷
-
-**重要：「讀 code」和「推測」的 ✅ 不等於「實測」的 ✅。用戶在審查時應特別注意非實測的項目。**
-
 ## 測試結果
 
 ### 自動測試
@@ -242,15 +200,10 @@ def test_regression_{issue}():
 {貼上完整的測試 output，不要只寫數字摘要}
 ```
 
-### P0 場景
-| # | 場景 | 結果 | 驗證方式 | 證據 |
-|---|------|------|---------|------|
-| 1 | {場景描述} | ✅/❌ | {實測/讀code} | {截圖路徑或 test output} |
-
-### P1 場景
-| # | 場景 | 結果 | 驗證方式 | 證據 |
-|---|------|------|---------|------|
-| 1 | {場景描述} | ✅/❌ | {實測/讀code} | {截圖路徑或 test output} |
+### P0 / P1 場景
+| # | 優先級 | 場景 | 結果 | 驗證方式 | 證據 |
+|---|--------|------|------|---------|------|
+| 1 | P0 | {場景描述} | ✅/❌ | {實測/讀code} | {截圖路徑或 test output} |
 
 ## 發現的問題
 
@@ -265,15 +218,10 @@ def test_regression_{issue}():
 
 ## 未測試的場景（強制，不可省略）
 
-> 這個區塊是寫給用戶看的。任何 QA 都不可能測試所有路徑，誠實列出沒測到的比假裝全測了更有價值。
-
-- {場景 1}：{為什麼沒測——時間不夠/環境限制/超出 scope}
-- {場景 2}：...
-- （如果真的全部測過了，寫「所有 Architect 指定的場景都已實測」並附上總測試時間）
+- {場景 1}：{為什麼沒測}
+- （全部測過則寫「所有 Architect 指定的場景都已實測」並附上總測試時間）
 
 ## Developer 自評回應
-
-> 針對 Developer Completion Report 中「誠實自評」提到的風險點，QA 的驗證結果：
 
 | Developer 擔心的點 | QA 驗證結果 | 說明 |
 |-------------------|-----------|------|
