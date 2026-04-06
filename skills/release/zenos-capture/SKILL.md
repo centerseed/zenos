@@ -8,7 +8,7 @@ description: >
   或說「把這個專案加入 ZenOS」「幫我建這個服務的 ontology」「把這個 repo 的文件掃進去」，
   或在討論完某個設計決策後想保存到知識層時，一定要使用這個 skill。
   引數範例：無引數、path/to/file.md、/Users/me/project/（目錄）
-version: 2.1.0
+version: 2.2.0
 ---
 
 # /zenos-capture — 知識捕獲 + 首次建構
@@ -484,6 +484,33 @@ mcp__zenos__journal_write(
 ```
 
 > 不要只寫數量（`{n} 個 entities`）——下次讀到沒有 context。寫「捕獲了什麼」和「還缺什麼」。
+
+**compressed 觸發蒸餾（journal_write 有回傳 `compressed: true` 時執行）：**
+
+**Step A：取 summary journal**
+```python
+mcp__zenos__journal_read(project="{專案名}", limit=5)
+# 找 is_summary=true 的最新一筆（即剛產生的 summary journal）
+```
+
+**Step B：對 summary journal 執行 Step 3.5 蒸餾**
+
+以 summary journal 的 `summary` 欄位內容為輸入，執行本 skill 的「Step 3.5：知識條目 — 撈、比對、寫入」流程（判斷標準與步驟完全相同，輸入來源改為 summary journal）。
+
+**Step C：呈現蒸餾結果**
+
+呈現格式如下（不需要用戶確認，直接執行）：
+
+```
+── Entry 蒸餾（journal 壓縮觸發）────────────────
+  [E1] 新增 {type} → {L2 entity 名稱}
+    「{content}」
+  [E2] ...
+  [--] 跳過 {n} 條（重複或不符兩關標準）
+────────────────────────────────────────────────
+```
+
+壓縮未觸發（`compressed: false`）時跳過以上步驟，行為與現有完全相同。
 
 ---
 
