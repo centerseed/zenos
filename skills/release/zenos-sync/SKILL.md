@@ -326,14 +326,24 @@ write(collection="entities", id={parent_entity_id}, data={
 
 **寫入 Work Journal（必做）：**
 
+先查：
+```python
+mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 同專案是否有近期 sync 筆記
+# → 有：新 summary 整合最新 sync 狀態，讓舊筆記變冗餘
+# → 沒有：正常新增
+```
+
 ```python
 mcp__zenos__journal_write(
-    summary="sync {專案名}：{n} commits，新增 {n} + 更新 {n} entities/documents",
+    summary="sync {專案名}：{重要的 ontology 變更或決策}；{遺留問題、source 斷鏈、或下一步}",
     project="{專案名}",
     flow_type="sync",
     tags=["{產品名}"]
 )
 ```
+
+> 不要只寫數量（`{n} commits`）——寫這次 sync 發現了什麼問題、做了什麼判斷。
 
 ---
 

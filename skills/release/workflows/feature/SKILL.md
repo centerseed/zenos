@@ -141,16 +141,24 @@ Architect 是實作階段的主控角色，按 plan_order 逐張 task 執行：
 
 ## Phase 6：寫入 Work Journal（必做）
 
-流程結束時，記錄本次工作摘要：
+**寫入前先查：**
+```python
+mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 找同功能/同 module 的近期筆記
+# → 延續同一件事：新 summary 包含完整脈絡，讓舊筆記變冗餘
+# → 新的不相關工作：正常新增
+```
 
 ```python
 mcp__zenos__journal_write(
-    summary="完成 {功能名稱}：{1-2 句摘要，含 Spec slug 和關鍵決策}",
+    summary="完成 {功能名稱}（{Spec slug}）：{不可從 code 重建的關鍵決策或洞察}；下一步：{next 或 無}",
     project="{專案名}",
     flow_type="feature",
     tags=["{功能關鍵字}"]
 )
 ```
+
+> 不要重複 commit message。寫「為什麼這樣設計」和「接下來要做什麼」。
 
 ---
 

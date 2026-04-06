@@ -16,7 +16,7 @@ version: 0.5.0
 
 ```python
 # 1. 讀最近工作日誌，了解上次做到哪、有什麼決策脈絡
-mcp__zenos__journal_read(limit=10)
+mcp__zenos__journal_read(limit=20, project="{專案名}")
 
 # 2. 看有沒有 QA 已通過等待最終確認的任務，或待規劃的任務
 mcp__zenos__search(collection="tasks", status="review,todo")
@@ -428,16 +428,29 @@ PM Spec → Architect 技術設計 + 建 tasks(todo) → Developer(in_progress) 
 
 ### 交付後寫入 Work Journal（必做）
 
-每次交付完成後，記錄本次工作摘要：
+**寫入前先查：**
+```python
+mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 找同主題/同 module 的近期筆記
+# → 是同一件事的延續：新 summary 要包含完整脈絡，讓舊筆記變冗餘
+# → 是新的不相關工作：正常新增
+```
+
+每次交付完成後記錄。summary 必須回答三件事：
+1. **做了什麼**（一句話，git log 有的不重複）
+2. **為什麼這樣做**（不可從 code 重建的決策或洞察）
+3. **下一步或遺留**（讓下一個 session 知道從哪接）
 
 ```python
 mcp__zenos__journal_write(
-    summary="{功能/修復摘要}：{關鍵改動 1-2 句}",
+    summary="{功能/修復}：{關鍵決策或洞察，不可從 code 重建的部分}；下一步：{next 或 無}",
     project="{專案名}",
-    flow_type="feature",  # 或 "bugfix" / "refactor"
+    flow_type="feature",  # 或 "bugfix" / "refactor" / "research"
     tags=["{模組名}"]
 )
 ```
+
+**不要寫的：** git 裡查得到的 file 清單、數量統計、重複 commit message 的內容。
 
 ---
 

@@ -466,14 +466,24 @@ write(collection="entries", id="{舊 entry ID}", data={
 
 **寫入 Work Journal（模式 A/B/C 完成後都要做）：**
 
+先查：
+```python
+mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 同來源/同產品是否已有 capture 筆記
+# → 有：新 summary 整合兩次的知識狀態，讓舊筆記變冗餘
+# → 沒有：正常新增
+```
+
 ```python
 mcp__zenos__journal_write(
-    summary="capture {來源描述}：{n} 個 entries + {n} 個 entities + {n} 個 documents",
+    summary="capture {來源描述}：{捕獲的關鍵知識點或概念}；{待補建的 entity 或遺留 TBD}",
     project="{專案名}",
     flow_type="capture",
     tags=["{產品名}"]
 )
 ```
+
+> 不要只寫數量（`{n} 個 entities`）——下次讀到沒有 context。寫「捕獲了什麼」和「還缺什麼」。
 
 ---
 

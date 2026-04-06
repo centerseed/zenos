@@ -93,16 +93,24 @@ Architect 確認：
 
 ## 寫入 Work Journal（必做）
 
-修復完成後，記錄本次工作摘要：
+**寫入前先查：**
+```python
+mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 同一個 bug 是否已有舊筆記（例如之前試過但沒修好）
+# → 有：新 summary 包含完整根因脈絡，讓舊筆記變冗餘
+# → 沒有：正常新增
+```
 
 ```python
 mcp__zenos__journal_write(
-    summary="修復 {bug 描述}：根因 {file:line}，{修復方式摘要}",
+    summary="修復 {bug 描述}：根因 {file:line}，{為什麼會發生／pattern}；{是否影響其他地方或下一步}",
     project="{專案名}",
     flow_type="bugfix",
     tags=["{模組名}"]
 )
 ```
+
+> 根因位置（file:line）是必填。「為什麼會發生」比「怎麼修」更有價值——同樣的 pattern 可能在其他地方重現。
 
 ---
 

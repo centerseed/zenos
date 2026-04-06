@@ -85,16 +85,24 @@ Challenger 執行完整流程：
 
 ## Phase 4：寫入 Work Journal（必做）
 
-brainstorm 結束後，記錄本次工作摘要：
+**寫入前先查：**
+```python
+mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 同主題是否已有舊的 brainstorm 筆記
+# → 有：新 summary 要整合新舊洞察，讓舊筆記變冗餘
+# → 沒有：正常新增
+```
 
 ```python
 mcp__zenos__journal_write(
-    summary="brainstorm {主題}：{升級版結論的一句話摘要}",
+    summary="brainstorm {主題}：{讓結論成立的關鍵洞察}；{未解決的問題或下一步}",
     project="{專案名}",
     flow_type="research",
     tags=["{主題關鍵字}"]
 )
 ```
+
+> 結論本身不夠——寫「為什麼是這個結論」和「還沒解決什麼」。沒有推導過程的結論，下次讀到跟沒寫一樣。
 
 ---
 
