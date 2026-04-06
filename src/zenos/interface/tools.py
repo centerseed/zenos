@@ -40,7 +40,17 @@ from urllib.parse import parse_qs
 from dotenv import load_dotenv
 from starlette.responses import JSONResponse
 
-from fastmcp import FastMCP
+try:
+    from fastmcp import FastMCP
+except ModuleNotFoundError:  # pragma: no cover - test fallback when fastmcp is absent
+    class FastMCP:  # type: ignore[override]
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def tool(self, *args, **kwargs):
+            def decorator(func):
+                return func
+            return decorator
 
 load_dotenv()
 
@@ -81,6 +91,7 @@ from zenos.infrastructure.context import (
     current_partner_roles,
 )
 from zenos.interface.governance_rules import GOVERNANCE_RULES
+from zenos.domain.partner_access import describe_partner_access, is_scoped_partner, is_unassigned_partner
 
 # ──────────────────────────────────────────────
 # Agent Identity — ContextVar for partner data
@@ -602,16 +613,15 @@ def _parse_entity_level(entity_level: str | None) -> int | None:
 def _is_entity_visible(entity: object) -> bool:
     """Centralized server-side visibility check for read paths."""
     partner = _current_partner.get() or {}
-    is_admin = bool(partner.get("isAdmin", False))
-    if is_admin:
+    access = describe_partner_access(partner)
+    if access["is_admin"]:
         return True
+    if access["is_unassigned_partner"]:
+        return False
 
     visibility = str(getattr(entity, "visibility", "public") or "public")
 
-    authorized_ids = list(partner.get("authorizedEntityIds") or [])
-    is_scoped = bool(authorized_ids)
-
-    if is_scoped:
+    if access["is_scoped_partner"]:
         # Scoped partner: L1 scope check is done at search/list level.
         # At per-entity level, just check visibility.
         return visibility == "public"
@@ -651,15 +661,15 @@ async def _is_task_visible(task: object) -> bool:
         partner = _current_partner.get() or {}
         if partner.get("isAdmin", False):
             return True
+        if is_unassigned_partner(partner):
+            return False
 
-        is_scoped = bool(partner.get("authorizedEntityIds"))
-
-        if is_scoped:
+        if is_scoped_partner(partner):
             # Scoped partner: visible if at least one linked entity is in allowed_ids.
             # Entity visibility is NOT applied here — scope membership is sufficient.
             if not linked:
                 return False
-            authorized_ids = list(partner.get("authorizedEntityIds") or [])
+            authorized_ids = describe_partner_access(partner)["authorized_l1_ids"]
             all_entities_list = await entity_repo.list_all()
             entity_map = {e.id: e for e in (all_entities_list or []) if e.id}
             allowed: set[str] = set()
@@ -698,6 +708,8 @@ async def _is_protocol_visible(protocol: object) -> bool:
         partner = _current_partner.get() or {}
         if partner.get("isAdmin", False):
             return True
+        if is_unassigned_partner(partner):
+            return False
         entity = await entity_repo.get_by_id(entity_id)
         if entity is None:
             return True  # entity deleted = show protocol
@@ -719,7 +731,9 @@ async def _is_blindspot_visible(blindspot: object) -> bool:
         if partner.get("isAdmin", False):
             return True
         # Scoped partners cannot see blindspots
-        if bool(partner.get("authorizedEntityIds")):
+        if is_unassigned_partner(partner):
+            return False
+        if is_scoped_partner(partner):
             return False
         related = getattr(blindspot, "related_entity_ids", None) or []
         if not related:
@@ -1035,13 +1049,12 @@ async def search(
             entities = [e for e in entities if _is_entity_visible(e)]
             # Apply L1 scope filter for scoped partners
             _partner_ctx = _current_partner.get() or {}
-            _is_admin = bool(_partner_ctx.get("isAdmin", False))
-            _authorized_ids = list(_partner_ctx.get("authorizedEntityIds") or [])
-            if _authorized_ids and not _is_admin:
+            _access = describe_partner_access(_partner_ctx)
+            if _access["is_scoped_partner"]:
                 all_entities_for_map = await ontology_service._entities.list_all()
                 _entity_map = {e.id: e for e in all_entities_for_map if e.id}
                 _allowed: set[str] = set()
-                for _l1_id in _authorized_ids:
+                for _l1_id in _access["authorized_l1_ids"]:
                     _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
                 entities = [e for e in entities if e.id in _allowed]
             # Apply level filter
@@ -3120,6 +3133,14 @@ async def journal_write(
     Returns:
         dict — {id, created_at, compressed: bool}
     """
+    import json as _json
+    # Coerce tags: agent 有時會傳 JSON 字串而非 list
+    if isinstance(tags, str):
+        try:
+            tags = _json.loads(tags)
+        except (_json.JSONDecodeError, ValueError):
+            tags = [t.strip() for t in tags.split(",") if t.strip()]
+
     await _ensure_journal_repo()
     assert _journal_repo is not None
     partner_id = _current_partner_id.get()
