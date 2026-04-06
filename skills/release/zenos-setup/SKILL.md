@@ -168,14 +168,55 @@ mcp__zenos__search(collection="entities", entity_level="L1")
 
 ### 安裝 agents
 
-將 `skills/agents/*.md` 複製到 `~/.claude/agents/`（generic，不注入 project name）：
+執行 release 同步腳本，將 `skills/release/*` 安裝到 `~/.claude/skills/` 與 `~/.codex/skills/`：
 
 ```bash
-mkdir -p ~/.claude/agents
-cp skills/agents/*.md ~/.claude/agents/
+python3 scripts/sync_skills_from_release.py
 ```
 
-> Agents 是 generic 的，不需要注入 project name。
+> Agent skills 是 generic 的，不需要注入 project name；workflow skills 也一併由 release 安裝。
+
+### Hook 安裝（Agent Context Injection）
+
+下載 hook script，並合併 hook 設定到 `.claude/settings.json`：
+
+```bash
+# 1. 下載 hook script
+curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/zenos-setup/scripts/zenos_hook.py \
+  > .claude/zenos_hook.py
+
+# 2. 合併 hook config（不覆蓋既有設定）
+python3 -c "
+import json
+settings_path = '.claude/settings.json'
+try:
+    with open(settings_path) as f:
+        settings = json.load(f)
+except (FileNotFoundError, json.JSONDecodeError):
+    settings = {}
+
+hook_entry = {
+    'matcher': 'Agent',
+    'hooks': [{'type': 'command', 'command': 'python3 .claude/zenos_hook.py 2>/dev/null || true', 'timeout': 20}]
+}
+hooks = settings.setdefault('hooks', {})
+pretooluse = hooks.setdefault('PreToolUse', [])
+already = any(
+    h.get('matcher') == 'Agent' and
+    any('zenos_hook.py' in hh.get('command', '') for hh in h.get('hooks', []))
+    for h in pretooluse
+)
+if not already:
+    pretooluse.append(hook_entry)
+with open(settings_path, 'w') as f:
+    json.dump(settings, f, indent=2, ensure_ascii=False)
+print('Hook installed.')
+"
+```
+
+> Hook 讓每個 subagent 啟動前自動取得 ZenOS journal + L2 entity 脈絡。
+> `zenos_hook.py` 會自動從 `.claude/mcp.json` 讀取 URL，無需手動配置。
+> `.claude/settings.json` 應加入 git 追蹤（`git add -f .claude/settings.json`）。
 
 ---
 
