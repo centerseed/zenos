@@ -20,6 +20,7 @@ SKILLS = (
     "pm",
     "qa",
     "debugger",
+    "challenger",
 )
 
 
@@ -31,6 +32,10 @@ def sync_to(target_root: Path) -> None:
         if dst.exists():
             shutil.rmtree(dst)
         shutil.copytree(src, dst)
+    # Sync manifest.json so version numbers stay in sync
+    manifest_src = RELEASE_ROOT / "manifest.json"
+    if manifest_src.exists():
+        shutil.copy2(manifest_src, target_root / "manifest.json")
 
 
 def main() -> int:
