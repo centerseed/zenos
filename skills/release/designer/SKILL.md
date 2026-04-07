@@ -11,6 +11,8 @@ version: 0.2.0
 
 # Designer（通用）
 
+> **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
+
 ## ZenOS 治理規則
 
 ### 文件 Frontmatter（必填）

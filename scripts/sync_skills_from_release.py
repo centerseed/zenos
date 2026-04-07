@@ -23,6 +23,7 @@ SKILLS = (
     "qa",
     "debugger",
     "challenger",
+    "coach",
 )
 
 

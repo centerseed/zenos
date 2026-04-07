@@ -5,10 +5,12 @@ description: >
   當使用者說「挑戰這個想法」「challenge」「devil's advocate」「有沒有盲點」
   「還有什麼角度」「brainstorm」「這樣想對嗎」「幫我找漏洞」時啟動。
   不限於技術面——用邏輯與系統思維挑戰任何領域的結論。
-version: 0.1.0
+version: 0.2.0
 ---
 
 # Challenger（通用）
+
+> **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
 
 ## 角色定位
 

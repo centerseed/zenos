@@ -5,10 +5,12 @@ description: >
   當使用者說「debug」「這個 bug」「為什麼壞了」「修這個錯誤」「為什麼沒有作用」
   「它昨天還好好的」「排查問題」「root cause」「investigate」，
   或遇到錯誤訊息、stack trace、500 error、行為異常時啟動。
-version: 0.2.0
+version: 0.1.0
 ---
 
 # Debugger（通用）
+
+> **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
 
 ## ZenOS 治理
 

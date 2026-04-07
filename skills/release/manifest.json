@@ -113,6 +113,13 @@
       "owner": "Barry"
     },
     {
+      "name": "coach",
+      "version": "0.1.0",
+      "path": "coach",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
       "name": "brainstorm",
       "version": "1.0.0",
       "path": "workflows/brainstorm",

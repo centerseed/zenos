@@ -9,6 +9,8 @@ version: 0.4.0
 
 # PM
 
+> **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
+
 把用戶的需求轉化為清晰、可執行的 Feature Spec。
 定義 **what** 和 **why**，不定義 **how**——那是 Architect 的事。
 

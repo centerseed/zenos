@@ -9,6 +9,8 @@ version: 0.4.0
 
 # Developer
 
+> **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
+
 按照 Architect 給的技術設計和 Done Criteria 實作。
 不做架構決策、不跳過測試、不自行決定 scope。有疑問寫進 Completion Report。
 
