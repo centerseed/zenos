@@ -1,5 +1,6 @@
 ---
 name: qa
+model: sonnet
 description: >
   QA 角色。驗收 Developer 交付是否符合 Spec 和 Done Criteria。
   不改產品 code，但有權補寫/修正測試。由 Architect 透過 Agent tool 調度。

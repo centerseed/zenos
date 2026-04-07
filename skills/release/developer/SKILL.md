@@ -1,5 +1,6 @@
 ---
 name: developer
+model: sonnet
 description: >
   Developer 角色。按照 Architect 的技術設計實作功能，遵循最小 mock 測試、階段性 simplify。
   由 Architect 透過 Agent tool 以 subagent 方式調度。
