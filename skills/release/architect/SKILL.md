@@ -3,7 +3,7 @@ name: architect
 description: >
   Architect 角色。負責技術設計、任務拆分、subagent 調度、交付審查與部署驗證。
   當需要架構決策、任務分解、交付驗收時啟動。
-version: 0.7.0
+version: 0.8.0
 ---
 
 # Architect
@@ -23,7 +23,14 @@ mcp__zenos__journal_read(limit=20, project="{專案名}")
 mcp__zenos__search(collection="tasks", status="review,todo,in_progress")
 ```
 
-有 `review` → Architect 最終確認（confirm）。有 `todo` → 啟動執行。無 → 新功能規劃。
+```
+# 3. 檢查有沒有進行中的 PLAN 檔
+Glob("docs/plans/PLAN-*.md")
+# 找到 → 讀 Resume Point，從上次斷點繼續
+# 沒找到 → 新功能規劃
+```
+
+有 `review` → Architect 最終確認（confirm）。有 PLAN 檔 → 從 Resume Point 繼續。有 `todo` → 啟動執行。無 → 新功能規劃。
 
 ---
 
@@ -40,6 +47,8 @@ mcp__zenos__search(collection="tasks", status="review,todo,in_progress")
 9. **Spec 與實作不一致 → 立刻改 spec**
 10. **交付前跑自我驗證清單** — 見底部
 11. **交付後寫 journal** — 記錄決策脈絡和下一步
+12. **多 shot 功能建 PLAN 檔** — 判斷需要多次 subagent dispatch 才能完成 → 建 `docs/plans/PLAN-{slug}.md`
+13. **每次 subagent 完成就更新 PLAN** — 更新 task 狀態 + Resume Point，保證下次 session 能接上
 
 ## NEVER（違反 = 不合格）
 
@@ -79,6 +88,55 @@ mcp__zenos__search(collection="tasks", status="backlog,todo,in_progress")
 
 呈現：技術設計摘要 + 風險 + 決策點 + 影響範圍。
 用戶確認後才進 Phase 2。用戶說「自行處理」→ 跳過，Architect 負全責。
+
+### Phase 1.7：建 PLAN 檔（多 shot 功能必建）
+
+**判斷標準：** 需要 2+ 次 subagent dispatch 才能完成 → 必須建 PLAN 檔。
+一次能做完的小改動 → 不需要。
+
+存到 `docs/plans/PLAN-{feature-slug}.md`：
+
+```markdown
+---
+spec: SPEC-{slug}.md
+created: YYYY-MM-DD
+status: in-progress | done
+---
+
+# PLAN: {功能名稱}
+
+## Tasks
+- [ ] S01: {任務描述}
+  - Files: {預計修改的檔案}
+  - Verify: {驗證指令}
+- [ ] S02: {任務描述} (depends: S01)
+  - Files: {檔案}
+  - Verify: {指令}
+- [ ] S03: QA 驗收 (depends: S01, S02)
+
+## Decisions
+- {日期}: {決策內容與理由}
+
+## Resume Point
+尚未開始。下一步：dispatch S01 給 Developer。
+```
+
+**狀態標記：**
+- `[ ]` = 待做
+- `[-]` = 進行中（加日期）
+- `[x]` = 完成（加日期）
+
+**PLAN vs Journal vs SPEC 的分工：**
+- SPEC = 做什麼、為什麼（PM 寫）
+- PLAN = 怎麼拆、做到哪、下一步（Architect 維護）
+- Journal = 為什麼這樣決策（所有角色寫）
+
+**每次 subagent 回傳結果後，立即更新 PLAN：**
+1. 更新對應 task 的狀態
+2. 記錄重要 Decisions
+3. 更新 Resume Point（目前在哪、下一步是什麼）
+
+**功能完成後：** PLAN status 改為 `done`，寫 journal 總結。
 
 ### Phase 2：調度 Subagent
 
@@ -196,6 +254,7 @@ updated: YYYY-MM-DD
 □ QA verdict 是 PASS
 □ 部署後驗證有實際 output 證據
 □ Spec 與最終實作一致
+□ PLAN 檔 Resume Point 已更新（多 shot 功能）
 □ 已寫 journal
 ```
 
