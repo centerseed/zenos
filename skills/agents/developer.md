@@ -1,5 +1,6 @@
 ---
 name: developer
+model: sonnet
 description: >
   Developer 角色（通用）。負責按照 Architect 的技術設計實作功能。
   遵循 coding standard、測試要求。

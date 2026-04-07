@@ -5,7 +5,9 @@ import shutil
 from pathlib import Path
 
 
-RELEASE_ROOT = Path(__file__).resolve().parents[1] / "skills" / "release"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+RELEASE_ROOT = REPO_ROOT / "skills" / "release"
+AGENTS_ROOT = REPO_ROOT / "skills" / "agents"
 SKILLS = (
     # ZenOS platform skills
     "zenos-setup",
@@ -24,7 +26,7 @@ SKILLS = (
 )
 
 
-def sync_to(target_root: Path) -> None:
+def sync_skills_to(target_root: Path) -> None:
     target_root.mkdir(parents=True, exist_ok=True)
     for name in SKILLS:
         src = RELEASE_ROOT / name
@@ -38,11 +40,27 @@ def sync_to(target_root: Path) -> None:
         shutil.copy2(manifest_src, target_root / "manifest.json")
 
 
+def sync_agents_to(target_root: Path) -> int:
+    """Sync skills/agents/*.md → .claude/agents/ (or .codex/agents/)."""
+    if not AGENTS_ROOT.exists():
+        return 0
+    target_root.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for src in AGENTS_ROOT.glob("*.md"):
+        shutil.copy2(src, target_root / src.name)
+        count += 1
+    return count
+
+
 def main() -> int:
     home = Path.home()
-    sync_to(home / ".claude" / "skills")
-    sync_to(home / ".codex" / "skills")
+    sync_skills_to(home / ".claude" / "skills")
+    sync_skills_to(home / ".codex" / "skills")
+    n_agents = sync_agents_to(home / ".claude" / "agents")
+    sync_agents_to(home / ".codex" / "agents")
     print(f"Synced {len(SKILLS)} skills: skills/release -> ~/.claude/skills and ~/.codex/skills")
+    if n_agents:
+        print(f"Synced {n_agents} agents: skills/agents -> ~/.claude/agents and ~/.codex/agents")
     return 0
 
 

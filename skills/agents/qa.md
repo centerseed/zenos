@@ -1,5 +1,6 @@
 ---
 name: qa
+model: sonnet
 description: >
   QA 角色（通用）。負責驗收 Developer 的交付，執行測試，產出 QA Verdict。
   通常由 Architect 透過 Agent tool 以 subagent 方式調度，不直接面對用戶。
