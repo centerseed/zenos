@@ -1,10 +1,11 @@
 ---
 type: ADR
 id: ADR-016
-status: Draft
+status: Approved
 l2_entity: 語意治理 Pipeline
 created: 2026-04-08
 updated: 2026-04-08
+approved: 2026-04-08
 ---
 
 # ADR-016: 通用治理啟動協議——讓不同用戶得到同樣的治理效果
@@ -270,9 +271,16 @@ mcp__zenos__search(
 |------|------|
 | `skills/release/zenos-capture/SKILL.md` | 加入 Step 0；Mode C 加防重複 Gate；P0/P1 改通用啟發式 |
 | `skills/release/zenos-sync/SKILL.md` | 加入 Step 0；廢棄 `.zenos-sync-state.json`；Source Audit 改標記+確認 |
-| `skills/workflows/knowledge-capture.md` | 同步 capture 的 Step 0 和通用啟發式 |
-| `skills/governance/capture-governance.md` | 加入 Context Establishment 規則引用 |
-| `skills/governance/shared-rules.md` | 加入 product scope 規則 |
+| `skills/release/governance/bootstrap-protocol.md` | **新增**：Step 0 完整規範（單一 SSOT） |
+| `skills/release/governance/capture-governance.md` | 加入 bootstrap protocol 引用 |
+| `skills/release/governance/shared-rules.md` | 加入 product scope 規則；修正 task status 集合 |
+| `skills/release/governance/document-governance.md` | relationship 欄位名稱修正；查重 + git sync 加 product_id；broken source 改標記+確認 |
+| `skills/workflows/knowledge-capture.md` | 同步 capture 的 Step 0、通用啟發式、journal write 規範、compressed 蒸餾 |
+| `skills/workflows/knowledge-sync.md` | 同步 sync 的 Step 0、journal 恢復、Source Audit 安全模式 |
+| `skills/governance/bootstrap-protocol.md` | **新增**：Step 0 完整規範（本地副本） |
+| `skills/governance/capture-governance.md` | 加入 bootstrap protocol 引用 |
+| `skills/governance/shared-rules.md` | 加入 product scope 規則；修正 task status 集合 |
+| `skills/governance/document-governance.md` | relationship 欄位名稱修正；查重 + git sync 加 product_id；broken source 改標記+確認 |
 
 ### 新增檔案
 
