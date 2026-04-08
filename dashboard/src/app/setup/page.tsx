@@ -475,7 +475,7 @@ function SetupPage() {
                   <button
                     onClick={() =>
                       copyText(
-                        selectedPlatform.configExample(partner.apiKey),
+                        selectedPlatform.configExample(partner!.apiKey),
                         `${selectedPlatform.name} config`
                       )
                     }
@@ -486,7 +486,7 @@ function SetupPage() {
                 </div>
 
                 <pre className="mt-4 overflow-x-auto rounded-2xl border border-slate-800 bg-black/30 p-4 text-xs leading-6 text-slate-100">
-                  {selectedPlatform.configExample(partner.apiKey)}
+                  {selectedPlatform.configExample(partner!.apiKey)}
                 </pre>
 
                 <div className="mt-4 flex flex-wrap gap-3 text-sm">

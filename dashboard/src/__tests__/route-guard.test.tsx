@@ -126,8 +126,7 @@ const SHARED_MEMBER = {
   isAdmin: false,
 };
 
-let mockPartner: typeof HOME_OWNER | typeof SHARED_GUEST | typeof SHARED_MEMBER =
-  HOME_OWNER;
+let mockPartner: Record<string, unknown> = HOME_OWNER;
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({

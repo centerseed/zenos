@@ -586,7 +586,7 @@ function TeamPage() {
               </thead>
               <tbody>
                 {partners.map((p) => {
-                  const isSelf = p.id === partner.id;
+                  const isSelf = p.id === partner?.id;
                   const isLoading = actionLoading === p.id;
                   const accessMode = getPartnerAccessMode(p);
                   const partnerWorkspaceRole = getPartnerWorkspaceRole(p);

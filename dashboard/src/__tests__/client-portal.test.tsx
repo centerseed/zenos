@@ -28,7 +28,7 @@ const DEFAULT_PARTNER = {
   updatedAt: new Date(),
 };
 
-let mockPartner = { ...DEFAULT_PARTNER };
+let mockPartner: Record<string, unknown> = { ...DEFAULT_PARTNER };
 
 const mockGetIdToken = vi.fn().mockResolvedValue("fake-token");
 const mockRouterReplace = vi.fn();

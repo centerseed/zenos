@@ -28,7 +28,7 @@ const DEFAULT_PARTNER = {
   updatedAt: new Date(),
 };
 
-let mockPartner = { ...DEFAULT_PARTNER };
+let mockPartner: Record<string, unknown> = { ...DEFAULT_PARTNER };
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn() }),
