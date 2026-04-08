@@ -334,16 +334,20 @@ mcp__zenos__get(collection="entities", name="<候選模組>")
 ### Step 3：神經層自動寫入 draft
 
 ```
-# 寫入前先查重：用 search(collection="documents", query="{source.uri}")
-# 檢查同 URL 的 document 是否已存在。已存在就跳過，不重複建立。
+# 寫入前雙重查重（兩種都要查，任一命中就跳過）：
+# 1. 用 source.uri 查：search(collection="documents", query="{source.uri}")
+# 2. 用檔名查：search(collection="documents", query="{檔名，如 STRATEGY-paceriz-launch-2026.md}")
+# 兩種查重都沒命中才建立新 document。
 write(collection="documents", data={
   title, source, tags, summary,
-  linked_entity_ids,
+  linked_entity_ids,   # ← 必填，不可省略（見下方說明）
   confirmed_by_user: False
 })
 ```
 
-> **linked_entity_ids 必帶**：你在掃描時已經知道這份文件跟哪個 entity 相關，直接帶上。不確定時才省略，server 會用 GovernanceAI 兜底推斷。
+> **linked_entity_ids 必帶，不可省略**：你在掃描時已經知道這份文件跟哪個 entity 相關，直接帶上。
+> 如果不確定歸屬，**必須先 `search(collection="entities", query="{文件關鍵字}")` 找最相關的 L2 entity**，選最佳匹配。
+> 真的找不到任何相關 entity → 停下來告知用戶，不要建立 `parent_id: null` 的孤兒 document。
 
 文件 entry 的 `source.uri`（**必須嚴格遵守**）：
 
