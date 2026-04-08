@@ -21,6 +21,11 @@ version: 2.2.0
 | 單一檔案路徑 | 檔案捕獲 | 快（秒） |
 | 目錄路徑 | **首次建構模式** | 分鐘級（批量） |
 
+> **啟動前必須完成 [Step 0: Context Establishment](../../governance/bootstrap-protocol.md)**。
+> 跳過 Step 0 就開始寫入 ontology = 違規操作。
+> 完成 Step 0 後你會有：`PRODUCT_ID`、`PRODUCT_NAME`、`PROJECT_NAME`、`L2_ENTITIES`、`EXISTING_DOCS`。
+> 後續所有 `search` / `write` 都帶 `product_id=PRODUCT_ID`。
+
 ---
 
 ## 模式 A：對話捕獲（無引數）
@@ -41,6 +46,26 @@ version: 2.2.0
 
 用戶有一個「已有很多文件的現有專案」，你要幫他把這個專案的知識體系建入 ontology。
 
+### C0. 防重複 Gate（不可跳過）
+
+Step 0 已載入 `L2_ENTITIES` 和 `EXISTING_DOCS`。檢查是否已有 ontology：
+
+```python
+if len(L2_ENTITIES) > 0 or len(EXISTING_DOCS) > 0:
+    # 已有 ontology → 不是首次建構，停下來問用戶
+    print(f"""
+    ⚠️  產品「{PRODUCT_NAME}」已有 ontology：
+      L2 entity：{len(L2_ENTITIES)} 個
+      Documents：{len(EXISTING_DOCS)} 個
+
+    選項：
+    - 「增量」→ 只處理尚未建立的文件（跳過已有 document 對應的檔案）
+    - 「重建」→ 清空後重建（危險，需二次確認）
+    - 「取消」→ 改用 /zenos-sync 做增量同步
+    """)
+    # 等用戶選擇，不自動繼續
+```
+
 ### C1. 掃描目錄，建立文件清單
 
 ```bash
@@ -48,22 +73,26 @@ find {目錄} -name "*.md" -not -path "*/.venv/*" -not -path "*/node_modules/*" 
   -not -path "*/__pycache__/*" -not -path "*/.git/*" | sort
 ```
 
-把結果按以下優先級分組：
+**讀取專案結構配置（若有）：**
+
+```bash
+cat {目錄}/.zenos-project.json 2>/dev/null
+```
+
+若有 `.zenos-project.json`，使用其中的 `structure` 定義分組。
+若無，使用以下**通用啟發式**（基於檔名 pattern，不依賴特定路徑結構）：
 
 **P0 — 骨架層種子（必讀，用來建實體）**
-路徑或檔名符合：`CLAUDE.md`、`README.md`、`*OVERVIEW*`、`*ARCHITECTURE*`、
-`*REFACTOR_SUMMARY*`、`*COMPLETE_REFACTOR*`、`*STRUCTURE*`、`docs/architecture/`
+檔名符合：`CLAUDE.md`、`README.md`、檔名含 `OVERVIEW`/`ARCHITECTURE`/`STRUCTURE`
 
 **P1 — 規格文件（讀 + 建 document entry）**
-路徑符合：`docs/*spec*`、`docs/*frd*`、`docs/*plan*`、`*SPEC*.md`、`*FRD*.md`、
-`FIRESTORE_STRUCTURE.md`、`docs/01-specs/`、`docs/04-frds/`、`docs/09-agent/`
+檔名含 `SPEC`/`FRD`/`PLAN`，或在名為 `specs`/`plans`/`architecture` 的目錄下
 
 **P2 — 功能/整合文件（建 document entry，選擇性讀）**
-路徑符合：`docs/02-api/`、`docs/03-integrations/`、`docs/guides/`、`docs/models/`、
-`docs/services/`、`docs/data_schemas/`、`*LITERATURE_REVIEW*.md`
+在名為 `api`/`guides`/`services`/`integrations`/`models` 的目錄下
 
 **P3 — 其餘文件（只建 entry，不讀全文）**
-所有其他 `.md`
+其他 `.md`
 
 **跳過（噪音，不進 ontology）**
 - `*FIX_REPORT*`、`*VALIDATION_FIX*`、`*CRITICAL_ERRORS_FIX*` — 一次性 bug fix 記錄

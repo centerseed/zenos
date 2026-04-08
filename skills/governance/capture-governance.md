@@ -1,5 +1,8 @@
 # 知識捕獲治理規則
 
+> **前置條件：** 所有捕獲操作開始前必須完成 [Step 0: Context Establishment](bootstrap-protocol.md)。
+> 這確保不同用戶在不同裝置上執行 capture 時，都從同一個 product scope 出發。
+
 ## 捕獲的定位
 
 `/zenos-capture` 是 ZenOS 知識層的唯一寫入入口。

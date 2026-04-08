@@ -212,7 +212,7 @@ search(collection="documents", query="主題關鍵字")
 - 必須指向**有效的檔案位置**，不可指向已刪除或已改名的路徑
 - 對 `type=github` 的 source，可用 `git ls-files` 驗證路徑是否存在
 - 若檔案已改名，應更新 URI 為新路徑（可用 `git log --follow --diff-filter=R` 追蹤）
-- 若檔案已刪除且無改名記錄，應移除該 source；若為文件的唯一 source，應將文件 status 改為 `archived`
+- 若檔案已刪除且無改名記錄，應**標記為 broken 並等用戶確認後才移除**（不自動刪除——不同裝置的本地 repo 狀態可能不同，見 ADR-016）；若用戶確認刪除且為文件的唯一 source，將文件 status 改為 `archived`
 
 ### 稽核觸發時機
 

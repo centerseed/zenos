@@ -1,11 +1,29 @@
 # Shared Rules — 建票與確認
 
+## Product Scope（所有操作必帶）
+
+所有治理操作開始前必須完成 [Step 0: Context Establishment](bootstrap-protocol.md)。
+完成後取得 `PRODUCT_ID`，後續**所有 `search` / `write` 都帶 `product_id`**：
+
+```python
+# 查重、搜尋、列表——都帶 product scope
+mcp__zenos__search(query="...", product_id=PRODUCT_ID)
+
+# 寫入——都確保關聯到正確產品
+mcp__zenos__write(collection="documents", data={..., "linked_entity_ids": [...]})
+```
+
+**禁止：** 不帶 product scope 的 search/write。跨產品誤判的風險高於多打一個參數的成本。
+
+---
+
 ## 建票前去重（必做）
 
 ```python
 mcp__zenos__search(
     query="任務關鍵字",
     collection="tasks",
+    project=PROJECT_NAME,
     status="backlog,todo,in_progress,review,blocked"
 )
 ```

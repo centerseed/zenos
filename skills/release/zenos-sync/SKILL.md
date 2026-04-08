@@ -19,6 +19,11 @@ version: 3.2.0
 **適用時機**：已有 ontology 的專案，需要跟上最近的 commits。
 **首次建構**：請改用 `/zenos-capture {目錄路徑}`。
 
+> **啟動前必須完成 [Step 0: Context Establishment](../../governance/bootstrap-protocol.md)**。
+> 跳過 Step 0 就開始寫入 ontology = 違規操作。
+> 完成 Step 0 後你會有：`PRODUCT_ID`、`PRODUCT_NAME`、`PROJECT_NAME`、`L2_ENTITIES`、`EXISTING_DOCS`。
+> 後續所有 `search` / `write` 都帶 `product_id=PRODUCT_ID`。
+
 ---
 
 ## Step 0：Source Audit（預設執行）
@@ -83,26 +88,31 @@ Source Audit 結果
 ✅ healthy:   N 筆
 ```
 
-### 0.4 自動修正
+### 0.4 分級修正（安全模式）
 
-依序執行修正，每筆修正後記錄結果：
+**自動修正（風險低）：**
+- **bad_label**：更新 label 為從 URI 提取的檔名（只改 label，不影響資料）
+- **renamed**：更新 URI 和 label 為新路徑（有 git 追蹤的明確新路徑）
 
-修正方式（都透過 `mcp__zenos__write` 更新 sources 陣列）：
-
-- **bad_label**：更新 label 為從 URI 提取的檔名
-- **broken**：移除該 source（若為 document 唯一 source，同時將 status 改為 `archived`）
-- **renamed**：更新 URI 和 label 為新路徑
-- **duplicate**：只報告，不自動處理
-
-### 0.5 顯示修正結果摘要
+**需用戶確認才修正（風險高）：**
+- **broken**：列出清單，等用戶確認後才刪除。可能原因：未 push、本地未 pull、或真的刪除。**不自動刪除。**
+- **duplicate**：報告，不自動處理
 
 ```
-修正完成：
+自動修正完成：
   ✅ bad_label 已修正：N 筆
-  ✅ broken 已清除：N 筆（其中 M 筆 document 已標記為 archived）
   ✅ renamed 已更新：N 筆
-  ⚠️  duplicate 需人工確認：N 筆（見上方清單）
+
+需確認（不自動處理）：
+  🔴 broken：N 筆（可能是未 push 的檔案，列表如下）
+    - {entity_name}: {uri} → 本地不存在
+    ...
+  🟠 duplicate：N 筆
+
+是否刪除 broken sources？（輸入編號 / 「全部」 / 「跳過」）
 ```
+
+> **為什麼不自動刪除 broken：** 不同裝置的本地 repo 狀態可能不同。電腦 A 新增的檔案在電腦 B 的 `git ls-files` 中不存在（因為沒 pull），自動刪除會誤殺合法 source。Step 0c 的 `git fetch` 降低了風險，但無法消除（fetch 只更新 ref，不更新 working tree）。
 
 ---
 
@@ -112,14 +122,20 @@ Source Audit 結果
 - 有引數（目錄路徑）→ `TARGET = {引數路徑}`，在該目錄執行 git 指令
 - 無引數 → `TARGET = 當前工作目錄`
 
-**讀取上次 sync 狀態：**
+**從 journal 恢復上次 sync 時間（取代本地 .zenos-sync-state.json）：**
 
-```bash
-cat {TARGET}/.zenos-sync-state.json  # 優先找專案目錄
-# 若不存在，找當前目錄的 .zenos-sync-state.json
+```python
+journals = mcp__zenos__journal_read(project=SCOPE["project"])
+last_sync_journal = next(
+    (j for j in journals["data"]["entries"]
+     if j.get("flow_type") == "sync"),
+    None
+)
 ```
 
-**如果找不到 .zenos-sync-state.json：**
+**遷移：** 若發現本地 `{TARGET}/.zenos-sync-state.json` 存在，讀取其 `last_sync`，寫入 journal 後刪除本地檔案。
+
+**如果找不到 sync 記錄：**
 > 這個專案還沒有 sync 記錄。
 >
 > 選項：
@@ -130,7 +146,7 @@ cat {TARGET}/.zenos-sync-state.json  # 優先找專案目錄
 **如果找到：**
 ```
 目標專案：{TARGET}
-上次 sync：{last_sync}（{距今 N 天前}）
+上次 sync：{last_sync_journal["created_at"]}（{距今 N 天前}）
 ```
 
 ---
@@ -291,23 +307,11 @@ write(collection="entities", id={parent_entity_id}, data={
 
 ---
 
-## Step 6：更新 last_sync
+## Step 6：記錄 sync 狀態（寫入 journal，不寫本地檔案）
 
-```json
-{
-  "project": "{TARGET 的絕對路徑}",
-  "last_sync": "2026-03-21T10:30:00+08:00",
-  "stats": {
-    "commits_scanned": 15,
-    "files_processed": 8,
-    "neural_layer_updated": 6,
-    "skeleton_confirmed": 2,
-    "skeleton_drafted": 1
-  }
-}
-```
+sync 狀態透過 Step 7 的 `journal_write` 記錄，不再寫本地 `.zenos-sync-state.json`。
 
-存到 `{TARGET}/.zenos-sync-state.json`（若 TARGET 是外部專案）或 `.zenos-sync-state.json`（當前目錄）。
+下次 sync 時從 journal 恢復（見 Step 0.5）。
 
 ---
 
