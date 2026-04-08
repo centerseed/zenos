@@ -7,7 +7,11 @@ description: >
 version: 2.0.0
 ---
 
-# /zenos-setup — ZenOS 初始化與更新
+# /zenos-setup — Bootstrap（MCP 連線前的首次安裝）
+
+> **本文件是 bootstrap 流程**，僅用於 MCP 連線建立前的首次安裝和 global skill 自我更新。
+> MCP 連線建立後，正式安裝流程由 `skills/workflows/setup.md` 定義。
+> 兩者職責不同，不應保持步驟一致。（見 ADR-017 D1）
 
 整個過程大約 2 分鐘。
 
