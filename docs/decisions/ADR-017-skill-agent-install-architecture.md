@@ -3,7 +3,7 @@ doc_id: ADR-017-skill-agent-install-architecture
 title: 架構決策：Skill/Agent 安裝流程——SSOT 邊界、多平台分發、LOCAL.md 保護
 type: ADR
 ontology_entity: MCP 介面設計
-status: Draft
+status: Approved
 version: "2.0"
 date: 2026-04-08
 supersedes: null
