@@ -347,15 +347,38 @@ write(collection="documents", data={
 
 文件 entry 的 `source.uri`（**必須嚴格遵守**）：
 
-構建 GitHub URL 的步驟：
-1. 在檔案所在目錄執行 `git remote get-url origin` 取得 remote URL
-2. 從 remote URL 解析 owner/repo（例如 `https://github.com/centerseed/havital.git` → `centerseed/havital`）
-3. 執行 `git rev-parse --show-toplevel` 取得 git root 絕對路徑
-4. 用「檔案絕對路徑 - git root 路徑」算出相對路徑
-5. 取得預設分支：`git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null` 或 fallback 到 `main`
-6. 組合：`https://github.com/{owner}/{repo}/blob/{branch}/{相對路徑}`
+構建 GitHub URL 的步驟（**每個檔案都必須獨立執行，不可共用結果**）：
 
-**禁止**：從目錄名推斷 repo 名稱、省略子目錄路徑。
+```bash
+# 必須先 cd 到檔案所在目錄——不同子目錄可能屬於不同 git repo
+cd "$(dirname "$FILE_PATH")"
+
+# 1. 取 remote URL
+git remote get-url origin
+
+# 2. 從 remote URL 解析 owner/repo
+#    例：https://github.com/centerseed/havital.git → centerseed/havital
+
+# 3. 取 git root（必須在檔案目錄內執行，不可在 capture 目標目錄或父目錄）
+GIT_ROOT=$(git rev-parse --show-toplevel)
+
+# 4. 算相對路徑
+#    FILE_PATH - GIT_ROOT = 相對路徑
+
+# 5. 取預設分支
+git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null  # fallback → main
+
+# 6. 組合
+#    https://github.com/{owner}/{repo}/blob/{branch}/{相對路徑}
+
+# 7. 驗證檔案在 git 追蹤中（防止寫入指向未 push 檔案的 URL）
+git ls-files --error-unmatch "{相對路徑}" 2>/dev/null || echo "WARNING: 檔案未被 git 追蹤"
+```
+
+**禁止**：
+- 從目錄名推斷 repo 名稱
+- 在批量處理時對所有檔案共用同一個 git root（子目錄可能是 submodule 或獨立 repo）
+- 省略 `cd` 步驟直接用 capture 目標目錄的 git context
 
 若無 git remote → `file://{絕對路徑}`（並在 summary 中標記）
 
