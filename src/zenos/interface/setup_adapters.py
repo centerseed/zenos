@@ -140,7 +140,7 @@ def _build_agents_md_addition(selection: str) -> str:
         "## ZenOS 治理技能\n\n"
         "執行對應操作前先讀取以下文件：\n\n"
         f"{governance_block}\n\n"
-        "> 若 `skills/governance/` 不存在，請先呼叫 setup(platform='codex') 取得 skill_files 並寫入。"
+        "> 若 `skills/governance/` 不存在，請先呼叫 `setup(platform='codex')`，再依 instructions 從 GitHub 下載並寫入 skills。"
     )
 
 
@@ -159,18 +159,36 @@ def _build_github_raw_base(manifest: dict) -> str:
 def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
     """組裝 claude_code 平台的 install response。
 
-    只做一件事：回傳安裝/更新 setup skill 的 curl 指令。
-    後續安裝流程由 /zenos-setup skill 負責。
+    測試與既有 client contract 仍期待 manifest + slash_commands +
+    claude_md_addition 的結構，因此這裡維持 install payload 形式，
+    並用 instructions 指向 GitHub raw URL 下載最新 skill。
     """
+    bundle_version = get_bundle_version()
     manifest = get_manifest()
+    slash_commands = get_slash_commands()
+    claude_md_addition = _build_claude_md_addition(selection)
     raw_base = _build_github_raw_base(manifest)
-    setup_skill_url = f"{raw_base}/skills/release/zenos-setup/SKILL.md"
 
     response: dict = {
-        "action": "install_setup_skill",
+        "action": "install",
         "platform": "claude_code",
-        "instruction": "執行以下指令安裝/更新 ZenOS setup skill，完成後執行 /zenos-setup 完成完整安裝：",
-        "command": f"mkdir -p ~/.claude/skills/zenos-setup && curl -sL {setup_skill_url} > ~/.claude/skills/zenos-setup/SKILL.md",
+        "bundle_version": bundle_version,
+        "skill_selection": selection,
+        "manifest": manifest,
+        "payload": {
+            "slash_commands": slash_commands,
+            "claude_md_addition": claude_md_addition,
+        },
+        "instructions": [
+            (
+                f"1. 從 GitHub 下載最新 skill：用 curl -sL "
+                f"{raw_base}/skills/release/{{skill.path}}/SKILL.md 取得各角色 skill，"
+                f"並用 {raw_base}/skills/workflows/*.md / skills/governance/*.md 安裝 workflow 與治理文件"
+            ),
+            "2. 將 payload.slash_commands 寫入 .claude/commands/ 對應檔案",
+            "3. 把 payload.claude_md_addition 追加到專案根目錄 CLAUDE.md",
+            "4. 完成後執行 /zenos-setup 啟動完整安裝流程",
+        ],
         "next_step": "/zenos-setup",
     }
 

@@ -11,6 +11,7 @@ version: 0.2.0
 # Challenger（通用）
 
 > **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
+> **ZenOS 脈絡載入**：開始挑戰分析前，若 MCP 可用，先讀 `mcp__zenos__journal_read(limit=20, project="{專案名}")`；若主張涉及特定模組或產品，再用 `mcp__zenos__get(collection="entities", name="<模組名稱>")` 取 L2 脈絡。
 
 ## 角色定位
 

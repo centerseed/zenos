@@ -53,11 +53,29 @@ curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/
 
 收到 token 後執行：
 
-```bash
-python .claude/skills/zenos-setup/scripts/setup.py --token TOKEN
+1. 讀取 `.claude/mcp.json`
+2. 若檔案不存在，先建立基礎結構：
+
+```json
+{
+  "mcpServers": {}
+}
 ```
 
-> 不帶 `--project`，先完成連線。
+3. 設定或覆蓋 `mcpServers.zenos` 為：
+
+```json
+{
+  "type": "http",
+  "url": "https://zenos-mcp-165893875709.asia-east1.run.app/mcp?api_key=<URL-encoded TOKEN>"
+}
+```
+
+4. 寫回 `.claude/mcp.json`
+5. 立刻讀回 `.claude/mcp.json` 驗證：
+   - `mcpServers.zenos` 存在
+   - `url` 含 `api_key=`
+   - `url` 不含 `project=`
 
 提示用戶：
 
@@ -101,13 +119,7 @@ curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/
 curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/{skill.path}/SKILL.md
 ```
 
-`zenos-setup` 額外下載 setup.py（安裝後才能執行 --update --project）：
-
-```bash
-mkdir -p .claude/skills/zenos-setup/scripts
-curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/zenos-setup/scripts/setup.py \
-  > .claude/skills/zenos-setup/scripts/setup.py
-```
+> 不下載 `setup.py`。MCP 設定與後續 project 更新都直接透過讀寫 `.claude/mcp.json` 完成。
 
 ### Governance 檔案
 
@@ -167,7 +179,7 @@ mcp__zenos__search(collection="entities", entity_level="L1")
 
 | 結果 | 處理 |
 |------|------|
-| 有結果 | 顯示清單讓用戶選擇 → 執行 `python .claude/skills/zenos-setup/scripts/setup.py --update --project 選擇的名稱` |
+| 有結果 | 顯示清單讓用戶選擇 → 讀取 `.claude/mcp.json`，保留既有 `api_key`，只更新 `mcpServers.zenos.url` 的 `project` query param，寫回後再讀回驗證 |
 | 無結果 | 告知：「目前沒有專案，先跳過。建立第一個專案後再執行 /zenos-setup 設定 project。」 |
 
 ### 安裝 agents
@@ -179,48 +191,6 @@ python3 scripts/sync_skills_from_release.py
 ```
 
 > Agent skills 是 generic 的，不需要注入 project name；workflow skills 也一併由 release 安裝。
-
-### Hook 安裝（Agent Context Injection）
-
-下載 hook script，並合併 hook 設定到 `.claude/settings.json`：
-
-```bash
-# 1. 下載 hook script
-curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/zenos-setup/scripts/zenos_hook.py \
-  > .claude/zenos_hook.py
-
-# 2. 合併 hook config（不覆蓋既有設定）
-python3 -c "
-import json
-settings_path = '.claude/settings.json'
-try:
-    with open(settings_path) as f:
-        settings = json.load(f)
-except (FileNotFoundError, json.JSONDecodeError):
-    settings = {}
-
-hook_entry = {
-    'matcher': 'Agent',
-    'hooks': [{'type': 'command', 'command': 'python3 .claude/zenos_hook.py 2>/dev/null || true', 'timeout': 20}]
-}
-hooks = settings.setdefault('hooks', {})
-pretooluse = hooks.setdefault('PreToolUse', [])
-already = any(
-    h.get('matcher') == 'Agent' and
-    any('zenos_hook.py' in hh.get('command', '') for hh in h.get('hooks', []))
-    for h in pretooluse
-)
-if not already:
-    pretooluse.append(hook_entry)
-with open(settings_path, 'w') as f:
-    json.dump(settings, f, indent=2, ensure_ascii=False)
-print('Hook installed.')
-"
-```
-
-> Hook 讓每個 subagent 啟動前自動取得 ZenOS journal + L2 entity 脈絡。
-> `zenos_hook.py` 會自動從 `.claude/mcp.json` 讀取 URL，無需手動配置。
-> `.claude/settings.json` 應加入 git 追蹤（`git add -f .claude/settings.json`）。
 
 ---
 

@@ -15,6 +15,11 @@ SKILLS = (
     "zenos-capture",
     "zenos-sync",
     "zenos-governance",
+    # Shared workflow skills published from release/workflows/
+    "workflows/feature",
+    "workflows/debug",
+    "workflows/triage",
+    "workflows/brainstorm",
     # Agent role skills
     "architect",
     "designer",

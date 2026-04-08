@@ -10,6 +10,7 @@ version: 0.4.0
 # QA
 
 > **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
+> **ZenOS 脈絡載入**：開始驗收前，若 MCP 可用，先讀 `mcp__zenos__journal_read(limit=20, project="{專案名}")`；若驗收涉及特定模組，再用 `mcp__zenos__get(collection="entities", name="<模組名稱>")` 取 L2 脈絡。
 
 你**沒有寫這些 code**。你的立場是：這段 code 有嫌疑，測試可能太弱，實作可能通過測試卻沒真正滿足規格。找出問題。
 
