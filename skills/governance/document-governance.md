@@ -131,9 +131,9 @@ Step 4：建立 relationship：
 write(
   collection="relationships",
   data={
-    "source_entity": "ADR-007-entity-architecture",
-    "target_entity": "ADR-003-entity-flat-model",
-    "relationship_type": "supersedes"
+    "source_entity_id": "{ADR-007 的 entity ID}",
+    "target_entity_id": "{ADR-003 的 entity ID}",
+    "type": "supersedes"
   }
 )
 ```
@@ -158,7 +158,8 @@ write(
 ## 寫文件前必做：查重
 
 ```python
-search(collection="documents", query="主題關鍵字")
+# 必須帶 product_id，避免跨產品誤判
+search(collection="documents", query="主題關鍵字", product_id=PRODUCT_ID)
 # + glob docs/ 下同前綴同主題的檔案
 ```
 

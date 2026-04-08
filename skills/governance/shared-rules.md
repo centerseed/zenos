@@ -20,11 +20,13 @@ mcp__zenos__write(collection="documents", data={..., "linked_entity_ids": [...]}
 ## 建票前去重（必做）
 
 ```python
+# 狀態集合依 SPEC-task-governance 2026-03-31 簡化版：
+# backlog 已併入 todo，blocked 已移除（改用 blocked_by/blocked_reason 欄位）
 mcp__zenos__search(
     query="任務關鍵字",
     collection="tasks",
     project=PROJECT_NAME,
-    status="backlog,todo,in_progress,review,blocked"
+    status="todo,in_progress,review"
 )
 ```
 

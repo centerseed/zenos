@@ -147,12 +147,13 @@ mcp__zenos__journal_write(
 )
 
 # 下次 sync 啟動時，從 journal 恢復上次時間
-journals = mcp__zenos__journal_read(project=SCOPE["project"])
+result = mcp__zenos__journal_read(project=SCOPE["project"])
+# journal_read 回傳 {entries: [...], count: int, total: int}
 last_sync_entry = next(
-    (j for j in journals if j["flow_type"] == "sync"),
+    (j for j in result["entries"] if j["flow_type"] == "sync"),
     None
 )
-# 從 tags 中提取 "until:..." 作為本次的 since
+# 從 tags 中提取 "until:..." 或用 created_at 作為本次的 since
 ```
 
 **好處：** 任何裝置都能讀到上次 sync 時間，不再因為本地檔案不同步而重複處理。

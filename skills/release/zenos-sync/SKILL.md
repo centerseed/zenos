@@ -30,11 +30,12 @@ version: 3.2.0
 
 每次執行 `/zenos-sync` 時先跑 Source Audit。若使用者執行 `/zenos-sync --audit` 或 `/zenos-sync audit`，則只跑 Step 0，不執行後續步驟。
 
-### 0.1 拉取所有有 sources 的項目
+### 0.1 拉取該產品下所有有 sources 的項目
 
 ```python
-mcp__zenos__search(collection="entities", limit=500)
-mcp__zenos__search(collection="documents", limit=500)
+# 必須帶 product_id，只 audit 當前產品的 sources
+mcp__zenos__search(collection="entities", product_id=SCOPE["product_id"], limit=500)
+mcp__zenos__search(collection="documents", product_id=SCOPE["product_id"], limit=500)
 ```
 
 過濾出 `sources` 欄位非空的所有 entity 和 document。
@@ -125,9 +126,10 @@ Source Audit 結果
 **從 journal 恢復上次 sync 時間（取代本地 .zenos-sync-state.json）：**
 
 ```python
-journals = mcp__zenos__journal_read(project=SCOPE["project"])
+result = mcp__zenos__journal_read(project=SCOPE["project"])
+# journal_read 回傳 {entries: [...], count: int, total: int}
 last_sync_journal = next(
-    (j for j in journals["data"]["entries"]
+    (j for j in result["entries"]
      if j.get("flow_type") == "sync"),
     None
 )

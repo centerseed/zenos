@@ -143,9 +143,10 @@ if len(L2_ENTITIES) > 0 or len(EXISTING_DOCS) > 0:
 **廢棄** `.zenos-sync-state.json`，從 journal 恢復上次 sync 時間：
 
 ```python
-journals = mcp__zenos__journal_read(project=SCOPE["project"])
+result = mcp__zenos__journal_read(project=SCOPE["project"])
+# journal_read 回傳 {entries: [...], count: int, total: int}
 last_sync_journal = next(
-    (j for j in journals["data"]["entries"]
+    (j for j in result["entries"]
      if j.get("flow_type") == "sync"),
     None
 )
