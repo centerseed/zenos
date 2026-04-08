@@ -48,6 +48,7 @@ vi.mock("@/lib/firebase", () => ({
 
 // ── Mock useAuth ─────────────────────────────────────────────────────────────
 const mockGetIdToken = vi.fn().mockResolvedValue("fake-id-token");
+const getPartnersMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
@@ -57,9 +58,21 @@ vi.mock("@/lib/auth", () => ({
       email: "admin@test.com",
       displayName: "Admin",
       isAdmin: true,
+      workspaceRole: "owner",
+      accessMode: "internal",
       status: "active",
     },
   }),
+}));
+
+vi.mock("@/lib/api", () => ({
+  getPartners: (...args: unknown[]) => getPartnersMock(...args),
+  getDepartments: vi.fn().mockResolvedValue(["all"]),
+  getProjectEntities: vi.fn().mockResolvedValue([]),
+  createDepartment: vi.fn(),
+  deleteDepartment: vi.fn(),
+  renameDepartment: vi.fn(),
+  updatePartnerScope: vi.fn(),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -76,12 +89,16 @@ const INVITED_PARTNER = {
   email: "invited@test.com",
   displayName: "invited@test.com",
   isAdmin: false,
+  workspaceRole: "guest" as const,
   status: "invited" as const,
+  accessMode: "unassigned" as const,
   invitedBy: "admin@test.com",
   createdAt: "2026-01-01T00:00:00Z",
   updatedAt: "2026-01-01T00:00:00Z",
   sharedPartnerId: "admin-partner-id",
 };
+
+getPartnersMock.mockResolvedValue([INVITED_PARTNER]);
 
 beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch({ partners: [INVITED_PARTNER] }));

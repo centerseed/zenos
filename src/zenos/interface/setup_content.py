@@ -38,7 +38,7 @@ _WORKFLOW_FILES: list[str] = [
 # agent skill 角色清單
 _AGENT_ROLES: list[str] = [
     "architect", "developer", "qa", "pm",
-    "designer", "marketing", "debugger",
+    "designer", "marketing", "debugger", "challenger",
 ]
 
 # slash command → SSOT skill 對應

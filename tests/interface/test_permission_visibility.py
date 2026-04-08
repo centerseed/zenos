@@ -140,7 +140,26 @@ class TestVisibilityEnum:
     def test_visibility_order(self):
         assert VISIBILITY_ORDER["public"] < VISIBILITY_ORDER["restricted"]
         assert VISIBILITY_ORDER["restricted"] < VISIBILITY_ORDER["confidential"]
-        assert VISIBILITY_ORDER["role-restricted"] < VISIBILITY_ORDER["restricted"]
+        assert VISIBILITY_ORDER["role-restricted"] == VISIBILITY_ORDER["restricted"]
+
+
+class TestWorkspaceRolePrecedence:
+    def test_workspace_role_wins_over_legacy_access_mode(self):
+        from zenos.domain.partner_access import describe_partner_access
+
+        access = describe_partner_access(
+            {
+                "isAdmin": False,
+                "workspaceRole": "guest",
+                "accessMode": "internal",
+                "authorizedEntityIds": ["product-acme"],
+            }
+        )
+
+        assert access["workspace_role"] == "guest"
+        assert access["access_mode"] == "scoped"
+        assert access["is_guest"] is True
+        assert access["is_internal_member"] is False
 
 
 # ===========================================================================

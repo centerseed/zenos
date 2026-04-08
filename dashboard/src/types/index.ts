@@ -1,5 +1,10 @@
 // Firestore document types — field names match Firestore camelCase convention
 
+export type PartnerAccessMode = "internal" | "scoped" | "unassigned";
+export type PartnerWorkspaceRole = "owner" | "member" | "guest";
+export type EntityVisibility = "public" | "restricted" | "confidential";
+export type LegacyEntityVisibility = EntityVisibility | "role-restricted";
+
 export interface Partner {
   id: string;
   email: string;
@@ -7,6 +12,8 @@ export interface Partner {
   apiKey: string;
   authorizedEntityIds: string[];
   sharedPartnerId?: string | null;
+  workspaceRole?: PartnerWorkspaceRole | null;
+  accessMode?: PartnerAccessMode | null;
   isAdmin: boolean;
   status: "active" | "suspended" | "invited";
   roles?: string[];
@@ -42,7 +49,7 @@ export interface Entity {
   confirmedByUser: boolean;
   owner: string | null;
   sources: Source[];
-  visibility: "public" | "restricted" | "role-restricted" | "confidential";
+  visibility: EntityVisibility;
   visibleToRoles?: string[];
   visibleToMembers?: string[];
   visibleToDepartments?: string[];

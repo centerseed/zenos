@@ -16,6 +16,7 @@ import { getTasks, getProjectEntities, getAllEntities, createTask, updateTask, c
 import { RefreshCw, Plus } from "lucide-react";
 import type { Task, TaskStatus, TaskPriority, Entity, Partner } from "@/types";
 import { TaskCreateDialog } from "@/components/TaskCreateDialog";
+import { resolveActiveWorkspace, isUnassignedPartner } from "@/lib/partner";
 
 type TabKey = "all" | "inbox" | "outbox" | "review";
 type ViewMode = "pulse" | "kanban";
@@ -297,9 +298,9 @@ export function TasksPage() {
     });
   }, [tasks, partnerNames, filterStatuses, filterPriority, filterProject, partner?.displayName]);
 
-  // scoped partner with no authorized entities — not yet configured by admin
-  const isEmptyScoped =
-    !!partner && !partner.isAdmin && !loading && (partner.authorizedEntityIds?.length ?? 0) === 0;
+  // guest workspace with no authorized entities — not yet configured for shared-L1 access
+  const { workspaceRole } = resolveActiveWorkspace(partner);
+  const isEmptyScoped = !loading && workspaceRole === "guest" && isUnassignedPartner(partner);
 
   return (
     <div className="min-h-screen">

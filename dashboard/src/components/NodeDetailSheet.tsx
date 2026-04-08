@@ -1,7 +1,16 @@
 "use client";
 
 import { useMemo, useState, useCallback, useEffect } from "react";
-import type { Entity, Relationship, Blindspot, Task, QualitySignals, Partner, ImpactChainHop } from "@/types";
+import type {
+  Entity,
+  EntityVisibility,
+  Relationship,
+  Blindspot,
+  Task,
+  QualitySignals,
+  Partner,
+  ImpactChainHop,
+} from "@/types";
 import {
   Sheet,
   SheetContent,
@@ -47,19 +56,19 @@ const TASK_STATUS_LABELS: Record<string, string> = {
   todo: "Todo",
 };
 
-const VISIBILITY_LABELS: Record<Entity["visibility"], string> = {
+const VISIBILITY_LABELS: Record<EntityVisibility, string> = {
   public: "Public — 所有人可見",
-  "role-restricted": "Role-Restricted — 限特定角色",
-  restricted: "Restricted — 限特定部門/成員",
-  confidential: "Confidential — 僅明確名單",
+  restricted: "Restricted — 僅授權的工作區成員可見",
+  confidential: "Confidential — 僅 owner 可見",
 };
 
-const VISIBILITY_COLORS: Record<Entity["visibility"], string> = {
+const VISIBILITY_COLORS: Record<EntityVisibility, string> = {
   public: "bg-green-500/15 text-green-400 border-green-500/30",
-  "role-restricted": "bg-blue-500/15 text-blue-400 border-blue-500/30",
   restricted: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
   confidential: "bg-red-500/15 text-red-400 border-red-500/30",
 };
+
+const VISIBILITY_OPTIONS: EntityVisibility[] = ["public", "restricted", "confidential"];
 
 const DEFAULT_ROLE_OPTIONS = [
   "engineering",
@@ -73,6 +82,16 @@ const DEFAULT_ROLE_OPTIONS = [
 
 function normalizeOption(value: string) {
   return value.trim().toLowerCase();
+}
+
+function normalizeVisibility(visibility: string | undefined | null): EntityVisibility {
+  if (visibility === "public" || visibility === "restricted" || visibility === "confidential") {
+    return visibility;
+  }
+  if (visibility === "role-restricted") {
+    return "restricted";
+  }
+  return "public";
 }
 
 function parseCommaSeparated(value: string) {
@@ -224,7 +243,7 @@ export default function NodeDetailSheet({
     if (entity) {
       setEditingVisibility(false);
       setVisForm({
-        visibility: entity.visibility ?? "public",
+        visibility: normalizeVisibility(entity.visibility as string | undefined),
         visibleToRoles: (entity.visibleToRoles ?? []).join(", "),
         visibleToMembers: (entity.visibleToMembers ?? []).join(", "),
         visibleToDepartments: (entity.visibleToDepartments ?? []).join(", "),
@@ -840,20 +859,20 @@ export default function NodeDetailSheet({
                 </section>
               )}
 
-              {/* Permission — Admin Only */}
+              {/* Visibility — Admin Only */}
               {isAdmin && (
                 <section>
                   <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/40 mb-3 flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-violet-500" />
-                    Permission
+                    Visibility
                   </h3>
 
                   {!editingVisibility ? (
                     /* --- Read-only view --- */
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <Badge className={`text-[10px] border ${VISIBILITY_COLORS[entity.visibility ?? "public"]}`}>
-                          {entity.visibility ?? "public"}
+                        <Badge className={`text-[10px] border ${VISIBILITY_COLORS[normalizeVisibility(entity.visibility as string | undefined)]}`}>
+                          {normalizeVisibility(entity.visibility as string | undefined)}
                         </Badge>
                         <button
                           onClick={() => setEditingVisibility(true)}
@@ -870,13 +889,13 @@ export default function NodeDetailSheet({
                       )}
                       {(entity.visibleToDepartments?.length ?? 0) > 0 && (
                         <div className="text-[10px] text-foreground/50">
-                          <span className="text-foreground/30">Departments:</span>{" "}
+                          <span className="text-foreground/30">Groups:</span>{" "}
                           {entity.visibleToDepartments?.join(", ")}
                         </div>
                       )}
                       {(entity.visibleToMembers?.length ?? 0) > 0 && (
                         <div className="text-[10px] text-foreground/50">
-                          <span className="text-foreground/30">Members:</span>{" "}
+                          <span className="text-foreground/30">Partners:</span>{" "}
                           {entity.visibleToMembers?.join(", ")}
                         </div>
                       )}
@@ -885,25 +904,25 @@ export default function NodeDetailSheet({
                     /* --- Edit form --- */
                     <div className="rounded-lg border border-border p-3 space-y-3 bg-foreground/[0.02]">
                       <div>
-                        <label className="text-[10px] text-foreground/40 block mb-1">Visibility Level</label>
+                        <label className="text-[10px] text-foreground/40 block mb-1">Visibility level</label>
                         <select
                           value={visForm.visibility}
-                          onChange={(e) => setVisForm((f) => ({ ...f, visibility: e.target.value as Entity["visibility"] }))}
+                          onChange={(e) => setVisForm((f) => ({ ...f, visibility: normalizeVisibility(e.target.value) }))}
                           className="w-full bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground"
                         >
-                          {(Object.keys(VISIBILITY_LABELS) as Entity["visibility"][]).map((v) => (
-                            <option key={v} value={v}>{v} — {VISIBILITY_LABELS[v].split("—")[1]?.trim()}</option>
+                          {VISIBILITY_OPTIONS.map((v) => (
+                            <option key={v} value={v}>{VISIBILITY_LABELS[v]}</option>
                           ))}
                         </select>
                         <p className="mt-1 text-[10px] text-foreground/30">
-                          Choose the exposure model first, then pick the exact audiences below.
+                          Pick the visibility level first, then scope the workspace audiences below.
                         </p>
                       </div>
                       {visForm.visibility !== "public" && (
                         <>
                           <MultiSelectField
-                            label="Visible to Roles"
-                            hint="Toggle predefined roles"
+                            label="Workspace roles"
+                            hint="Toggle predefined workspace roles"
                             options={roleOptions}
                             value={parseCommaSeparated(visForm.visibleToRoles)}
                             onToggle={(item) => toggleCsvItem("visibleToRoles", item)}
@@ -913,24 +932,24 @@ export default function NodeDetailSheet({
                             onManualChange={(value) => setVisForm((f) => ({ ...f, visibleToRoles: value }))}
                           />
                           <MultiSelectField
-                            label="Visible to Departments"
-                            hint="Pulled from current org departments"
+                            label="Workspace groups"
+                            hint="Pulled from current workspace groups"
                             options={availableDepartmentOptions}
                             value={parseCommaSeparated(visForm.visibleToDepartments)}
                             onToggle={(item) => toggleCsvItem("visibleToDepartments", item)}
                             manualValue={visForm.visibleToDepartments}
-                            manualLabel="Additional departments"
+                            manualLabel="Additional groups"
                             manualPlaceholder="finance, hr"
                             onManualChange={(value) => setVisForm((f) => ({ ...f, visibleToDepartments: value }))}
                           />
                           <MultiSelectField
-                            label="Visible to Members"
-                            hint="Pick exact partner accounts"
+                            label="Authorized members"
+                            hint="Pick exact workspace partner accounts"
                             options={memberOptions}
                             value={parseCommaSeparated(visForm.visibleToMembers)}
                             onToggle={(item) => toggleCsvItem("visibleToMembers", item)}
                             manualValue={visForm.visibleToMembers}
-                            manualLabel="Additional member IDs"
+                            manualLabel="Additional partner IDs"
                             manualPlaceholder="partner-id-1, partner-id-2"
                             onManualChange={(value) => setVisForm((f) => ({ ...f, visibleToMembers: value }))}
                           />
@@ -945,7 +964,7 @@ export default function NodeDetailSheet({
                           disabled={savingVis}
                           className="text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 transition-colors"
                         >
-                          {savingVis ? "Saving..." : "Save"}
+                          {savingVis ? "Saving..." : "Save Visibility"}
                         </button>
                         <button
                           onClick={() => {

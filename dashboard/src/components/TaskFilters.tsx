@@ -108,7 +108,7 @@ export function TaskFilters({
         }
         className="text-sm border border-border rounded-lg px-3 py-1.5 bg-card text-foreground cursor-pointer"
       >
-        <option value="">All Projects</option>
+        <option value="">All Products</option>
         {availableProjects.map((p) => (
           <option key={p} value={p}>
             {p.toUpperCase()}

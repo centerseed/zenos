@@ -187,7 +187,7 @@ export default function PreviewPage() {
         {products.length > 0 && (
           <div>
             <h3 className="text-sm font-semibold text-[#FAFAFA]/60 uppercase tracking-wider mb-3">
-              Projects
+              Products
             </h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {products.map((p) => (

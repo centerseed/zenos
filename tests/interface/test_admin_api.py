@@ -222,7 +222,11 @@ class TestInvitePartner:
         request = _mock_request(
             method="POST",
             headers={"authorization": "Bearer fake-token"},
-            body={"email": "new@test.com", "authorized_entity_ids": ["e-1", "e-2"]},
+            body={
+                "email": "new@test.com",
+                "access_mode": "scoped",
+                "authorized_entity_ids": ["e-1", "e-2"],
+            },
         )
 
         mock_repo = AsyncMock()
@@ -251,8 +255,35 @@ class TestInvitePartner:
             assert body["status"] == "invited"
             assert body["apiKey"] == ""
             assert body["authorizedEntityIds"] == ["e-1", "e-2"]
+            assert body["accessMode"] == "scoped"
+            assert body["workspaceRole"] == "guest"
             assert body["sharedPartnerId"] == "p1"
             assert "inviteExpiresAt" in body
+
+    async def test_invite_defaults_to_unassigned_and_clears_scope(self):
+        from zenos.interface.admin_api import invite_partner
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            body={"email": "new3@test.com", "authorized_entity_ids": ["e-1"]},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.create = AsyncMock(return_value=None)
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
+             patch("zenos.interface.admin_api._get_partner_by_email", return_value=(None, None)), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+            resp = await invite_partner(request)
+
+        assert resp.status_code == 201
+        import json
+        body = json.loads(resp.body)
+        assert body["accessMode"] == "unassigned"
+        assert body["workspaceRole"] == "member"
+        assert body["authorizedEntityIds"] == []
 
     async def test_invite_sets_expires_at_7_days(self):
         """New invite must have inviteExpiresAt set to approximately now + 7 days."""
@@ -293,7 +324,11 @@ class TestInvitePartner:
         request = _mock_request(
             method="POST",
             headers={"authorization": "Bearer fake-token"},
-            body={"email": "client@test.com", "authorized_entity_ids": ["entity-x"]},
+            body={
+                "email": "client@test.com",
+                "access_mode": "scoped",
+                "authorized_entity_ids": ["entity-x"],
+            },
         )
 
         mock_repo = AsyncMock()
@@ -352,7 +387,11 @@ class TestInvitePartner:
         request = _mock_request(
             method="POST",
             headers={"authorization": "Bearer fake-token"},
-            body={"email": "pending@test.com", "authorized_entity_ids": ["new-entity"]},
+            body={
+                "email": "pending@test.com",
+                "access_mode": "scoped",
+                "authorized_entity_ids": ["new-entity"],
+            },
         )
 
         mock_repo = AsyncMock()
@@ -596,6 +635,98 @@ class TestUpdatePartnerStatus:
             assert resp.status_code == 400
 
 
+class TestUpdatePartnerScope:
+    """Tests for PUT /api/partners/{id}/scope."""
+
+    async def test_update_scope_sets_explicit_access_mode(self):
+        from zenos.interface.admin_api import update_partner_scope
+
+        request = _mock_request(
+            method="PUT",
+            headers={"authorization": "Bearer fake-token"},
+            body={
+                "roles": ["finance"],
+                "department": "finance",
+                "workspace_role": "guest",
+                "authorized_entity_ids": ["product-abc"],
+            },
+            path_params={"id": "partner-2"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2",
+            "email": "user@test.com",
+            "displayName": "User",
+            "isAdmin": False,
+            "status": "active",
+            "accessMode": "internal",
+            "sharedPartnerId": "p1",
+            "authorizedEntityIds": [],
+            "roles": [],
+            "department": "all",
+            "invitedBy": None,
+            "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "updatedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        })
+        mock_repo.create_department = AsyncMock(return_value=None)
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+            resp = await update_partner_scope(request)
+
+        assert resp.status_code == 200
+        fields = mock_repo.update_fields.call_args[0][1]
+        assert fields["accessMode"] == "scoped"
+        assert fields["authorizedEntityIds"] == ["product-abc"]
+
+    async def test_update_scope_clears_scope_for_unassigned(self):
+        from zenos.interface.admin_api import update_partner_scope
+
+        request = _mock_request(
+            method="PUT",
+            headers={"authorization": "Bearer fake-token"},
+            body={
+                "roles": [],
+                "department": "all",
+                "access_mode": "unassigned",
+                "authorized_entity_ids": ["product-abc"],
+            },
+            path_params={"id": "partner-2"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2",
+            "email": "user@test.com",
+            "displayName": "User",
+            "isAdmin": False,
+            "status": "active",
+            "accessMode": "scoped",
+            "sharedPartnerId": "p1",
+            "authorizedEntityIds": ["product-abc"],
+            "roles": [],
+            "department": "all",
+            "invitedBy": None,
+            "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "updatedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        })
+        mock_repo.create_department = AsyncMock(return_value=None)
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+            resp = await update_partner_scope(request)
+
+        assert resp.status_code == 200
+        fields = mock_repo.update_fields.call_args[0][1]
+        assert fields["accessMode"] == "unassigned"
+        assert fields["authorizedEntityIds"] == []
+
+
 class TestActivatePartner:
     """Tests for POST /api/partners/activate."""
 
@@ -823,7 +954,7 @@ class TestDeletePartner:
 
             assert resp.status_code == 403
 
-    async def test_delete_active_partner_forbidden(self):
+    async def test_delete_active_partner_succeeds(self):
         from zenos.interface.admin_api import delete_partner
 
         request = _mock_request(
@@ -837,6 +968,7 @@ class TestDeletePartner:
             "id": "partner-active", "email": "active@test.com",
             "status": "active", "sharedPartnerId": "p1", "isAdmin": False,
         })
+        mock_repo.delete = AsyncMock()
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
@@ -844,10 +976,9 @@ class TestDeletePartner:
 
             resp = await delete_partner(request)
 
-            assert resp.status_code == 403
-            import json
-            body = json.loads(resp.body)
-            assert "invited" in body["message"]
+            # Active partners can now be deleted (CRM FK cleanup handles cascading)
+            assert resp.status_code == 204
+            mock_repo.delete.assert_awaited_once_with("partner-active")
 
     async def test_delete_self_forbidden(self):
         from zenos.interface.admin_api import delete_partner
@@ -895,7 +1026,7 @@ class TestDeletePartner:
 
             assert resp.status_code == 404
 
-    async def test_delete_suspended_partner_forbidden(self):
+    async def test_delete_suspended_partner_success(self):
         from zenos.interface.admin_api import delete_partner
 
         request = _mock_request(
@@ -909,6 +1040,7 @@ class TestDeletePartner:
             "id": "partner-suspended", "email": "suspended@test.com",
             "status": "suspended", "sharedPartnerId": "p1", "isAdmin": False,
         })
+        mock_repo.delete = AsyncMock()
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
@@ -916,7 +1048,8 @@ class TestDeletePartner:
 
             resp = await delete_partner(request)
 
-            assert resp.status_code == 403
+            assert resp.status_code == 204
+            mock_repo.delete.assert_called_once_with("partner-suspended")
 
 
 class TestCorsHandling:

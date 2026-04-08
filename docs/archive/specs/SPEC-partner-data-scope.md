@@ -3,11 +3,14 @@ doc_id: SPEC-partner-data-scope
 title: Feature Spec：Partner Data Scope（單 Tenant 內的資料共享模型）
 type: SPEC
 ontology_entity: ZenOS MCP Server
-status: approved
+status: superseded
 version: "1.0"
 date: 2026-03-30
 supersedes: null
+superseded_by: SPEC-partner-access-scope
 ---
+
+> Superseded by `SPEC-partner-access-scope`. This file remains only as historical context for the tenant routing model.
 
 # Feature Spec：Partner Data Scope
 

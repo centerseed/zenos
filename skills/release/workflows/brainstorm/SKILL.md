@@ -30,7 +30,7 @@ version: 1.0.0
 
 ## Phase 1：擴散 — Challenger 挑戰
 
-叫起 Challenger agent（讀取 `skills/agents/challenger.md`），傳入當前分析內容。
+叫起 Challenger agent（讀取 `skills/release/challenger/SKILL.md`），傳入當前分析內容。
 
 Challenger 執行完整流程：
 1. Steel-man 重述原始觀點

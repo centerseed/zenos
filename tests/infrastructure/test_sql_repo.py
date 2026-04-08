@@ -1040,7 +1040,7 @@ class TestSqlPartnerKeyValidator:
         row = _make_row(
             id="p1", email="a@b.com", display_name="Alice",
             api_key="secret_key", authorized_entity_ids=[],  # pragma: allowlist secret
-            status="active", is_admin=False, shared_partner_id=None,
+            status="active", is_admin=False, shared_partner_id=None, access_mode="internal",
             default_project="zenos",
         )
 
@@ -1049,7 +1049,7 @@ class TestSqlPartnerKeyValidator:
                 "secret_key": {
                     "id": "p1", "email": "a@b.com", "displayName": "Alice",
                     "apiKey": "secret_key", "authorizedEntityIds": [],  # pragma: allowlist secret
-                    "status": "active", "isAdmin": False,
+                    "status": "active", "isAdmin": False, "accessMode": "internal",
                     "sharedPartnerId": None, "defaultProject": "zenos",
                 }
             }
@@ -1444,6 +1444,7 @@ def _make_partner_row(**overrides) -> MagicMock:
         "status": "active",
         "is_admin": False,
         "shared_partner_id": None,
+        "access_mode": "internal",
         "default_project": None,
         "roles": [],
         "department": "all",
@@ -1506,6 +1507,7 @@ class TestSqlPartnerRepository:
         assert result is not None
         assert result["id"] == "p2"
         assert result["isAdmin"] is True
+        assert result["accessMode"] == "internal"
         sql = conn.fetchrow.call_args[0][0]
         assert "partners" in sql
 
@@ -1557,6 +1559,7 @@ class TestSqlPartnerRepository:
             "status": "invited",
             "isAdmin": False,
             "sharedPartnerId": "p1",
+            "accessMode": "unassigned",
             "invitedBy": "admin@test.com",
             "createdAt": NOW,
             "updatedAt": NOW,
@@ -1597,7 +1600,15 @@ class TestSqlPartnerRepository:
         conn.execute.assert_not_called()
 
     def test_delete_executes_delete_sql(self):
-        """delete removes partner by ID."""
+        """delete removes partner by ID via a 6-step transaction:
+        1. NULL out task assignees
+        2. Delete task_comments
+        3. Delete tool_events
+        4. Delete crm.activities recorded_by this partner
+        5. Delete crm.deals owned by this partner (cascades remaining activities)
+        6. Delete the partner row
+        All steps execute inside a single transaction via conn.execute.
+        """
         from zenos.infrastructure.sql_repo import SqlPartnerRepository
         import asyncio
 
@@ -1605,10 +1616,19 @@ class TestSqlPartnerRepository:
         repo = SqlPartnerRepository(pool)
         asyncio.get_event_loop().run_until_complete(repo.delete("p1"))
 
-        conn.execute.assert_called_once()
-        sql = conn.execute.call_args[0][0]
-        assert "DELETE" in sql
-        assert "partners" in sql
+        assert conn.execute.call_count == 6, (
+            f"Expected 6 execute calls (NULL assignees, delete task_comments, "
+            f"delete tool_events, delete crm.activities, delete crm.deals, delete partner), "
+            f"got {conn.execute.call_count}"
+        )
+        # The final call must delete from partners table
+        final_sql = conn.execute.call_args_list[-1][0][0]
+        assert "DELETE" in final_sql
+        assert "partners" in final_sql
+        # CRM cleanup steps must be present
+        all_sqls = [call[0][0] for call in conn.execute.call_args_list]
+        assert any("crm.activities" in sql for sql in all_sqls), "Missing crm.activities cleanup"
+        assert any("crm.deals" in sql for sql in all_sqls), "Missing crm.deals cleanup"
 
     def test_get_entity_tenant_returns_partner_info(self):
         """get_entity_tenant JOINs entities+partners and returns tenant data."""

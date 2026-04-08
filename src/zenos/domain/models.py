@@ -90,16 +90,8 @@ class TaskPriority(str, Enum):
 
 
 class Visibility(str, Enum):
-    """Entity visibility levels, ordered from most open to most restrictive.
-
-    Spec mapping (SPEC-agent-aware-permission-governance.md):
-      public        ↔ open
-      role-restricted ↔ internal (scoped by department/role)
-      restricted    ↔ restricted
-      confidential  ↔ confidential
-    """
+    """Entity visibility levels in SPEC-identity-and-access."""
     PUBLIC = "public"
-    ROLE_RESTRICTED = "role-restricted"
     RESTRICTED = "restricted"
     CONFIDENTIAL = "confidential"
 
@@ -107,9 +99,10 @@ class Visibility(str, Enum):
 # Numeric order for comparison: higher = more restrictive.
 VISIBILITY_ORDER: dict[str, int] = {
     "public": 0,
+    "restricted": 1,
+    "confidential": 2,
+    # Legacy alias kept for backward-compatible reads during migration.
     "role-restricted": 1,
-    "restricted": 2,
-    "confidential": 3,
 }
 
 
@@ -211,7 +204,7 @@ class Entity:
     confirmed_by_user: bool = False
     owner: str | None = None  # Phase 0: simple name string (e.g. "Barry")
     sources: list[dict] = field(default_factory=list)  # [{uri, label, type}]
-    visibility: str = "public"  # "public" | "restricted" | "role-restricted" | "confidential"
+    visibility: str = "public"  # "public" | "restricted" | "confidential"
     visible_to_roles: list[str] = field(default_factory=list)
     visible_to_members: list[str] = field(default_factory=list)
     visible_to_departments: list[str] = field(default_factory=list)

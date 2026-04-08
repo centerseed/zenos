@@ -251,13 +251,12 @@ class TestSearchTool:
 
             assert len(result["entities"]) == 3
 
-    async def test_entities_role_restricted_hidden_without_role_match(self):
+    async def test_entities_confidential_hidden_for_member(self):
         from zenos.interface.tools import search, _current_partner
 
         restricted = _make_entity(
             id="ent-r",
-            visibility="role-restricted",
-            visible_to_roles=["engineering"],
+            visibility="confidential",
         )
         token_partner = _current_partner.set({"id": "p-marketing", "isAdmin": False})
         token_roles = current_partner_roles.set(["marketing"])
@@ -596,6 +595,103 @@ class TestGetTool:
 
             assert result["entity"]["id"] == "ent-1"
 
+    async def test_guest_get_entity_enforces_shared_l1_scope(self):
+        from zenos.interface.tools import get, _current_partner
+
+        shared_root = _make_entity(id="product-acme", type="product", level=1, name="Acme", parent_id=None)
+        shared_child = _make_entity(
+            id="ent-shared",
+            name="Shared Module",
+            type="module",
+            level=2,
+            parent_id="product-acme",
+            visibility="public",
+        )
+        other_root = _make_entity(id="product-other", type="product", level=1, name="Other", parent_id=None)
+        other_child = _make_entity(
+            id="ent-other",
+            name="Other Module",
+            type="module",
+            level=2,
+            parent_id="product-other",
+            visibility="public",
+        )
+
+        token = _current_partner.set(
+            {
+                "id": "p-guest",
+                "isAdmin": False,
+                "workspaceRole": "guest",
+                "authorizedEntityIds": ["product-acme"],
+            }
+        )
+        try:
+            with patch("zenos.interface.tools.entity_repo") as mock_er, \
+                 patch("zenos.interface.tools.relationship_repo") as mock_rr, \
+                 patch("zenos.interface.tools.ontology_service") as mock_os:
+                mock_er.list_all = AsyncMock(return_value=[shared_root, shared_child, other_root, other_child])
+                mock_er.get_by_id = AsyncMock(side_effect=lambda eid: {
+                    "ent-shared": shared_child,
+                    "ent-other": other_child,
+                }.get(eid))
+                mock_rr.list_by_entity = AsyncMock(return_value=[])
+                mock_os.get_entity = AsyncMock(side_effect=lambda name: None)
+
+                allowed = await get(collection="entities", id="ent-shared")
+                denied = await get(collection="entities", id="ent-other")
+
+                assert allowed["entity"]["id"] == "ent-shared"
+                assert denied["error"] == "NOT_FOUND"
+        finally:
+            _current_partner.reset(token)
+
+    async def test_guest_get_document_enforces_shared_l1_scope(self):
+        from zenos.interface.tools import get, _current_partner
+
+        shared_root = _make_entity(id="product-acme", type="product", level=1, name="Acme", parent_id=None)
+        shared_doc = _make_entity(
+            id="doc-shared",
+            name="Shared Doc",
+            type="document",
+            level=3,
+            parent_id="product-acme",
+            visibility="public",
+        )
+        other_root = _make_entity(id="product-other", type="product", level=1, name="Other", parent_id=None)
+        other_doc = _make_entity(
+            id="doc-other",
+            name="Other Doc",
+            type="document",
+            level=3,
+            parent_id="product-other",
+            visibility="public",
+        )
+
+        token = _current_partner.set(
+            {
+                "id": "p-guest",
+                "isAdmin": False,
+                "workspaceRole": "guest",
+                "authorizedEntityIds": ["product-acme"],
+            }
+        )
+        try:
+            with patch("zenos.interface.tools.entity_repo") as mock_er, \
+                 patch("zenos.interface.tools.ontology_service") as mock_os:
+                mock_er.list_all = AsyncMock(return_value=[shared_root, shared_doc, other_root, other_doc])
+                mock_os.get_document = AsyncMock(side_effect=lambda doc_id: {
+                    "doc-shared": shared_doc,
+                    "doc-other": other_doc,
+                }.get(doc_id))
+
+                allowed = await get(collection="documents", id="doc-shared")
+                denied = await get(collection="documents", id="doc-other")
+
+                assert allowed["id"] == "doc-shared"
+                assert denied["error"] == "NOT_FOUND"
+        finally:
+            _current_partner.reset(token)
+
     async def test_get_entity_not_found(self):
         from zenos.interface.tools import get
 
@@ -791,6 +887,47 @@ class TestWriteTool:
             assert result["warnings"] == []
             assert "context_bundle" in result
             assert "governance_hints" in result
+
+    async def test_guest_write_entity_is_rejected(self):
+        """Guest attempting L1 entity write → application-layer guard raises PermissionError,
+        interface layer converts it to status=rejected response."""
+        from zenos.interface.tools import write, _current_partner
+
+        token = _current_partner.set(
+            {
+                "id": "p-guest",
+                "isAdmin": False,
+                "workspaceRole": "guest",
+                "authorizedEntityIds": ["product-acme"],
+            }
+        )
+        try:
+            with patch("zenos.interface.tools.entity_repo") as mock_er, \
+                 patch("zenos.interface.tools.ontology_service") as mock_os:
+                # No pre-existing entity (new entity creation path)
+                mock_er.get_by_id = AsyncMock(return_value=None)
+                mock_er.get_by_name = AsyncMock(return_value=None)
+                # Application-layer guard raises PermissionError for L1 entity creation
+                mock_os.upsert_entity = AsyncMock(
+                    side_effect=PermissionError(
+                        "Guest partners cannot create L1 entities (type='product')."
+                    )
+                )
+                result = await write(
+                    collection="entities",
+                    data={
+                        "name": "Guest Entity",
+                        "type": "product",
+                        "summary": "not allowed",
+                        "tags": {"what": "x", "why": "y", "how": "z", "who": "w"},
+                    },
+                )
+
+            assert result["status"] == "rejected"
+            assert "FORBIDDEN" in result["rejection_reason"]
+            assert "Guest" in result["rejection_reason"]
+        finally:
+            _current_partner.reset(token)
 
     async def test_write_module_without_parent_id_returns_warning(self):
         from zenos.interface.tools import write

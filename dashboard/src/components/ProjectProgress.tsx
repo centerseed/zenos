@@ -18,8 +18,8 @@ export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
   if (entities.length === 0) {
     return (
       <div className="bg-card rounded-lg border border-border p-6">
-        <h3 className="text-sm font-semibold text-white mb-4">Projects Progress</h3>
-        <p className="text-sm text-muted-foreground text-center py-4">No projects yet</p>
+        <h3 className="text-sm font-semibold text-white mb-4">Products Progress</h3>
+        <p className="text-sm text-muted-foreground text-center py-4">No products yet</p>
       </div>
     );
   }
@@ -38,7 +38,7 @@ export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
 
   return (
     <div className="bg-card rounded-lg border border-border p-6">
-      <h3 className="text-sm font-semibold text-white mb-4">Projects Progress</h3>
+      <h3 className="text-sm font-semibold text-white mb-4">Products Progress</h3>
       <div className="space-y-4">
         {stats.map(({ entity, total, done, percent }) => {
           let barColor = "bg-red-500";

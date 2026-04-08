@@ -121,8 +121,14 @@ python3 scripts/sync_skills_from_release.py
 | `release/qa/` | 驗收 + QA Verdict | Agent role |
 | `release/designer/` | UI/UX 設計 | Agent role |
 | `release/marketing/` | 行銷內容 | Agent role |
+| `release/debugger/` | 根因分析與除錯 | Agent role |
+| `release/challenger/` | 多視角挑戰與壓力測試 | Agent role |
+| `release/workflows/feature/` | 功能規劃到建票流程 | Workflow |
+| `release/workflows/debug/` | 多角色協作除錯流程 | Workflow |
+| `release/workflows/triage/` | 任務盤點流程 | Workflow |
+| `release/workflows/brainstorm/` | 系統性腦暴流程 | Workflow |
 
-> `skills/agents/` 已 deprecated，內容已移至 `skills/release/`，保留僅供歷史參考。
+> `skills/agents/` 已 deprecated，保留僅供歷史參考。角色與 workflow 的可發佈版本一律以 `skills/release/` 為準。
 
 ---
 

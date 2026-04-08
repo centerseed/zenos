@@ -1433,6 +1433,231 @@ class TestEntityUpdateSemantics:
 
 
 # ===========================================================================
+# Confirmed entity field update (name/summary/tags overwrite)
+# ===========================================================================
+
+
+class TestConfirmedEntityFieldUpdate:
+    """Verify that confirmed entities report rejected field overwrites and
+    that force=true allows overwriting name/summary/tags."""
+
+    @pytest.mark.asyncio
+    async def test_confirmed_entity_rejects_name_change_without_force(self):
+        """Attempting to rename a confirmed entity without force should
+        return the original name and include REJECTED_FIELDS warning."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Old Name",
+            type="product",
+            summary="Old summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "name": "New Name",
+        })
+
+        # Name should NOT be updated
+        assert result.entity.name == "Old Name"
+        # Warnings should contain REJECTED_FIELDS
+        assert any("REJECTED_FIELDS" in w for w in (result.warnings or []))
+        assert any("name:" in w for w in (result.warnings or []))
+
+    @pytest.mark.asyncio
+    async def test_confirmed_entity_rejects_summary_change_without_force(self):
+        """Attempting to change summary on a confirmed entity without force
+        should keep the old summary and warn about rejection."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="Old summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "summary": "Brand new summary",
+        })
+
+        assert result.entity.summary == "Old summary"
+        assert any("REJECTED_FIELDS" in w for w in (result.warnings or []))
+        assert any("summary:" in w for w in (result.warnings or []))
+
+    @pytest.mark.asyncio
+    async def test_confirmed_entity_rejects_tags_change_without_force(self):
+        """Attempting to change non-empty tags on a confirmed entity without
+        force should keep old tags and warn about rejection."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "tags": {"what": "new-what", "why": "new-why", "how": "AI", "who": "runners"},
+        })
+
+        # Non-empty tags should NOT be overwritten
+        assert result.entity.tags.what == "app"
+        assert result.entity.tags.why == "coach"
+        assert any("REJECTED_FIELDS" in w for w in (result.warnings or []))
+        assert any("tags.what:" in w for w in (result.warnings or []))
+
+    @pytest.mark.asyncio
+    async def test_force_allows_name_overwrite_on_confirmed_entity(self):
+        """force=true should allow renaming a confirmed entity."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Old Name",
+            type="product",
+            summary="Old summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "name": "New Name",
+            "force": True,
+        })
+
+        assert result.entity.name == "New Name"
+        # No REJECTED_FIELDS warning
+        assert not any("REJECTED_FIELDS" in w for w in (result.warnings or []))
+
+    @pytest.mark.asyncio
+    async def test_force_allows_summary_overwrite_on_confirmed_entity(self):
+        """force=true should allow updating summary on confirmed entity."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="Old summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "summary": "Brand new summary",
+            "force": True,
+        })
+
+        assert result.entity.summary == "Brand new summary"
+
+    @pytest.mark.asyncio
+    async def test_force_allows_tags_overwrite_on_confirmed_entity(self):
+        """force=true should allow updating tags on confirmed entity."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "tags": {"what": "new-app", "why": "new-coach", "how": "new-AI", "who": "new-runners"},
+            "force": True,
+        })
+
+        assert result.entity.tags.what == "new-app"
+        assert result.entity.tags.why == "new-coach"
+
+    @pytest.mark.asyncio
+    async def test_confirmed_entity_fills_empty_fields_without_force(self):
+        """Confirmed entity should still accept filling empty fields without force."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Paceriz",
+            type="product",
+            summary="",  # empty
+            tags=Tags(what="app", why="", how="AI", who="runners"),
+            confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "summary": "Filled summary",
+            "tags": {"what": "app", "why": "new-why", "how": "AI", "who": "runners"},
+        })
+
+        assert result.entity.summary == "Filled summary"
+        assert result.entity.tags.why == "new-why"
+        # No REJECTED_FIELDS warning because we only filled empty fields
+        assert not any("REJECTED_FIELDS" in w for w in (result.warnings or []))
+
+    @pytest.mark.asyncio
+    async def test_append_sources_with_name_change_does_not_swallow_name(self):
+        """When both append_sources and name are provided, the name change
+        should not be silently ignored by the append_sources fast path."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1",
+            name="Old Name",
+            type="product",
+            summary="summary",
+            tags=Tags(what="app", why="coach", how="AI", who="runners"),
+            confirmed_by_user=False,  # unconfirmed, so name change should succeed
+            sources=[{"uri": "https://old.md", "label": "old", "type": "github"}],
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "id": "ent-1",
+            "name": "New Name",
+            "append_sources": [{"uri": "https://new.md", "label": "new", "type": "github"}],
+        })
+
+        # Name should be updated (not swallowed by fast path)
+        assert result.entity.name == "New Name"
+        # New source should be appended
+        uris = [s.get("uri") for s in result.entity.sources]
+        assert "https://new.md" in uris
+        assert "https://old.md" in uris
+
+
+# ===========================================================================
 # Auto-infer module parent for L3 entities
 # ===========================================================================
 
@@ -2010,3 +2235,230 @@ class TestGovernanceAIPromptInputFiltering:
         assert isinstance(global_context["recurring_terms"], list)
         assert any("ZenOS" in line for line in global_context["active_products"])
         assert any("ZenOS" in line for line in global_context["impact_target_hints"])
+
+
+# ---------------------------------------------------------------------------
+# S05: Guest write guard
+# ---------------------------------------------------------------------------
+
+def _guest_partner(authorized_l1_ids: list[str] | None = None) -> dict:
+    """Build a minimal guest partner dict."""
+    return {
+        "workspaceRole": "guest",
+        "authorizedEntityIds": authorized_l1_ids or [],
+        "isAdmin": False,
+    }
+
+
+def _member_partner() -> dict:
+    return {"workspaceRole": "member", "isAdmin": False}
+
+
+def _owner_partner() -> dict:
+    return {"isAdmin": True}
+
+
+class TestGuestWriteGuard:
+    """S05: Guests cannot create L1/L2; can create L3 only with authorized parent L2."""
+
+    # ----- Criteria 1: guest tries to create L1 entity → PermissionError -----
+
+    async def test_guest_cannot_create_l1_product(self):
+        """guest + type=product (L1) → PermissionError with clear message."""
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        with pytest.raises(PermissionError, match="[Gg]uest"):
+            await svc.upsert_entity(
+                _valid_entity_data(type="product"),
+                partner=_guest_partner(authorized_l1_ids=["l1-prod"]),
+            )
+
+    # ----- Criteria 2: guest tries to create L2 entity → PermissionError -----
+
+    async def test_guest_cannot_create_l2_module(self):
+        """guest + type=module (L2) → PermissionError even with authorized L1."""
+        repos = _mock_repos()
+        parent = Entity(
+            id="l1-prod", name="Product", type="product",
+            summary="P", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        svc = _make_service(repos)
+        with pytest.raises(PermissionError, match="[Gg]uest"):
+            await svc.upsert_entity(
+                _valid_entity_data(
+                    type="module",
+                    parent_id="l1-prod",
+                    layer_decision={
+                        "q1_persistent": True,
+                        "q2_cross_role": True,
+                        "q3_company_consensus": True,
+                        "impacts_draft": "A 改了什麼→B 的什麼要跟著看",
+                    },
+                ),
+                partner=_guest_partner(authorized_l1_ids=["l1-prod"]),
+            )
+
+    # ----- Criteria 3: guest creates L3 without authorized L2 parent → PermissionError -----
+
+    async def test_guest_cannot_create_l3_without_authorized_parent(self):
+        """guest + type=goal + parent_id not in authorized subtree → PermissionError."""
+        repos = _mock_repos()
+        # parent exists but is NOT in guest's authorized scope
+        parent = Entity(
+            id="mod-unauthorized", name="Other Module", type="module",
+            summary="not guest scope", tags=Tags(what="x", why="x", how="x", who="x"),
+            parent_id="other-l1",
+        )
+        # entity_map: l1-prod → mod-authorized; other-l1 → mod-unauthorized
+        l1_prod = Entity(
+            id="l1-prod", name="Product", type="product",
+            summary="P", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        mod_authorized = Entity(
+            id="mod-authorized", name="Module", type="module",
+            summary="M", tags=Tags(what="x", why="x", how="x", who="x"),
+            parent_id="l1-prod",
+        )
+        all_entities = [l1_prod, mod_authorized, parent]
+
+        def _get_by_id(eid):
+            return {e.id: e for e in all_entities}.get(eid)
+
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=_get_by_id)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=all_entities)
+        svc = _make_service(repos)
+
+        with pytest.raises(PermissionError, match="[Gg]uest"):
+            await svc.upsert_entity(
+                _valid_entity_data(type="goal", parent_id="mod-unauthorized"),
+                partner=_guest_partner(authorized_l1_ids=["l1-prod"]),
+            )
+
+    # ----- Criteria 4: guest creates L3 with valid authorized L2 → success, visibility=public -----
+
+    async def test_guest_can_create_l3_with_authorized_parent_and_gets_public_visibility(self):
+        """guest + type=goal + parent_id within authorized subtree → success + visibility=public."""
+        repos = _mock_repos()
+        l1_prod = Entity(
+            id="l1-prod", name="Product", type="product",
+            summary="P", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        mod_authorized = Entity(
+            id="mod-auth", name="Module", type="module",
+            summary="M", tags=Tags(what="x", why="x", how="x", who="x"),
+            parent_id="l1-prod",
+        )
+        all_entities = [l1_prod, mod_authorized]
+
+        def _get_by_id(eid):
+            return {e.id: e for e in all_entities}.get(eid)
+
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=_get_by_id)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=all_entities)
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity(
+            _valid_entity_data(type="goal", parent_id="mod-auth"),
+            partner=_guest_partner(authorized_l1_ids=["l1-prod"]),
+        )
+        assert result.entity.type == "goal"
+        assert result.entity.visibility == "public"
+
+    async def test_guest_l3_creation_overrides_caller_visibility_to_public(self):
+        """Guest providing visibility=restricted is overridden to public."""
+        repos = _mock_repos()
+        l1_prod = Entity(
+            id="l1-prod", name="Product", type="product",
+            summary="P", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        mod_auth = Entity(
+            id="mod-auth", name="Module", type="module",
+            summary="M", tags=Tags(what="x", why="x", how="x", who="x"),
+            parent_id="l1-prod",
+        )
+        all_entities = [l1_prod, mod_auth]
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {e.id: e for e in all_entities}.get(eid)
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=all_entities)
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity(
+            _valid_entity_data(type="goal", parent_id="mod-auth", visibility="restricted"),
+            partner=_guest_partner(authorized_l1_ids=["l1-prod"]),
+        )
+        assert result.entity.visibility == "public"
+
+    # ----- Criteria 5: guest creates task → no restriction (tested via TaskService) -----
+
+    async def test_guest_can_create_task(self):
+        """Guest partner is not restricted from creating tasks in TaskService."""
+        from zenos.application.task_service import TaskService
+
+        task_repo = AsyncMock()
+        task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+        task_repo.list_all = AsyncMock(return_value=[])
+        entity_repo = AsyncMock()
+        entity_repo.list_all = AsyncMock(return_value=[])
+        blindspot_repo = AsyncMock()
+        blindspot_repo.list_all = AsyncMock(return_value=[])
+
+        svc = TaskService(task_repo=task_repo, entity_repo=entity_repo, blindspot_repo=blindspot_repo)
+        result = await svc.create_task({
+            "title": "My guest task",
+            "created_by": "guest-partner-id",
+            "priority": "medium",
+        })
+        assert result.task.title == "My guest task"
+
+    # ----- Non-guest is unaffected by the guard -----
+
+    async def test_member_can_create_l1_entity(self):
+        """member partner has no entity-level restrictions from write guard."""
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(
+            _valid_entity_data(type="product"),
+            partner=_member_partner(),
+        )
+        assert result.entity.type == "product"
+
+    async def test_owner_can_create_l2_entity(self):
+        """owner (admin) can create L2 without write guard restriction."""
+        repos = _mock_repos()
+        parent = Entity(
+            id="l1-prod", name="Product", type="product",
+            summary="P", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(
+            _valid_entity_data(
+                type="module",
+                parent_id="l1-prod",
+                layer_decision={
+                    "q1_persistent": True,
+                    "q2_cross_role": True,
+                    "q3_company_consensus": True,
+                    "impacts_draft": "A 改了什麼→B 的什麼要跟著看",
+                },
+            ),
+            partner=_owner_partner(),
+        )
+        assert result.entity.type == "module"
+
+    async def test_no_partner_context_is_unaffected(self):
+        """When partner=None (internal/test path), write guard does not trigger."""
+        repos = _mock_repos()
+        svc = _make_service(repos)
+        result = await svc.upsert_entity(
+            _valid_entity_data(type="product"),
+            partner=None,
+        )
+        assert result.entity.type == "product"

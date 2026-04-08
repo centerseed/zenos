@@ -91,7 +91,7 @@ from zenos.infrastructure.context import (
     current_partner_roles,
 )
 from zenos.interface.governance_rules import GOVERNANCE_RULES
-from zenos.domain.partner_access import describe_partner_access, is_scoped_partner, is_unassigned_partner
+from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
 
 # ──────────────────────────────────────────────
 # Agent Identity — ContextVar for partner data
@@ -611,61 +611,112 @@ def _parse_entity_level(entity_level: str | None) -> int | None:
 
 
 def _is_entity_visible(entity: object) -> bool:
-    """Centralized server-side visibility check for read paths."""
-    partner = _current_partner.get() or {}
+    """Centralized server-side visibility check for read paths.
+
+    Visibility rules (S04 query slicing):
+    - owner/admin: sees everything
+    - unassigned: sees nothing
+    - guest: only public entities (L1 scope check done at list level)
+    - member: only public entities; restricted and confidential are owner-only.
+              If a public entity has visible_to_departments set, the partner's
+              department must be in that list.
+    """
+    partner = _current_partner.get()
+    if not partner:
+        return True
     access = describe_partner_access(partner)
     if access["is_admin"]:
         return True
     if access["is_unassigned_partner"]:
         return False
 
-    visibility = str(getattr(entity, "visibility", "public") or "public")
+    visibility = str(getattr(entity, "visibility", "public") or "public").strip().lower()
+    if visibility == "role-restricted":
+        visibility = "restricted"
 
-    if access["is_scoped_partner"]:
-        # Scoped partner: L1 scope check is done at search/list level.
-        # At per-entity level, just check visibility.
+    if access["is_guest"]:
+        # Guest: L1 scope check is done at search/list level.
         return visibility == "public"
 
-    # Internal non-admin
-    # Department-based filter
-    visible_to_departments = set(getattr(entity, "visible_to_departments", []) or [])
-    partner_department = str(current_partner_department.get() or "all")
-    if (
-        visible_to_departments
-        and partner_department not in visible_to_departments
-        and "all" not in visible_to_departments
-    ):
+    # Member: can see public + restricted, but not confidential.
+    if visibility == "confidential":
         return False
 
-    if visibility in {"confidential", "restricted"}:
-        return False
-    if visibility == "role-restricted":
-        partner_roles = set(current_partner_roles.get() or [])
-        visible_to_roles = set(getattr(entity, "visible_to_roles", []) or [])
-        return bool(partner_roles & visible_to_roles) if visible_to_roles else False
+    # Apply department filter: if entity restricts to specific departments,
+    # the partner's department must match (non-"all" partners only).
+    visible_to_depts = getattr(entity, "visible_to_departments", None) or []
+    if visible_to_depts:
+        partner_dept = str(current_partner_department.get() or "all")
+        if partner_dept not in visible_to_depts:
+            return False
+
     return True
+
+
+async def _guest_allowed_entity_ids() -> set[str]:
+    """Resolve the guest's authorized subtree IDs.
+
+    Returns an empty set when the caller is not a guest or when scope
+    resolution fails. Guest access should fail closed.
+    """
+    partner = _current_partner.get()
+    if not partner or not is_guest(partner):
+        return set()
+
+    try:
+        access = describe_partner_access(partner)
+        authorized_ids = access["authorized_l1_ids"]
+        if not authorized_ids:
+            return set()
+
+        all_entities_list = await entity_repo.list_all()
+        entity_map = {e.id: e for e in (all_entities_list or []) if e.id}
+        allowed: set[str] = set()
+        for l1_id in authorized_ids:
+            allowed |= _collect_subtree_ids(l1_id, entity_map)
+        return allowed
+    except Exception:
+        logger.warning("_guest_allowed_entity_ids failed, denying guest access", exc_info=True)
+        return set()
+
+
+def _is_document_like_entity_visible_for_guest(item: object, allowed_ids: set[str]) -> bool:
+    """Check guest subtree membership for entity/document-like items."""
+    item_id = str(getattr(item, "id", "") or "").strip()
+    if item_id and item_id in allowed_ids:
+        return True
+
+    linked_entity_ids = getattr(item, "linked_entity_ids", None) or []
+    for linked_id in linked_entity_ids:
+        if str(linked_id).strip() in allowed_ids:
+            return True
+
+    parent_id = str(getattr(item, "parent_id", "") or "").strip()
+    return bool(parent_id and parent_id in allowed_ids)
 
 
 async def _is_task_visible(task: object) -> bool:
     """Task visibility check.
 
     - Admin: always visible.
-    - Scoped partner: requires at least one linked entity in their L1 subtree.
+    - Guest: requires at least one linked entity in their authorized L1 subtree.
       Entity visibility (public/restricted) is NOT checked — any entity in scope
       makes the task visible. Tasks with no linked entities are NOT visible.
-    - Internal non-admin: task hidden if ANY linked entity is invisible.
+    - Member: task hidden if ANY linked entity is invisible.
       Tasks with no linked entities are always visible (fail-open).
     """
     try:
         linked = getattr(task, "linked_entities", None) or []
         partner = _current_partner.get() or {}
+        if not partner:
+            return True
         if partner.get("isAdmin", False):
             return True
         if is_unassigned_partner(partner):
             return False
 
-        if is_scoped_partner(partner):
-            # Scoped partner: visible if at least one linked entity is in allowed_ids.
+        if is_guest(partner):
+            # Guest: visible if at least one linked entity is in allowed_ids.
             # Entity visibility is NOT applied here — scope membership is sufficient.
             if not linked:
                 return False
@@ -706,6 +757,8 @@ async def _is_protocol_visible(protocol: object) -> bool:
         if not entity_id:
             return True  # orphan protocol = visible
         partner = _current_partner.get() or {}
+        if not partner:
+            return True
         if partner.get("isAdmin", False):
             return True
         if is_unassigned_partner(partner):
@@ -724,16 +777,18 @@ async def _is_blindspot_visible(blindspot: object) -> bool:
 
     If ALL related entities are invisible, the blindspot is hidden.
     Blindspots with no related entities are always visible.
-    Scoped partners (clients) never see blindspots.
+    Guests never see blindspots.
     """
     try:
         partner = _current_partner.get() or {}
+        if not partner:
+            return True
         if partner.get("isAdmin", False):
             return True
-        # Scoped partners cannot see blindspots
+        # Guests cannot see blindspots.
         if is_unassigned_partner(partner):
             return False
-        if is_scoped_partner(partner):
+        if is_guest(partner):
             return False
         related = getattr(blindspot, "related_entity_ids", None) or []
         if not related:
@@ -774,6 +829,32 @@ def _check_write_visibility(existing_entity: object, data: dict) -> dict | None:
     except Exception:
         logger.warning("_check_write_visibility failed, allowing write", exc_info=True)
         return None
+
+
+def _guest_write_rejection(collection: str) -> dict | None:
+    """Reject ontology writes from guests while keeping task/comment paths open.
+
+    Entity writes are intentionally excluded from this blanket rejection:
+    guests may create L3 entities under their authorized scope. The
+    application-layer write guard (OntologyService._enforce_guest_write_guard)
+    enforces the L1/L2/L3 rules with proper scope checks.
+    """
+    partner = _current_partner.get()
+    if not partner or not is_guest(partner):
+        return None
+
+    # Non-entity ontology collections remain fully restricted for guests.
+    # Note: "documents" is intentionally excluded — write(collection="documents") is
+    # the backward-compatible path for entity(type="document"), an L3 type that guests
+    # are allowed to create under an authorized parent. The application-layer write guard
+    # in OntologyService.upsert_document enforces the scope check.
+    if collection in {"protocols", "blindspots", "relationships", "entries"}:
+        return {
+            "status": "rejected",
+            "data": {},
+            "rejection_reason": "Guests cannot create or modify ontology content.",
+        }
+    return None
 
 
 def _audit_log(
@@ -1047,10 +1128,10 @@ async def search(
             ) else None
             entities = await ontology_service.list_entities(type_filter=type_filter)
             entities = [e for e in entities if _is_entity_visible(e)]
-            # Apply L1 scope filter for scoped partners
+            # Apply L1 scope filter for guests
             _partner_ctx = _current_partner.get() or {}
-            _access = describe_partner_access(_partner_ctx)
-            if _access["is_scoped_partner"]:
+            _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
+            if _access and _access["is_guest"]:
                 all_entities_for_map = await ontology_service._entities.list_all()
                 _entity_map = {e.id: e for e in all_entities_for_map if e.id}
                 _allowed: set[str] = set()
@@ -1078,6 +1159,13 @@ async def search(
             # Query document entities (type="document") from entities collection
             doc_entities = await ontology_service._entities.list_all(type_filter="document")
             doc_entities = [d for d in doc_entities if _is_entity_visible(d)]
+            partner_ctx = _current_partner.get()
+            if partner_ctx and is_guest(partner_ctx):
+                allowed_ids = await _guest_allowed_entity_ids()
+                doc_entities = [
+                    d for d in doc_entities
+                    if allowed_ids and _is_document_like_entity_visible_for_guest(d, allowed_ids)
+                ]
             # Exclude archived document entities (dead links confirmed unresolvable)
             doc_entities = [d for d in doc_entities if d.status != "archived"]
             # Apply product_id filter for documents via parent_id chain
@@ -1217,6 +1305,8 @@ async def get(
     if not name and not id:
         return {"error": "INVALID_INPUT", "message": "Must provide either name or id"}
 
+    partner = _current_partner.get() or {}
+
     if collection == "entities":
         if name:
             result = await ontology_service.get_entity(name)
@@ -1231,18 +1321,39 @@ async def get(
             result = None
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Entity not found"}
-        if not _is_entity_visible(result.entity):
+        if partner and is_guest(partner):
+            allowed_ids = await _guest_allowed_entity_ids()
+            if not allowed_ids or not _is_document_like_entity_visible_for_guest(result.entity, allowed_ids):
+                return {"error": "NOT_FOUND", "message": "Entity not found"}
+            if not _is_entity_visible(result.entity):
+                return {"error": "NOT_FOUND", "message": "Entity not found"}
+        elif not _is_entity_visible(result.entity):
             return {"error": "NOT_FOUND", "message": "Entity not found"}
         response = _serialize(result)
         # Split relationships into outgoing/incoming for clearer graph navigation
         eid = result.entity.id
         if result.relationships:
+            allowed_ids = await _guest_allowed_entity_ids() if partner and is_guest(partner) else set()
+            visible_relationships = []
+            for rel in result.relationships:
+                other_id = rel.target_id if rel.source_entity_id == eid else rel.source_entity_id
+                other_entity = await entity_repo.get_by_id(other_id)
+                if other_entity is None:
+                    continue
+                if partner and is_guest(partner):
+                    if not allowed_ids or not _is_document_like_entity_visible_for_guest(other_entity, allowed_ids):
+                        continue
+                    if not _is_entity_visible(other_entity):
+                        continue
+                elif not _is_entity_visible(other_entity):
+                    continue
+                visible_relationships.append(rel)
             response["outgoing_relationships"] = [
-                _serialize(r) for r in result.relationships
+                _serialize(r) for r in visible_relationships
                 if r.source_entity_id == eid
             ]
             response["incoming_relationships"] = [
-                _serialize(r) for r in result.relationships
+                _serialize(r) for r in visible_relationships
                 if r.source_entity_id != eid
             ]
             # Remove flat list to avoid payload duplication
@@ -1281,7 +1392,13 @@ async def get(
         result = await ontology_service.get_document(doc_id)
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
-        if not _is_entity_visible(result):
+        if partner and is_guest(partner):
+            allowed_ids = await _guest_allowed_entity_ids()
+            if not allowed_ids or not _is_document_like_entity_visible_for_guest(result, allowed_ids):
+                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+            if hasattr(result, "visibility") and not _is_entity_visible(result):
+                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+        elif not _is_entity_visible(result):
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
         return _serialize(result)
 
@@ -1341,8 +1458,17 @@ async def read_source(doc_id: str) -> dict:
     """
     await _ensure_services()
     try:
-        doc_entity = await entity_repo.get_by_id(doc_id)
-        if doc_entity and not _is_entity_visible(doc_entity):
+        doc_record = await ontology_service.get_document(doc_id)
+        if doc_record is None:
+            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+        partner = _current_partner.get() or {}
+        if partner and is_guest(partner):
+            allowed_ids = await _guest_allowed_entity_ids()
+            if not allowed_ids or not _is_document_like_entity_visible_for_guest(doc_record, allowed_ids):
+                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+            if hasattr(doc_record, "visibility") and not _is_entity_visible(doc_record):
+                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+        elif hasattr(doc_record, "visibility") and not _is_entity_visible(doc_record):
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
         result = None
         reader = getattr(source_service, "read_source_with_recovery", None)
@@ -1464,6 +1590,10 @@ async def write(
         if id:
             data["id"] = id
 
+        guest_rejection = _guest_write_rejection(collection)
+        if guest_rejection is not None:
+            return _unified_response(**guest_rejection)
+
         if collection == "entities":
             # --- Permission check: existing entity must be visible to caller ---
             existing_id = data.get("id")
@@ -1487,7 +1617,7 @@ async def write(
             else:
                 _before_visibility = None
 
-            result = await ontology_service.upsert_entity(data)
+            result = await ontology_service.upsert_entity(data, partner=_current_partner.get())
             serialized = _serialize(result)
             entity_id = serialized.get("entity", {}).get("id")
             _audit_log(
@@ -1529,12 +1659,19 @@ async def write(
                     pass  # never block write
             if policy_suggestion is not None:
                 serialized["policy_suggestion"] = policy_suggestion
+            # Detect rejected fields and set response status accordingly
+            _warnings = result.warnings or []
+            _rejected = [w for w in _warnings if w.startswith("REJECTED_FIELDS:")]
+            _resp_status = "partial" if _rejected else "ok"
+            _rejection_reason = _rejected[0] if _rejected else None
             return _unified_response(
+                status=_resp_status,
                 data=serialized,
-                warnings=result.warnings or [],
+                warnings=_warnings,
                 similar_items=result.similar_items or [],
                 context_bundle=context_bundle,
                 governance_hints=governance_hints,
+                rejection_reason=_rejection_reason,
             )
 
         elif collection == "documents":
@@ -1548,7 +1685,7 @@ async def write(
                     changes={"input": data},
                 )
                 return _unified_response(data=serialized)
-            result = await ontology_service.upsert_document(data)
+            result = await ontology_service.upsert_document(data, partner=_current_partner.get())
             serialized = _serialize(result)
             _audit_log(
                 event_type="ontology.document.upsert",
@@ -1818,6 +1955,12 @@ async def write(
                     f"Use: entities, documents, protocols, blindspots, relationships, entries"
                 ),
             )
+    except PermissionError as e:
+        return _unified_response(
+            status="rejected",
+            data={},
+            rejection_reason=f"FORBIDDEN: {e}",
+        )
     except (ValueError, KeyError, TypeError) as e:
         return _unified_response(status="rejected", data={}, rejection_reason=str(e))
 

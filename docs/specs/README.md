@@ -8,6 +8,7 @@
 - `SPEC-task-governance.md`
 - `SPEC-l2-entity-redefinition.md`
 - `SPEC-partner-context-fix.md`
+- `SPEC-partner-access-scope.md`
 - `SPEC-agent-integration-contract.md`
 - `SPEC-governance-observability.md`
 - `SPEC-task-view-clarity.md`

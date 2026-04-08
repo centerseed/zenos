@@ -5,41 +5,139 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useMemo, useState } from "react";
 import { APP_COPY } from "@/lib/i18n";
+import { resolveActiveWorkspace } from "@/lib/partner";
 
-const BASE_NAV_ITEMS = [
+/** Shared workspace surface: shown when isHomeWorkspace=false and workspaceRole is member or guest */
+const SHARED_WORKSPACE_NAV_ITEMS = [
+  { href: "/knowledge-map", label: "知識地圖" },
+  { href: "/projects", label: "Products" },
+  { href: "/tasks", label: "Tasks" },
+];
+
+/** Full home workspace nav for members */
+const MEMBER_NAV_ITEMS = [
   { href: "/knowledge-map", label: "知識地圖" },
   { href: "/projects", label: "專案" },
   { href: "/tasks", label: "任務" },
   { href: "/clients", label: "客戶" },
 ];
 
-const SCOPED_NAV_ITEMS = [
-  { href: "/projects", label: "專案" },
-  { href: "/tasks", label: "任務" },
+/** Full home workspace nav for owners */
+const OWNER_NAV_ITEMS = [
+  ...MEMBER_NAV_ITEMS,
+  { href: "/team", label: APP_COPY.team },
+  { href: "/setup", label: APP_COPY.setup },
 ];
 
-const ADMIN_NAV_ITEMS = [{ href: "/team", label: APP_COPY.team }];
+// ─── Workspace Entry ──────────────────────────────────────────────────────────
 
-const TAIL_NAV_ITEMS = [{ href: "/setup", label: APP_COPY.setup }];
+interface WorkspaceInfo {
+  id: string;
+  name: string;
+  hasUpdate?: boolean;
+}
+
+interface WorkspaceEntryProps {
+  availableWorkspaces: WorkspaceInfo[];
+  activeWorkspaceId?: string;
+  onSwitch?: (workspaceId: string) => void;
+}
+
+function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: WorkspaceEntryProps) {
+  const [open, setOpen] = useState(false);
+
+  if (availableWorkspaces.length <= 1) {
+    return (
+      <span
+        data-testid="workspace-entry-single"
+        className="hidden sm:inline-flex items-center rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1 text-xs font-medium text-muted-foreground"
+      >
+        我的工作區
+      </span>
+    );
+  }
+
+  const active = availableWorkspaces.find((w) => w.id === activeWorkspaceId) ?? availableWorkspaces[0];
+
+  return (
+    <div className="relative hidden sm:block" data-testid="workspace-entry-picker">
+      <button
+        onClick={() => setOpen((prev) => !prev)}
+        className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+      >
+        {active.name}
+        <svg className="h-3 w-3 opacity-60" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {open && (
+        <ul
+          role="listbox"
+          aria-label="切換工作區"
+          className="absolute left-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-md border border-border bg-card shadow-lg"
+        >
+          {availableWorkspaces.map((ws) => {
+            const isActive = ws.id === active.id;
+            return (
+              <li key={ws.id} role="option" aria-selected={isActive}>
+                <button
+                  onClick={() => {
+                    onSwitch?.(ws.id);
+                    setOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-secondary/60 ${isActive ? "text-primary" : "text-foreground"}`}
+                >
+                  <span>{ws.name}</span>
+                  {ws.hasUpdate && !isActive && (
+                    <span
+                      data-testid={`workspace-badge-${ws.id}`}
+                      className="ml-2 h-1.5 w-1.5 rounded-full bg-primary"
+                      aria-label="有更新"
+                    />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export function AppNav() {
   const pathname = usePathname();
   const { partner, signOut } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const isScoped = !partner?.isAdmin && (partner?.authorizedEntityIds?.length ?? 0) > 0;
+  const { isHomeWorkspace, workspaceRole } = resolveActiveWorkspace(partner);
 
+  // Two-stage nav decision:
+  // Stage 1 — isHomeWorkspace gate: shared workspaces get restricted surface
+  // Stage 2 — workspaceRole gate: within home workspace, role determines nav depth
   const navItems = useMemo(() => {
-    if (isScoped) {
-      return SCOPED_NAV_ITEMS;
+    if (!isHomeWorkspace) {
+      // Shared workspace: always show the restricted shared surface regardless of role
+      return SHARED_WORKSPACE_NAV_ITEMS;
     }
-    const items = [...BASE_NAV_ITEMS];
-    if (partner?.isAdmin) {
-      items.push(...ADMIN_NAV_ITEMS);
-    }
-    items.push(...TAIL_NAV_ITEMS);
-    return items;
-  }, [partner?.isAdmin, isScoped]);
+    // Home workspace: full surface, gated by role.
+    // guest within home workspace is an edge case (spec says it shouldn't occur);
+    // fallback to OWNER_NAV_ITEMS to avoid blank nav.
+    if (workspaceRole === "member") return MEMBER_NAV_ITEMS;
+    return OWNER_NAV_ITEMS;
+  }, [isHomeWorkspace, workspaceRole]);
+
+  // Workspace entry: derive available workspaces from partner data.
+  // Partner.availableWorkspaces is not yet defined in the backend (pending S04/S05).
+  // Until then, we derive a single-workspace list from the current partner context,
+  // so the entry always renders correctly and won't crash when the field is absent.
+  const availableWorkspaces = useMemo<WorkspaceInfo[]>(() => {
+    const raw = (partner as unknown as { availableWorkspaces?: WorkspaceInfo[] })?.availableWorkspaces;
+    if (Array.isArray(raw) && raw.length > 0) return raw;
+    return [{ id: partner?.id ?? "home", name: "我的工作區" }];
+  }, [partner]);
 
   if (!partner) return null;
 
@@ -48,7 +146,7 @@ export function AppNav() {
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-3 sm:gap-6">
           <Link
-            href="/"
+            href="/tasks"
             className="flex items-center gap-2 rounded-md transition-opacity hover:opacity-95"
             aria-label="ZenOS 首頁"
           >
@@ -66,6 +164,7 @@ export function AppNav() {
               </span>
             </span>
           </Link>
+          <WorkspaceEntry availableWorkspaces={availableWorkspaces} activeWorkspaceId={partner.id} />
           <nav className="hidden md:flex items-center gap-1">
             {navItems.map(({ href, label }) => {
               const isActive = pathname.startsWith(href);

@@ -1,45 +1,38 @@
 /**
- * Tests for client portal — scoped partner visibility and access control.
+ * Tests for client portal — workspaceRole-driven visibility and access control.
  *
- * DC-1: scoped partner nav shows only 專案 and 任務
- * DC-2: internal member nav unchanged
- * DC-3: non-admin redirect from /setup
- * DC-4: empty-scope prompt on tasks page
- * DC-5: external client badge in team member list
+ * DC-1: guest nav shows only shared-L1 collaboration entry points
+ * DC-2: member and owner nav follow workspaceRole
+ * DC-3: non-owner redirect from /setup
+ * DC-4: guest empty-scope prompt on tasks page
+ * DC-5: workspaceRole badges in team member list
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 import React from "react";
 
-// ── Mutable partner state shared across tests ────────────────────────────────
-let mockPartner: {
-  id: string;
-  email: string;
-  displayName: string;
-  apiKey: string;
-  isAdmin: boolean;
-  status: "active" | "invited" | "suspended";
-  authorizedEntityIds: string[];
-  invitedBy: null;
-  createdAt: Date;
-  updatedAt: Date;
-} = {
+type WorkspaceRole = "owner" | "member" | "guest";
+
+const DEFAULT_PARTNER = {
   id: "partner-1",
   email: "user@test.com",
   displayName: "Test User",
   apiKey: "test-key", // pragma: allowlist secret
   isAdmin: false,
-  status: "active",
-  authorizedEntityIds: [],
-  invitedBy: null,
+  workspaceRole: "guest" as WorkspaceRole,
+  status: "active" as const,
+  accessMode: "unassigned" as const,
+  authorizedEntityIds: [] as string[],
+  invitedBy: null as null,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
 
+let mockPartner = { ...DEFAULT_PARTNER };
+
 const mockGetIdToken = vi.fn().mockResolvedValue("fake-token");
 const mockRouterReplace = vi.fn();
-
-// ── Static top-level mocks (hoisted by vitest) ───────────────────────────────
+const getPartnersMock = vi.hoisted(() => vi.fn().mockResolvedValue([]));
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: mockRouterReplace }),
@@ -103,6 +96,7 @@ vi.mock("@/lib/api", () => ({
   getTasks: vi.fn().mockResolvedValue([]),
   getProjectEntities: vi.fn().mockResolvedValue([]),
   getAllEntities: vi.fn().mockResolvedValue([]),
+  getPartners: (...args: unknown[]) => getPartnersMock(...args),
   createTask: vi.fn(),
   updateTask: vi.fn(),
   confirmTask: vi.fn(),
@@ -130,42 +124,81 @@ vi.mock("@/lib/firebase", () => ({
   getAuthInstance: vi.fn(() => ({})),
 }));
 
-// ── Shared reset ─────────────────────────────────────────────────────────────
+beforeEach(() => {
+  mockPartner = { ...DEFAULT_PARTNER };
+});
 
 afterEach(() => {
   cleanup();
   mockRouterReplace.mockClear();
+  vi.unstubAllGlobals();
 });
 
-// ─── DC-1 & DC-2: AppNav navigation items ────────────────────────────────────
-
-describe("AppNav — scoped partner navigation", () => {
-  it("DC-1: scoped partner sees only 專案 and 任務", async () => {
-    mockPartner = { ...mockPartner, authorizedEntityIds: ["entity-abc"], isAdmin: false };
+describe("AppNav — two-stage nav (isHomeWorkspace → workspaceRole)", () => {
+  it("DC-1: guest in shared workspace (sharedPartnerId set) sees only Knowledge Map / Products / Tasks", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "guest",
+      accessMode: "scoped",
+      authorizedEntityIds: ["entity-abc"],
+      sharedPartnerId: "owner-partner-id",
+    };
 
     const { AppNav } = await import("@/components/AppNav");
     render(<AppNav />);
 
-    expect(screen.getByRole("link", { name: "專案" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "任務" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "知識地圖" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "知識地圖" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "客戶" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /成員/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /設定/i })).not.toBeInTheDocument();
   });
 
-  it("DC-2: internal member sees full nav (知識地圖, 客戶, 設定)", async () => {
-    mockPartner = { ...mockPartner, authorizedEntityIds: [], isAdmin: false };
+  it("DC-1: member in shared workspace (sharedPartnerId set) sees only Knowledge Map / Products / Tasks", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "member",
+      accessMode: "internal",
+      authorizedEntityIds: [],
+      sharedPartnerId: "owner-partner-id",
+    };
+
+    const { AppNav } = await import("@/components/AppNav");
+    render(<AppNav />);
+
+    expect(screen.getByRole("link", { name: "知識地圖" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "客戶" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /成員/i })).not.toBeInTheDocument();
+  });
+
+  it("DC-2: member in home workspace sees full nav without team/setup", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "member",
+      accessMode: "internal",
+      authorizedEntityIds: [],
+    };
 
     const { AppNav } = await import("@/components/AppNav");
     render(<AppNav />);
 
     expect(screen.getByRole("link", { name: "知識地圖" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "客戶" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /設定/i })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /成員/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /設定/i })).not.toBeInTheDocument();
   });
 
-  it("DC-2: admin user sees full nav including 成員 (team)", async () => {
-    mockPartner = { ...mockPartner, authorizedEntityIds: [], isAdmin: true };
+  it("DC-2: owner in home workspace sees team and setup entries", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "owner",
+      accessMode: "internal",
+      authorizedEntityIds: [],
+      isAdmin: true,
+    };
 
     const { AppNav } = await import("@/components/AppNav");
     render(<AppNav />);
@@ -176,28 +209,36 @@ describe("AppNav — scoped partner navigation", () => {
   });
 });
 
-// ─── DC-3: /setup admin guard ────────────────────────────────────────────────
-
-describe("SetupPage — admin guard", () => {
-  it("DC-3: non-admin user is redirected to /", async () => {
-    mockPartner = { ...mockPartner, isAdmin: false, authorizedEntityIds: [] };
+describe("SetupPage — owner guard", () => {
+  it("DC-3: non-owner user is redirected to /tasks", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "guest",
+      accessMode: "unassigned",
+      authorizedEntityIds: [],
+    };
 
     const { default: Page } = await import("@/app/setup/page");
     render(<Page />);
 
     await waitFor(() => {
-      expect(mockRouterReplace).toHaveBeenCalledWith("/");
+      expect(mockRouterReplace).toHaveBeenCalledWith("/tasks");
     });
   });
 
-  it("DC-3: admin user renders setup content (not redirected)", async () => {
-    mockPartner = { ...mockPartner, isAdmin: true, authorizedEntityIds: [] };
+  it("DC-3: owner user renders setup content (not redirected)", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "owner",
+      isAdmin: true,
+      accessMode: "internal",
+      authorizedEntityIds: [],
+    };
     mockRouterReplace.mockClear();
 
     const { default: Page } = await import("@/app/setup/page");
     render(<Page />);
 
-    // The page renders the MCP config block — meaning it was not short-circuited
     await waitFor(() => {
       expect(screen.getByTestId("mcp-config")).toBeInTheDocument();
     });
@@ -205,11 +246,14 @@ describe("SetupPage — admin guard", () => {
   });
 });
 
-// ─── DC-4: empty-scope prompt on tasks page ──────────────────────────────────
-
 describe("TasksPage — empty scope prompt", () => {
-  it("DC-4: shows 未設定存取空間 when partner has empty authorizedEntityIds (non-admin)", async () => {
-    mockPartner = { ...mockPartner, isAdmin: false, authorizedEntityIds: [] };
+  it("DC-4: shows 未指派空間 prompt when guest has no shared L1 access", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "guest",
+      accessMode: "unassigned",
+      authorizedEntityIds: [],
+    };
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -225,12 +269,15 @@ describe("TasksPage — empty scope prompt", () => {
         screen.getByText(/您的帳號尚未設定存取空間，請聯繫管理員/)
       ).toBeInTheDocument();
     });
-
-    vi.unstubAllGlobals();
   });
 
-  it("DC-4: does NOT show prompt when partner has authorized entities", async () => {
-    mockPartner = { ...mockPartner, isAdmin: false, authorizedEntityIds: ["entity-1"] };
+  it("DC-4: does NOT show prompt when guest has authorized shared L1 entities", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "guest",
+      accessMode: "scoped",
+      authorizedEntityIds: ["entity-1"],
+    };
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -241,17 +288,18 @@ describe("TasksPage — empty scope prompt", () => {
     const { TasksPage } = await import("@/app/tasks/page");
     render(<TasksPage />);
 
-    // Wait a moment — if prompt were to appear it would appear immediately
-    await new Promise((r) => setTimeout(r, 100));
-    expect(
-      screen.queryByText(/您的帳號尚未設定存取空間/)
-    ).not.toBeInTheDocument();
-
-    vi.unstubAllGlobals();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByText(/您的帳號尚未設定存取空間/)).not.toBeInTheDocument();
   });
 
-  it("DC-4: admin user does NOT see empty-scope prompt even with empty authorizedEntityIds", async () => {
-    mockPartner = { ...mockPartner, isAdmin: true, authorizedEntityIds: [] };
+  it("DC-4: owner user does NOT see empty-scope prompt even with empty authorizedEntityIds", async () => {
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "owner",
+      isAdmin: true,
+      accessMode: "internal",
+      authorizedEntityIds: [],
+    };
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
@@ -262,62 +310,60 @@ describe("TasksPage — empty scope prompt", () => {
     const { TasksPage } = await import("@/app/tasks/page");
     render(<TasksPage />);
 
-    await new Promise((r) => setTimeout(r, 100));
-    expect(
-      screen.queryByText(/您的帳號尚未設定存取空間/)
-    ).not.toBeInTheDocument();
-
-    vi.unstubAllGlobals();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(screen.queryByText(/您的帳號尚未設定存取空間/)).not.toBeInTheDocument();
   });
 });
 
-// ─── DC-5: External client badge in team member list ────────────────────────
-
-describe("TeamPage — external client badge", () => {
+describe("TeamPage — workspaceRole badge", () => {
   beforeEach(() => {
-    mockPartner = { ...mockPartner, isAdmin: true, authorizedEntityIds: [] };
+    mockPartner = {
+      ...mockPartner,
+      workspaceRole: "owner",
+      isAdmin: true,
+      accessMode: "internal",
+      authorizedEntityIds: [],
+    };
+    // Reset mock to default empty so each test fully controls its partner list
+    getPartnersMock.mockReset();
+    getPartnersMock.mockResolvedValue([]);
   });
 
-  it("DC-5: shows 外部客戶 badge for partner with authorizedEntityIds", async () => {
+  it("DC-5: shows 訪客 badge for partner with shared access", async () => {
     const externalPartner = {
       id: "ext-partner-1",
       email: "client@external.com",
       displayName: "External Client",
       isAdmin: false,
+      workspaceRole: "guest" as const,
       status: "active" as const,
+      accessMode: "scoped" as const,
       authorizedEntityIds: ["entity-1", "entity-2"],
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ partners: [externalPartner] }),
-    }));
+    getPartnersMock.mockResolvedValueOnce([externalPartner]);
 
     const { default: Page } = await import("@/app/team/page");
     render(<Page />);
 
     await waitFor(() => {
-      expect(screen.getByText("外部客戶")).toBeInTheDocument();
+      expect(screen.getByText("訪客")).toBeInTheDocument();
     });
-    expect(screen.getByText(/授權 2 個專案空間/)).toBeInTheDocument();
-
-    vi.unstubAllGlobals();
   });
 
-  it("DC-5: does NOT show 外部客戶 badge for partner with empty authorizedEntityIds", async () => {
+  it("DC-5: shows 成員 badge for member partner", async () => {
     const internalPartner = {
       id: "int-partner-1",
       email: "member@internal.com",
       displayName: "Internal Member",
       isAdmin: false,
+      workspaceRole: "member" as const,
       status: "active" as const,
+      accessMode: "internal" as const,
       authorizedEntityIds: [],
     };
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ partners: [internalPartner] }),
-    }));
+    // Use mockResolvedValue (not Once) so getPartners always returns the partner
+    // even if called multiple times (e.g. React strict mode double invoke).
+    getPartnersMock.mockResolvedValue([internalPartner]);
 
     const { default: Page } = await import("@/app/team/page");
     render(<Page />);
@@ -325,8 +371,13 @@ describe("TeamPage — external client badge", () => {
     await waitFor(() => {
       expect(screen.getByText("member@internal.com")).toBeInTheDocument();
     });
-    expect(screen.queryByText("外部客戶")).not.toBeInTheDocument();
-
-    vi.unstubAllGlobals();
+    // Nav link (APP_COPY.team) and the role badge both render "成員".
+    // Use getAllByText to handle multiple matches, then verify the badge span exists.
+    const memberTexts = screen.getAllByText("成員");
+    const badgeSpan = memberTexts.find(
+      (el) => el.tagName === "SPAN" && !el.closest("a")
+    );
+    expect(badgeSpan).toBeInTheDocument();
+    expect(screen.queryByText(/授權 \d+ 個專案空間/)).not.toBeInTheDocument();
   });
 });

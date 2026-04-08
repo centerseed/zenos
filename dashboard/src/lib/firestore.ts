@@ -70,6 +70,11 @@ export function toTask(id: string, data: Record<string, unknown>): Task {
 }
 
 export function toPartner(id: string, data: Record<string, unknown>): Partner {
+  const accessMode = data.accessMode ?? data.access_mode;
+  const normalizedAccessMode =
+    accessMode === "internal" || accessMode === "scoped" || accessMode === "unassigned"
+      ? accessMode
+      : undefined;
   return {
     id,
     email: data.email as string,
@@ -77,6 +82,15 @@ export function toPartner(id: string, data: Record<string, unknown>): Partner {
     apiKey: data.apiKey as string,
     authorizedEntityIds: (data.authorizedEntityIds as string[]) ?? [],
     sharedPartnerId: (data.sharedPartnerId as string) ?? null,
+    accessMode:
+      ((normalizedAccessMode === "scoped" && ((data.authorizedEntityIds as string[]) ?? []).length === 0)
+        ? "unassigned"
+        : normalizedAccessMode) ??
+      (((data.isAdmin as boolean) ?? false)
+        ? "internal"
+        : ((data.authorizedEntityIds as string[]) ?? []).length > 0
+          ? "scoped"
+          : "unassigned"),
     isAdmin: (data.isAdmin as boolean) ?? false,
     status: (data.status as Partner["status"]) ?? "active",
     invitedBy: (data.invitedBy as string) ?? null,

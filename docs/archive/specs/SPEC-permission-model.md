@@ -4,7 +4,7 @@ id: SPEC-permission-model
 status: Under Review
 ontology_entity: 夥伴身份與邀請
 created: 2026-04-03
-updated: 2026-04-04
+updated: 2026-04-06
 ---
 
 # Feature Spec: Partner 權限模型
@@ -31,20 +31,32 @@ ZenOS 現有的 partner 模型假設所有 partner 都看到同一個 tenant 的
 
 兩個維度同時成立：partner 必須先有對應 L1 的 scope，且 entity 的 visibility 允許，才能看到該 entity。
 
-### `authorized_entity_ids` 重新定義為 L1 Scope
+### `authorized_entity_ids` 重新定義為 L1 分享範圍
 
-`partners.authorized_entity_ids`（現有欄位，`text[]`）重新定義語意：存放該 partner 被授權存取的 **L1 product ID 列表**。
+`partners.authorized_entity_ids`（現有欄位，`text[]`）重新定義語意：存放該 partner 被分享的 **L1 product ID 列表**。
 
 - 原設計為細粒度 per-entity 授權，但從未實際使用（無任何查詢邏輯）。
-- 重新定義為 L1-level scope，不需要新增欄位或 migration。
+- 重新定義為 L1-level scope；scope 本身不需要新增欄位，但若要明確表達 Internal / Scoped / Unassigned 身份，允許另加獨立欄位。
+- 該欄位只描述「被分享哪些 L1」，**不再負責區分內部成員 vs 外部 / scoped partner 身份**。
 
 | `authorized_entity_ids` 值 | 身份 | 能看什麼 |
 |---------------------------|------|---------|
-| `null` 或 `{}` | 內部成員 | 走現有 `sharedPartnerId` 邏輯，看整個 tenant 的資料 |
+| `null` 或 `{}` | 未指派空間的 partner | 不自動取得任何 L1 可見性 |
 | `{product-abc}` | Scoped partner | 只看 L1 `product-abc` 底下的資料 |
 | `{product-abc, product-xyz}` | Scoped partner（多 L1，P1）| 看兩個 L1 底下的資料 |
 
-空陣列（`{}`）與 null 等價，視為內部成員。
+空陣列（`{}`）與 null 等價，視為「尚未被分享任何 L1」，不是內部成員。
+
+### Internal Member 是獨立狀態，不由空 scope 推導
+
+內部成員能看整個 tenant 的資料，是一個**獨立身份狀態**，不能再由 `authorized_entity_ids` 為空來推導。
+
+本 spec 定義產品語意如下：
+
+- `authorized_entity_ids = []`：未被分享任何 L1，應看不到 tenant 資料
+- `authorized_entity_ids = [L1...]`：Scoped partner，只看被分享的 L1
+- Internal Member：可跨 L1 工作，但其身份由另一個明確狀態決定，不由空 scope 猜測
+- Architect 可透過獨立欄位（例如 `access_mode`）表達此狀態；重點是 server-side 不得再用空 scope 推導 internal member
 
 ---
 
@@ -54,11 +66,12 @@ ZenOS 現有的 partner 模型假設所有 partner 都看到同一個 tenant 的
 
 #### 1. `authorized_entity_ids` 重新定義語意
 
-- **描述**：`authorized_entity_ids` 欄位存放 L1 product ID 列表。null 或空陣列 = 內部成員；有值 = scoped partner。
+- **描述**：`authorized_entity_ids` 欄位存放 L1 product ID 列表。null 或空陣列代表「尚未分享任何 L1」，有值代表 scoped partner 的分享範圍。
 - **Acceptance Criteria**：
-  - Given partner 的 `authorized_entity_ids = null`，When 查詢任何資料，Then 行為與現有內部成員一致（看全部）
-  - Given partner 的 `authorized_entity_ids = {}`，When 查詢任何資料，Then 行為與 null 等價（看全部）
+  - Given partner 的 `authorized_entity_ids = null`，When 查詢任何資料，Then 不自動返回任何 L1 資料
+  - Given partner 的 `authorized_entity_ids = {}`，When 查詢任何資料，Then 行為與 null 等價（不返回任何 L1 資料）
   - Given partner 的 `authorized_entity_ids = {product-abc}`，When 查詢 entities，Then 只返回 `product_id = product-abc` 的資料
+  - Given partner 尚未被分享任何 L1，When 登入 Dashboard，Then 顯示「尚未設定存取空間」
 
 #### 2. Server 端強制執行 scope 過濾
 
@@ -103,10 +116,10 @@ ZenOS 現有的 partner 模型假設所有 partner 都看到同一個 tenant 的
 
 #### 6. 只有 Admin 可以設定 `authorized_entity_ids`
 
-- **描述**：`authorized_entity_ids` 的設定與修改只能由 tenant admin 執行，包含升格（改回 null）與降格（設為 L1 ID）。
+- **描述**：`authorized_entity_ids` 的設定與修改只能由 tenant admin 執行。移除所有分享後，partner 回到「尚未設定存取空間」，而不是自動升格為內部成員。
 - **Acceptance Criteria**：
   - Given 非 admin partner 嘗試修改自己或他人的 `authorized_entity_ids`，Then 系統拒絕並回傳 403
-  - Given admin 將 scoped partner 的 `authorized_entity_ids` 改回 null，Then 該 partner 立即取得內部成員的完整存取權
+  - Given admin 將 scoped partner 的 `authorized_entity_ids` 改回 null，Then 該 partner 立即失去所有 L1 可見性
   - Given admin 修改設定，Then 下次該 partner 查詢時即套用新的 scope
 
 ### P1（應該有）
@@ -125,6 +138,7 @@ ZenOS 現有的 partner 模型假設所有 partner 都看到同一個 tenant 的
 - 細粒度的 per-entity per-partner 授權（`authorized_entity_ids` 不再用於單一 entity 控制）
 - Partner 自行管理自己的 `authorized_entity_ids`
 - L2 / L3 層級的獨立 scope 設定（scope 以 L1 為單位，L2/L3 繼承）
+- Internal Member 的資料模型欄位設計（由 Architect 決定，必要時可加 migration）
 
 ---
 
@@ -188,7 +202,8 @@ ZenOS 現有的 partner 模型假設所有 partner 都看到同一個 tenant 的
 
 ## 技術約束（給 Architect 參考）
 
-- `authorized_entity_ids` 欄位現有 GIN index，可直接用於 `@>` 查詢，不需要額外 migration
+- `authorized_entity_ids` 欄位現有 GIN index，可直接用於 `@>` 查詢；若 Architect 新增身份欄位，該 migration 應與 runtime enforcement 一起交付
 - 所有查詢入口（dashboard_api.py、tools.py）必須在 session 建立時解析 `authorized_entity_ids`，注入查詢 context
 - `authorized_entity_ids` 與 `sharedPartnerId` 是不同維度：scoped partner（客戶）的 `sharedPartnerId` 設為 admin_id（才能路由到正確 partition），但 scope 過濾在其之上額外執行
+- `sharedPartnerId` 不得被當成「可看整個 tenant」的授權來源
 - 存取其他 L1 資源時回傳空結果（非 403），以免暴露 L1 存在

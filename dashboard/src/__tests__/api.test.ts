@@ -359,7 +359,52 @@ describe("getPartnerMe", () => {
     vi.stubGlobal("fetch", mockFetch({ partner }));
 
     const result = await getPartnerMe(FAKE_TOKEN);
-    expect(result).toEqual(partner);
+    expect(result).toMatchObject({
+      id: "p-1",
+      email: "user@example.com",
+      isAdmin: false,
+      workspaceRole: "member",
+      accessMode: "internal",
+      authorizedEntityIds: [],
+    });
+  });
+
+  it("preserves workspaceRole and canonicalizes legacy access fields", async () => {
+    const partner = {
+      id: "p-guest",
+      email: "guest@example.com",
+      displayName: "Guest",
+      workspaceRole: "guest",
+      accessMode: "scoped",
+      authorizedEntityIds: ["entity-1"],
+      isAdmin: false,
+    };
+    vi.stubGlobal("fetch", mockFetch({ partner }));
+
+    const result = await getPartnerMe(FAKE_TOKEN);
+
+    expect(result.workspaceRole).toBe("guest");
+    expect(result.accessMode).toBe("scoped");
+    expect(result.authorizedEntityIds).toEqual(["entity-1"]);
+  });
+
+  it("preserves server-provided scoped accessMode when guest has empty entity list", async () => {
+    const partner = {
+      id: "p-guest-empty",
+      email: "guest2@example.com",
+      displayName: "Guest No Entities",
+      workspaceRole: "guest",
+      accessMode: "scoped",
+      authorizedEntityIds: [],
+      isAdmin: false,
+    };
+    vi.stubGlobal("fetch", mockFetch({ partner }));
+
+    const result = await getPartnerMe(FAKE_TOKEN);
+
+    expect(result.workspaceRole).toBe("guest");
+    expect(result.accessMode).toBe("scoped");
+    expect(result.authorizedEntityIds).toEqual([]);
   });
 });
 

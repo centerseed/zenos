@@ -45,6 +45,7 @@ from zenos.domain.repositories import (
     RelationshipRepository,
 )
 from zenos.domain.search import SearchResult, search_ontology
+from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
 
 
 # ──────────────────────────────────────────────
@@ -199,6 +200,15 @@ class OntologyService:
         )
 
     @staticmethod
+    def _canonical_visibility(value: object) -> str:
+        raw = str(value or "public").strip().lower()
+        if raw == "role-restricted":
+            return "restricted"
+        if raw not in {"public", "restricted", "confidential"}:
+            raise ValueError("visibility must be one of: public, restricted, confidential")
+        return raw
+
+    @staticmethod
     def is_entity_visible_for_partner(
         entity: Entity,
         partner: dict,
@@ -214,32 +224,31 @@ class OntologyService:
         Returns:
             True if the partner has access, False otherwise.
         """
-        if partner.get("isAdmin"):
+        access = describe_partner_access(partner)
+
+        if access["is_owner"]:
             return True
 
-        authorized_ids = list(partner.get("authorizedEntityIds") or [])
-        is_scoped = bool(authorized_ids)
+        if is_unassigned_partner(partner):
+            return False
 
-        if is_scoped:
-            # Scoped partner (client): check L1 subtree scope then visibility
+        authorized_ids = list(partner.get("authorizedEntityIds") or [])
+
+        if access["is_guest"]:
+            # Guest: check authorized L1 subtree, then public-only visibility.
             if entity_map is not None:
                 allowed: set[str] = set()
                 for l1_id in authorized_ids:
                     allowed |= _collect_subtree_ids(l1_id, entity_map)
                 if entity.id not in allowed:
                     return False
-            # Scoped partners can only see public entities
-            return entity.visibility == "public"
+            elif not authorized_ids:
+                return False
+            return OntologyService._canonical_visibility(entity.visibility) == "public"
 
-        # Internal non-admin members
-        visibility = entity.visibility
-        if visibility in {"confidential", "restricted"}:
-            return False  # admin-only
-        if visibility == "role-restricted":
-            partner_roles = set(partner.get("roles") or [])
-            visible_to_roles = set(entity.visible_to_roles or [])
-            return bool(partner_roles & visible_to_roles) if visible_to_roles else False
-        return True  # public
+        # Member: can see public + restricted, but not confidential.
+        visibility = OntologyService._canonical_visibility(entity.visibility)
+        return visibility in ("public", "restricted")
 
     @classmethod
     def _normalize_layer_decision(cls, layer_decision: object) -> dict:
@@ -848,16 +857,92 @@ class OntologyService:
     # Governance-facing use cases (治理端)
     # ──────────────────────────────────────────
 
-    async def upsert_entity(self, data: dict) -> UpsertEntityResult:
+    # ── L1/L2 type constants for write guard ──
+    _L1_TYPES: frozenset[str] = frozenset({"product", "company", "person"})
+    _L2_TYPES: frozenset[str] = frozenset({"module"})
+    _L3_TYPES: frozenset[str] = frozenset({"document", "goal", "role", "project"})
+
+    async def _enforce_guest_write_guard(self, data: dict, partner: dict) -> None:
+        """Enforce write restrictions for guest partners.
+
+        Rules:
+        - L1 entity creation → always rejected for guests.
+        - L2 entity creation → always rejected for guests.
+        - L3 entity creation → allowed only when parent_id is within the guest's
+          authorized L1 subtree. If no parent_id is provided the guard also rejects,
+          because we cannot verify scope membership.
+        - After passing the guard, data["visibility"] is forced to "public".
+
+        Raises:
+            PermissionError: When the guest violates any of the above rules.
+        """
+        entity_type = str(data.get("type", "")).strip()
+
+        # L1: always rejected
+        if entity_type in self._L1_TYPES:
+            raise PermissionError(
+                f"Guest partners cannot create L1 entities (type='{entity_type}'). "
+                "Only member or owner roles may create top-level entities."
+            )
+
+        # L2: always rejected
+        if entity_type in self._L2_TYPES:
+            raise PermissionError(
+                f"Guest partners cannot create L2 entities (type='{entity_type}'). "
+                "Only member or owner roles may create module-level entities."
+            )
+
+        # L3: must have parent_id within authorized subtree
+        if entity_type in self._L3_TYPES:
+            parent_id = data.get("parent_id")
+            access = describe_partner_access(partner)
+            authorized_l1_ids = access["authorized_l1_ids"]
+
+            if not parent_id:
+                raise PermissionError(
+                    "Guest partners must provide parent_id when creating L3 entities. "
+                    "The parent must be within your authorized scope."
+                )
+
+            # Build the guest's allowed subtree from their authorized L1 ids
+            all_entities_list = await self._entities.list_all()
+            entity_map: dict[str, Entity] = {
+                e.id: e for e in (all_entities_list or []) if e.id
+            }
+            allowed: set[str] = set()
+            for l1_id in authorized_l1_ids:
+                allowed |= _collect_subtree_ids(l1_id, entity_map)
+
+            if parent_id not in allowed:
+                raise PermissionError(
+                    f"Guest partners cannot create entities under parent '{parent_id}'. "
+                    "The parent entity is outside your authorized scope."
+                )
+
+            # Force visibility=public for guest-created L3 entities
+            data["visibility"] = "public"
+
+    async def upsert_entity(self, data: dict, partner: dict | None = None) -> UpsertEntityResult:
         """Create or update an entity with integrated governance logic.
 
         Steps:
-          1. Validate input data
-          2. Build and persist the entity
-          3. Apply tag-confidence classification
-          4. Check split criteria (if entity has an ID for relationship lookup)
-          5. Return entity + governance advice
+          1. Guest write guard (if partner provided)
+          2. Validate input data
+          3. Build and persist the entity
+          4. Apply tag-confidence classification
+          5. Check split criteria (if entity has an ID for relationship lookup)
+          6. Return entity + governance advice
+
+        Args:
+            data: Entity field dict (name, type, summary, tags, etc.)
+            partner: Optional partner dict for write guard enforcement.
+                     When provided and partner is a guest, L1/L2 creation
+                     is rejected and L3 creation requires an authorized parent.
         """
+        # ── Guest write guard (application-layer, server-side enforcement) ──
+        if partner is not None and is_guest(partner):
+            await self._enforce_guest_write_guard(data, partner)
+
         existing: Entity | None = None
         if data.get("id"):
             existing = await self._entities.get_by_id(data["id"])
@@ -867,7 +952,16 @@ class OntologyService:
                 )
 
         # --- Fast path: append_sources on existing entity (skip full validation) ---
-        if existing and data.get("append_sources"):
+        # Only use fast path when append_sources is the ONLY mutation requested.
+        # If caller also provides name/summary/tags/type changes, fall through
+        # to the full update path so those fields are not silently ignored.
+        _FIELD_MUTATIONS = {"name", "summary", "tags", "type", "status", "parent_id", "level", "owner", "force"}
+        _has_field_mutations = existing and any(
+            k in data and data[k] != getattr(existing, k, None)
+            for k in _FIELD_MUTATIONS
+            if k in data
+        )
+        if existing and data.get("append_sources") and not _has_field_mutations:
             append_sources = data["append_sources"]
             existing_uris = {s.get("uri") for s in existing.sources}
             added = 0
@@ -1003,6 +1097,9 @@ class OntologyService:
             merged_data.setdefault("visible_to_departments", list(existing.visible_to_departments))
             merged_data.setdefault("confirmed_by_user", existing.confirmed_by_user)
             merged_data.setdefault("last_reviewed_at", existing.last_reviewed_at)
+
+        if "visibility" in merged_data:
+            merged_data["visibility"] = self._canonical_visibility(merged_data["visibility"])
 
         # 2. type enum
         entity_type = merged_data.get("type", "")
@@ -1269,16 +1366,36 @@ class OntologyService:
 
         # --- Confirmed entity protection: merge-only update (unless force=true) ---
         if existing and existing.confirmed_by_user and not merged_data.get("force"):
+                skipped_fields: list[str] = []
+                # Check name: explicitly requested rename is blocked without force
+                if data.get("name") and data["name"] != existing.name:
+                    skipped_fields.append(
+                        f"name: '{existing.name}' → '{data['name']}'"
+                    )
                 for field_name in ("summary", "status", "parent_id", "level"):
                     existing_val = getattr(existing, field_name, None)
                     new_val = data.get(field_name)
-                    if new_val and not existing_val:
-                        setattr(existing, field_name, new_val)
-                # Merge tags: only fill empty tag fields
+                    if new_val and new_val != existing_val:
+                        if not existing_val:
+                            # Fill empty field — allowed
+                            setattr(existing, field_name, new_val)
+                        else:
+                            # Overwrite non-empty field — blocked
+                            skipped_fields.append(
+                                f"{field_name}: '{existing_val}' → '{new_val}'"
+                            )
+                # Merge tags: only fill empty tag fields, report skipped overwrites
                 if isinstance(data.get("tags"), dict) and isinstance(existing.tags, Tags):
                     for dim in ("what", "why", "how", "who"):
-                        if data["tags"].get(dim) and not getattr(existing.tags, dim, ""):
-                            setattr(existing.tags, dim, data["tags"][dim])
+                        new_tag_val = data["tags"].get(dim)
+                        existing_tag_val = getattr(existing.tags, dim, "")
+                        if new_tag_val and new_tag_val != existing_tag_val:
+                            if not existing_tag_val:
+                                setattr(existing.tags, dim, new_tag_val)
+                            else:
+                                skipped_fields.append(
+                                    f"tags.{dim}: '{existing_tag_val}' → '{new_tag_val}'"
+                                )
                 if data.get("details") and not existing.details:
                     existing.details = data["details"]
                 if data.get("owner") and not existing.owner:
@@ -1290,9 +1407,15 @@ class OntologyService:
                     for s in append_sources:
                         if s.get("uri") not in existing_uris:
                             existing.sources.append(s)
-                warnings.append(
-                    f"Entity '{existing.name}' 已確認，僅更新空欄位（加 force=true 可覆寫）"
-                )
+                if skipped_fields:
+                    warnings.append(
+                        f"REJECTED_FIELDS: Entity '{existing.name}' 已確認，"
+                        f"以下欄位變更被拒絕（需 force=true 覆寫）：{'; '.join(skipped_fields)}"
+                    )
+                else:
+                    warnings.append(
+                        f"Entity '{existing.name}' 已確認，僅更新空欄位（加 force=true 可覆寫）"
+                    )
                 existing.updated_at = datetime.now(timezone.utc)
                 saved = await self._entities.upsert(existing)
                 tag_confidence = apply_tag_confidence(saved.tags)
@@ -1758,7 +1881,7 @@ class OntologyService:
             return ent.id
         return None
 
-    async def upsert_document(self, data: dict) -> Entity:
+    async def upsert_document(self, data: dict, partner: dict | None = None) -> Entity:
         """Create or update a document as an entity(type="document").
 
         Accepts the legacy document format (title, source, linked_entity_ids)
@@ -1768,6 +1891,12 @@ class OntologyService:
           - linked_entity_ids[0] → parent_id (primary), rest → relationships
           - tags (DocumentTags format) → Tags (unified list format)
         """
+        # --- Guest write guard ---
+        # document is an L3 type; guests may create it under an authorized parent.
+        # We inject type="document" so the shared guard can evaluate L1/L2/L3 rules.
+        if partner is not None and is_guest(partner):
+            await self._enforce_guest_write_guard({**data, "type": "document"}, partner)
+
         # --- Required field validation (clear error messages) ---
         is_create = not data.get("id")
         if is_create:

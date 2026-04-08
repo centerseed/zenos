@@ -1,70 +1,41 @@
 # ZenOS
 
-中小企業的 AI Context 層——建一次 ontology，公司的每一個 AI agent 都共享同一套 context。
-不是 ERP、不是搜尋引擎、不是文件管理。是文件之上的語意代理（Semantic Proxy）。
+中小企業的 AI Context 層——建一次 ontology，所有 AI agent 共享同一套 context。
+Semantic Proxy：不是 ERP、不是搜尋引擎、不是文件管理。Phase 0 → 開發中。
 
-## 階段
+## Hard Constraints
 
-Phase 0 概念驗證 → 已進入開發。Backend: Python + PostgreSQL + MCP。Frontend: Next.js dashboard。
+1. **任務管理只用 ZenOS MCP task tools**（`mcp__zenos__task`）— 用其他工具會繞過 ontology 的 task tracking
+2. **毀滅性操作不暴露為 MCP tool** — purge_all 只能用 admin script，防止 agent 誤觸資料全滅
+3. **部署後必須實際驗證服務可用** — deploy 成功 ≠ 服務正常；curl / 瀏覽器確認端點回應
+4. **MCP 交付用 partner key 做端到端驗證** — 確保走過 auth + data scope，不是只測 happy path
+5. **智慧邏輯只放 server 端** — 不散到 caller skill / dashboard；邏輯分叉後無法統一修正
+6. **UI 術語映射** — 不出現 entity/ontology。Product→專案、Module→模組、Knowledge Graph→知識地圖、Entity→節點
 
-## 讀文件順序（新 session 必讀）
+## Architecture
 
-1. `docs/spec.md` Part 0–1（North Star + 核心命題）
-2. `docs/spec.md` Part 4–5（Ontology 技術路線 + 漸進式信任）
-3. `docs/spec.md` Part 7（服務架構 + Dashboard）
+- DDD 四層：`domain → application → infrastructure → interface`（`src/zenos/`）
+- MCP 入口：`src/zenos/interface/tools.py`
+- Frontend：Next.js 15 + Tailwind（`dashboard/`）
+- DB：PostgreSQL schema `zenos`（Cloud SQL `zentropy-4f7a5:asia-east1:zentropy-db`）
+- Deploy：Frontend → Firebase Hosting / Backend → Cloud Run
 
-概念速查與關鍵發現見 `docs/reference/REF-glossary.md`。
-
-## 技術棧
-
-- Backend: Python 3.12, `src/zenos/`（DDD 四層：domain → application → infrastructure → interface）
-- MCP Server: `src/zenos/interface/tools.py`（對外 MCP tools）
-- Frontend: Next.js 15 + TypeScript + Tailwind, `dashboard/`
-- DB: PostgreSQL（Cloud SQL `zentropy-4f7a5:asia-east1:zentropy-db`，schema `zenos`，12 tables）
-- Deploy: Firebase Hosting（zenos-naruvia.web.app）+ Cloud Run
-- Test: `pytest`（backend）, `vitest`（frontend）
-
-## 開發規則
-
-- 任務管理一律用 ZenOS MCP task tools（`mcp__zenos__task`），不用其他工具
-- MCP 交付必須用 partner key 做端到端連線驗證
-- 部署後必須實際驗證服務可用，不能只看 deploy 成功
-- 部署 Dashboard 時只需部署 hosting（Firestore rules 已不再使用）
-- 毀滅性操作（purge_all）絕不暴露為 MCP tool，只能用 admin script
-- 智慧邏輯放在 ZenOS server 端，不散到 caller skill
-- UI 不出現 entity/ontology 字眼。Product→專案、Module→模組、Knowledge Graph→知識地圖、Entity→「節點」
-
-## 開發角色
-
-角色 skill 定義在 `.claude/skills/`。Architect 用 subagent 調度 Developer/QA，不跳過 QA。
-
-## 常用指令
+## Commands
 
 ```bash
-# Backend（必須用 .venv，系統 Python 缺少依賴）
+# Backend test（必須用 .venv，系統 Python 缺依賴）
 .venv/bin/pytest tests/ -x
-python -m zenos.interface.tools  # 啟動 MCP server
 
-# Frontend
-cd dashboard && npm run dev
+# Frontend test
 cd dashboard && npx vitest run
 
-# Deploy
-cd dashboard && npm run build && firebase deploy --only hosting
-./scripts/deploy_mcp.sh
+# Deploy — 根據改動範圍選腳本，不手打指令
+./scripts/deploy.sh          # dashboard (Firebase Hosting)
+./scripts/deploy_mcp.sh      # Python backend (Cloud Run)
 ```
 
-## ZenOS 治理技能
+## Known Gotchas
 
-若當前專案有 `skills/governance/` 目錄（透過 `/zenos-setup` 安裝），
-執行對應操作前**必須先用 Read tool 讀取該文件完整內容**再執行：
-
-| 操作場景 | 讀取文件 |
-|----------|---------|
-| 寫文件（SPEC/ADR/TD 等） | `skills/governance/document-governance.md` |
-| 建立 L2 概念、寫 impacts | `skills/governance/l2-knowledge-governance.md` |
-| 建立任務 | `skills/governance/task-governance.md` |
-| 知識捕獲（判斷分層） | `skills/governance/capture-governance.md` |
-
-> 若 `skills/governance/` 不存在，跳過治理流程。
-> Local skill 由 `/zenos-setup` 從 SSOT 拉取更新。
+- 部署 Dashboard 只需 `--only hosting` — Firestore rules 已不再使用
+- `python -m zenos.interface.tools` 啟動本地 MCP server（開發除錯用）
+- 新 session 需深入理解產品：讀 `docs/spec.md` Part 0–1, 4–5, 7；速查 `docs/reference/REF-glossary.md`

@@ -7,6 +7,7 @@ import { AppNav } from "@/components/AppNav";
 import { AuthGuard } from "@/components/AuthGuard";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/components/ui/toast";
+import { resolveActiveWorkspace } from "@/lib/partner";
 
 const MCP_SERVER_URL = "https://zenos-mcp-165893875709.asia-east1.run.app";
 const STREAMABLE_HTTP_URL = `${MCP_SERVER_URL}/mcp`;
@@ -287,14 +288,16 @@ function SetupPage() {
   const { pushToast } = useToast();
   const [selectedPlatformId, setSelectedPlatformId] =
     useState<PlatformId>("claude-code");
+  const { workspaceRole, isHomeWorkspace } = resolveActiveWorkspace(partner);
+  const canManageWorkspace = isHomeWorkspace && workspaceRole === "owner";
 
   useEffect(() => {
-    if (partner && !partner.isAdmin) {
-      router.replace("/");
+    if (partner && !canManageWorkspace) {
+      router.replace("/tasks");
     }
-  }, [partner, router]);
+  }, [partner, canManageWorkspace, router]);
 
-  if (!partner || !partner.isAdmin) return null;
+  if (!canManageWorkspace) return null;
 
   const selectedPlatform =
     PLATFORM_INSTALLS.find((item) => item.id === selectedPlatformId) ??
@@ -456,7 +459,10 @@ function SetupPage() {
                 ) : null}
               </div>
 
-              <div className="rounded-2xl border border-border bg-[#0f1418] p-5">
+              <div
+                data-testid="mcp-config"
+                className="rounded-2xl border border-border bg-[#0f1418] p-5"
+              >
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="text-xs uppercase tracking-[0.22em] text-slate-400">

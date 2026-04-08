@@ -9,6 +9,7 @@ import {
   createDepartment,
   deleteDepartment,
   getDepartments,
+  getPartners,
   getProjectEntities,
   renameDepartment,
   updatePartnerScope,
@@ -18,6 +19,12 @@ import { AppNav } from "@/components/AppNav";
 import { LoadingState } from "@/components/LoadingState";
 import { useToast } from "@/components/ui/toast";
 import type { Entity, Partner } from "@/types";
+import {
+  getPartnerAccessMode,
+  getPartnerWorkspaceRole,
+  resolveActiveWorkspace,
+  isScopedPartner,
+} from "@/lib/partner";
 
 const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
 const DEFAULT_ROLE_OPTIONS = [
@@ -29,6 +36,11 @@ const DEFAULT_ROLE_OPTIONS = [
   "hr",
   "ops",
 ];
+const ACCESS_MODE_OPTIONS = [
+  { value: "internal", label: "內部成員" },
+  { value: "scoped", label: "已分享空間" },
+  { value: "unassigned", label: "未指派空間" },
+] as const;
 function TeamPage() {
   const { user, partner } = useAuth();
   const router = useRouter();
@@ -38,6 +50,7 @@ function TeamPage() {
   const [loading, setLoading] = useState(true);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteDepartment, setInviteDepartment] = useState("all");
+  const [inviteAccessMode, setInviteAccessMode] = useState<"internal" | "scoped" | "unassigned">("unassigned");
   const [inviting, setInviting] = useState(false);
   const [inviteMessage, setInviteMessage] = useState<{
     type: "success" | "error";
@@ -51,41 +64,31 @@ function TeamPage() {
     department: string;
     customRole: string;
     customDepartment: string;
-    isExternalClient: boolean;
+    accessMode: "internal" | "scoped" | "unassigned";
     authorizedEntityIds: string[];
   } | null>(null);
   const [newDepartment, setNewDepartment] = useState("");
-  const [isExternalClient, setIsExternalClient] = useState(false);
   const [selectedL1Ids, setSelectedL1Ids] = useState<string[]>([]);
   const [projectEntities, setProjectEntities] = useState<Entity[]>([]);
+  const { workspaceRole, isHomeWorkspace } = resolveActiveWorkspace(partner);
+  const canManageWorkspace = isHomeWorkspace && workspaceRole === "owner";
   const departmentOptions = Array.isArray(departments) && departments.length > 0
     ? departments
     : ["all", ...DEFAULT_ROLE_OPTIONS];
 
-  // Admin guard: redirect non-admin users
+  // Route guard: redirect non-owner or shared-workspace users away from company management UI
   useEffect(() => {
-    if (partner && !partner.isAdmin) {
-      router.replace("/");
+    if (partner && !canManageWorkspace) {
+      router.replace("/tasks");
     }
-  }, [partner, router]);
+  }, [partner, canManageWorkspace, router]);
 
   const fetchPartners = useCallback(async () => {
     if (!user) return;
     try {
       const token = await user.getIdToken();
-      const res = await fetch(`${API_URL}/api/partners`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({ message: "Unknown error" }));
-        throw new Error(body.message || body.detail || `Failed: ${res.status}`);
-      }
-      const body = await res.json();
-      const data = Array.isArray(body.partners) ? body.partners : [];
-      setPartners(data as Partner[]);
+      const data = await getPartners(token);
+      setPartners(data);
     } catch (err) {
       console.error("Failed to fetch partners:", err);
     } finally {
@@ -105,14 +108,14 @@ function TeamPage() {
   }, [user]);
 
   useEffect(() => {
-    if (partner?.isAdmin) {
+    if (canManageWorkspace) {
       fetchPartners();
       fetchDepartments();
       user?.getIdToken().then((token) =>
         getProjectEntities(token).then(setProjectEntities).catch(console.error)
       );
     }
-  }, [partner, fetchPartners, fetchDepartments, user]);
+  }, [canManageWorkspace, fetchPartners, fetchDepartments, user]);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -122,6 +125,8 @@ function TeamPage() {
     setInviteMessage(null);
 
     try {
+      const effectiveAccessMode =
+        inviteAccessMode === "scoped" && selectedL1Ids.length > 0 ? "scoped" : inviteAccessMode === "internal" ? "internal" : "unassigned";
       const token = await user.getIdToken();
       const res = await fetch(`${API_URL}/api/partners/invite`, {
         method: "POST",
@@ -132,7 +137,9 @@ function TeamPage() {
         body: JSON.stringify({
           email: inviteEmail.trim(),
           department: inviteDepartment,
-          authorized_entity_ids: isExternalClient ? selectedL1Ids : [],
+          accessMode: effectiveAccessMode,
+          access_mode: effectiveAccessMode,
+          authorized_entity_ids: effectiveAccessMode === "scoped" ? selectedL1Ids : [],
         }),
       });
 
@@ -156,7 +163,7 @@ function TeamPage() {
       pushToast({ tone: "success", title: "邀請已送出", description: `${inviteEmail.trim()} 已加入待啟用名單` });
       setInviteEmail("");
       setInviteDepartment("all");
-      setIsExternalClient(false);
+      setInviteAccessMode("unassigned");
       setSelectedL1Ids([]);
       await fetchPartners();
       await fetchDepartments();
@@ -290,7 +297,15 @@ function TeamPage() {
     }
   };
 
-  const handleScopeSave = async (targetPartner: Partner, data: { roles: string[]; department: string; authorizedEntityIds?: string[] }) => {
+  const handleScopeSave = async (
+    targetPartner: Partner,
+    data: {
+      roles: string[];
+      department: string;
+      accessMode: "internal" | "scoped" | "unassigned";
+      authorizedEntityIds?: string[];
+    }
+  ) => {
     if (!user) return;
     setActionLoading(targetPartner.id);
     try {
@@ -298,6 +313,7 @@ function TeamPage() {
       await updatePartnerScope(token, targetPartner.id, {
         roles: data.roles,
         department: data.department || "all",
+        accessMode: data.accessMode,
         authorizedEntityIds: data.authorizedEntityIds,
       });
       await fetchPartners();
@@ -358,6 +374,7 @@ function TeamPage() {
 
   const openScopeEditor = (p: Partner) => {
     const entityIds = p.authorizedEntityIds ?? [];
+    const accessMode = getPartnerAccessMode(p);
     setScopeEditor({
       partnerId: p.id,
       email: p.email,
@@ -365,12 +382,12 @@ function TeamPage() {
       department: p.department || "all",
       customRole: "",
       customDepartment: "",
-      isExternalClient: entityIds.length > 0,
+      accessMode,
       authorizedEntityIds: [...entityIds],
     });
   };
 
-  if (!partner?.isAdmin) return null;
+  if (!canManageWorkspace) return null;
 
   const activeCount = partners.filter((p) => p.status === "active").length;
   const invitedCount = partners.filter((p) => p.status === "invited").length;
@@ -425,21 +442,26 @@ function TeamPage() {
                 {inviting ? "送出中..." : "送出邀請"}
               </button>
             </div>
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={isExternalClient}
-                  onChange={(e) => {
-                    setIsExternalClient(e.target.checked);
-                    if (!e.target.checked) setSelectedL1Ids([]);
-                  }}
-                  aria-label="設為外部客戶"
-                />
-                外部客戶（限制存取指定專案空間）
-              </label>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="text-sm text-foreground">存取模式</label>
+              <select
+                value={inviteAccessMode}
+                onChange={(e) => {
+                  const next = e.target.value as typeof inviteAccessMode;
+                  setInviteAccessMode(next);
+                  if (next !== "scoped") setSelectedL1Ids([]);
+                }}
+                aria-label="邀請存取模式"
+                className="bg-background border border-border rounded-lg px-4 py-2 text-sm text-white min-w-40"
+              >
+                {ACCESS_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </div>
-            {isExternalClient && (
+            {inviteAccessMode === "scoped" && (
               <div className="border border-border rounded-lg p-3 space-y-2">
                 <p className="text-xs text-muted-foreground">選擇可存取的專案空間：</p>
                 {projectEntities.length === 0 ? (
@@ -566,6 +588,20 @@ function TeamPage() {
                 {partners.map((p) => {
                   const isSelf = p.id === partner.id;
                   const isLoading = actionLoading === p.id;
+                  const accessMode = getPartnerAccessMode(p);
+                  const partnerWorkspaceRole = getPartnerWorkspaceRole(p);
+                  const roleLabel =
+                    partnerWorkspaceRole === "owner"
+                      ? "擁有者"
+                      : partnerWorkspaceRole === "member"
+                        ? "成員"
+                        : "訪客";
+                  const accessModeLabel =
+                    accessMode === "scoped"
+                      ? "已分享空間"
+                      : accessMode === "internal"
+                        ? "內部成員"
+                        : "未指派空間";
                   return (
                     <tr
                       key={p.id}
@@ -581,25 +617,33 @@ function TeamPage() {
                         <div className="space-y-2 min-w-[220px]">
                           <span
                             className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                              p.isAdmin
+                              partnerWorkspaceRole === "owner"
                                 ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                                 : "bg-secondary text-muted-foreground border border-border"
                             }`}
                           >
-                            {p.isAdmin ? "管理員" : "一般成員"}
+                            {roleLabel}
                           </span>
-                          {!p.isAdmin && (
+                          {partnerWorkspaceRole !== "owner" && (
                             <div className="space-y-1">
-                              {(p.authorizedEntityIds?.length ?? 0) > 0 && (
-                                <div className="flex flex-wrap items-center gap-1">
-                                  <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-amber-500/10 text-amber-400 border border-amber-500/20 font-medium">
-                                    外部客戶
-                                  </span>
+                              <div className="flex flex-wrap items-center gap-1">
+                                <span
+                                  className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${
+                                    accessMode === "scoped"
+                                      ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                      : accessMode === "internal"
+                                        ? "bg-blue-500/10 text-blue-300 border-blue-500/20"
+                                        : "bg-slate-500/10 text-slate-300 border-slate-500/20"
+                                  }`}
+                                >
+                                  {accessModeLabel}
+                                </span>
+                                {isScopedPartner(p) && (
                                   <span className="text-[11px] text-muted-foreground">
                                     授權 {p.authorizedEntityIds!.length} 個專案空間
                                   </span>
-                                </div>
-                              )}
+                                )}
+                              </div>
                               <div className="flex flex-wrap gap-1">
                                 {(p.roles || []).length === 0 ? (
                                   <span className="text-[11px] text-muted-foreground">角色：（未設定）</span>
@@ -630,16 +674,16 @@ function TeamPage() {
                         ) : (
                           <div className="flex items-center justify-end gap-2">
                             {p.status !== "invited" && (
-                              <button
-                                onClick={() => handleRoleChange(p, !p.isAdmin)}
-                                aria-label={p.isAdmin ? `將 ${p.email} 改為一般成員` : `將 ${p.email} 改為管理員`}
-                                disabled={isLoading}
-                                className="text-xs text-muted-foreground hover:text-white transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                              >
-                                {p.isAdmin ? "設為一般成員" : "設為管理員"}
-                              </button>
-                            )}
-                            {!p.isAdmin && p.status !== "invited" && (
+                            <button
+                              onClick={() => handleRoleChange(p, !p.isAdmin)}
+                              aria-label={partnerWorkspaceRole === "owner" ? `將 ${p.email} 改為一般成員` : `將 ${p.email} 改為擁有者`}
+                              disabled={isLoading}
+                              className="text-xs text-muted-foreground hover:text-white transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {partnerWorkspaceRole === "owner" ? "設為一般成員" : "設為擁有者"}
+                            </button>
+                          )}
+                            {partnerWorkspaceRole !== "owner" && p.status !== "invited" && (
                               <button
                                 onClick={() => openScopeEditor(p)}
                                 aria-label={`編輯 ${p.email} 的權限範圍`}
@@ -670,7 +714,6 @@ function TeamPage() {
                               </button>
                             )}
                             {p.status === "invited" && (
-                              <>
                                 <button
                                   onClick={() => handleResendInvite(p)}
                                   aria-label={`Resend invite to ${p.email}`}
@@ -679,16 +722,15 @@ function TeamPage() {
                                 >
                                   重新寄送
                                 </button>
-                                <button
-                                  onClick={() => handleDeleteInvite(p)}
-                                  aria-label={`Delete invite for ${p.email}`}
-                                  disabled={isLoading}
-                                  className="text-xs text-red-400 hover:text-red-300 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  刪除
-                                </button>
-                              </>
                             )}
+                            <button
+                              onClick={() => handleDeleteInvite(p)}
+                              aria-label={`Delete invite for ${p.email}`}
+                              disabled={isLoading}
+                              className="text-xs text-red-400 hover:text-red-300 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              刪除
+                            </button>
                           </div>
                         )}
                       </td>
@@ -802,27 +844,30 @@ function TeamPage() {
             </div>
 
             <div className="space-y-2">
-              <label className="text-xs text-muted-foreground uppercase tracking-wide">外部客戶設定</label>
-              <label className="flex items-center gap-2 text-sm text-foreground cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={scopeEditor.isExternalClient}
-                  onChange={(e) =>
-                    setScopeEditor((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            isExternalClient: e.target.checked,
-                            authorizedEntityIds: e.target.checked ? prev.authorizedEntityIds : [],
-                          }
-                        : prev
-                    )
-                  }
-                  aria-label="設為外部客戶"
-                />
-                設為外部客戶（限制存取指定專案空間）
-              </label>
-              {scopeEditor.isExternalClient && (
+              <label className="text-xs text-muted-foreground uppercase tracking-wide">存取模式</label>
+              <select
+                value={scopeEditor.accessMode}
+                onChange={(e) =>
+                  setScopeEditor((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          accessMode: e.target.value as "internal" | "scoped" | "unassigned",
+                          authorizedEntityIds: e.target.value === "scoped" ? prev.authorizedEntityIds : [],
+                        }
+                      : prev
+                  )
+                }
+                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-white"
+                aria-label="成員存取模式"
+              >
+                {ACCESS_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {scopeEditor.accessMode === "scoped" && (
                 <div className="border border-border rounded-lg p-3 space-y-2">
                   <p className="text-xs text-muted-foreground">選擇可存取的專案空間：</p>
                   {projectEntities.length === 0 ? (
@@ -863,20 +908,27 @@ function TeamPage() {
               >
                 取消
               </button>
-              <button
-                className="text-sm px-3 py-2 rounded bg-primary text-primary-foreground transition-all active:scale-95 disabled:opacity-50"
-                disabled={actionLoading === scopeEditor.partnerId}
-                onClick={() => {
+                <button
+                  className="text-sm px-3 py-2 rounded bg-primary text-primary-foreground transition-all active:scale-95 disabled:opacity-50"
+                  disabled={actionLoading === scopeEditor.partnerId}
+                  onClick={() => {
                   const target = partners.find((p) => p.id === scopeEditor.partnerId);
                   if (!target) return;
+                  const effectiveAccessMode =
+                    scopeEditor.accessMode === "scoped" && scopeEditor.authorizedEntityIds.length > 0
+                      ? "scoped"
+                      : scopeEditor.accessMode === "internal"
+                        ? "internal"
+                        : "unassigned";
                   handleScopeSave(target, {
                     roles: scopeEditor.roles,
                     department: scopeEditor.department || "all",
-                    authorizedEntityIds: scopeEditor.isExternalClient
+                    accessMode: effectiveAccessMode,
+                    authorizedEntityIds: effectiveAccessMode === "scoped"
                       ? scopeEditor.authorizedEntityIds
                       : [],
                   });
-                }}
+                  }}
               >
                 {actionLoading === scopeEditor.partnerId ? "儲存中..." : "儲存範圍"}
               </button>

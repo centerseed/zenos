@@ -86,6 +86,7 @@ _PARTNER = {
     "apiKey": "key-123",  # pragma: allowlist secret
     "authorizedEntityIds": [],
     "status": "active",
+    "accessMode": "internal",
     "isAdmin": False,
     "sharedPartnerId": None,
     "defaultProject": None,
@@ -116,6 +117,34 @@ class TestGetPartnerMe:
         assert body["partner"]["id"] == "p1"
         assert body["partner"]["apiKey"] == "key-123"  # pragma: allowlist secret
         assert body["partner"]["email"] == "user@test.com"
+        assert body["partner"]["accessMode"] == "internal"
+        assert body["partner"]["workspaceRole"] == "member"
+        # S01: isHomeWorkspace is included in the session context
+        assert body["partner"]["isHomeWorkspace"] is True  # sharedPartnerId is None
+
+    async def test_returns_is_home_workspace_false_for_shared_partner(self):
+        """Guest partner with sharedPartnerId should return isHomeWorkspace=False."""
+        from zenos.interface.dashboard_api import get_partner_me
+
+        shared_partner = {
+            **_PARTNER,
+            "sharedPartnerId": "owner-partner-id",
+            "workspaceRole": "guest",
+            "accessMode": "scoped",
+            "isAdmin": False,
+            "authorizedEntityIds": ["l1-entity-1"],
+        }
+        request = _make_request(headers={"authorization": "Bearer fake-token"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=shared_partner):
+            resp = await get_partner_me(request)
+
+        import json
+        body = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["partner"]["isHomeWorkspace"] is False
+        assert body["partner"]["workspaceRole"] == "guest"
 
     async def test_returns_401_without_token(self):
         from zenos.interface.dashboard_api import get_partner_me
@@ -210,13 +239,12 @@ class TestListEntities:
 
         assert resp.status_code == 401
 
-    async def test_hides_role_restricted_entity_without_matching_role(self):
+    async def test_hides_confidential_entity_from_member(self):
         from zenos.interface.dashboard_api import list_entities
 
         request = _make_request(headers={"authorization": "Bearer fake-token"})
         hidden = _make_entity("e-hidden")
-        hidden.visibility = "role-restricted"
-        hidden.visible_to_roles = ["engineering"]
+        hidden.visibility = "confidential"
 
         with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \

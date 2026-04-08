@@ -36,6 +36,11 @@ from zenos.application.ontology_service import OntologyService, _collect_subtree
 from zenos.application.task_service import TaskService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.models import Blindspot, Entity, EntityType, Relationship, Task
+from zenos.domain.partner_access import (
+    describe_partner_access,
+    is_guest,
+    is_unassigned_partner,
+)
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.unit_of_work import UnitOfWork
 from zenos.infrastructure.sql_repo import (  # composition root
@@ -124,25 +129,63 @@ async def _auth_and_scope(request: Request) -> tuple[dict | None, str | None]:
     return partner, effective_id
 
 
+async def _list_all_entities_with_context(
+    effective_id: str,
+    *,
+    type_filter: str | None = None,
+) -> list[Entity]:
+    """Load entities while the partner context is active."""
+    token = current_partner_id.set(effective_id)
+    try:
+        return await _entity_repo.list_all(type_filter=type_filter)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def _get_entity_by_id_with_context(
+    effective_id: str,
+    entity_id: str,
+) -> Entity | None:
+    """Load a single entity while the partner context is active."""
+    token = current_partner_id.set(effective_id)
+    try:
+        return await _entity_repo.get_by_id(entity_id)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def _compute_impact_chains_with_context(
+    effective_id: str,
+    entity_id: str,
+) -> tuple[list[dict], list[dict]]:
+    """Compute impact chains under the active partner context."""
+    if _relationship_repo is None:
+        return [], []
+    ontology_service = OntologyService(
+        _entity_repo,
+        _relationship_repo,
+        None,
+        None,
+        None,
+    )
+    token = current_partner_id.set(effective_id)
+    try:
+        return await asyncio.gather(
+            ontology_service.compute_impact_chain(entity_id, direction="forward"),
+            ontology_service.compute_impact_chain(entity_id, direction="reverse"),
+        )
+    finally:
+        current_partner_id.reset(token)
+
+
 # ──────────────────────────────────────────────
 # Visibility helpers (permission governance Phase 0)
 # ──────────────────────────────────────────────
 
 
-def _is_scoped_partner(partner: dict) -> bool:
-    """Return True if the partner is a scoped (external client) partner.
-
-    Admin partners are never scoped — they see everything regardless of
-    authorizedEntityIds.
-    """
-    if partner.get("isAdmin"):
-        return False
-    return bool(partner.get("authorizedEntityIds"))
-
-
 def _build_allowed_entity_ids(partner: dict, entity_map: dict[str, Entity]) -> set[str]:
-    """Return the set of entity IDs allowed for a scoped partner."""
-    authorized_ids = partner.get("authorizedEntityIds") or []
+    """Return the set of entity IDs allowed for a guest."""
+    authorized_ids = describe_partner_access(partner)["authorized_l1_ids"]
     allowed: set[str] = set()
     for l1_id in authorized_ids:
         allowed |= _collect_subtree_ids(l1_id, entity_map)
@@ -152,23 +195,26 @@ def _build_allowed_entity_ids(partner: dict, entity_map: dict[str, Entity]) -> s
 async def _is_task_visible_for_partner(
     task: Task,
     partner: dict,
+    effective_id: str,
     allowed_ids: set[str] | None = None,
 ) -> bool:
     """Task visibility rules:
 
     - Admin: always visible.
-    - Scoped partner: task must have at least one linked entity in allowed_ids.
-      Tasks with no linked entities are NOT visible to scoped partners.
-    - Internal non-admin: task is visible only if ALL linked entities are visible.
+    - Guest: task must have at least one linked entity in allowed_ids.
+      Tasks with no linked entities are NOT visible to guests.
+    - Member: task is visible only if ALL linked entities are visible.
       Tasks with no linked entities are always visible (fail-open).
     """
     try:
         linked = task.linked_entities or []
         if partner.get("isAdmin"):
             return True
+        if is_unassigned_partner(partner):
+            return False
 
-        if _is_scoped_partner(partner):
-            # Scoped partner: requires at least one linked entity in scope
+        if is_guest(partner):
+            # Guest: requires at least one linked entity in scope.
             if not linked:
                 return False
             if allowed_ids is None:
@@ -180,7 +226,7 @@ async def _is_task_visible_for_partner(
                     return True
             return False
 
-        # Internal non-admin: all linked entities must be visible
+        # Member: all linked entities must be visible.
         if not linked:
             return True
         for eid in linked:
@@ -188,7 +234,7 @@ async def _is_task_visible_for_partner(
                 eid = eid.get("id", "")
             if not eid:
                 continue
-            entity = await _entity_repo.get_by_id(eid)
+            entity = await _get_entity_by_id_with_context(effective_id, eid)
             if entity and not OntologyService.is_entity_visible_for_partner(entity, partner):
                 return False
         return True
@@ -197,22 +243,28 @@ async def _is_task_visible_for_partner(
         return True
 
 
-async def _is_blindspot_visible_for_partner(bs: Blindspot, partner: dict) -> bool:
+async def _is_blindspot_visible_for_partner(
+    bs: Blindspot,
+    partner: dict,
+    effective_id: str,
+) -> bool:
     """Blindspot is visible if ANY related entity is visible.
 
-    Scoped partners never see blindspots.
-    Blindspots with no related entities are always visible (fail-open for internal).
+    Guests never see blindspots.
+    Blindspots with no related entities are always visible (fail-open for members).
     """
     try:
         if partner.get("isAdmin"):
             return True
-        if _is_scoped_partner(partner):
+        if is_unassigned_partner(partner):
+            return False
+        if is_guest(partner):
             return False
         related = bs.related_entity_ids or []
         if not related:
             return True
         for eid in related:
-            entity = await _entity_repo.get_by_id(eid)
+            entity = await _get_entity_by_id_with_context(effective_id, eid)
             if entity and OntologyService.is_entity_visible_for_partner(entity, partner):
                 return True
         return False
@@ -351,6 +403,15 @@ async def get_partner_me(request: Request) -> Response:
     if not partner:
         return _error_response("NOT_FOUND", f"No partner found for email {email}", 404, request=request)
 
+    partner = dict(partner)
+    access = describe_partner_access(partner)
+    partner["accessMode"] = access["access_mode"]
+    partner["workspaceRole"] = access["workspace_role"]
+    # isHomeWorkspace is true when the partner is operating in their own workspace
+    # (sharedPartnerId is null). When non-null, the partner is a guest in another
+    # owner's workspace. Included explicitly so the frontend can build
+    # ActiveWorkspaceContext without additional derivation.
+    partner["isHomeWorkspace"] = not bool(partner.get("sharedPartnerId"))
     return _json_response({"partner": partner}, request=request)
 
 
@@ -369,15 +430,13 @@ async def list_entities(request: Request) -> Response:
 
     await _ensure_repos()
     type_filter = request.query_params.get("type")
-    token = current_partner_id.set(effective_id)
-    try:
-        entities = await _entity_repo.list_all(type_filter=type_filter)
-    finally:
-        current_partner_id.reset(token)
+    if is_unassigned_partner(partner):
+        return _json_response({"entities": []}, request=request)
+    entities = await _list_all_entities_with_context(effective_id, type_filter=type_filter)
 
-    if _is_scoped_partner(partner):
+    if is_guest(partner):
         # Need full entity tree (not just type-filtered subset) to compute subtrees correctly.
-        all_entities = await _entity_repo.list_all() if type_filter else entities
+        all_entities = await _list_all_entities_with_context(effective_id) if type_filter else entities
         entity_map = {e.id: e for e in all_entities if e.id}
         allowed_ids = _build_allowed_entity_ids(partner, entity_map)
         entities = [
@@ -402,6 +461,8 @@ async def get_entity(request: Request) -> Response:
     partner, effective_id = await _auth_and_scope(request)
     if not partner:
         return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("NOT_FOUND", f"Entity {request.path_params.get('id')} not found", 404, request=request)
 
     entity_id = request.path_params.get("id")
     await _ensure_repos()
@@ -414,8 +475,8 @@ async def get_entity(request: Request) -> Response:
     if not entity:
         return _error_response("NOT_FOUND", f"Entity {entity_id} not found", 404, request=request)
 
-    if _is_scoped_partner(partner):
-        all_entities = await _entity_repo.list_all()
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
         entity_map = {e.id: e for e in all_entities if e.id}
         allowed_ids = _build_allowed_entity_ids(partner, entity_map)
         if entity_id not in allowed_ids or entity.visibility != "public":
@@ -423,17 +484,7 @@ async def get_entity(request: Request) -> Response:
     elif not OntologyService.is_entity_visible_for_partner(entity, partner):
         return _error_response("NOT_FOUND", f"Entity {entity_id} not found", 404, request=request)
 
-    ontology_service = OntologyService(
-        _entity_repo,
-        _relationship_repo,
-        None,
-        None,
-        None,
-    )
-    impact_chain, reverse_impact_chain = await asyncio.gather(
-        ontology_service.compute_impact_chain(entity_id, direction="forward"),
-        ontology_service.compute_impact_chain(entity_id, direction="reverse"),
-    )
+    impact_chain, reverse_impact_chain = await _compute_impact_chains_with_context(effective_id, entity_id)
 
     return _json_response(
         {
@@ -460,14 +511,16 @@ async def get_entity_children(request: Request) -> Response:
 
     entity_id = request.path_params.get("id")
     await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _json_response({"entities": [], "count": 0}, request=request)
     token = current_partner_id.set(effective_id)
     try:
         children = await _entity_repo.list_by_parent(entity_id)
     finally:
         current_partner_id.reset(token)
 
-    if _is_scoped_partner(partner):
-        all_entities = await _entity_repo.list_all()
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
         entity_map = {e.id: e for e in (all_entities or []) if e.id}
         allowed_ids = _build_allowed_entity_ids(partner, entity_map)
         # If the parent entity itself is not in scope, return empty (no info leak)
@@ -502,14 +555,47 @@ async def get_entity_relationships(request: Request) -> Response:
 
     entity_id = request.path_params.get("id")
     await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _json_response({"relationships": []}, request=request)
     token = current_partner_id.set(effective_id)
     try:
+        entity = await _entity_repo.get_by_id(entity_id)
+        if not entity or not OntologyService.is_entity_visible_for_partner(entity, partner):
+            return _json_response({"relationships": []}, request=request)
         relationships = await _relationship_repo.list_by_entity(entity_id)
     finally:
         current_partner_id.reset(token)
 
+    allowed_ids: set[str] | None = None
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
+        entity_map = {e.id: e for e in all_entities if e.id}
+        allowed_ids = _build_allowed_entity_ids(partner, entity_map)
+        if not allowed_ids or entity_id not in allowed_ids or entity.visibility != "public":
+            return _json_response({"relationships": []}, request=request)
+
+    visible_relationships: list[Relationship] = []
+    for rel in relationships:
+        src = await _get_entity_by_id_with_context(effective_id, rel.source_entity_id)
+        tgt = await _get_entity_by_id_with_context(effective_id, rel.target_id)
+        if not src or not tgt:
+            continue
+        if is_guest(partner):
+            if not allowed_ids:
+                continue
+            if src.id not in allowed_ids or tgt.id not in allowed_ids:
+                continue
+            if src.visibility != "public" or tgt.visibility != "public":
+                continue
+        elif not (
+            OntologyService.is_entity_visible_for_partner(src, partner)
+            and OntologyService.is_entity_visible_for_partner(tgt, partner)
+        ):
+            continue
+        visible_relationships.append(rel)
+
     return _json_response(
-        {"relationships": [_relationship_to_dict(r) for r in relationships]},
+        {"relationships": [_relationship_to_dict(r) for r in visible_relationships]},
         request=request,
     )
 
@@ -528,14 +614,41 @@ async def list_relationships(request: Request) -> Response:
         return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
 
     await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _json_response({"relationships": []}, request=request)
     token = current_partner_id.set(effective_id)
     try:
         relationships = await _relationship_repo.list_all()
     finally:
         current_partner_id.reset(token)
 
+    visible_relationships: list[Relationship] = []
+    allowed_ids: set[str] | None = None
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
+        entity_map = {e.id: e for e in all_entities if e.id}
+        allowed_ids = _build_allowed_entity_ids(partner, entity_map)
+    for rel in relationships:
+        src = await _get_entity_by_id_with_context(effective_id, rel.source_entity_id)
+        tgt = await _get_entity_by_id_with_context(effective_id, rel.target_id)
+        if not src or not tgt:
+            continue
+        if is_guest(partner):
+            if not allowed_ids:
+                continue
+            if src.id not in allowed_ids or tgt.id not in allowed_ids:
+                continue
+            if src.visibility != "public" or tgt.visibility != "public":
+                continue
+        elif not (
+            OntologyService.is_entity_visible_for_partner(src, partner)
+            and OntologyService.is_entity_visible_for_partner(tgt, partner)
+        ):
+            continue
+        visible_relationships.append(rel)
+
     return _json_response(
-        {"relationships": [_relationship_to_dict(r) for r in relationships]},
+        {"relationships": [_relationship_to_dict(r) for r in visible_relationships]},
         request=request,
     )
 
@@ -555,6 +668,8 @@ async def list_blindspots(request: Request) -> Response:
 
     entity_id = request.query_params.get("entity_id")
     await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _json_response({"blindspots": []}, request=request)
     token = current_partner_id.set(effective_id)
     try:
         blindspots = await _blindspot_repo.list_all(entity_id=entity_id)
@@ -564,7 +679,7 @@ async def list_blindspots(request: Request) -> Response:
     # Filter blindspots by related entity visibility
     visible_blindspots = []
     for bs in blindspots:
-        if await _is_blindspot_visible_for_partner(bs, partner):
+        if await _is_blindspot_visible_for_partner(bs, partner, effective_id):
             visible_blindspots.append(bs)
 
     return _json_response(
@@ -592,23 +707,25 @@ async def list_tasks(request: Request) -> Response:
     created_by = request.query_params.get("created_by") or None
 
     await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _json_response({"tasks": []}, request=request)
     token = current_partner_id.set(effective_id)
     try:
         tasks = await _task_repo.list_all(status=status_list, assignee=assignee, created_by=created_by, limit=500)
     finally:
         current_partner_id.reset(token)
 
-    # Build allowed_ids for scoped partners (needed for task filtering)
+    # Build allowed_ids for guests (needed for task filtering)
     allowed_ids: set[str] | None = None
-    if _is_scoped_partner(partner):
-        all_entities = await _entity_repo.list_all()
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
         entity_map = {e.id: e for e in all_entities if e.id}
         allowed_ids = _build_allowed_entity_ids(partner, entity_map)
 
     # Filter tasks by linked entity visibility
     visible_tasks = []
     for t in tasks:
-        if await _is_task_visible_for_partner(t, partner, allowed_ids=allowed_ids):
+        if await _is_task_visible_for_partner(t, partner, effective_id, allowed_ids=allowed_ids):
             visible_tasks.append(t)
 
     return _json_response({"tasks": [_task_to_dict(t) for t in visible_tasks]}, request=request)
@@ -629,6 +746,19 @@ async def list_tasks_by_entity(request: Request) -> Response:
 
     entity_id = request.path_params.get("entityId")
     await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _json_response({"tasks": []}, request=request)
+
+    # Build allowed_ids for guests BEFORE the entity check so we can reject
+    # out-of-scope entity IDs even if they happen to be public.
+    allowed_ids: set[str] | None = None
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
+        entity_map = {e.id: e for e in all_entities if e.id}
+        allowed_ids = _build_allowed_entity_ids(partner, entity_map)
+        if entity_id not in allowed_ids:
+            return _json_response({"tasks": []}, request=request)
+
     token = current_partner_id.set(effective_id)
     try:
         # Check if the requested entity itself is visible
@@ -639,15 +769,11 @@ async def list_tasks_by_entity(request: Request) -> Response:
     finally:
         current_partner_id.reset(token)
 
-    # Build allowed_ids for scoped partners
-    allowed_ids: set[str] | None = None
-    if _is_scoped_partner(partner):
-        all_entities = await _entity_repo.list_all()
-        entity_map = {e.id: e for e in all_entities if e.id}
-        allowed_ids = _build_allowed_entity_ids(partner, entity_map)
-
     # Filter tasks by linked entity visibility
-    visible_tasks = [t for t in tasks if await _is_task_visible_for_partner(t, partner, allowed_ids=allowed_ids)]
+    visible_tasks = [
+        t for t in tasks
+        if await _is_task_visible_for_partner(t, partner, effective_id, allowed_ids=allowed_ids)
+    ]
 
     return _json_response({"tasks": [_task_to_dict(t) for t in visible_tasks]}, request=request)
 
@@ -971,15 +1097,18 @@ async def update_task(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
-# Helper: build allowed_ids for scoped partner
+# Helper: build allowed_ids for guest
 # ──────────────────────────────────────────────
 
 
-async def _get_allowed_ids_for_scoped_partner(partner: dict) -> set[str] | None:
-    """Return the set of allowed entity IDs for a scoped partner, or None if not scoped."""
-    if not _is_scoped_partner(partner):
+async def _get_allowed_ids_for_guest(
+    partner: dict,
+    effective_id: str,
+) -> set[str] | None:
+    """Return the set of allowed entity IDs for a guest, or None otherwise."""
+    if not is_guest(partner):
         return None
-    all_entities = await _entity_repo.list_all()
+    all_entities = await _list_all_entities_with_context(effective_id)
     entity_map = {e.id: e for e in all_entities if e.id}
     return _build_allowed_entity_ids(partner, entity_map)
 
@@ -1009,8 +1138,8 @@ async def list_comments(request: Request) -> Response:
     if not task_obj:
         return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
 
-    allowed_ids = await _get_allowed_ids_for_scoped_partner(partner)
-    if not await _is_task_visible_for_partner(task_obj, partner, allowed_ids=allowed_ids):
+    allowed_ids = await _get_allowed_ids_for_guest(partner, effective_id)
+    if not await _is_task_visible_for_partner(task_obj, partner, effective_id, allowed_ids=allowed_ids):
         return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
 
     comments = await _comment_repo.list_by_task(task_id)
@@ -1088,8 +1217,8 @@ async def create_comment(request: Request) -> Response:
     if not task_obj:
         return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
 
-    allowed_ids = await _get_allowed_ids_for_scoped_partner(partner)
-    if not await _is_task_visible_for_partner(task_obj, partner, allowed_ids=allowed_ids):
+    allowed_ids = await _get_allowed_ids_for_guest(partner, effective_id)
+    if not await _is_task_visible_for_partner(task_obj, partner, effective_id, allowed_ids=allowed_ids):
         return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
 
     comment = await _comment_repo.create(task_id=task_id, partner_id=effective_id, content=content)
@@ -1127,8 +1256,8 @@ async def delete_comment(request: Request) -> Response:
     if not task_obj:
         return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
 
-    allowed_ids = await _get_allowed_ids_for_scoped_partner(partner)
-    if not await _is_task_visible_for_partner(task_obj, partner, allowed_ids=allowed_ids):
+    allowed_ids = await _get_allowed_ids_for_guest(partner, effective_id)
+    if not await _is_task_visible_for_partner(task_obj, partner, effective_id, allowed_ids=allowed_ids):
         return _error_response("NOT_FOUND", f"Task '{task_id}' not found", 404, request=request)
 
     comment = await _comment_repo.get_by_id(comment_id)

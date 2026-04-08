@@ -115,6 +115,79 @@
 }
 
 @layer utilities {
+  .graph-core-glow {
+    animation: graph-pulse 6s ease-in-out infinite;
+  }
+
+  .graph-hub {
+    animation: graph-breathe 5.5s ease-in-out infinite;
+  }
+
+  .graph-node {
+    animation: graph-float 6s ease-in-out infinite;
+  }
+
+  .graph-node-a {
+    animation-delay: -0.2s;
+  }
+
+  .graph-node-b {
+    animation-delay: -1.4s;
+  }
+
+  .graph-node-c {
+    animation-delay: -2.2s;
+  }
+
+  .graph-node-d {
+    animation-delay: -3.3s;
+  }
+
+  .graph-node-e {
+    animation-delay: -4.1s;
+  }
+
+  .graph-line {
+    animation: graph-line-fade 4.5s ease-in-out infinite;
+  }
+
+  .graph-line-2,
+  .graph-signal-2 {
+    animation-delay: -1.3s;
+  }
+
+  .graph-line-3,
+  .graph-signal-3 {
+    animation-delay: -2.4s;
+  }
+
+  .graph-line-4 {
+    animation-delay: -0.8s;
+  }
+
+  .graph-line-5 {
+    animation-delay: -1.9s;
+  }
+
+  .graph-line-6 {
+    animation-delay: -2.8s;
+  }
+
+  .graph-line-7 {
+    animation-delay: -3.4s;
+  }
+
+  .graph-line-8 {
+    animation-delay: -4s;
+  }
+
+  .graph-signal {
+    stroke-dasharray: 14 120;
+    stroke-dashoffset: 140;
+    filter: drop-shadow(0 0 6px rgba(54, 225, 202, 0.45));
+    animation: graph-travel 3.6s linear infinite;
+  }
+
   .text-blue-400 {
     color: #4adfd1 !important;
   }
@@ -137,5 +210,66 @@
 
   .border-primary\/40 {
     border-color: rgb(54 225 202 / 0.4) !important;
+  }
+}
+
+@keyframes graph-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, -8px, 0) scale(1.06);
+  }
+}
+
+@keyframes graph-breathe {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    transform: translate(-50%, -50%) scale(1.06);
+  }
+}
+
+@keyframes graph-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: translate(-50%, -50%) scale(1);
+  }
+  50% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1.18);
+  }
+}
+
+@keyframes graph-line-fade {
+  0%,
+  100% {
+    opacity: 0.28;
+  }
+  50% {
+    opacity: 0.65;
+  }
+}
+
+@keyframes graph-travel {
+  from {
+    stroke-dashoffset: 140;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .graph-core-glow,
+  .graph-hub,
+  .graph-node,
+  .graph-line,
+  .graph-signal {
+    animation: none !important;
   }
 }

@@ -1510,7 +1510,7 @@ class SqlPartnerKeyValidator:
                 rows = await conn.fetch(
                     f"""SELECT id, email, display_name, api_key,
                                authorized_entity_ids, status, is_admin,
-                               shared_partner_id, default_project, roles, department
+                               shared_partner_id, access_mode, default_project, roles, department
                         FROM {SCHEMA}.partners WHERE status = 'active'"""
                 )
             new_cache: dict[str, dict] = {}
@@ -1526,6 +1526,7 @@ class SqlPartnerKeyValidator:
                         "status": row["status"],
                         "isAdmin": row["is_admin"],
                         "sharedPartnerId": row["shared_partner_id"],
+                        "accessMode": row["access_mode"] if "access_mode" in row else None,
                         "defaultProject": row["default_project"] or "",
                         "roles": list(row["roles"] or []) if "roles" in row else [],
                         "department": (row["department"] or "all") if "department" in row else "all",
@@ -1844,6 +1845,7 @@ def _row_to_partner_dict(row: asyncpg.Record) -> dict:
         "status": row["status"],
         "isAdmin": row["is_admin"],
         "sharedPartnerId": row["shared_partner_id"],
+        "accessMode": row["access_mode"] if "access_mode" in row else None,
         "defaultProject": row["default_project"],
         "roles": list(row["roles"] or []) if "roles" in row else [],
         "department": (row["department"] or "all") if "department" in row else "all",
@@ -1855,7 +1857,7 @@ def _row_to_partner_dict(row: asyncpg.Record) -> dict:
 
 
 _PARTNER_SELECT_COLS = """id, email, display_name, api_key, authorized_entity_ids,
-                       status, is_admin, shared_partner_id, default_project, invited_by,
+                       status, is_admin, shared_partner_id, access_mode, default_project, invited_by,
                        roles, department, created_at, updated_at, invite_expires_at"""
 
 
@@ -1906,9 +1908,9 @@ class SqlPartnerRepository:
             await conn.execute(
                 f"""INSERT INTO {SCHEMA}.partners (
                         id, email, display_name, api_key, authorized_entity_ids,
-                        status, is_admin, shared_partner_id, invited_by,
+                        status, is_admin, shared_partner_id, access_mode, invited_by,
                         roles, department, created_at, updated_at, invite_expires_at
-                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)""",
+                    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)""",
                 data["id"],
                 data["email"],
                 data["displayName"],
@@ -1917,6 +1919,7 @@ class SqlPartnerRepository:
                 data.get("status", "invited"),
                 data.get("isAdmin", False),
                 data.get("sharedPartnerId"),
+                data.get("accessMode", "unassigned"),
                 data.get("invitedBy", ""),
                 data.get("roles", []),
                 data.get("department", "all"),
@@ -2015,6 +2018,7 @@ class SqlPartnerRepository:
             "isAdmin": "is_admin",
             "apiKey": "api_key",  # pragma: allowlist secret
             "displayName": "display_name",
+            "accessMode": "access_mode",
             "roles": "roles",
             "department": "department",
             "authorizedEntityIds": "authorized_entity_ids",
@@ -2039,10 +2043,39 @@ class SqlPartnerRepository:
     async def delete(self, partner_id: str) -> None:
         """Delete partner by ID."""
         async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"DELETE FROM {SCHEMA}.partners WHERE id = $1",
-                partner_id,
-            )
+            async with conn.transaction():
+                # Nullify tasks assigned to this partner
+                await conn.execute(
+                    f"UPDATE {SCHEMA}.tasks SET assignee = NULL WHERE assignee = $1",
+                    partner_id,
+                )
+                # Delete task_comments by this partner
+                await conn.execute(
+                    f"DELETE FROM {SCHEMA}.task_comments WHERE partner_id = $1",
+                    partner_id,
+                )
+                # Delete tool_events by this partner (prevent FK constraint error)
+                await conn.execute(
+                    f"DELETE FROM {SCHEMA}.tool_events WHERE partner_id = $1",
+                    partner_id,
+                )
+                # CRM cleanup: recorded_by and owner_partner_id are NOT NULL FKs
+                # without ON DELETE action, so they must be cleaned up before
+                # deleting the partner to avoid FK constraint errors.
+                # Delete activities recorded by this partner on other partners' deals.
+                await conn.execute(
+                    "DELETE FROM crm.activities WHERE recorded_by = $1",
+                    partner_id,
+                )
+                # Delete deals owned by this partner (cascades remaining activities).
+                await conn.execute(
+                    "DELETE FROM crm.deals WHERE owner_partner_id = $1",
+                    partner_id,
+                )
+                await conn.execute(
+                    f"DELETE FROM {SCHEMA}.partners WHERE id = $1",
+                    partner_id,
+                )
 
     async def get_entity_tenant(self, entity_id: str) -> dict | None:
         """Return {partner_id, shared_partner_id} for the entity's owner partner."""

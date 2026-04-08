@@ -265,12 +265,19 @@ describe("NodeDetailSheet — permission editor", () => {
     render(<NodeDetailSheet {...defaultProps} entity={makeEntity({ visibility: "restricted" })} />);
 
     fireEvent.click(screen.getByText("Edit"));
-    fireEvent.change(screen.getByRole("combobox"), { target: { value: "restricted" } });
 
-    expect(await screen.findByText("Choose the exposure model first, then pick the exact audiences below.")).toBeDefined();
-    const rolesField = screen.getByText("Visible to Roles").closest("div")?.parentElement as HTMLElement;
-    const departmentsField = screen.getByText("Visible to Departments").closest("div")?.parentElement as HTMLElement;
-    const membersField = screen.getByText("Visible to Members").closest("div")?.parentElement as HTMLElement;
+    const visibilitySelect = screen.getByRole("combobox");
+    expect(within(visibilitySelect).queryByText("role-restricted")).toBeNull();
+    expect(within(visibilitySelect).getByText("Public — 所有人可見")).toBeDefined();
+    expect(within(visibilitySelect).getByText("Restricted — 僅授權的工作區成員可見")).toBeDefined();
+    expect(within(visibilitySelect).getByText("Confidential — 僅 owner 可見")).toBeDefined();
+
+    fireEvent.change(visibilitySelect, { target: { value: "restricted" } });
+
+    expect(await screen.findByText("Pick the visibility level first, then scope the workspace audiences below.")).toBeDefined();
+    const rolesField = screen.getByText("Workspace roles").closest("div")?.parentElement as HTMLElement;
+    const departmentsField = screen.getByText("Workspace groups").closest("div")?.parentElement as HTMLElement;
+    const membersField = screen.getByText("Authorized members").closest("div")?.parentElement as HTMLElement;
 
     expect(within(rolesField).getByRole("button", { name: /engineering/i })).toBeDefined();
     expect(within(departmentsField).getByRole("button", { name: /^finance/i })).toBeDefined();
@@ -279,7 +286,7 @@ describe("NodeDetailSheet — permission editor", () => {
     fireEvent.click(within(rolesField).getByRole("button", { name: /engineering/i }));
     fireEvent.click(within(departmentsField).getByRole("button", { name: /^finance/i }));
     fireEvent.click(within(membersField).getByRole("button", { name: /Alice/i }));
-    fireEvent.click(screen.getByText("Save"));
+    fireEvent.click(screen.getByText("Save Visibility"));
 
     await waitFor(() => {
       expect(updateEntityVisibilityMock).toHaveBeenCalledWith("token-123", "entity-1", {

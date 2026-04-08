@@ -2,10 +2,12 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
 import { LoadingState } from "@/components/LoadingState";
+import { resolveActiveWorkspace } from "@/lib/partner";
 import {
   getDeals,
   patchDealStage,
@@ -405,12 +407,21 @@ function NewDealModal({
 
 function ClientsPage() {
   const { user, partner } = useAuth();
+  const router = useRouter();
+  const { isHomeWorkspace } = resolveActiveWorkspace(partner);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInactive, setShowInactive] = useState(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Route guard: shared-workspace users cannot access the CRM page
+  useEffect(() => {
+    if (partner && !isHomeWorkspace) {
+      router.replace("/tasks");
+    }
+  }, [partner, isHomeWorkspace, router]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -502,6 +513,8 @@ function ClientsPage() {
   const activeDragDeal = activeDragId
     ? deals.find((d) => d.id === activeDragId)
     : null;
+
+  if (!isHomeWorkspace) return null;
 
   return (
     <div className="min-h-screen">

@@ -3,6 +3,7 @@
  * Replaces direct Firestore SDK calls. All functions require a Firebase ID token.
  */
 import type { Entity, Relationship, Blindspot, Task, TaskComment, Partner, QualitySignals, ImpactChainHop } from "@/types";
+import { getPartnerWorkspaceRole } from "@/lib/partner";
 
 export const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
@@ -38,6 +39,46 @@ async function apiFetch<T>(path: string, token: string): Promise<T> {
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
   const data = await res.json();
   return hydrateDates(data) as T;
+}
+
+function normalizePartner(data: Record<string, unknown>): Partner {
+  const rawAccessMode = data.accessMode ?? data.access_mode;
+  const authorizedEntityIds = Array.isArray(data.authorizedEntityIds) ? data.authorizedEntityIds : [];
+  const normalizedAccessMode =
+    rawAccessMode === "internal" || rawAccessMode === "scoped" || rawAccessMode === "unassigned"
+      ? rawAccessMode
+      : undefined;
+  const normalizedWorkspaceRole =
+    data.workspaceRole ?? data.workspace_role;
+  const workspaceRole = getPartnerWorkspaceRole({
+    accessMode: normalizedAccessMode,
+    authorizedEntityIds,
+    isAdmin: Boolean(data.isAdmin),
+    workspaceRole:
+      normalizedWorkspaceRole === "owner" ||
+      normalizedWorkspaceRole === "member" ||
+      normalizedWorkspaceRole === "guest"
+        ? normalizedWorkspaceRole
+        : undefined,
+  });
+  // Trust the server-provided accessMode when it is a valid value.
+  // Re-deriving from authorizedEntityIds.length loses the "scoped" state when
+  // the guest has no entity list yet (workspace_role="guest" + empty IDs).
+  const resolvedAccessMode =
+    normalizedAccessMode ??
+    (workspaceRole === "owner" || workspaceRole === "member"
+      ? "internal"
+      : authorizedEntityIds.length > 0
+        ? "scoped"
+        : "unassigned");
+  return hydrateDates({
+    ...data,
+    accessMode: resolvedAccessMode,
+    workspaceRole,
+    isAdmin: Boolean(data.isAdmin) || workspaceRole === "owner",
+    authorizedEntityIds,
+    sharedPartnerId: data.sharedPartnerId ?? data.shared_partner_id ?? null,
+  }) as Partner;
 }
 
 /** Fetch all product entities */
@@ -178,18 +219,18 @@ export async function getTasksByEntity(
 /** Fetch the current partner (auth) */
 export async function getPartnerMe(token: string): Promise<Partner> {
   const res = await apiFetch<{ partner: Partner }>("/api/partner/me", token);
-  return res.partner;
+  return normalizePartner(res.partner as unknown as Record<string, unknown>);
 }
 
 export async function getPartners(token: string): Promise<Partner[]> {
   const res = await apiFetch<{ partners: Partner[] }>("/api/partners", token);
-  return res.partners ?? [];
+  return (res.partners ?? []).map((partner) => normalizePartner(partner as unknown as Record<string, unknown>));
 }
 
 export async function updatePartnerScope(
   token: string,
   partnerId: string,
-  data: { roles: string[]; department: string; authorizedEntityIds?: string[] }
+  data: { roles: string[]; department: string; accessMode?: Partner["accessMode"]; authorizedEntityIds?: string[] }
 ): Promise<Partner> {
   const res = await fetch(`${API_BASE}/api/partners/${partnerId}/scope`, {
     method: "PUT",
@@ -197,10 +238,13 @@ export async function updatePartnerScope(
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(data),
+    body: JSON.stringify({
+      ...data,
+      access_mode: data.accessMode,
+    }),
   });
   if (!res.ok) throw new Error(`API /api/partners/${partnerId}/scope: ${res.status}`);
-  return hydrateDates(await res.json()) as Partner;
+  return normalizePartner(await res.json() as Record<string, unknown>);
 }
 
 export async function getDepartments(token: string): Promise<string[]> {

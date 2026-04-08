@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Entity, Relationship } from "@/types";
+import type { Entity, EntityVisibility, Relationship } from "@/types";
 import { getRelationships, updateEntityVisibility } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { LoadingState } from "@/components/LoadingState";
@@ -26,13 +26,25 @@ const statusColors: Record<string, string> = {
   completed: "bg-secondary text-muted-foreground",
 };
 
+const VISIBILITY_OPTIONS: EntityVisibility[] = ["public", "restricted", "confidential"];
+
+function normalizeVisibility(visibility: string): EntityVisibility {
+  if (visibility === "public" || visibility === "restricted" || visibility === "confidential") {
+    return visibility;
+  }
+  if (visibility === "role-restricted") {
+    return "restricted";
+  }
+  return "public";
+}
+
 function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Entity[] }) {
   const { user, partner } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [loadingRels, setLoadingRels] = useState(false);
   const [savingVisibility, setSavingVisibility] = useState(false);
-  const [visibility, setVisibility] = useState<Entity["visibility"]>(entity.visibility);
+  const [visibility, setVisibility] = useState<EntityVisibility>(normalizeVisibility(entity.visibility as string));
   const [visibleToRoles, setVisibleToRoles] = useState((entity.visibleToRoles || []).join(", "));
   const [visibleToDepartments, setVisibleToDepartments] = useState(
     (entity.visibleToDepartments || []).join(", ")
@@ -103,38 +115,39 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
         <div className="border-t border-border p-4 bg-background">
           {partner?.isAdmin && (
             <div className="mb-4 rounded-md border border-border p-3">
-              <div className="text-xs text-muted-foreground mb-2">Permission</div>
+              <div className="text-xs text-muted-foreground mb-2">Visibility</div>
               <div className="grid gap-2">
                 <select
                   aria-label={`Visibility for ${entity.name}`}
                   value={visibility}
-                  onChange={(e) => setVisibility(e.target.value as Entity["visibility"])}
+                  onChange={(e) => setVisibility(normalizeVisibility(e.target.value))}
                   className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
                 >
-                  <option value="public">public</option>
-                  <option value="restricted">restricted</option>
-                  <option value="role-restricted">role-restricted</option>
-                  <option value="confidential">confidential</option>
+                  {VISIBILITY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
                 </select>
                 <input
-                  aria-label={`Visible roles for ${entity.name}`}
+                  aria-label={`Workspace roles for ${entity.name}`}
                   value={visibleToRoles}
                   onChange={(e) => setVisibleToRoles(e.target.value)}
-                  placeholder="visible roles (comma-separated)"
+                  placeholder="workspace roles (comma-separated)"
                   className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
                 />
                 <input
-                  aria-label={`Visible departments for ${entity.name}`}
+                  aria-label={`Workspace groups for ${entity.name}`}
                   value={visibleToDepartments}
                   onChange={(e) => setVisibleToDepartments(e.target.value)}
-                  placeholder="visible departments (comma-separated)"
+                  placeholder="workspace groups (comma-separated)"
                   className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
                 />
                 <input
-                  aria-label={`Visible members for ${entity.name}`}
+                  aria-label={`Authorized members for ${entity.name}`}
                   value={visibleToMembers}
                   onChange={(e) => setVisibleToMembers(e.target.value)}
-                  placeholder="visible members (partner ids, comma-separated)"
+                  placeholder="authorized members (partner ids, comma-separated)"
                   className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
                 />
                 <button
@@ -142,7 +155,7 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
                   disabled={savingVisibility}
                   className="justify-self-start text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50"
                 >
-                  {savingVisibility ? "Saving..." : "Save Permission"}
+                  {savingVisibility ? "Saving..." : "Save Visibility"}
                 </button>
               </div>
             </div>

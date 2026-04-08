@@ -58,7 +58,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
   if (assignees.length === 0) {
     return (
       <div className="bg-card rounded-lg border border-border p-6">
-        <h3 className="text-sm font-semibold text-white mb-4">People x Projects</h3>
+        <h3 className="text-sm font-semibold text-white mb-4">People x Products</h3>
         <p className="text-sm text-muted-foreground text-center py-4">No tasks assigned yet</p>
       </div>
     );
@@ -72,7 +72,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
 
   return (
     <div className="bg-card rounded-lg border border-border p-6">
-      <h3 className="text-sm font-semibold text-white mb-4">People x Projects</h3>
+      <h3 className="text-sm font-semibold text-white mb-4">People x Products</h3>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>

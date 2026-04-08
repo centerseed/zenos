@@ -4,7 +4,7 @@ id: SPEC-client-portal
 status: Draft
 ontology_entity: TBD
 created: 2026-04-03
-updated: 2026-04-03
+updated: 2026-04-06
 ---
 
 # Feature Spec: 客戶協作入口（Client Portal）
@@ -29,6 +29,7 @@ ZenOS 目前是純內部工具——文件、任務、知識圖譜只有持有 G
 | ZenOS Admin | 邀請客戶、設定 L1 scope、管理成員 |
 | ZenOS 內部成員 | 看全部資料，與客戶協作 |
 | 客戶（Scoped Partner）| 被邀請進入特定 L1 空間，可查看、討論、建任務 |
+| 未指派 partner | 已完成登入但尚未被分享任何 L1，只看到等待指派畫面 |
 
 ---
 
@@ -39,7 +40,7 @@ ZenOS 目前是純內部工具——文件、任務、知識圖譜只有持有 G
 - 客戶只能看到自己被授權的 L1 空間內的內容（nodes、文件、tasks）
 - 客戶無法感知其他 L1 空間的存在
 - ZenOS 內部成員可跨所有 L1 操作
-- 隔離機制定義於 SPEC-permission-model（`authorized_entity_ids` + `visibility`）
+- 隔離機制定義於 `SPEC-partner-access-scope` 與 `SPEC-permission-model`
 
 ---
 
@@ -61,14 +62,15 @@ ZenOS 目前是純內部工具——文件、任務、知識圖譜只有持有 G
 #### 2. L1 隔離的 Dashboard 視角
 
 - **描述**：客戶登入後看到同一個 Dashboard，但頁籤與資料根據其 `authorized_entity_ids` 自動過濾。
-- **客戶可見頁籤**：Tasks、Projects（限自己的 L1）
+- **客戶可見頁籤**：Tasks、Products（限自己的 L1）
 - **客戶不可見頁籤**：Team、Setup、Clients（CRM）、任何跨 L1 的管理功能
 - **Acceptance Criteria**：
-  - Given 客戶登入，Then 導覽列只顯示 Tasks 與 Projects 頁籤，不出現 Team / Setup / CRM
+  - Given 客戶登入，Then 導覽列只顯示 Tasks 與 Products 頁籤，不出現 Team / Setup / CRM
   - Given 客戶在 Tasks 頁，Then 只看到自己 L1 下的 tasks
-  - Given 客戶在 Projects 頁，Then 只看到自己 L1 下的 nodes（visibility = public）
+  - Given 客戶在 Products 頁，Then 只看到自己 L1 下的 nodes（visibility = public）
   - Given 客戶嘗試直接存取 `/team` 或 `/setup` URL，Then 重導回首頁（不顯示 403 或其他 L1 資訊）
   - Given 客戶的 `authorized_entity_ids` 為空（尚未指派 L1），Then 登入後顯示「您的帳號尚未設定存取空間，請聯繫管理員」，不顯示空白畫面
+  - Given 客戶的 `authorized_entity_ids` 為空，When 直接呼叫 API 或刷新頁面，Then 仍回到等待指派畫面，不看到任何 tenant 資料
 
 #### 3. 客戶可查看文件與任務
 
@@ -128,6 +130,7 @@ ZenOS 目前是純內部工具——文件、任務、知識圖譜只有持有 G
 
 ## 依賴
 
+- **SPEC-partner-access-scope**：新 partner 預設空白、L1 分享、未指派狀態
 - **SPEC-permission-model**：L1 隔離、visibility 規則、`authorized_entity_ids` 語意
 
 ---

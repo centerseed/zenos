@@ -30,6 +30,7 @@ from starlette.routing import Route
 
 from zenos.infrastructure.email_client import EmailService
 from zenos.infrastructure.sql_repo import SqlPartnerRepository  # composition root
+from zenos.domain.partner_access import describe_partner_access
 
 logger = logging.getLogger(__name__)
 
@@ -179,12 +180,16 @@ def _same_tenant_id(partner_id: str | None, partner: dict | None) -> str:
 
 def _sanitize_partner_for_admin_view(partner_id: str, data: dict) -> dict:
     """Remove sensitive fields before returning partner data to admin UI."""
+    access = describe_partner_access(data)
     sanitized = {
         "id": partner_id,
         "email": data.get("email", ""),
         "displayName": data.get("displayName", ""),
         "isAdmin": bool(data.get("isAdmin", False)),
         "status": data.get("status", "active"),
+        "accessMode": access["access_mode"],
+        "workspaceRole": access["workspace_role"],
+        "authorizedEntityIds": list(data.get("authorizedEntityIds", []) or []),
         "roles": list(data.get("roles", []) or []),
         "department": data.get("department", "all"),
         "invitedBy": data.get("invitedBy"),
@@ -193,6 +198,15 @@ def _sanitize_partner_for_admin_view(partner_id: str, data: dict) -> dict:
         "sharedPartnerId": data.get("sharedPartnerId"),
     }
     return sanitized
+
+
+def _workspace_role_to_access_mode(workspace_role: str) -> str:
+    mapping = {
+        "owner": "internal",
+        "member": "internal",
+        "guest": "scoped",
+    }
+    return mapping[workspace_role]
 
 
 # ──────────────────────────────────────────────
@@ -297,6 +311,30 @@ async def invite_partner(request: Request) -> Response:
     authorized_entity_ids = body.get("authorized_entity_ids", [])
     if not isinstance(authorized_entity_ids, list):
         authorized_entity_ids = []
+    workspace_role_raw = body.get("workspace_role", None)
+    access_mode_raw = body.get("access_mode", None)
+    workspace_role_raw = body.get("workspace_role", None)
+    if workspace_role_raw is not None:
+        workspace_role = str(workspace_role_raw or "").strip().lower()
+        if workspace_role not in {"member", "guest"}:
+            return _error_response(
+                "INVALID_INPUT",
+                "workspace_role must be one of ['member', 'guest']",
+                400,
+                request=request,
+            )
+        access_mode = _workspace_role_to_access_mode(workspace_role)
+    else:
+        access_mode = str(access_mode_raw or "unassigned").strip().lower()
+        if access_mode not in {"internal", "scoped", "unassigned"}:
+            return _error_response(
+                "INVALID_INPUT",
+                "access_mode must be one of ['internal', 'scoped', 'unassigned']",
+                400,
+                request=request,
+            )
+    if access_mode != "scoped":
+        authorized_entity_ids = []
 
     roles_raw = body.get("roles", [])
     department_raw = str(body.get("department", "all") or "all").strip() or "all"
@@ -319,8 +357,8 @@ async def invite_partner(request: Request) -> Response:
         if existing_status == "invited":
             # Re-invite: reset expiry and optionally update authorized_entity_ids
             reinvite_fields: dict[str, object] = {"inviteExpiresAt": invite_expires_at, "updatedAt": now}
-            if authorized_entity_ids:
-                reinvite_fields["authorizedEntityIds"] = authorized_entity_ids
+            reinvite_fields["authorizedEntityIds"] = authorized_entity_ids
+            reinvite_fields["accessMode"] = access_mode
             repo = await _ensure_partner_repo()
             await repo.update_fields(existing_id, reinvite_fields)
             logger.info(
@@ -336,8 +374,9 @@ async def invite_partner(request: Request) -> Response:
             )
             existing["inviteExpiresAt"] = invite_expires_at
             existing["updatedAt"] = now
-            if authorized_entity_ids:
-                existing["authorizedEntityIds"] = authorized_entity_ids
+            existing["authorizedEntityIds"] = authorized_entity_ids
+            existing["accessMode"] = access_mode
+            existing["workspaceRole"] = "guest" if access_mode == "scoped" else "member"
             existing["id"] = existing_id
             sign_in_link = _generate_sign_in_link(email)
             email_sent = await _send_invite_email(
@@ -360,6 +399,7 @@ async def invite_partner(request: Request) -> Response:
         "status": "invited",
         "isAdmin": False,
         "sharedPartnerId": shared_partner_id,
+        "accessMode": access_mode,
         "invitedBy": caller.get("email", ""),
         "roles": roles,
         "department": department_raw,
@@ -394,6 +434,8 @@ async def invite_partner(request: Request) -> Response:
         "apiKey": "",
         "authorizedEntityIds": authorized_entity_ids,
         "sharedPartnerId": shared_partner_id,
+        "accessMode": access_mode,
+        "workspaceRole": "guest" if access_mode == "scoped" else "member",
         "isAdmin": False,
         "status": "invited",
         "invitedBy": caller.get("email", ""),
@@ -501,7 +543,7 @@ async def delete_department(request: Request) -> Response:
 
 
 async def delete_partner(request: Request) -> Response:
-    """Delete an invited partner. Admin only. Only invited status allowed."""
+    """Delete a partner. Admin only."""
     if request.method == "OPTIONS":
         return _handle_options(request)
 
@@ -529,14 +571,6 @@ async def delete_partner(request: Request) -> Response:
     if _same_tenant_id(caller_id, caller) != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant delete is not allowed", 403, request=request)
 
-    if target.get("status") != "invited":
-        return _error_response(
-            "FORBIDDEN",
-            f"Only invited partners can be deleted (current status: {target.get('status')})",
-            403,
-            request=request,
-        )
-
     await repo.delete(partner_id)
 
     logger.info(
@@ -547,7 +581,7 @@ async def delete_partner(request: Request) -> Response:
             "target_email": target.get("email", ""),
             "target_partner_id": partner_id,
             "result": "success",
-            "detail": "status=invited",
+            "detail": f"status={target.get('status')}",
         },
     )
 
@@ -738,6 +772,8 @@ async def update_partner_scope(request: Request) -> Response:
     roles_raw = body.get("roles", [])
     department_raw = body.get("department", "all")
     authorized_entity_ids_raw = body.get("authorized_entity_ids", None)
+    workspace_role_raw = body.get("workspace_role", None)
+    access_mode_raw = body.get("access_mode", None)
 
     if not isinstance(roles_raw, list) or any(not isinstance(r, str) for r in roles_raw):
         return _error_response("INVALID_INPUT", "roles must be string[]", 400, request=request)
@@ -748,22 +784,58 @@ async def update_partner_scope(request: Request) -> Response:
         or any(not isinstance(x, str) for x in authorized_entity_ids_raw)
     ):
         return _error_response("INVALID_INPUT", "authorized_entity_ids must be string[] or null", 400, request=request)
-
-    roles = sorted({r.strip() for r in roles_raw if r.strip()})
-    department = department_raw.strip()
+    if workspace_role_raw is not None:
+        if not isinstance(workspace_role_raw, str) or workspace_role_raw.strip().lower() not in {"member", "guest"}:
+            return _error_response(
+                "INVALID_INPUT",
+                "workspace_role must be one of ['member', 'guest']",
+                400,
+                request=request,
+            )
+    elif access_mode_raw is not None and (
+        not isinstance(access_mode_raw, str)
+        or access_mode_raw.strip().lower() not in {"internal", "scoped", "unassigned"}
+    ):
+        return _error_response(
+            "INVALID_INPUT",
+            "access_mode must be one of ['internal', 'scoped', 'unassigned']",
+            400,
+            request=request,
+        )
 
     repo = await _ensure_partner_repo()
     target = await repo.get_by_id(partner_id)
     if not target:
         return _error_response("NOT_FOUND", f"Partner {partner_id} not found", 404, request=request)
 
+    roles = sorted({r.strip() for r in roles_raw if r.strip()})
+    department = department_raw.strip()
+    if workspace_role_raw is not None:
+        access_mode = _workspace_role_to_access_mode(str(workspace_role_raw).strip().lower())
+    else:
+        access_mode = (
+            str(access_mode_raw).strip().lower()
+            if access_mode_raw is not None
+            else describe_partner_access(target)["access_mode"]
+        )
+
     caller_tenant = _same_tenant_id(caller_id, caller)
     if caller_tenant != _same_tenant_id(partner_id, target):
         return _error_response("FORBIDDEN", "Cross-tenant scope change is not allowed", 403, request=request)
 
+    if workspace_role_raw is None and access_mode_raw is None:
+        access_mode = describe_partner_access(target)["access_mode"]
+    if access_mode != "scoped":
+        authorized_entity_ids_raw = []
+
     now = datetime.now(timezone.utc)
     await repo.create_department(caller_tenant, department)
-    update_data: dict = {"roles": roles, "department": department, "updatedAt": now}
+    update_data: dict = {
+        "roles": roles,
+        "department": department,
+        "accessMode": access_mode,
+        "updatedAt": now,
+    }
     if authorized_entity_ids_raw is not None:
         update_data["authorizedEntityIds"] = authorized_entity_ids_raw
     await repo.update_fields(partner_id, update_data)
@@ -779,6 +851,8 @@ async def update_partner_scope(request: Request) -> Response:
         "displayName": target["displayName"],
         "isAdmin": target["isAdmin"],
         "status": target["status"],
+        "accessMode": access_mode,
+        "workspaceRole": "owner" if target["isAdmin"] else ("guest" if access_mode == "scoped" else "member"),
         "roles": roles,
         "department": department,
         "authorizedEntityIds": authorized_entity_ids,
@@ -817,7 +891,7 @@ async def update_entity_visibility(request: Request) -> Response:
         return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
 
     visibility = str(body.get("visibility", "public"))
-    valid = {"public", "restricted", "role-restricted", "confidential"}
+    valid = {"public", "restricted", "confidential"}
     if visibility not in valid:
         return _error_response("INVALID_INPUT", f"visibility must be one of {sorted(valid)}", 400, request=request)
 
@@ -829,6 +903,11 @@ async def update_entity_visibility(request: Request) -> Response:
     visible_to_roles = _norm_list(body.get("visible_to_roles", []))
     visible_to_members = _norm_list(body.get("visible_to_members", []))
     visible_to_departments = _norm_list(body.get("visible_to_departments", []))
+    if visibility != "confidential":
+        visible_to_members = []
+    if visibility != "restricted":
+        visible_to_roles = []
+        visible_to_departments = []
 
     repo = await _ensure_partner_repo()
     caller_tenant = _same_tenant_id(caller_id, caller)

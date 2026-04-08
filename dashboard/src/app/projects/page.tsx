@@ -52,7 +52,7 @@ function ProjectList() {
       <div className="min-h-screen flex flex-col">
         <AppNav />
         <div className="flex-1 flex items-center justify-center">
-          <LoadingState label="Loading projects..." />
+          <LoadingState label="Loading products..." />
         </div>
       </div>
     );
@@ -62,9 +62,9 @@ function ProjectList() {
     <div className="min-h-screen flex flex-col">
       <AppNav />
       <main id="main-content" className="max-w-5xl mx-auto px-6 py-8 w-full">
-        <h1 className="text-2xl font-bold text-foreground mb-6">Projects</h1>
+        <h1 className="text-2xl font-bold text-foreground mb-6">Products</h1>
         {products.length === 0 ? (
-          <p className="text-muted-foreground text-sm">No projects yet.</p>
+          <p className="text-muted-foreground text-sm">No products yet.</p>
         ) : (
           <div className="grid gap-3">
             {products.map((p) => (
@@ -126,7 +126,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
       <div className="min-h-screen flex flex-col">
         <AppNav />
         <div className="flex-1 flex items-center justify-center">
-          <LoadingState label="Loading project details..." />
+          <LoadingState label="Loading product details..." />
         </div>
       </div>
     );
@@ -180,7 +180,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
 
         <div className="pt-4">
           <Link href="/projects" className="text-sm text-blue-400 hover:underline">
-            Back to projects
+            Back to products
           </Link>
         </div>
       </main>
@@ -204,7 +204,7 @@ function ProjectPageInner() {
 export default function Page() {
   return (
     <AuthGuard>
-      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><LoadingState label="Loading projects..." /></div>}>
+      <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><LoadingState label="Loading products..." /></div>}>
         <ProjectPageInner />
       </Suspense>
     </AuthGuard>

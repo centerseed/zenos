@@ -247,6 +247,7 @@ class TestInviteFlowE2E:
             headers={"authorization": "Bearer fake-token"},
             body={
                 "email": "new-client@acme.com",
+                "workspace_role": "guest",
                 "authorized_entity_ids": ["l1-entity-id"],
             },
         )
@@ -276,7 +277,7 @@ class TestInviteFlowE2E:
         request = _mock_request(
             method="POST",
             headers={"authorization": "Bearer fake-token"},
-            body={"email": "another-client@acme.com", "authorized_entity_ids": ["l1-entity-id"]},
+            body={"email": "another-client@acme.com", "workspace_role": "guest", "authorized_entity_ids": ["l1-entity-id"]},
         )
 
         mock_repo = AsyncMock()
