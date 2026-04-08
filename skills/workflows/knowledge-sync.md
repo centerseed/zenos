@@ -82,7 +82,7 @@ git log --follow --diff-filter=R --summary -- {path}
 ```
 Source Audit 結果
 ─────────────────────────────────
-🔴 broken:    N 筆 — URI 指向已刪除的檔案（將自動清除）
+🔴 broken:    N 筆 — URI 指向不存在的檔案（需確認後才刪除）
 🟡 bad_label: N 筆 — label 將自動修正
 🟠 renamed:   N 筆 — URI 將自動更新為新路徑
 🟠 duplicate: N 筆 — 列出重複項供參考（不自動處理）

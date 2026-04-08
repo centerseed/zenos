@@ -146,7 +146,7 @@ write(
 
 2. 對每個修改的文件：
    a. 讀取 frontmatter 取得 doc_id 和 type
-   b. search(collection="documents", query=doc_id) 找對應 entity
+   b. search(collection="documents", query=doc_id, product_id=PRODUCT_ID) 找對應 entity
    c. 比對：
       - git 有修改 + ZenOS status=draft → 建議 under_review
       - git 有新文件 + ZenOS 無 entity → 建議建立 entity

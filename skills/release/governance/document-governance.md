@@ -131,9 +131,9 @@ Step 4：建立 relationship：
 write(
   collection="relationships",
   data={
-    "source_entity": "ADR-007-entity-architecture",
-    "target_entity": "ADR-003-entity-flat-model",
-    "relationship_type": "supersedes"
+    "source_entity_id": "{ADR-007 的 entity ID}",
+    "target_entity_id": "{ADR-003 的 entity ID}",
+    "type": "supersedes"
   }
 )
 ```
@@ -146,7 +146,7 @@ write(
 
 2. 對每個修改的文件：
    a. 讀取 frontmatter 取得 doc_id 和 type
-   b. search(collection="documents", query=doc_id) 找對應 entity
+   b. search(collection="documents", query=doc_id, product_id=PRODUCT_ID) 找對應 entity
    c. 比對：
       - git 有修改 + ZenOS status=draft → 建議 under_review
       - git 有新文件 + ZenOS 無 entity → 建議建立 entity
@@ -158,7 +158,8 @@ write(
 ## 寫文件前必做：查重
 
 ```python
-search(collection="documents", query="主題關鍵字")
+# 必須帶 product_id，避免跨產品誤判
+search(collection="documents", query="主題關鍵字", product_id=PRODUCT_ID)
 # + glob docs/ 下同前綴同主題的檔案
 ```
 
@@ -212,7 +213,7 @@ search(collection="documents", query="主題關鍵字")
 - 必須指向**有效的檔案位置**，不可指向已刪除或已改名的路徑
 - 對 `type=github` 的 source，可用 `git ls-files` 驗證路徑是否存在
 - 若檔案已改名，應更新 URI 為新路徑（可用 `git log --follow --diff-filter=R` 追蹤）
-- 若檔案已刪除且無改名記錄，應移除該 source；若為文件的唯一 source，應將文件 status 改為 `archived`
+- 若檔案已刪除且無改名記錄，應**標記為 broken 並等用戶確認後才移除**（不自動刪除——不同裝置的本地 repo 狀態可能不同，見 ADR-016）；若用戶確認刪除且為文件的唯一 source，將文件 status 改為 `archived`
 
 ### 稽核觸發時機
 

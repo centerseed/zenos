@@ -364,9 +364,9 @@ mcp__zenos__get(collection="entities", name="<候選模組>")
 
 ```
 # 寫入前雙重查重（兩種都要查，任一命中就跳過）：
-# 1. 用 source.uri 查：search(collection="documents", query="{source.uri}")
-# 2. 用檔名查：search(collection="documents", query="{檔名，如 STRATEGY-paceriz-launch-2026.md}")
-# 兩種查重都沒命中才建立新 document。
+# 1. 用 source.uri 查：search(collection="documents", query="{source.uri}", product_id=PRODUCT_ID)
+# 2. 用檔名查：search(collection="documents", query="{檔名}", product_id=PRODUCT_ID)
+# 所有查重都必須帶 product_id，避免跨產品誤判。兩種查重都沒命中才建立新 document。
 write(collection="documents", data={
   title, source, tags, summary,
   linked_entity_ids,   # ← 必填，不可省略（見下方說明）
