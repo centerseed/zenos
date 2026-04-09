@@ -2066,3 +2066,169 @@ def detect_invalid_document_titles(entities: list[Entity]) -> list[dict]:
 
     return invalid
 
+
+# ──────────────────────────────────────────────
+# Health Signal KPIs (ADR-020)
+# ──────────────────────────────────────────────
+
+HEALTH_THRESHOLDS: dict[str, dict[str, float]] = {
+    "quality_score":               {"green": 70, "yellow": 50},
+    "unconfirmed_ratio":           {"green": 0.30, "yellow": 0.60},
+    "blindspot_total":             {"green": 20, "yellow": 50},
+    "median_confirm_latency_days": {"green": 3, "yellow": 7},
+    "active_l2_missing_impacts":   {"green": 0, "yellow": 3},
+    "duplicate_blindspot_rate":    {"green": 0.05, "yellow": 0.15},
+}
+
+BOOTSTRAP_OVERRIDES: dict[str, dict[str, float]] = {
+    "unconfirmed_ratio": {"green": 0.50, "yellow": 0.70},
+}
+
+
+def _kpi_level(kpi_name: str, value: float, *, bootstrap: bool = False) -> str:
+    """Determine green/yellow/red level for a single KPI."""
+    thresholds = HEALTH_THRESHOLDS.get(kpi_name)
+    if not thresholds:
+        return "green"
+    if bootstrap and kpi_name in BOOTSTRAP_OVERRIDES:
+        thresholds = BOOTSTRAP_OVERRIDES[kpi_name]
+
+    green_threshold = thresholds["green"]
+    yellow_threshold = thresholds["yellow"]
+
+    # quality_score is "higher is better"; others are "lower is better"
+    if kpi_name == "quality_score":
+        if value >= green_threshold:
+            return "green"
+        if value >= yellow_threshold:
+            return "yellow"
+        return "red"
+    else:
+        if value <= green_threshold:
+            return "green"
+        if value <= yellow_threshold:
+            return "yellow"
+        return "red"
+
+
+def compute_health_kpis(
+    entities: list[Entity],
+    protocols: list[Protocol],
+    blindspots: list[Blindspot],
+    quality_score: int,
+    l2_repairs_count: int,
+    *,
+    bootstrap: bool = False,
+) -> dict:
+    """Compute 6 health KPIs from pre-fetched data. Pure function, zero I/O.
+
+    Returns dict with 'kpis', 'overall_level', 'recommended_action', 'red_reasons'.
+    """
+    # --- unconfirmed_ratio ---
+    all_items = [*entities, *protocols, *blindspots]
+    total_items = len(all_items)
+    unconfirmed_items = sum(1 for item in all_items if not getattr(item, "confirmed_by_user", False))
+    unconfirmed_ratio = (unconfirmed_items / total_items) if total_items else 0.0
+
+    # --- blindspot_total ---
+    blindspot_total = len(blindspots)
+
+    # --- duplicate_blindspot_rate ---
+    signature_count: dict[tuple, int] = {}
+    for bs in blindspots:
+        sig = (
+            " ".join(bs.description.strip().lower().split()),
+            bs.severity,
+            tuple(sorted(bs.related_entity_ids)),
+            " ".join(bs.suggested_action.strip().lower().split()),
+        )
+        signature_count[sig] = signature_count.get(sig, 0) + 1
+    duplicate_blindspots = sum(max(0, cnt - 1) for cnt in signature_count.values())
+    duplicate_blindspot_rate = (duplicate_blindspots / len(blindspots)) if blindspots else 0.0
+
+    # --- median_confirm_latency_days ---
+    latencies: list[float] = []
+    for item in all_items:
+        if not getattr(item, "confirmed_by_user", False):
+            continue
+        created_at = getattr(item, "created_at", None) or getattr(item, "generated_at", None)
+        updated_at = getattr(item, "updated_at", None)
+        if created_at and updated_at and updated_at >= created_at:
+            latencies.append((updated_at - created_at).total_seconds() / 86400)
+    median_confirm_latency_days = 0.0
+    if latencies:
+        sorted_days = sorted(latencies)
+        mid = len(sorted_days) // 2
+        if len(sorted_days) % 2 == 1:
+            median_confirm_latency_days = sorted_days[mid]
+        else:
+            median_confirm_latency_days = (sorted_days[mid - 1] + sorted_days[mid]) / 2
+
+    # --- Build KPI dict with levels ---
+    raw_kpis = {
+        "quality_score": quality_score,
+        "unconfirmed_ratio": round(unconfirmed_ratio, 4),
+        "blindspot_total": blindspot_total,
+        "median_confirm_latency_days": round(median_confirm_latency_days, 2),
+        "active_l2_missing_impacts": l2_repairs_count,
+        "duplicate_blindspot_rate": round(duplicate_blindspot_rate, 4),
+    }
+
+    kpis = {}
+    for name, value in raw_kpis.items():
+        level = _kpi_level(name, value, bootstrap=bootstrap)
+        kpis[name] = {"value": value, "level": level}
+
+    # --- overall_level: worst of all KPIs ---
+    levels = [v["level"] for v in kpis.values()]
+    if "red" in levels:
+        overall_level = "red"
+    elif "yellow" in levels:
+        overall_level = "yellow"
+    else:
+        overall_level = "green"
+
+    # --- red_reasons ---
+    red_reasons = []
+    for name, kpi_data in kpis.items():
+        if kpi_data["level"] == "red":
+            thresholds = HEALTH_THRESHOLDS[name]
+            if bootstrap and name in BOOTSTRAP_OVERRIDES:
+                thresholds = BOOTSTRAP_OVERRIDES[name]
+            threshold_val = thresholds["yellow"]
+            red_reasons.append({
+                "kpi": name,
+                "value": kpi_data["value"],
+                "threshold": threshold_val,
+                "repair": _kpi_repair_hint(name),
+            })
+
+    return {
+        "kpis": kpis,
+        "overall_level": overall_level,
+        "recommended_action": determine_recommended_action(overall_level),
+        "red_reasons": red_reasons,
+    }
+
+
+def determine_recommended_action(overall_level: str) -> str | None:
+    """Map overall health level to recommended action."""
+    if overall_level == "red":
+        return "run_governance"
+    if overall_level == "yellow":
+        return "review_health"
+    return None
+
+
+def _kpi_repair_hint(kpi_name: str) -> str:
+    """Return human-readable repair hint for a red KPI."""
+    hints = {
+        "quality_score": "執行 analyze(check_type='quality') 查看具體缺陷並修復",
+        "unconfirmed_ratio": "使用 confirm 確認 draft 狀態的 entities/protocols/blindspots",
+        "blindspot_total": "逐一審查 blindspots，resolve 已處理的項目",
+        "median_confirm_latency_days": "加速 confirm 流程，縮短 draft → confirmed 延遲",
+        "active_l2_missing_impacts": "補 impacts 或降級 L2 到 L3",
+        "duplicate_blindspot_rate": "合併重複的 blindspots",
+    }
+    return hints.get(kpi_name, "")
+

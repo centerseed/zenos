@@ -1725,10 +1725,19 @@ class TestAnalyzeTool:
             _make_entity(id="ent-1", type="product", confirmed_by_user=False),
             _make_entity(id="doc-1", type="document", confirmed_by_user=True),
         ]
-        blindspots = [
-            _make_blindspot(id="bs-1", description="dup", suggested_action="fix"),
-            _make_blindspot(id="bs-2", description="dup", suggested_action="fix"),
-        ]
+        health_signal = {
+            "kpis": {
+                "quality_score": {"value": 90, "level": "green"},
+                "unconfirmed_ratio": {"value": 0.5, "level": "yellow"},
+                "blindspot_total": {"value": 2, "level": "green"},
+                "median_confirm_latency_days": {"value": 1.0, "level": "green"},
+                "active_l2_missing_impacts": {"value": 0, "level": "green"},
+                "duplicate_blindspot_rate": {"value": 0.5, "level": "red"},
+            },
+            "overall_level": "red",
+            "recommended_action": "run_governance",
+            "red_reasons": [],
+        }
         with patch("zenos.interface.tools.governance_service") as mock_gs, \
              patch("zenos.interface.tools.ontology_service") as mock_os, \
              patch("zenos.interface.tools.blindspot_repo") as mock_br:
@@ -1738,19 +1747,22 @@ class TestAnalyzeTool:
             )
             mock_gs.run_blindspot_analysis = AsyncMock(return_value=[])
             mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
+            mock_gs.compute_health_signal = AsyncMock(return_value=health_signal)
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(return_value=entities)
             mock_os._documents = AsyncMock()
             mock_os._documents.list_all = AsyncMock(return_value=[])
             mock_os._protocols = AsyncMock()
             mock_os._protocols.get_by_entity = AsyncMock(return_value=None)
-            mock_br.list_all = AsyncMock(return_value=blindspots)
+            mock_br.list_all = AsyncMock(return_value=[])
 
             result = await analyze(check_type="all")
 
             assert "kpis" in result
-            assert result["kpis"]["total_items"] >= 2
-            assert result["kpis"]["duplicate_blindspots"] == 1
+            assert "health_signal" in result
+            assert result["health_signal"]["overall_level"] == "red"
+            assert result["kpis"]["blindspot_total"] == 2
+            assert result["kpis"]["duplicate_blindspot_rate"] == 0.5
 
     async def test_analyze_invalid_type(self):
         from zenos.interface.tools import analyze

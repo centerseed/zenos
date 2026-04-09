@@ -24,6 +24,7 @@ from zenos.domain.governance import (
     check_governance_review_overdue,
     check_impacts_target_validity,
     check_reverse_impacts,
+    compute_health_kpis,
     compute_quality_correction_priority,
     compute_search_unused_signals,
     detect_staleness,
@@ -386,8 +387,13 @@ class GovernanceService:
 
         # --- Goal disconnected (L2 entity types that cannot reach any GOAL) ---
         # Only MODULE is the current L2 type in the domain model.
+        # Skip entirely when no GOAL entities exist — otherwise every MODULE
+        # gets flagged as "goal_disconnected", producing pure noise.
         _L2_TYPES = {EntityType.MODULE}
         goal_ids = {e.id for e in entities if e.type == EntityType.GOAL and e.id}
+
+        if not goal_ids:
+            return issues
 
         for entity in entities:
             if not entity.id:
@@ -579,6 +585,54 @@ class GovernanceService:
             quality_report.warnings.append(partner_verb_item)
 
         return quality_report
+
+    async def compute_health_signal(self) -> dict:
+        """Compute lightweight health signal (ADR-020).
+
+        Queries repos, runs quality check for score + l2 repairs,
+        then delegates to domain pure function compute_health_kpis.
+
+        Returns dict with kpis, overall_level, recommended_action, red_reasons.
+        """
+        all_entities = await self._entities.list_all()
+        entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
+        documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
+        blindspots = await self._blindspots.list_all()
+
+        # Collect protocols
+        protocols = []
+        for entity in entities:
+            if entity.id:
+                protocol = await self._protocols.get_by_entity(entity.id)
+                if protocol is not None:
+                    protocols.append(protocol)
+
+        # Get quality_score and l2_repairs via existing run_quality_check
+        relationships = await self._load_all_relationships(all_entities)
+        quality_report = run_quality_check(
+            entities=entities,
+            documents=documents,
+            protocols=protocols,
+            blindspots=blindspots,
+            relationships=relationships,
+        )
+        quality_score = quality_report.score
+
+        # Count active L2 missing impacts
+        l2_missing = _find_active_l2_without_concrete_impacts(entities, relationships)
+        l2_repairs_count = len(l2_missing)
+
+        # Determine bootstrap mode: < 50 entities
+        bootstrap = len(entities) < 50
+
+        return compute_health_kpis(
+            entities=entities,
+            protocols=protocols,
+            blindspots=blindspots,
+            quality_score=quality_score,
+            l2_repairs_count=l2_repairs_count,
+            bootstrap=bootstrap,
+        )
 
     async def run_staleness_check(self) -> dict:
         """Detect staleness patterns across entities and documents.

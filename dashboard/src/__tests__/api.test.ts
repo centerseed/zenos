@@ -12,6 +12,7 @@ import {
   getTasks,
   getTasksByEntity,
   getPartnerMe,
+  updatePartnerScope,
   uploadTaskAttachment,
   uploadToSignedUrl,
   deleteTaskAttachment,
@@ -341,7 +342,7 @@ describe("getTasksByEntity", () => {
 // ─── getPartnerMe ───
 
 describe("getPartnerMe", () => {
-  it("calls GET /api/partner/me with auth header", async () => {
+  it("calls GET /api/partner/me with auth header and no-store cache", async () => {
     const partner = { id: "p-1", email: "user@example.com" };
     const fakeFetch = mockFetch({ partner });
     vi.stubGlobal("fetch", fakeFetch);
@@ -350,8 +351,44 @@ describe("getPartnerMe", () => {
 
     expect(fakeFetch).toHaveBeenCalledWith(
       `${API_BASE}/api/partner/me`,
-      { headers: { Authorization: `Bearer ${FAKE_TOKEN}` } }
+      {
+        cache: "no-store",
+        headers: { Authorization: `Bearer ${FAKE_TOKEN}` },
+      }
     );
+  });
+
+  it("includes active workspace header when one is stored", async () => {
+    const partner = { id: "p-1", email: "user@example.com" };
+    const fakeFetch = mockFetch({ partner });
+    vi.stubGlobal("fetch", fakeFetch);
+    const originalLocalStorage = window.localStorage;
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: vi.fn((key: string) => key === "zenos.activeWorkspaceId" ? "workspace-123" : null),
+      },
+    });
+
+    try {
+      await getPartnerMe(FAKE_TOKEN);
+
+      expect(fakeFetch).toHaveBeenCalledWith(
+        `${API_BASE}/api/partner/me`,
+        {
+          cache: "no-store",
+          headers: {
+            Authorization: `Bearer ${FAKE_TOKEN}`,
+            "X-Active-Workspace-Id": "workspace-123",
+          },
+        }
+      );
+    } finally {
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        value: originalLocalStorage,
+      });
+    }
   });
 
   it("returns partner data unwrapped from { partner: {...} } response", async () => {
@@ -405,6 +442,44 @@ describe("getPartnerMe", () => {
     expect(result.workspaceRole).toBe("guest");
     expect(result.accessMode).toBe("scoped");
     expect(result.authorizedEntityIds).toEqual([]);
+  });
+});
+
+describe("updatePartnerScope", () => {
+  it("sends authorized_entity_ids in the request body", async () => {
+    const partner = {
+      id: "p-guest",
+      email: "guest@example.com",
+      displayName: "Guest",
+      workspaceRole: "guest",
+      accessMode: "scoped",
+      authorizedEntityIds: ["entity-1", "entity-2"],
+      isAdmin: false,
+    };
+    const fakeFetch = mockFetch(partner);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await updatePartnerScope(FAKE_TOKEN, "p-guest", {
+      roles: ["engineering"],
+      department: "all",
+      accessMode: "scoped",
+      authorizedEntityIds: ["entity-1", "entity-2"],
+    });
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/partners/p-guest/scope`,
+      expect.objectContaining({
+        method: "PUT",
+        body: JSON.stringify({
+          roles: ["engineering"],
+          department: "all",
+          accessMode: "scoped",
+          authorizedEntityIds: ["entity-1", "entity-2"],
+          access_mode: "scoped",
+          authorized_entity_ids: ["entity-1", "entity-2"],
+        }),
+      })
+    );
   });
 });
 

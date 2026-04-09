@@ -32,6 +32,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from zenos.application.governance_service import GovernanceService
 from zenos.application.ontology_service import OntologyService, _collect_subtree_ids
 from zenos.application.task_service import TaskService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
@@ -48,10 +49,13 @@ from zenos.infrastructure.sql_repo import (  # composition root
     SqlBlindspotRepository,
     SqlEntityRepository,
     SqlPartnerRepository,
+    SqlProtocolRepository,
     SqlRelationshipRepository,
     SqlTaskRepository,
     SqlToolEventRepository,
+    get_cached_health,
     get_pool,
+    upsert_health_cache,
 )
 from zenos.interface.admin_api import (
     _cors_headers,
@@ -104,6 +108,59 @@ async def _get_partner_by_email_sql(email: str) -> dict | None:
     return await _partner_repo.get_by_email(email)
 
 
+def _requested_active_workspace_id(request: Request) -> str | None:
+    raw = request.headers.get("x-active-workspace-id", "").strip()
+    return raw or None
+
+
+async def _build_available_workspaces(partner: dict) -> list[dict]:
+    workspaces = [{"id": partner["id"], "name": "我的工作區", "hasUpdate": False}]
+    shared_partner_id = partner.get("sharedPartnerId")
+    if not shared_partner_id:
+        return workspaces
+
+    await _ensure_repos()
+    owner = await _partner_repo.get_by_id(str(shared_partner_id))
+    owner_name = (
+        (owner or {}).get("displayName")
+        or (owner or {}).get("email")
+        or "共享工作區"
+    )
+    workspaces.append({
+        "id": str(shared_partner_id),
+        "name": f"{owner_name} 的工作區",
+        "hasUpdate": False,
+    })
+    return workspaces
+
+
+def _resolve_active_workspace_id(partner: dict, requested_id: str | None) -> str:
+    home_id = str(partner["id"])
+    shared_id = str(partner["sharedPartnerId"]) if partner.get("sharedPartnerId") else None
+    if requested_id and requested_id in {home_id, shared_id}:
+        return requested_id
+    return home_id
+
+
+def _active_partner_view(partner: dict, active_workspace_id: str) -> tuple[dict, str]:
+    """Project a raw partner row into the selected active-workspace context."""
+    shared_partner_id = str(partner["sharedPartnerId"]) if partner.get("sharedPartnerId") else None
+    if shared_partner_id and active_workspace_id == str(partner["id"]):
+        projected = dict(partner)
+        projected["sharedPartnerId"] = None
+        projected["isAdmin"] = True
+        projected["accessMode"] = "internal"
+        projected["workspaceRole"] = "owner"
+        projected["authorizedEntityIds"] = []
+        return projected, str(partner["id"])
+
+    projected = dict(partner)
+    access = describe_partner_access(projected)
+    projected["accessMode"] = access["access_mode"]
+    projected["workspaceRole"] = access["workspace_role"]
+    return projected, shared_partner_id or str(partner["id"])
+
+
 # ──────────────────────────────────────────────
 # Auth helper — Firebase token → partner scope
 # ──────────────────────────────────────────────
@@ -124,9 +181,15 @@ async def _auth_and_scope(request: Request) -> tuple[dict | None, str | None]:
     partner = await _get_partner_by_email_sql(email)
     if not partner:
         return None, None
-    # Use sharedPartnerId for data scoping (same as Dashboard frontend logic)
-    effective_id = partner.get("sharedPartnerId") or partner["id"]
-    return partner, effective_id
+    active_workspace_id = _resolve_active_workspace_id(
+        partner,
+        _requested_active_workspace_id(request),
+    )
+    adjusted_partner, effective_id = _active_partner_view(partner, active_workspace_id)
+    adjusted_partner["activeWorkspaceId"] = active_workspace_id
+    adjusted_partner["homeWorkspaceId"] = partner["id"]
+    adjusted_partner["isHomeWorkspace"] = active_workspace_id == str(partner["id"])
+    return adjusted_partner, effective_id
 
 
 async def _list_all_entities_with_context(
@@ -399,19 +462,19 @@ async def get_partner_me(request: Request) -> Response:
     if not email:
         return _error_response("INVALID_INPUT", "Email not found in token", 400, request=request)
 
-    partner = await _get_partner_by_email_sql(email)
-    if not partner:
+    raw_partner = await _get_partner_by_email_sql(email)
+    if not raw_partner:
         return _error_response("NOT_FOUND", f"No partner found for email {email}", 404, request=request)
 
-    partner = dict(partner)
-    access = describe_partner_access(partner)
-    partner["accessMode"] = access["access_mode"]
-    partner["workspaceRole"] = access["workspace_role"]
-    # isHomeWorkspace is true when the partner is operating in their own workspace
-    # (sharedPartnerId is null). When non-null, the partner is a guest in another
-    # owner's workspace. Included explicitly so the frontend can build
-    # ActiveWorkspaceContext without additional derivation.
-    partner["isHomeWorkspace"] = not bool(partner.get("sharedPartnerId"))
+    active_workspace_id = _resolve_active_workspace_id(
+        raw_partner,
+        _requested_active_workspace_id(request),
+    )
+    partner, _ = _active_partner_view(raw_partner, active_workspace_id)
+    partner["activeWorkspaceId"] = active_workspace_id
+    partner["homeWorkspaceId"] = raw_partner["id"]
+    partner["isHomeWorkspace"] = active_workspace_id == str(raw_partner["id"])
+    partner["availableWorkspaces"] = await _build_available_workspaces(raw_partner)
     return _json_response({"partner": partner}, request=request)
 
 
@@ -1391,6 +1454,85 @@ async def get_quality_signals(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Endpoint: GET /api/data/governance-health
+# ──────────────────────────────────────────────
+
+_HEALTH_CACHE_MAX_AGE_SECONDS = 24 * 3600  # 24 hours
+
+
+async def get_governance_health(request: Request) -> Response:
+    """Return governance health level for the current partner.
+
+    Response:
+        {
+          "overall_level": "green" | "yellow" | "red",
+          "cached_at": "ISO datetime" | null,
+          "stale": false | true
+        }
+
+    Safe degradation: any failure returns green + stale=true.
+    """
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    await _ensure_repos()
+    pool = await get_pool()
+
+    # 1. Try cache
+    cached = await get_cached_health(pool, effective_id)
+
+    if cached is not None:
+        computed_at = cached["computed_at"]
+        age_seconds = (datetime.now(timezone.utc) - computed_at).total_seconds()
+        if age_seconds < _HEALTH_CACHE_MAX_AGE_SECONDS:
+            return _json_response({
+                "overall_level": cached["overall_level"],
+                "cached_at": computed_at.isoformat(),
+                "stale": False,
+            }, request=request)
+
+    # 2. Cache miss or stale — recompute
+    try:
+        token = current_partner_id.set(effective_id)
+        try:
+            governance_service = GovernanceService(
+                entity_repo=_entity_repo,
+                relationship_repo=_relationship_repo,
+                protocol_repo=SqlProtocolRepository(pool),
+                blindspot_repo=_blindspot_repo,
+            )
+            health_signal = await governance_service.compute_health_signal()
+        finally:
+            current_partner_id.reset(token)
+
+        overall_level = health_signal.get("overall_level", "green")
+        await upsert_health_cache(pool, effective_id, overall_level)
+        return _json_response({
+            "overall_level": overall_level,
+            "cached_at": datetime.now(timezone.utc).isoformat(),
+            "stale": False,
+        }, request=request)
+    except Exception:
+        logger.warning("governance-health: compute failed, returning degraded response", exc_info=True)
+        # Return stale cache if available, otherwise safe green
+        if cached is not None:
+            return _json_response({
+                "overall_level": cached["overall_level"],
+                "cached_at": cached["computed_at"].isoformat(),
+                "stale": True,
+            }, request=request)
+        return _json_response({
+            "overall_level": "green",
+            "cached_at": None,
+            "stale": True,
+        }, request=request)
+
+
+# ──────────────────────────────────────────────
 # Route table
 # ──────────────────────────────────────────────
 
@@ -1403,6 +1545,7 @@ dashboard_routes = [
     Route("/api/data/relationships", list_relationships, methods=["GET", "OPTIONS"]),
     Route("/api/data/blindspots", list_blindspots, methods=["GET", "OPTIONS"]),
     Route("/api/data/quality-signals", get_quality_signals, methods=["GET", "OPTIONS"]),
+    Route("/api/data/governance-health", get_governance_health, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/by-entity/{entityId}", list_tasks_by_entity, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/comments/{commentId}", delete_comment, methods=["DELETE", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/comments", create_comment, methods=["POST", "OPTIONS"]),

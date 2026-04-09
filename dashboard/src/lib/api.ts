@@ -9,9 +9,18 @@ export const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
   "https://zenos-mcp-165893875709.asia-east1.run.app";
 
+const ACTIVE_WORKSPACE_STORAGE_KEY = "zenos.activeWorkspaceId";
+
 const DATE_FIELDS = new Set([
   "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
 ]);
+
+function getStoredActiveWorkspaceId(): string | null {
+  if (typeof window === "undefined") return null;
+  const storage = window.localStorage;
+  if (!storage || typeof storage.getItem !== "function") return null;
+  return storage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+}
 
 /** Recursively convert ISO date strings to Date objects in-place */
 function hydrateDates<T>(obj: T): T {
@@ -32,9 +41,18 @@ function hydrateDates<T>(obj: T): T {
   return obj;
 }
 
-async function apiFetch<T>(path: string, token: string): Promise<T> {
+async function apiFetch<T>(
+  path: string,
+  token: string,
+  options?: { cache?: RequestCache }
+): Promise<T> {
+  const activeWorkspaceId = getStoredActiveWorkspaceId();
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
+    ...(options?.cache ? { cache: options.cache } : {}),
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
+    },
   });
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
   const data = await res.json();
@@ -77,8 +95,31 @@ function normalizePartner(data: Record<string, unknown>): Partner {
     workspaceRole,
     isAdmin: Boolean(data.isAdmin) || workspaceRole === "owner",
     authorizedEntityIds,
+    activeWorkspaceId:
+      typeof data.activeWorkspaceId === "string" ? data.activeWorkspaceId : null,
+    homeWorkspaceId:
+      typeof data.homeWorkspaceId === "string" ? data.homeWorkspaceId : null,
+    availableWorkspaces: Array.isArray(data.availableWorkspaces)
+      ? data.availableWorkspaces
+          .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+          .map((item) => ({
+            id: String(item.id ?? ""),
+            name: String(item.name ?? ""),
+            hasUpdate: Boolean(item.hasUpdate),
+          }))
+          .filter((item) => item.id && item.name)
+      : undefined,
     sharedPartnerId: data.sharedPartnerId ?? data.shared_partner_id ?? null,
   }) as Partner;
+}
+
+export function setActiveWorkspaceId(workspaceId: string | null): void {
+  if (typeof window === "undefined") return;
+  if (!workspaceId) {
+    window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+    return;
+  }
+  window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
 }
 
 /** Fetch all product entities */
@@ -218,7 +259,7 @@ export async function getTasksByEntity(
 
 /** Fetch the current partner (auth) */
 export async function getPartnerMe(token: string): Promise<Partner> {
-  const res = await apiFetch<{ partner: Partner }>("/api/partner/me", token);
+  const res = await apiFetch<{ partner: Partner }>("/api/partner/me", token, { cache: "no-store" });
   return normalizePartner(res.partner as unknown as Record<string, unknown>);
 }
 
@@ -241,6 +282,7 @@ export async function updatePartnerScope(
     body: JSON.stringify({
       ...data,
       access_mode: data.accessMode,
+      authorized_entity_ids: data.authorizedEntityIds,
     }),
   });
   if (!res.ok) throw new Error(`API /api/partners/${partnerId}/scope: ${res.status}`);
@@ -366,6 +408,15 @@ export async function addLinkAttachment(
 /** Fetch quality signals: search_unused and summary_poor flags */
 export async function getQualitySignals(token: string): Promise<QualitySignals> {
   return apiFetch<QualitySignals>("/api/data/quality-signals", token);
+}
+
+/** Fetch governance health level for the current workspace */
+export async function getGovernanceHealth(token: string): Promise<{
+  overall_level: "green" | "yellow" | "red";
+  cached_at: string | null;
+  stale: boolean;
+}> {
+  return apiFetch("/api/data/governance-health", token);
 }
 
 /** Create a new task */

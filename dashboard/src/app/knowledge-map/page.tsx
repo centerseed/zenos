@@ -4,6 +4,7 @@ import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
+import { GovernanceHealthBanner } from "@/components/GovernanceHealthBanner";
 import { LoadingState } from "@/components/LoadingState";
 import { useSearchParams } from "next/navigation";
 import {
@@ -11,6 +12,7 @@ import {
   getAllBlindspots,
   getAllRelationships,
   getEntityContext,
+  getGovernanceHealth,
   getTasks,
   getQualitySignals,
 } from "@/lib/api";
@@ -133,6 +135,7 @@ function KnowledgeMapContent() {
   const [relationships, setRelationships] = useState<Relationship[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [qualitySignals, setQualitySignals] = useState<QualitySignals>({ search_unused: [], summary_poor: [] });
+  const [healthLevel, setHealthLevel] = useState<"green" | "yellow" | "red">("green");
   const [loading, setLoading] = useState(true);
   const [impactChain, setImpactChain] = useState<ImpactChainHop[]>([]);
   const [reverseImpactChain, setReverseImpactChain] = useState<ImpactChainHop[]>([]);
@@ -150,19 +153,21 @@ function KnowledgeMapContent() {
     async function load() {
       try {
         const token = await user!.getIdToken();
-        const [fetchedEntities, fetchedBlindspots, fetchedRelationships, fetchedTasks, fetchedQuality] =
+        const [fetchedEntities, fetchedBlindspots, fetchedRelationships, fetchedTasks, fetchedQuality, fetchedHealth] =
           await Promise.all([
             getAllEntities(token),
             getAllBlindspots(token),
             getAllRelationships(token),
             getTasks(token),
             getQualitySignals(token).catch(() => ({ search_unused: [], summary_poor: [] })),
+            getGovernanceHealth(token).catch(() => ({ overall_level: "green" as const, cached_at: null, stale: true })),
           ]);
         setEntities(fetchedEntities);
         setBlindspots(fetchedBlindspots);
         setRelationships(fetchedRelationships);
         setTasks(fetchedTasks);
         setQualitySignals(fetchedQuality);
+        setHealthLevel(fetchedHealth.overall_level);
 
         // Auto-select if id is in URL
         if (targetId) {
@@ -344,6 +349,7 @@ function KnowledgeMapContent() {
   return (
     <div className="h-screen flex flex-col bg-background">
       <AppNav />
+      <GovernanceHealthBanner level={healthLevel} />
       {loading ? (
         <LoadingState variant="page" label="Loading knowledge map..." />
       ) : (

@@ -1478,6 +1478,25 @@ class TestSqlPartnerRepository:
         sql = conn.fetchrow.call_args[0][0]
         assert "partners" in sql
         assert "email" in sql
+        assert "btrim(lower(email))" in sql
+
+    def test_get_by_email_normalizes_case_and_whitespace(self):
+        """get_by_email uses normalized comparison instead of exact raw equality."""
+        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        import asyncio
+
+        row = _make_partner_row(email="alice@test.com", id="p-alice")
+        pool, conn = _make_pool(fetchrow=row)
+        repo = SqlPartnerRepository(pool)
+
+        result = asyncio.get_event_loop().run_until_complete(
+            repo.get_by_email(" Alice@Test.com ")
+        )
+
+        assert result is not None
+        assert result["email"] == "alice@test.com"
+        _, passed_email = conn.fetchrow.call_args[0]
+        assert passed_email == " Alice@Test.com "
 
     def test_get_by_email_returns_none_when_missing(self):
         """get_by_email returns None when no partner matches."""
@@ -1683,3 +1702,69 @@ class TestSqlPartnerRepository:
         assert "UPDATE" in sql
         assert "entities" in sql
         assert "visibility" in sql
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Governance Health Cache helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestGovernanceHealthCache:
+
+    def test_get_cached_health_returns_none_when_no_row(self):
+        """get_cached_health returns None when cache miss."""
+        from zenos.infrastructure.sql_repo import get_cached_health
+
+        pool, _conn = _make_pool(fetchrow=None)
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            get_cached_health(pool, "partner_abc")
+        )
+        assert result is None
+
+    def test_get_cached_health_returns_dict_when_row_exists(self):
+        """get_cached_health returns {overall_level, computed_at} on hit."""
+        from zenos.infrastructure.sql_repo import get_cached_health
+
+        row = _make_row(overall_level="yellow", computed_at=NOW)
+        pool, conn = _make_pool(fetchrow=row)
+        import asyncio
+        result = asyncio.get_event_loop().run_until_complete(
+            get_cached_health(pool, "partner_abc")
+        )
+        assert result == {"overall_level": "yellow", "computed_at": NOW}
+        conn.fetchrow.assert_called_once()
+        sql = conn.fetchrow.call_args[0][0]
+        assert "governance_health_cache" in sql
+        assert "partner_abc" == conn.fetchrow.call_args[0][1]
+
+    def test_upsert_health_cache_executes_upsert_sql(self):
+        """upsert_health_cache runs INSERT ... ON CONFLICT DO UPDATE."""
+        from zenos.infrastructure.sql_repo import upsert_health_cache
+
+        pool, conn = _make_pool()
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(
+            upsert_health_cache(pool, "partner_abc", "red")
+        )
+        conn.execute.assert_called_once()
+        sql = conn.execute.call_args[0][0]
+        assert "governance_health_cache" in sql
+        assert "ON CONFLICT" in sql
+        assert conn.execute.call_args[0][1] == "partner_abc"
+        assert conn.execute.call_args[0][2] == "red"
+
+    def test_upsert_health_cache_overwrites_existing(self):
+        """Calling upsert twice uses same SQL (ON CONFLICT handles update)."""
+        from zenos.infrastructure.sql_repo import upsert_health_cache
+
+        pool, conn = _make_pool()
+        import asyncio
+        asyncio.get_event_loop().run_until_complete(
+            upsert_health_cache(pool, "partner_abc", "green")
+        )
+        asyncio.get_event_loop().run_until_complete(
+            upsert_health_cache(pool, "partner_abc", "yellow")
+        )
+        assert conn.execute.call_count == 2
+        # Second call should have "yellow"
+        assert conn.execute.call_args_list[1][0][2] == "yellow"

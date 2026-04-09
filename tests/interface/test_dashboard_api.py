@@ -122,8 +122,8 @@ class TestGetPartnerMe:
         # S01: isHomeWorkspace is included in the session context
         assert body["partner"]["isHomeWorkspace"] is True  # sharedPartnerId is None
 
-    async def test_returns_is_home_workspace_false_for_shared_partner(self):
-        """Guest partner with sharedPartnerId should return isHomeWorkspace=False."""
+    async def test_defaults_to_home_workspace_for_shared_partner_without_header(self):
+        """Without an active-workspace header, login falls back to home workspace."""
         from zenos.interface.dashboard_api import get_partner_me
 
         shared_partner = {
@@ -137,7 +137,50 @@ class TestGetPartnerMe:
         request = _make_request(headers={"authorization": "Bearer fake-token"})
 
         with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
-             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=shared_partner):
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=shared_partner), \
+             patch("zenos.interface.dashboard_api._partner_repo") as mock_repo, \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)):
+            mock_repo.get_by_id = AsyncMock(return_value={
+                "id": "owner-partner-id",
+                "email": "owner@test.com",
+                "displayName": "Barry",
+            })
+            resp = await get_partner_me(request)
+
+        import json
+        body = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["partner"]["isHomeWorkspace"] is True
+        assert body["partner"]["workspaceRole"] == "owner"
+
+    async def test_returns_is_home_workspace_false_for_shared_partner_when_header_requests_shared(self):
+        from zenos.interface.dashboard_api import get_partner_me
+
+        shared_partner = {
+            **_PARTNER,
+            "id": "guest-home-id",
+            "sharedPartnerId": "owner-partner-id",
+            "workspaceRole": "guest",
+            "accessMode": "scoped",
+            "isAdmin": False,
+            "authorizedEntityIds": ["l1-entity-1"],
+        }
+        request = _make_request(
+            headers={
+                "authorization": "Bearer fake-token",
+                "x-active-workspace-id": "owner-partner-id",
+            }
+        )
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=shared_partner), \
+             patch("zenos.interface.dashboard_api._partner_repo") as mock_repo, \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)):
+            mock_repo.get_by_id = AsyncMock(return_value={
+                "id": "owner-partner-id",
+                "email": "owner@test.com",
+                "displayName": "Barry",
+            })
             resp = await get_partner_me(request)
 
         import json
@@ -145,6 +188,48 @@ class TestGetPartnerMe:
         assert resp.status_code == 200
         assert body["partner"]["isHomeWorkspace"] is False
         assert body["partner"]["workspaceRole"] == "guest"
+
+    async def test_returns_available_workspaces_and_honors_active_workspace_header(self):
+        from zenos.interface.dashboard_api import get_partner_me
+
+        shared_partner = {
+            **_PARTNER,
+            "id": "guest-home-id",
+            "email": "guest@test.com",
+            "displayName": "Guest User",
+            "sharedPartnerId": "owner-partner-id",
+            "workspaceRole": "guest",
+            "accessMode": "scoped",
+            "isAdmin": False,
+            "authorizedEntityIds": ["l1-entity-1"],
+        }
+        request = _make_request(
+            headers={
+                "authorization": "Bearer fake-token",
+                "x-active-workspace-id": "owner-partner-id",
+            }
+        )
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token(email="guest@test.com")), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=shared_partner), \
+             patch("zenos.interface.dashboard_api._partner_repo") as mock_repo, \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)):
+            mock_repo.get_by_id = AsyncMock(return_value={
+                "id": "owner-partner-id",
+                "email": "owner@test.com",
+                "displayName": "Barry",
+            })
+            resp = await get_partner_me(request)
+
+        import json
+        body = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["partner"]["activeWorkspaceId"] == "owner-partner-id"
+        assert body["partner"]["isHomeWorkspace"] is False
+        assert body["partner"]["availableWorkspaces"] == [
+            {"id": "guest-home-id", "name": "我的工作區", "hasUpdate": False},
+            {"id": "owner-partner-id", "name": "Barry 的工作區", "hasUpdate": False},
+        ]
 
     async def test_returns_401_without_token(self):
         from zenos.interface.dashboard_api import get_partner_me
@@ -443,8 +528,8 @@ class TestListTasks:
 
         assert resp.status_code == 401
 
-    async def test_uses_shared_partner_id_for_scoping(self):
-        """When partner has sharedPartnerId, that ID is used for data scoping."""
+    async def test_defaults_to_home_workspace_scoping_without_header(self):
+        """Without an active-workspace header, data queries scope to home workspace."""
         from zenos.interface.dashboard_api import list_tasks
 
         partner_with_shared = {**_PARTNER, "sharedPartnerId": "parent-p1"}
@@ -461,7 +546,31 @@ class TestListTasks:
 
             await list_tasks(request)
 
-        # The ContextVar should be set with the sharedPartnerId
+        mock_ctx.set.assert_called_once_with("p1")
+
+    async def test_uses_shared_partner_id_for_scoping_when_header_requests_shared(self):
+        """When the shared workspace is selected, data queries scope to sharedPartnerId."""
+        from zenos.interface.dashboard_api import list_tasks
+
+        partner_with_shared = {**_PARTNER, "sharedPartnerId": "parent-p1"}
+        request = _make_request(
+            headers={
+                "authorization": "Bearer fake-token",
+                "x-active-workspace-id": "parent-p1",
+            }
+        )
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=partner_with_shared), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._task_repo") as mock_repo, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_repo.list_all = AsyncMock(return_value=[])
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            await list_tasks(request)
+
         mock_ctx.set.assert_called_once_with("parent-p1")
 
 
@@ -896,5 +1005,107 @@ class TestConfirmTask:
 
         with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=None):
             resp = await confirm_task(request)
+
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# F. GET /api/data/governance-health
+# ---------------------------------------------------------------------------
+
+class TestGetGovernanceHealth:
+
+    async def test_returns_cached_health_when_fresh(self):
+        """Cache hit < 24h returns directly without recomputation."""
+        from zenos.interface.dashboard_api import get_governance_health
+
+        request = _make_request(headers={"authorization": "Bearer fake-token"})
+        fresh_time = datetime(2026, 4, 9, 10, 0, 0, tzinfo=timezone.utc)
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock()), \
+             patch("zenos.interface.dashboard_api.get_pool", new=AsyncMock(return_value=MagicMock())), \
+             patch("zenos.interface.dashboard_api.get_cached_health", new=AsyncMock(return_value={
+                 "overall_level": "yellow",
+                 "computed_at": fresh_time,
+             })), \
+             patch("zenos.interface.dashboard_api.datetime") as mock_dt:
+            mock_dt.now.return_value = fresh_time  # same time = 0 age
+            mock_dt.side_effect = lambda *a, **kw: datetime(*a, **kw)
+            resp = await get_governance_health(request)
+
+        import json as _json
+        body = _json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["overall_level"] == "yellow"
+        assert body["stale"] is False
+
+    async def test_returns_green_on_no_cache_and_compute_failure(self):
+        """No cache + compute failure = safe degradation to green."""
+        from zenos.interface.dashboard_api import get_governance_health
+
+        request = _make_request(headers={"authorization": "Bearer fake-token"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock()), \
+             patch("zenos.interface.dashboard_api.get_pool", new=AsyncMock(return_value=MagicMock())), \
+             patch("zenos.interface.dashboard_api.get_cached_health", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api.GovernanceService") as mock_gs_cls:
+            mock_gs = MagicMock()
+            mock_gs.compute_health_signal = AsyncMock(side_effect=RuntimeError("DB down"))
+            mock_gs_cls.return_value = mock_gs
+            resp = await get_governance_health(request)
+
+        import json as _json
+        body = _json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["overall_level"] == "green"
+        assert body["stale"] is True
+        assert body["cached_at"] is None
+
+    async def test_recomputes_when_cache_stale(self):
+        """Cache older than 24h triggers recomputation."""
+        from zenos.interface.dashboard_api import get_governance_health
+
+        request = _make_request(headers={"authorization": "Bearer fake-token"})
+        old_time = datetime(2026, 4, 7, 10, 0, 0, tzinfo=timezone.utc)
+
+        mock_pool = MagicMock()
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock()), \
+             patch("zenos.interface.dashboard_api.get_pool", new=AsyncMock(return_value=mock_pool)), \
+             patch("zenos.interface.dashboard_api.get_cached_health", new=AsyncMock(return_value={
+                 "overall_level": "green",
+                 "computed_at": old_time,
+             })), \
+             patch("zenos.interface.dashboard_api.upsert_health_cache", new=AsyncMock()) as mock_upsert, \
+             patch("zenos.interface.dashboard_api.GovernanceService") as mock_gs_cls, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_gs = MagicMock()
+            mock_gs.compute_health_signal = AsyncMock(return_value={
+                "overall_level": "red",
+                "kpis": {},
+            })
+            mock_gs_cls.return_value = mock_gs
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+            resp = await get_governance_health(request)
+
+        import json as _json
+        body = _json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["overall_level"] == "red"
+        assert body["stale"] is False
+
+    async def test_returns_401_without_auth(self):
+        from zenos.interface.dashboard_api import get_governance_health
+
+        request = _make_request()
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=None):
+            resp = await get_governance_health(request)
 
         assert resp.status_code == 401

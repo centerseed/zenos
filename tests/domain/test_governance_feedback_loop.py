@@ -16,12 +16,16 @@ from unittest.mock import AsyncMock
 import pytest
 
 from zenos.domain.governance import (
+    HEALTH_THRESHOLDS,
     _blindspot_threshold,
+    _kpi_level,
     _task_problem_tokens,
     _tasks_are_similar,
     check_impacts_target_validity,
+    compute_health_kpis,
     compute_quality_correction_priority,
     detect_stale_documents_from_consistency,
+    determine_recommended_action,
 )
 from zenos.domain.models import Entity, EntityStatus, EntityType, Relationship, RelationshipType, Tags
 from zenos.application.governance_service import GovernanceService
@@ -649,3 +653,210 @@ class TestGovernanceServiceTaskRepo:
         )
         result = await svc.infer_blindspots_from_tasks()
         assert isinstance(result, list)
+
+
+# ──────────────────────────────────────────────
+# ADR-020: Health Signal KPI tests
+# ──────────────────────────────────────────────
+
+from zenos.domain.models import Blindspot, Protocol
+
+
+def _health_entity(
+    entity_id: str = "e1",
+    confirmed: bool = False,
+) -> Entity:
+    """Entity helper for health KPI tests."""
+    return Entity(
+        id=entity_id,
+        name=f"Entity-{entity_id}",
+        type=EntityType.MODULE,
+        status=EntityStatus.ACTIVE,
+        summary="Test",
+        tags=Tags(what="test", why="test", how="test", who="dev"),
+        confirmed_by_user=confirmed,
+        created_at=_NOW,
+        updated_at=_NOW + timedelta(days=1) if confirmed else _NOW,
+    )
+
+
+def _health_protocol(entity_id: str = "e1", confirmed: bool = False) -> Protocol:
+    return Protocol(
+        entity_id=entity_id,
+        entity_name="Test",
+        content={"what": {}, "why": {}, "how": {}, "who": {}},
+        confirmed_by_user=confirmed,
+        generated_at=_NOW,
+        updated_at=_NOW + timedelta(days=1) if confirmed else _NOW,
+    )
+
+
+def _health_blindspot(
+    description: str = "test blindspot",
+    severity: str = "yellow",
+    confirmed: bool = False,
+) -> Blindspot:
+    return Blindspot(
+        description=description,
+        severity=severity,
+        related_entity_ids=["e1"],
+        suggested_action="fix it",
+        confirmed_by_user=confirmed,
+        created_at=_NOW,
+    )
+
+
+class TestHealthKPIs:
+    """ADR-020: compute_health_kpis pure function tests."""
+
+    def test_all_green(self):
+        """All KPIs within green thresholds."""
+        entities = [
+            _health_entity(entity_id=f"e{i}", confirmed=True)
+            for i in range(5)
+        ]
+        protocols = [_health_protocol(f"e{i}", confirmed=True) for i in range(5)]
+        blindspots = [_health_blindspot(f"issue {i}") for i in range(3)]
+
+        result = compute_health_kpis(
+            entities=entities,
+            protocols=protocols,
+            blindspots=blindspots,
+            quality_score=80,
+            l2_repairs_count=0,
+        )
+
+        assert result["overall_level"] == "green"
+        assert result["recommended_action"] is None
+        assert result["red_reasons"] == []
+        assert result["kpis"]["quality_score"]["level"] == "green"
+
+    def test_yellow_quality_score(self):
+        """Quality score between 50 and 70 → yellow."""
+        result = compute_health_kpis(
+            entities=[_health_entity(confirmed=True)],
+            protocols=[],
+            blindspots=[],
+            quality_score=60,
+            l2_repairs_count=0,
+        )
+
+        assert result["kpis"]["quality_score"]["level"] == "yellow"
+        assert result["kpis"]["quality_score"]["value"] == 60
+
+    def test_red_quality_score(self):
+        """Quality score below 50 → red."""
+        result = compute_health_kpis(
+            entities=[_health_entity(confirmed=True)],
+            protocols=[],
+            blindspots=[],
+            quality_score=30,
+            l2_repairs_count=0,
+        )
+
+        assert result["kpis"]["quality_score"]["level"] == "red"
+        assert result["overall_level"] == "red"
+        assert result["recommended_action"] == "run_governance"
+        red_kpis = [r["kpi"] for r in result["red_reasons"]]
+        assert "quality_score" in red_kpis
+
+    def test_red_l2_missing_impacts(self):
+        """active_l2_missing_impacts > 3 → red."""
+        result = compute_health_kpis(
+            entities=[_health_entity(confirmed=True)],
+            protocols=[],
+            blindspots=[],
+            quality_score=80,
+            l2_repairs_count=5,
+        )
+
+        kpi = result["kpis"]["active_l2_missing_impacts"]
+        assert kpi["value"] == 5
+        assert kpi["level"] == "red"
+        assert result["overall_level"] == "red"
+        red_kpis = [r["kpi"] for r in result["red_reasons"]]
+        assert "active_l2_missing_impacts" in red_kpis
+
+    def test_unconfirmed_ratio_high(self):
+        """All items unconfirmed → high unconfirmed_ratio."""
+        entities = [_health_entity(entity_id=f"e{i}", confirmed=False) for i in range(5)]
+        result = compute_health_kpis(
+            entities=entities,
+            protocols=[],
+            blindspots=[],
+            quality_score=80,
+            l2_repairs_count=0,
+        )
+
+        assert result["kpis"]["unconfirmed_ratio"]["value"] == 1.0
+        assert result["kpis"]["unconfirmed_ratio"]["level"] == "red"
+
+    def test_bootstrap_relaxes_unconfirmed_threshold(self):
+        """Bootstrap mode uses relaxed thresholds for unconfirmed_ratio."""
+        # 40% unconfirmed: normal → yellow, bootstrap → green
+        entities = [
+            _health_entity(entity_id=f"e{i}", confirmed=(i < 3))
+            for i in range(5)
+        ]
+        result_normal = compute_health_kpis(
+            entities=entities, protocols=[], blindspots=[],
+            quality_score=80, l2_repairs_count=0, bootstrap=False,
+        )
+        result_bootstrap = compute_health_kpis(
+            entities=entities, protocols=[], blindspots=[],
+            quality_score=80, l2_repairs_count=0, bootstrap=True,
+        )
+
+        assert result_normal["kpis"]["unconfirmed_ratio"]["level"] == "yellow"
+        assert result_bootstrap["kpis"]["unconfirmed_ratio"]["level"] == "green"
+
+    def test_duplicate_blindspot_rate(self):
+        """Duplicate blindspots are correctly detected."""
+        blindspots = [
+            _health_blindspot("same issue", "yellow"),
+            _health_blindspot("same issue", "yellow"),
+            _health_blindspot("different issue", "red"),
+        ]
+        result = compute_health_kpis(
+            entities=[_health_entity()],
+            protocols=[],
+            blindspots=blindspots,
+            quality_score=80,
+            l2_repairs_count=0,
+        )
+
+        rate = result["kpis"]["duplicate_blindspot_rate"]["value"]
+        assert rate > 0.3  # 1 duplicate out of 3
+
+    def test_empty_ontology(self):
+        """Empty ontology → green (no items to fail)."""
+        result = compute_health_kpis(
+            entities=[], protocols=[], blindspots=[],
+            quality_score=80, l2_repairs_count=0,
+        )
+
+        assert result["overall_level"] == "green"
+        assert result["kpis"]["unconfirmed_ratio"]["value"] == 0.0
+
+
+class TestDetermineRecommendedAction:
+    def test_green(self):
+        assert determine_recommended_action("green") is None
+
+    def test_yellow(self):
+        assert determine_recommended_action("yellow") == "review_health"
+
+    def test_red(self):
+        assert determine_recommended_action("red") == "run_governance"
+
+
+class TestKPILevel:
+    def test_quality_score_levels(self):
+        assert _kpi_level("quality_score", 80) == "green"
+        assert _kpi_level("quality_score", 60) == "yellow"
+        assert _kpi_level("quality_score", 40) == "red"
+
+    def test_blindspot_total_levels(self):
+        assert _kpi_level("blindspot_total", 10) == "green"
+        assert _kpi_level("blindspot_total", 30) == "yellow"
+        assert _kpi_level("blindspot_total", 60) == "red"

@@ -1871,7 +1871,12 @@ class SqlPartnerRepository:
         """Fetch partner by email. Returns standardized dict or None."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT {_PARTNER_SELECT_COLS} FROM {SCHEMA}.partners WHERE email = $1 LIMIT 1",
+                f"""
+                SELECT {_PARTNER_SELECT_COLS}
+                FROM {SCHEMA}.partners
+                WHERE btrim(lower(email)) = btrim(lower($1))
+                LIMIT 1
+                """,
                 email,
             )
         return _row_to_partner_dict(row) if row else None
@@ -2334,3 +2339,45 @@ class SqlWorkJournalRepository:
                 tags or [],
             )
         return entry_id
+
+
+# ===================================================================
+# Governance Health Cache — standalone helpers (no class needed)
+# ===================================================================
+
+
+async def get_cached_health(pool: asyncpg.Pool, partner_id: str) -> dict | None:
+    """Return cached health signal or None if no cache exists.
+
+    Returns: {"overall_level": str, "computed_at": datetime} or None.
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"SELECT overall_level, computed_at FROM {SCHEMA}.governance_health_cache "
+            "WHERE partner_id = $1",
+            partner_id,
+        )
+    if row is None:
+        return None
+    return {
+        "overall_level": row["overall_level"],
+        "computed_at": row["computed_at"],
+    }
+
+
+async def upsert_health_cache(
+    pool: asyncpg.Pool, partner_id: str, overall_level: str
+) -> None:
+    """UPSERT governance health cache for a partner."""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            INSERT INTO {SCHEMA}.governance_health_cache (partner_id, overall_level, computed_at)
+            VALUES ($1, $2, NOW())
+            ON CONFLICT (partner_id) DO UPDATE SET
+                overall_level = EXCLUDED.overall_level,
+                computed_at = EXCLUDED.computed_at
+            """,
+            partner_id,
+            overall_level,
+        )
