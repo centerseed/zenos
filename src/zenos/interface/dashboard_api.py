@@ -157,7 +157,13 @@ def _active_partner_view(partner: dict, active_workspace_id: str) -> tuple[dict,
     projected = dict(partner)
     access = describe_partner_access(projected)
     projected["accessMode"] = access["access_mode"]
-    projected["workspaceRole"] = access["workspace_role"]
+    # Only set workspaceRole when partner is NOT unassigned.
+    # Setting workspaceRole="guest" on an unassigned partner causes
+    # resolve_access_mode to reclassify them as "scoped" (since it
+    # prioritises workspaceRole over accessMode), breaking the
+    # unassigned → empty-result fast-path.
+    if access["access_mode"] != "unassigned":
+        projected["workspaceRole"] = access["workspace_role"]
     return projected, shared_partner_id or str(partner["id"])
 
 

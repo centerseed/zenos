@@ -359,7 +359,7 @@ class TestL1ScopeEntityListE2E:
         """
         from zenos.interface.dashboard_api import list_entities
 
-        request = _mock_request(headers={"authorization": "Bearer fake"})
+        request = _mock_request(headers={"authorization": "Bearer fake", "x-active-workspace-id": "p-admin-e2e"})
 
         with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value={"email": "client@acme.com"}), \
              patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=SCOPED_CLIENT), \
@@ -395,7 +395,7 @@ class TestL1ScopeGetEntityOutOfBoundsE2E:
         from zenos.interface.dashboard_api import get_entity
 
         request = _mock_request(
-            headers={"authorization": "Bearer fake"},
+            headers={"authorization": "Bearer fake", "x-active-workspace-id": "p-admin-e2e"},
             path_params={"id": "other-l1-id"},
         )
 
@@ -419,7 +419,7 @@ class TestL1ScopeGetEntityOutOfBoundsE2E:
         from zenos.interface.dashboard_api import get_entity
 
         request = _mock_request(
-            headers={"authorization": "Bearer fake"},
+            headers={"authorization": "Bearer fake", "x-active-workspace-id": "p-admin-e2e"},
             path_params={"id": "ent-child-allowed"},
         )
 
@@ -452,7 +452,7 @@ class TestBlindspotIsolationE2E:
         """
         from zenos.interface.dashboard_api import list_blindspots
 
-        request = _mock_request(headers={"authorization": "Bearer fake"})
+        request = _mock_request(headers={"authorization": "Bearer fake", "x-active-workspace-id": "p-admin-e2e"})
 
         with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value={"email": "client@acme.com"}), \
              patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=SCOPED_CLIENT), \
@@ -490,7 +490,7 @@ class TestTaskVisibilityIgnoresEntityVisibilityE2E:
         """
         from zenos.interface.dashboard_api import list_tasks
 
-        request = _mock_request(headers={"authorization": "Bearer fake"})
+        request = _mock_request(headers={"authorization": "Bearer fake", "x-active-workspace-id": "p-admin-e2e"})
 
         with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value={"email": "client@acme.com"}), \
              patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=SCOPED_CLIENT), \
