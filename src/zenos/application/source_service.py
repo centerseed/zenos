@@ -22,7 +22,7 @@ class SourceService:
         self._entities = entity_repo
         self._adapter = source_adapter
 
-    async def read_source(self, doc_id: str) -> str:
+    async def read_source(self, doc_id: str, *, source_uri: str | None = None) -> str:
         """Read the raw content of a document's source file.
 
         Steps:
@@ -30,9 +30,13 @@ class SourceService:
           2. If UUID lookup fails, fall back to scanning all document entities
              and matching by source URI (for callers that pass a GitHub URI
              instead of an entity ID).
-          3. Extract the source URI from entity.sources[0].
+          3. Use *source_uri* if provided; otherwise extract from entity.sources[0].
           4. Delegate to the source adapter to read the content.
           5. Return the text content.
+
+        Args:
+            doc_id: Entity ID or URI string.
+            source_uri: If provided, read this specific URI instead of sources[0].
 
         Raises:
             ValueError: if the document entity is not found.
@@ -56,16 +60,22 @@ class SourceService:
         if entity is None:
             raise ValueError(f"Document '{doc_id}' not found")
 
-        # Extract URI from sources list or legacy source field
-        if entity.sources:
+        # Use caller-provided URI or fall back to first source
+        if source_uri:
+            uri = source_uri
+        elif entity.sources:
             uri = entity.sources[0].get("uri", "")
         else:
             raise ValueError(f"Document '{doc_id}' has no source URI")
 
         return await self._adapter.read_content(uri)
 
-    async def read_source_with_recovery(self, doc_id: str) -> dict:
+    async def read_source_with_recovery(self, doc_id: str, *, source_uri: str | None = None) -> dict:
         """Read source with dead link detection and source_status update.
+
+        Args:
+            doc_id: Entity ID or URI string.
+            source_uri: If provided, read this specific URI instead of sources[0].
 
         Returns:
             {"content": str} on success
@@ -96,8 +106,15 @@ class SourceService:
         if not entity.sources:
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' has no source URI"}
 
-        source = entity.sources[0]
-        uri = source.get("uri", "")
+        # If source_uri provided, find matching source entry; otherwise use first
+        if source_uri:
+            source = next(
+                (s for s in entity.sources if s.get("uri", "") == source_uri),
+                entity.sources[0],
+            )
+        else:
+            source = entity.sources[0]
+        uri = source.get("uri", "") if not source_uri else source_uri
         source_type = source.get("type", "")
         current_status = source.get("status", "valid")
 
@@ -105,15 +122,22 @@ class SourceService:
         if current_status == "unresolvable":
             return {"error": "ALREADY_UNRESOLVABLE"}
 
+        # Extract source_id for targeted status updates (Finding 3)
+        source_id = source.get("source_id")
+
         try:
             content = await self._adapter.read_content(uri)
             return {"content": content}
 
         except FileNotFoundError:
-            return await self._handle_not_found(entity.id, uri, source_type)
+            return await self._handle_not_found(
+                entity, uri, source_type, source_id=source_id,
+            )
 
         except PermissionError:
-            await self._entities.update_source_status(entity.id, "stale")
+            await self._entities.update_source_status(
+                entity.id, "stale", source_id=source_id,
+            )
             return {
                 "error": "DEAD_LINK",
                 "source_type": source_type,
@@ -122,16 +146,38 @@ class SourceService:
                 "proposed_uri": None,
             }
 
+    async def _should_archive_entity(self, entity) -> bool:
+        """Return True only if all sources are unresolvable (or entity is single-doc)."""
+        doc_role = getattr(entity, "doc_role", None) or "single"
+        if doc_role != "index":
+            return True
+        # For index docs, archive only when ALL sources are unresolvable
+        for src in (entity.sources or []):
+            if src.get("status", "valid") != "unresolvable":
+                return False
+        return True
+
     async def _handle_not_found(
-        self, entity_id: str, uri: str, source_type: str
+        self,
+        entity,
+        uri: str,
+        source_type: str,
+        *,
+        source_id: str | None = None,
     ) -> dict:
         """Decide source_status and action based on source type after a 404."""
         if source_type == SourceType.GITHUB:
-            return await self._handle_github_not_found(entity_id, uri)
+            return await self._handle_github_not_found(
+                entity, uri, source_id=source_id,
+            )
 
         if source_type == SourceType.GDRIVE:
-            await self._entities.update_source_status(entity_id, "unresolvable")
-            await self._entities.archive_entity(entity_id)
+            await self._entities.update_source_status(
+                entity.id, "unresolvable", source_id=source_id,
+            )
+            # Finding 4: only archive if all sources are unresolvable
+            if await self._should_archive_entity(entity):
+                await self._entities.archive_entity(entity.id)
             return {
                 "error": "DEAD_LINK",
                 "source_type": source_type,
@@ -141,7 +187,9 @@ class SourceService:
             }
 
         # notion and wiki: stale, wait for manual repair
-        await self._entities.update_source_status(entity_id, "stale")
+        await self._entities.update_source_status(
+            entity.id, "stale", source_id=source_id,
+        )
         return {
             "error": "DEAD_LINK",
             "source_type": source_type,
@@ -150,7 +198,13 @@ class SourceService:
             "proposed_uri": None,
         }
 
-    async def _handle_github_not_found(self, entity_id: str, uri: str) -> dict:
+    async def _handle_github_not_found(
+        self,
+        entity,
+        uri: str,
+        *,
+        source_id: str | None = None,
+    ) -> dict:
         """Handle GitHub 404: search same repo for same-named file."""
         proposed_uri: str | None = None
 
@@ -160,7 +214,9 @@ class SourceService:
                 proposed_uri = candidates[0]
 
         if proposed_uri is not None:
-            await self._entities.update_source_status(entity_id, "stale")
+            await self._entities.update_source_status(
+                entity.id, "stale", source_id=source_id,
+            )
             return {
                 "error": "DEAD_LINK",
                 "source_type": SourceType.GITHUB,
@@ -170,8 +226,12 @@ class SourceService:
             }
 
         # No alternative found — unresolvable
-        await self._entities.update_source_status(entity_id, "unresolvable")
-        await self._entities.archive_entity(entity_id)
+        await self._entities.update_source_status(
+            entity.id, "unresolvable", source_id=source_id,
+        )
+        # Finding 4: only archive if all sources are unresolvable
+        if await self._should_archive_entity(entity):
+            await self._entities.archive_entity(entity.id)
         return {
             "error": "DEAD_LINK",
             "source_type": SourceType.GITHUB,

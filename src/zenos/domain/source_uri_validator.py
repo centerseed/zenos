@@ -13,6 +13,14 @@ GITHUB_BLOB_PATTERN = re.compile(
     r"^https://github\.com/[^/]+/[^/]+/blob/[^/]+/.+"
 )
 
+GITHUB_TREE_PATTERN = re.compile(
+    r"^https://github\.com/[^/]+/[^/]+/tree/"
+)
+
+GITHUB_RAW_PATTERN = re.compile(
+    r"^https://raw\.githubusercontent\.com/"
+)
+
 NOTION_UUID_PATTERN = re.compile(
     r"[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}",
     re.IGNORECASE,
@@ -32,6 +40,26 @@ def validate_source_uri(source_type: str, uri: str) -> tuple[bool, str]:
     Returns (is_valid, error_message). error_message is empty string when valid.
     """
     if source_type == "github":
+        if GITHUB_TREE_PATTERN.match(uri):
+            return (
+                False,
+                (
+                    "GitHub tree URLs (directory listings) are not accepted. "
+                    "Use a blob URL pointing to a specific file: "
+                    "https://github.com/{owner}/{repo}/blob/{branch}/{path}. "
+                    f"Got: {uri!r}"
+                ),
+            )
+        if GITHUB_RAW_PATTERN.match(uri):
+            return (
+                False,
+                (
+                    "GitHub raw.githubusercontent.com URLs are not accepted. "
+                    "Use the standard blob URL: "
+                    "https://github.com/{owner}/{repo}/blob/{branch}/{path}. "
+                    f"Got: {uri!r}"
+                ),
+            )
         if not GITHUB_BLOB_PATTERN.match(uri):
             return (
                 False,
@@ -64,6 +92,15 @@ def validate_source_uri(source_type: str, uri: str) -> tuple[bool, str]:
         return (True, "")
 
     if source_type == "gdrive":
+        if "/drive/folders/" in uri or "/drive/u/" in uri:
+            return (
+                False,
+                (
+                    "Google Drive folder URLs are not accepted. "
+                    "Use a file URL: https://drive.google.com/file/d/{file-id}/view. "
+                    f"Got: {uri!r}"
+                ),
+            )
         if not GDRIVE_FILE_PATTERN.match(uri):
             return (
                 False,

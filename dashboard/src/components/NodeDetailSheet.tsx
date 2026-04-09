@@ -4,8 +4,6 @@ import { useMemo, useState, useCallback, useEffect } from "react";
 import type {
   Entity,
   EntityVisibility,
-  Source,
-  SourceStatus,
   Relationship,
   Blindspot,
   Task,
@@ -482,7 +480,7 @@ export default function NodeDetailSheet({
 
   // Reference Layer: Documents + Sources (ADR-022 Document Bundle)
   const categorizedDocs = useMemo(() => {
-    if (!entity) return { specs: [], adrs: [], sources: [] as Source[], isIndex: false, sourcesByDocType: {} as Record<string, Source[]> };
+    if (!entity) return { specs: [] as Entity[], adrs: [] as Entity[], sources: [] as Entity["sources"], isIndex: false, sourcesByDocType: {} as Record<string, Entity["sources"]> };
     const childDocs = entities.filter((e) => e.parentId === entity.id && e.type === "document");
     const specs = childDocs.filter((d) => d.name.startsWith("SPEC-"));
     const adrs = childDocs.filter((d) => d.name.startsWith("ADR-"));

@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 from zenos.domain.governance import apply_tag_confidence, check_split_criteria, find_tech_terms_in_summary
 from zenos.domain.validation import find_similar_items
 from zenos.domain.source_uri_validator import validate_source_uri, BARE_DOMAIN_BLACKLIST
+from zenos.domain.doc_types import (
+    canonical_type as compute_canonical_type,
+    ensure_source_ids,
+    expand_for_search,
+    generate_source_id,
+    is_known_doc_type,
+)
 from zenos.infrastructure.github_adapter import parse_github_url, GitHubAdapter
 from zenos.domain.models import (
     Blindspot,
@@ -844,7 +851,20 @@ class OntologyService:
                 protocol = await self._protocols.get_by_entity(entity.id)
                 if protocol is not None:
                     protocols.append(protocol)
-        results = search_ontology(query, entities, documents, protocols, max_level=max_level)
+        # ADR-022 D2: Transparent doc_type search expansion.
+        # If the query matches a known doc_type (legacy or new), expand the query
+        # to also match its aliases. E.g., "ADR" → search for "ADR" and "DECISION".
+        expanded_query = query
+        query_upper = query.strip().upper()
+        from zenos.domain.doc_types import expand_for_search, DOC_TYPE_ALIASES, VALID_DOC_TYPES
+        all_known_types = set(VALID_DOC_TYPES) | set(DOC_TYPE_ALIASES.keys()) | {"SC"}
+        if query_upper in all_known_types:
+            expanded_types = expand_for_search(query_upper)
+            if len(expanded_types) > 1:
+                # Search with multiple type keywords joined by space (OR semantics in tokenizer)
+                expanded_query = " ".join(expanded_types)
+
+        results = search_ontology(expanded_query, entities, documents, protocols, max_level=max_level)
 
         # Fill ancestors for entity results
         for result in results:
@@ -1505,6 +1525,13 @@ class OntologyService:
             entity.last_reviewed_at = merged_data.get(
                 "last_reviewed_at", existing.last_reviewed_at
             )
+            # ADR-022 Document Bundle fields
+            if "doc_role" in merged_data:
+                entity.doc_role = merged_data["doc_role"]
+            if "change_summary" in merged_data:
+                entity.change_summary = merged_data["change_summary"]
+            if "summary_updated_at" in merged_data:
+                entity.summary_updated_at = merged_data["summary_updated_at"]
         else:
             entity = Entity(
                 name=merged_data["name"],
@@ -1523,6 +1550,10 @@ class OntologyService:
                 visible_to_roles=list(merged_data.get("visible_to_roles", [])),
                 visible_to_members=list(merged_data.get("visible_to_members", [])),
                 visible_to_departments=list(merged_data.get("visible_to_departments", [])),
+                # ADR-022 Document Bundle fields
+                doc_role=merged_data.get("doc_role"),
+                change_summary=merged_data.get("change_summary"),
+                summary_updated_at=merged_data.get("summary_updated_at"),
             )
         entity.updated_at = datetime.now(timezone.utc)
 
@@ -1998,20 +2029,151 @@ class OntologyService:
         )
         related_ids = linked_entity_ids[1:] if len(linked_entity_ids) > 1 else []
 
-        # Build sources list from legacy source field
-        existing_source = (existing.sources[0] if existing and existing.sources else {})
-        if data.get("clear_sources"):
-            sources: list[dict] = []
+        # --- ADR-022 Bundle Operations ---
+        # Detect add_source / update_source / remove_source in data
+        add_source_data = data.get("add_source")
+        update_source_data = data.get("update_source")
+        remove_source_data = data.get("remove_source")
+        has_bundle_op = any([add_source_data, update_source_data, remove_source_data])
+
+        # Resolve doc_role
+        doc_role = data.get("doc_role")
+        if doc_role is None and existing:
+            doc_role = existing.doc_role or "single"
+        elif doc_role is None:
+            doc_role = "single"
+
+        # Handle change_summary
+        change_summary = data.get("change_summary")
+        summary_updated_at = None
+        if change_summary is not None:
+            summary_updated_at = datetime.now(timezone.utc)
+        elif existing:
+            change_summary = existing.change_summary
+            summary_updated_at = existing.summary_updated_at
+
+        # Build sources list — bundle operations take priority over legacy source field
+        suggestions = []
+        if has_bundle_op and existing:
+            sources: list[dict] = list(existing.sources) if existing.sources else []
+
+            if add_source_data:
+                # Guard: single cannot add 2nd source
+                if doc_role == "single" and len(sources) >= 1:
+                    raise ValueError(
+                        "single doc entity 只能有一個 source。"
+                        "若需聚合多份文件請先將 doc_role 改為 index。"
+                    )
+                # Validate URI if provided
+                new_src_uri = str(add_source_data.get("uri", "")).strip()
+                new_src_type = add_source_data.get("type", "")
+                if new_src_type and new_src_uri:
+                    is_valid, error_msg = validate_source_uri(new_src_type, new_src_uri)
+                    if not is_valid:
+                        raise ValueError(f"Invalid source URI: {error_msg}")
+                new_source = {
+                    "source_id": generate_source_id(),
+                    "uri": new_src_uri,
+                    "type": new_src_type,
+                    "label": add_source_data.get("label", ""),
+                    "doc_type": add_source_data.get("doc_type", ""),
+                    "doc_status": add_source_data.get("doc_status", ""),
+                    "status": "valid",
+                    "note": add_source_data.get("note", ""),
+                    "is_primary": add_source_data.get("is_primary", False),
+                }
+                # Warn on unknown doc_type
+                if new_source["doc_type"] and not is_known_doc_type(new_source["doc_type"]):
+                    suggestions.append(
+                        f"doc_type '{new_source['doc_type']}' is not a known type. "
+                        f"Consider using 'OTHER' or one of: SPEC, DECISION, DESIGN, PLAN, "
+                        f"REPORT, CONTRACT, GUIDE, MEETING, REFERENCE, TEST."
+                    )
+                sources.append(new_source)
+                suggestions.append("change_summary 可能需要更新")
+
+            elif update_source_data:
+                target_sid = update_source_data.get("source_id")
+                if not target_sid:
+                    raise ValueError("update_source requires source_id")
+                found = False
+                for src in sources:
+                    if src.get("source_id") == target_sid:
+                        for key in ("uri", "label", "doc_type", "doc_status", "note", "is_primary", "status"):
+                            if key in update_source_data and key != "source_id":
+                                src[key] = update_source_data[key]
+                        # Re-validate URI if changed
+                        if "uri" in update_source_data and src.get("type"):
+                            is_valid, error_msg = validate_source_uri(src["type"], src["uri"])
+                            if not is_valid:
+                                raise ValueError(f"Invalid source URI: {error_msg}")
+                        found = True
+                        break
+                if not found:
+                    raise ValueError(
+                        f"source_id '{target_sid}' not found in this document"
+                    )
+                suggestions.append("change_summary 可能需要更新")
+
+            elif remove_source_data:
+                target_sid = remove_source_data.get("source_id")
+                if not target_sid:
+                    raise ValueError("remove_source requires source_id")
+                # Guard: cannot remove last source
+                if len(sources) <= 1:
+                    raise ValueError(
+                        "不可移除最後一個 source。"
+                        "Document entity 至少需要一個 source。"
+                    )
+                # Guard: index only
+                if doc_role == "single":
+                    raise ValueError(
+                        "single doc entity 不支援 remove_source。"
+                    )
+                original_len = len(sources)
+                sources = [s for s in sources if s.get("source_id") != target_sid]
+                if len(sources) == original_len:
+                    raise ValueError(
+                        f"source_id '{target_sid}' not found in this document"
+                    )
+                suggestions.append("change_summary 可能需要更新")
+
         else:
-            sources: list[dict] = list(existing.sources) if existing else []
-        if source_data and isinstance(source_data, dict):
-            merged_source = {
-                "uri": source_data.get("uri", existing_source.get("uri", "")),
-                "label": source_data.get("label") or data.get("title") or existing_source.get("label", ""),
-                "type": source_data.get("type", existing_source.get("type", "")),
-                "status": "valid",
-            }
-            sources = [merged_source]
+            # Check for plural "sources" payload first (ADR-022 bundle creation)
+            sources_payload = data.get("sources")
+            if sources_payload and isinstance(sources_payload, list):
+                # Honor explicit sources array from caller
+                sources: list[dict] = []
+                for src in sources_payload:
+                    if isinstance(src, dict):
+                        sources.append({
+                            "uri": src.get("uri", ""),
+                            "type": src.get("type", ""),
+                            "label": src.get("label", ""),
+                            "doc_type": src.get("doc_type", ""),
+                            "doc_status": src.get("doc_status", ""),
+                            "status": src.get("status", "valid"),
+                            "note": src.get("note", ""),
+                            "is_primary": src.get("is_primary", False),
+                        })
+            else:
+                # Legacy path: build sources from singular source field
+                existing_source = (existing.sources[0] if existing and existing.sources else {})
+                if data.get("clear_sources"):
+                    sources: list[dict] = []
+                else:
+                    sources: list[dict] = list(existing.sources) if existing else []
+                if source_data and isinstance(source_data, dict):
+                    merged_source = {
+                        "uri": source_data.get("uri", existing_source.get("uri", "")),
+                        "label": source_data.get("label") or data.get("title") or existing_source.get("label", ""),
+                        "type": source_data.get("type", existing_source.get("type", "")),
+                        "status": "valid",
+                    }
+                    sources = [merged_source]
+
+        # Ensure all sources have source_ids (backfill for legacy sources)
+        ensure_source_ids(sources)
 
         # Build unified Tags from legacy DocumentTags format
         tags_data = data.get("tags")
@@ -2051,6 +2213,10 @@ class OntologyService:
             "status": data.get("status", existing.status if existing else "current"),
             "parent_id": parent_id,
             "sources": sources,
+            # ADR-022 Document Bundle fields
+            "doc_role": doc_role,
+            "change_summary": change_summary,
+            "summary_updated_at": summary_updated_at,
         }
         # Document lifecycle updates are governance operations that should remain
         # merge-safe but not be blocked by confirmed-entity protection.
@@ -2075,6 +2241,9 @@ class OntologyService:
                 related_ids=related_ids,
                 remove_stale=True,
             )
+
+        # Attach bundle operation suggestions for tools.py to pick up
+        saved._bundle_suggestions = suggestions  # type: ignore[attr-defined]
         return saved
 
     async def _resolve_document_title(

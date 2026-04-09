@@ -51,6 +51,28 @@ class SourceType(str, Enum):
     NOTION = "notion"
     UPLOAD = "upload"
     WIKI = "wiki"
+    URL = "url"
+
+
+class DocRole(str, Enum):
+    """Document entity role: single file proxy vs multi-source index."""
+    SINGLE = "single"
+    INDEX = "index"
+
+
+class SourceStatus(str, Enum):
+    """Per-source URI reachability status."""
+    VALID = "valid"
+    STALE = "stale"
+    UNRESOLVABLE = "unresolvable"
+
+
+class DocStatus(str, Enum):
+    """Per-source document lifecycle status (used in index bundles)."""
+    DRAFT = "draft"
+    APPROVED = "approved"
+    SUPERSEDED = "superseded"
+    ARCHIVED = "archived"
 
 
 class DocumentStatus(str, Enum):
@@ -203,7 +225,7 @@ class Entity:
     details: dict | None = None
     confirmed_by_user: bool = False
     owner: str | None = None  # Phase 0: simple name string (e.g. "Barry")
-    sources: list[dict] = field(default_factory=list)  # [{uri, label, type}]
+    sources: list[dict] = field(default_factory=list)  # [{uri, label, type, source_id, ...}]
     visibility: str = "public"  # "public" | "restricted" | "confidential"
     visible_to_roles: list[str] = field(default_factory=list)
     visible_to_members: list[str] = field(default_factory=list)
@@ -211,6 +233,10 @@ class Entity:
     last_reviewed_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+    # ADR-022 Document Bundle fields (only meaningful for type="document")
+    doc_role: str | None = None  # DocRole value: "single" | "index"
+    change_summary: str | None = None  # Human-authored summary of recent doc changes
+    summary_updated_at: datetime | None = None  # When change_summary was last updated
 
 
 @dataclass

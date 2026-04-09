@@ -178,3 +178,67 @@ async def test_read_source_entity_with_no_sources_raises():
 
     with pytest.raises(ValueError):
         await svc.read_source("uuid-006")
+
+
+# ---------------------------------------------------------------------------
+# Tests: source_uri parameter overrides sources[0]
+# ---------------------------------------------------------------------------
+
+
+class _RecordingSourceAdapter:
+    """Records which URI was read."""
+
+    def __init__(self) -> None:
+        self.read_uris: list[str] = []
+
+    async def read_content(self, uri: str) -> str:
+        self.read_uris.append(uri)
+        return f"content of {uri}"
+
+
+@pytest.mark.asyncio
+async def test_read_source_with_source_uri_reads_specified_uri():
+    """When source_uri is provided, read_source reads that URI instead of sources[0]."""
+    entity = Entity(
+        id="uuid-010",
+        name="Multi Source Doc",
+        type="document",
+        summary="doc with multiple sources",
+        tags=Tags(what=["test"], why="testing", how="unit", who=["dev"]),
+        sources=[
+            {"uri": "first-uri.md", "label": "primary", "type": "github"},
+            {"uri": "second-uri.md", "label": "secondary", "type": "github"},
+        ],
+    )
+    repo = _StubEntityRepo([entity])
+    adapter = _RecordingSourceAdapter()
+    svc = SourceService(entity_repo=repo, source_adapter=adapter)
+
+    result = await svc.read_source("uuid-010", source_uri="second-uri.md")
+
+    assert result == "content of second-uri.md"
+    assert adapter.read_uris == ["second-uri.md"]
+
+
+@pytest.mark.asyncio
+async def test_read_source_without_source_uri_reads_first():
+    """Without source_uri, read_source still reads sources[0] as before."""
+    entity = Entity(
+        id="uuid-011",
+        name="Multi Source Doc",
+        type="document",
+        summary="doc with multiple sources",
+        tags=Tags(what=["test"], why="testing", how="unit", who=["dev"]),
+        sources=[
+            {"uri": "first-uri.md", "label": "primary", "type": "github"},
+            {"uri": "second-uri.md", "label": "secondary", "type": "github"},
+        ],
+    )
+    repo = _StubEntityRepo([entity])
+    adapter = _RecordingSourceAdapter()
+    svc = SourceService(entity_repo=repo, source_adapter=adapter)
+
+    result = await svc.read_source("uuid-011")
+
+    assert result == "content of first-uri.md"
+    assert adapter.read_uris == ["first-uri.md"]

@@ -39,7 +39,7 @@ class _StubEntityRepo:
         self._by_id = {e.id: e for e in entities if e.id}
         self._all = list(entities)
         # Track mutation calls for assertions
-        self.source_status_updates: list[tuple[str, str]] = []
+        self.source_status_updates: list[tuple[str, str, str | None]] = []
         self.archived_ids: list[str] = []
 
     async def get_by_id(self, entity_id: str) -> Entity | None:
@@ -62,12 +62,18 @@ class _StubEntityRepo:
     async def list_by_parent(self, parent_id: str) -> list[Entity]:
         return []
 
-    async def update_source_status(self, entity_id: str, new_status: str) -> None:
-        self.source_status_updates.append((entity_id, new_status))
+    async def update_source_status(self, entity_id: str, new_status: str, source_id: str | None = None) -> None:
+        self.source_status_updates.append((entity_id, new_status, source_id))
         # Also update in-memory so subsequent reads see the new status
         entity = self._by_id.get(entity_id)
         if entity and entity.sources:
-            entity.sources[0]["status"] = new_status
+            if source_id:
+                for src in entity.sources:
+                    if src.get("source_id") == source_id:
+                        src["status"] = new_status
+                        break
+            else:
+                entity.sources[0]["status"] = new_status
 
     async def archive_entity(self, entity_id: str) -> None:
         self.archived_ids.append(entity_id)
@@ -194,7 +200,7 @@ async def test_recovery_github_404_found_alternative_sets_stale_and_proposed_uri
     assert result["source_status"] == "stale"
     assert result["suggested_action"] == "search_repo"
     assert result["proposed_uri"] == "https://github.com/owner/repo/blob/main/new-docs/spec.md"
-    assert ("id-3", "stale") in repo.source_status_updates
+    assert ("id-3", "stale", None) in repo.source_status_updates
     assert "id-3" not in repo.archived_ids
 
 
@@ -219,7 +225,7 @@ async def test_recovery_github_404_no_alternative_sets_unresolvable_and_archives
     assert result["source_status"] == "unresolvable"
     assert result["suggested_action"] == "mark_unresolvable"
     assert result["proposed_uri"] is None
-    assert ("id-4", "unresolvable") in repo.source_status_updates
+    assert ("id-4", "unresolvable", None) in repo.source_status_updates
     assert "id-4" in repo.archived_ids
 
 
@@ -246,7 +252,7 @@ async def test_recovery_gdrive_404_sets_unresolvable_and_archives():
     assert result["source_type"] == "gdrive"
     assert result["source_status"] == "unresolvable"
     assert result["suggested_action"] == "mark_unresolvable"
-    assert ("id-5", "unresolvable") in repo.source_status_updates
+    assert ("id-5", "unresolvable", None) in repo.source_status_updates
     assert "id-5" in repo.archived_ids
 
 
@@ -273,7 +279,7 @@ async def test_recovery_notion_404_sets_stale_not_archived():
     assert result["source_type"] == "notion"
     assert result["source_status"] == "stale"
     assert result["suggested_action"] == "check_permission"
-    assert ("id-6", "stale") in repo.source_status_updates
+    assert ("id-6", "stale", None) in repo.source_status_updates
     assert "id-6" not in repo.archived_ids
 
 
@@ -300,7 +306,7 @@ async def test_recovery_wiki_404_sets_stale_not_archived():
     assert result["source_type"] == "wiki"
     assert result["source_status"] == "stale"
     assert result["suggested_action"] == "check_permission"
-    assert ("id-7", "stale") in repo.source_status_updates
+    assert ("id-7", "stale", None) in repo.source_status_updates
     assert "id-7" not in repo.archived_ids
 
 
@@ -326,7 +332,7 @@ async def test_recovery_permission_error_sets_stale_check_permission():
     assert result["error"] == "DEAD_LINK"
     assert result["source_status"] == "stale"
     assert result["suggested_action"] == "check_permission"
-    assert ("id-8", "stale") in repo.source_status_updates
+    assert ("id-8", "stale", None) in repo.source_status_updates
     assert "id-8" not in repo.archived_ids
 
 
@@ -353,3 +359,66 @@ async def test_recovery_dead_link_response_contains_required_fields():
     assert "source_type" in result
     assert "suggested_action" in result
     assert "source_status" in result
+
+
+# ---------------------------------------------------------------------------
+# Tests: source_uri parameter overrides sources[0]
+# ---------------------------------------------------------------------------
+
+
+class _RecordingSourceAdapter:
+    """Records which URI was read."""
+
+    def __init__(self) -> None:
+        self.read_uris: list[str] = []
+
+    async def read_content(self, uri: str) -> str:
+        self.read_uris.append(uri)
+        return f"content of {uri}"
+
+    async def search_alternatives_for_uri(self, uri: str) -> list[str]:
+        return []
+
+
+@pytest.mark.asyncio
+async def test_recovery_with_source_uri_reads_specified_uri():
+    """When source_uri is provided, read_source_with_recovery reads that URI."""
+    entity = _make_entity("id-20", "https://github.com/owner/repo/blob/main/first.md")
+    # Add a second source to the entity
+    entity.sources.append({
+        "uri": "https://github.com/owner/repo/blob/main/second.md",
+        "label": "secondary",
+        "type": "github",
+        "status": "valid",
+    })
+    repo = _StubEntityRepo([entity])
+    adapter = _RecordingSourceAdapter()
+    svc = SourceService(entity_repo=repo, source_adapter=adapter)
+
+    result = await svc.read_source_with_recovery(
+        "id-20",
+        source_uri="https://github.com/owner/repo/blob/main/second.md",
+    )
+
+    assert result == {"content": "content of https://github.com/owner/repo/blob/main/second.md"}
+    assert adapter.read_uris == ["https://github.com/owner/repo/blob/main/second.md"]
+
+
+@pytest.mark.asyncio
+async def test_recovery_without_source_uri_reads_first():
+    """Without source_uri, read_source_with_recovery still reads sources[0]."""
+    entity = _make_entity("id-21", "https://github.com/owner/repo/blob/main/first.md")
+    entity.sources.append({
+        "uri": "https://github.com/owner/repo/blob/main/second.md",
+        "label": "secondary",
+        "type": "github",
+        "status": "valid",
+    })
+    repo = _StubEntityRepo([entity])
+    adapter = _RecordingSourceAdapter()
+    svc = SourceService(entity_repo=repo, source_adapter=adapter)
+
+    result = await svc.read_source_with_recovery("id-21")
+
+    assert result == {"content": "content of https://github.com/owner/repo/blob/main/first.md"}
+    assert adapter.read_uris == ["https://github.com/owner/repo/blob/main/first.md"]

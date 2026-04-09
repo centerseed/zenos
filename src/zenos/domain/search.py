@@ -58,6 +58,13 @@ def _collect_searchable_text_entity(entity: Entity) -> str:
             parts.extend(who)
         else:
             parts.append(who)
+    # ADR-022: Include per-source doc_type so doc_type searches hit bundle sources
+    if entity.sources:
+        for src in entity.sources:
+            if isinstance(src, dict):
+                doc_type = src.get("doc_type", "")
+                if doc_type:
+                    parts.append(doc_type)
     return " ".join(parts)
 
 

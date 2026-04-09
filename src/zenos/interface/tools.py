@@ -1405,7 +1405,13 @@ async def get(
                 return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
         elif not _is_entity_visible(result):
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
-        return _serialize(result)
+        serialized = _serialize(result)
+        # ADR-022: enrich sources with canonical_type
+        from zenos.domain.doc_types import canonical_type as compute_canonical_type
+        for src in (serialized.get("sources") or []):
+            if src.get("doc_type"):
+                src["canonical_type"] = compute_canonical_type(src["doc_type"])
+        return serialized
 
     elif collection == "blindspots":
         if not id:
@@ -1445,7 +1451,7 @@ async def get(
     tags={"read"},
     annotations={"readOnlyHint": True},
 )
-async def read_source(doc_id: str) -> dict:
+async def read_source(doc_id: str, source_id: str | None = None) -> dict:
     """讀取文件的原始內容（透過 adapter 從 GitHub 等來源取得）。
 
     這個工具讀取的是實際的文件內容，不是 ontology metadata。
@@ -1460,8 +1466,17 @@ async def read_source(doc_id: str) -> dict:
 
     Args:
         doc_id: 文件的 ID（從 search 或 get 取得）
+        source_id: 可選。指定要讀取的 source（用於 doc_role=index 的多 source 文件）。
+                   不指定時讀取 primary source 或第一個 valid source。
     """
     await _ensure_services()
+    # MCP setup_hint mapping for adapter suggestions
+    _SETUP_HINTS: dict[str, str] = {
+        "github": "GitHub MCP",
+        "gdrive": "Google Drive MCP",
+        "notion": "Notion MCP",
+        "wiki": "Wiki MCP",
+    }
     try:
         doc_record = await ontology_service.get_document(doc_id)
         if doc_record is None:
@@ -1475,18 +1490,95 @@ async def read_source(doc_id: str) -> dict:
                 return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
         elif hasattr(doc_record, "visibility") and not _is_entity_visible(doc_record):
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+
+        # --- ADR-022: source_id-aware source selection ---
+        sources = doc_record.sources or []
+        all_source_info = [
+            {"source_id": s.get("source_id", ""), "label": s.get("label", ""), "status": s.get("status", "valid")}
+            for s in sources
+        ]
+
+        target_source = None
+        if source_id:
+            # Find specific source by source_id
+            target_source = next((s for s in sources if s.get("source_id") == source_id), None)
+            if target_source is None:
+                return {
+                    "error": "NOT_FOUND",
+                    "message": f"source_id '{source_id}' not found in this document",
+                    "available_sources": all_source_info,
+                }
+        else:
+            # Primary fallback logic (D6) — prefer primary+valid, then any valid
+            # 1. is_primary=true AND valid
+            target_source = next(
+                (s for s in sources if s.get("is_primary") and s.get("status", "valid") == "valid"),
+                None,
+            )
+            # 2. First valid source (regardless of primary flag)
+            if target_source is None:
+                target_source = next((s for s in sources if s.get("status", "valid") == "valid"), None)
+            # 3. Last stale source (if no valid)
+            if target_source is None and sources:
+                stale_sources = [s for s in sources if s.get("status") == "stale"]
+                target_source = stale_sources[-1] if stale_sources else sources[-1]
+
+        if target_source is None:
+            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' has no sources"}
+
+        uri = target_source.get("uri", "")
+        source_type = target_source.get("type", "")
+        source_status = target_source.get("status", "valid")
+
+        # Build alternative_sources (other sources in the same bundle)
+        current_sid = target_source.get("source_id", "")
+        alternative_sources = [
+            s for s in all_source_info
+            if s.get("source_id") != current_sid and s.get("status") == "valid"
+        ]
+
+        # If target source is stale/unresolvable, return info with setup_hint
+        if source_status in ("stale", "unresolvable"):
+            return {
+                "error": "SOURCE_UNAVAILABLE",
+                "doc_id": doc_id,
+                "source_id": current_sid,
+                "source_type": source_type,
+                "source_status": source_status,
+                "uri": uri,
+                "setup_hint": _SETUP_HINTS.get(source_type, ""),
+                "alternative_sources": alternative_sources,
+                "all_sources_status": all_source_info,
+            }
+
+        # Read the actual content via adapter — pass selected URI so the
+        # service reads the correct source, not always sources[0].
         result = None
         reader = getattr(source_service, "read_source_with_recovery", None)
         if reader is not None:
-            maybe = reader(doc_id)
+            maybe = reader(doc_id, source_uri=uri)
             if inspect.isawaitable(maybe):
                 result = await maybe
         if result is None:
-            result = await source_service.read_source(doc_id)
+            result = await source_service.read_source(doc_id, source_uri=uri)
         if isinstance(result, str):
-            return {"doc_id": doc_id, "content": result}
+            resp = {"doc_id": doc_id, "content": result}
+            if current_sid:
+                resp["source_id"] = current_sid
+            if alternative_sources:
+                resp["alternative_sources"] = alternative_sources
+            return resp
         if "content" in result:
-            return {"doc_id": doc_id, "content": result["content"]}
+            resp = {"doc_id": doc_id, "content": result["content"]}
+            if current_sid:
+                resp["source_id"] = current_sid
+            if alternative_sources:
+                resp["alternative_sources"] = alternative_sources
+            return resp
+        # Error result from read_source_with_recovery — enrich with setup_hint
+        if "error" in result:
+            result["setup_hint"] = _SETUP_HINTS.get(result.get("source_type", source_type), "")
+            result["alternative_sources"] = alternative_sources
         return result
     except (ValueError, FileNotFoundError):
         return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
@@ -1698,8 +1790,11 @@ async def write(
                 changes={"input": data},
             )
             linked_ids = serialized.get("linked_entity_ids") or data.get("linked_entity_ids") or []
+            # ADR-022: pick up bundle operation suggestions
+            bundle_suggestions = getattr(result, "_bundle_suggestions", None) or []
             return _unified_response(
                 data=serialized,
+                suggestions=bundle_suggestions if bundle_suggestions else None,
                 context_bundle=await _build_context_bundle(linked_entity_ids=linked_ids),
                 governance_hints=_build_governance_hints(),
             )

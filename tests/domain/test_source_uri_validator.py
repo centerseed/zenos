@@ -37,6 +37,16 @@ class TestGitHubValidation:
             "https://github.com/owner/repo/tree/main/docs",
         )
         assert ok is False
+        assert "tree" in msg.lower()
+
+    def test_raw_githubusercontent_url_rejected(self):
+        """raw.githubusercontent.com URLs must be rejected (ADR-022 D7)."""
+        ok, msg = validate_source_uri(
+            "github",
+            "https://raw.githubusercontent.com/owner/repo/main/path/file.md",
+        )
+        assert ok is False
+        assert "raw" in msg.lower()
 
     def test_missing_path_segment_rejected(self):
         """URL must have a path after branch."""
@@ -123,7 +133,16 @@ class TestGDriveValidation:
             "https://drive.google.com/drive/folders/xyz",
         )
         assert ok is False
-        assert "folder" in msg.lower() or "file" in msg.lower()
+        assert "folder" in msg.lower()
+
+    def test_folder_url_with_user_path_rejected(self):
+        """GDrive /drive/u/ URLs (user-specific folder views) must be rejected."""
+        ok, msg = validate_source_uri(
+            "gdrive",
+            "https://drive.google.com/drive/u/0/folders/abc123",
+        )
+        assert ok is False
+        assert "folder" in msg.lower()
 
     def test_relative_path_rejected(self):
         ok, msg = validate_source_uri("gdrive", "docs/myfile.pdf")

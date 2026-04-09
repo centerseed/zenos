@@ -184,6 +184,10 @@ def _row_to_entity(row: asyncpg.Record) -> Entity:
         last_reviewed_at=_to_dt(row["last_reviewed_at"]),
         created_at=_to_dt(row["created_at"]) or _now(),
         updated_at=_to_dt(row["updated_at"]) or _now(),
+        # ADR-022 Document Bundle fields
+        doc_role=row["doc_role"] if "doc_role" in row.keys() else None,
+        change_summary=row["change_summary"] if "change_summary" in row.keys() else None,
+        summary_updated_at=_to_dt(row["summary_updated_at"]) if "summary_updated_at" in row.keys() else None,
     )
 
 
@@ -248,8 +252,9 @@ class SqlEntityRepository:
                     id, partner_id, name, type, level, parent_id, status, summary,
                     tags_json, details_json, confirmed_by_user, owner, sources_json,
                     visibility, visible_to_roles, visible_to_members,
-                    visible_to_departments, last_reviewed_at, created_at, updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20)
+                    visible_to_departments, last_reviewed_at, created_at, updated_at,
+                    doc_role, change_summary, summary_updated_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, type=EXCLUDED.type, level=EXCLUDED.level,
                     parent_id=EXCLUDED.parent_id, status=EXCLUDED.status,
@@ -262,7 +267,10 @@ class SqlEntityRepository:
                     visible_to_members=EXCLUDED.visible_to_members,
                     visible_to_departments=EXCLUDED.visible_to_departments,
                     last_reviewed_at=EXCLUDED.last_reviewed_at,
-                    updated_at=EXCLUDED.updated_at
+                    updated_at=EXCLUDED.updated_at,
+                    doc_role=EXCLUDED.doc_role,
+                    change_summary=EXCLUDED.change_summary,
+                    summary_updated_at=EXCLUDED.summary_updated_at
                 WHERE entities.partner_id = EXCLUDED.partner_id
                 """,
                 entity.id, pid, entity.name, entity.type, entity.level,
@@ -275,6 +283,7 @@ class SqlEntityRepository:
                 entity.visible_to_members, entity.visible_to_departments,
                 entity.last_reviewed_at,
                 entity.created_at, entity.updated_at,
+                entity.doc_role, entity.change_summary, entity.summary_updated_at,
             )
         return entity
 
@@ -307,22 +316,58 @@ class SqlEntityRepository:
             )
         return [_row_to_entity(r) for r in rows]
 
-    async def update_source_status(self, entity_id: str, new_status: str) -> None:
-        """Update sources[0].status for a document entity."""
+    async def update_source_status(
+        self,
+        entity_id: str,
+        new_status: str,
+        source_id: str | None = None,
+    ) -> None:
+        """Update source_status for a document entity's source.
+
+        Args:
+            entity_id: The entity to update.
+            new_status: New source_status value (valid/stale/unresolvable).
+            source_id: If provided, update only the source with this source_id.
+                       If None, update sources[0] (backward compatible).
+        """
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"""UPDATE {SCHEMA}.entities
-                    SET sources_json = jsonb_set(
-                        sources_json,
-                        '{{0,status}}',
-                        $1::jsonb,
-                        true
-                    ),
-                    updated_at = now()
-                    WHERE id = $2 AND partner_id = $3""",
-                json.dumps(new_status), entity_id, pid,
-            )
+            if source_id is None:
+                # Legacy behavior: update first source
+                await conn.execute(
+                    f"""UPDATE {SCHEMA}.entities
+                        SET sources_json = jsonb_set(
+                            sources_json,
+                            '{{0,status}}',
+                            $1::jsonb,
+                            true
+                        ),
+                        updated_at = now()
+                        WHERE id = $2 AND partner_id = $3""",
+                    json.dumps(new_status), entity_id, pid,
+                )
+            else:
+                # Per-source update: find source by source_id and update its status
+                row = await conn.fetchrow(
+                    f"SELECT sources_json FROM {SCHEMA}.entities WHERE id = $1 AND partner_id = $2",
+                    entity_id, pid,
+                )
+                if row is None:
+                    return
+                sources = json.loads(row["sources_json"]) if row["sources_json"] else []
+                updated = False
+                for src in sources:
+                    if src.get("source_id") == source_id:
+                        src["status"] = new_status
+                        updated = True
+                        break
+                if updated:
+                    await conn.execute(
+                        f"""UPDATE {SCHEMA}.entities
+                            SET sources_json = $1::jsonb, updated_at = now()
+                            WHERE id = $2 AND partner_id = $3""",
+                        json.dumps(sources), entity_id, pid,
+                    )
 
     async def batch_update_source_uris(
         self,
@@ -330,10 +375,16 @@ class SqlEntityRepository:
         *,
         atomic: bool = False,
     ) -> dict:
-        """Batch update sources[0].uri for multiple document entities.
+        """Batch update source URIs for document entities.
+
+        Supports two payload formats (can be mixed in one batch):
+          - Legacy:  {"document_id": str, "new_uri": str}
+                     Updates the primary source (is_primary=true), or first source.
+          - New:     {"document_id": str, "source_id": str, "new_uri": str}
+                     Updates the source matching source_id exactly.
 
         Args:
-            updates: List of {"document_id": str, "new_uri": str}
+            updates: List of update dicts.
             atomic: If True, wrap in a transaction (all-or-nothing).
 
         Returns:
@@ -348,8 +399,8 @@ class SqlEntityRepository:
             for item in updates:
                 doc_id = item["document_id"]
                 new_uri = item["new_uri"]
+                target_source_id = item.get("source_id")
                 try:
-                    # Check entity exists and belongs to partner
                     row = await conn.fetchrow(
                         f"SELECT id, sources_json FROM {SCHEMA}.entities "
                         f"WHERE id = $1 AND partner_id = $2",
@@ -361,21 +412,49 @@ class SqlEntityRepository:
                         not_found.append(doc_id)
                         continue
 
-                    # Idempotent: check if URI already matches
                     current_sources = json.loads(row["sources_json"]) if row["sources_json"] else []
-                    if current_sources and current_sources[0].get("uri") == new_uri:
-                        updated.append(doc_id)
-                        continue
-
-                    # Extract label from new_uri
                     new_label = new_uri.rsplit("/", 1)[-1] if "/" in new_uri else new_uri
 
-                    # Update sources[0].uri and sources[0].label
-                    if current_sources:
-                        current_sources[0]["uri"] = new_uri
-                        current_sources[0]["label"] = new_label
+                    if target_source_id:
+                        # New format: update by source_id
+                        source_found = False
+                        for src in current_sources:
+                            if src.get("source_id") == target_source_id:
+                                if src.get("uri") == new_uri:
+                                    updated.append(doc_id)
+                                    source_found = True
+                                    break
+                                src["uri"] = new_uri
+                                src["label"] = new_label
+                                source_found = True
+                                break
+                        if not source_found:
+                            if atomic:
+                                raise ValueError(
+                                    f"source_id '{target_source_id}' not found in document '{doc_id}'"
+                                )
+                            errors.append({
+                                "document_id": doc_id,
+                                "source_id": target_source_id,
+                                "error": f"source_id '{target_source_id}' not found",
+                            })
+                            continue
                     else:
-                        current_sources = [{"uri": new_uri, "label": new_label, "type": "github"}]
+                        # Legacy format: update primary or first source
+                        if not current_sources:
+                            current_sources = [{"uri": new_uri, "label": new_label, "type": "github"}]
+                        else:
+                            # Find primary source, or fall back to first
+                            target_idx = 0
+                            for i, src in enumerate(current_sources):
+                                if src.get("is_primary"):
+                                    target_idx = i
+                                    break
+                            if current_sources[target_idx].get("uri") == new_uri:
+                                updated.append(doc_id)
+                                continue
+                            current_sources[target_idx]["uri"] = new_uri
+                            current_sources[target_idx]["label"] = new_label
 
                     await conn.execute(
                         f"""UPDATE {SCHEMA}.entities

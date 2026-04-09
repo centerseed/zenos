@@ -368,6 +368,10 @@ def _entity_to_dict(e: Entity) -> dict:
         "lastReviewedAt": e.last_reviewed_at,
         "createdAt": e.created_at,
         "updatedAt": e.updated_at,
+        # ADR-022 Document Bundle fields
+        "docRole": e.doc_role,
+        "changeSummary": e.change_summary,
+        "summaryUpdatedAt": e.summary_updated_at,
     }
 
 
