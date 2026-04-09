@@ -13,6 +13,7 @@ const ACTIVE_WORKSPACE_STORAGE_KEY = "zenos.activeWorkspaceId";
 
 const DATE_FIELDS = new Set([
   "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
+  "summaryUpdatedAt",
 ]);
 
 function getStoredActiveWorkspaceId(): string | null {
@@ -110,7 +111,7 @@ function normalizePartner(data: Record<string, unknown>): Partner {
           .filter((item) => item.id && item.name)
       : undefined,
     sharedPartnerId: data.sharedPartnerId ?? data.shared_partner_id ?? null,
-  }) as Partner;
+  }) as unknown as Partner;
 }
 
 export function setActiveWorkspaceId(workspaceId: string | null): void {

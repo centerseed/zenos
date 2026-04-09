@@ -4,6 +4,8 @@ import { useMemo, useState, useCallback, useEffect } from "react";
 import type {
   Entity,
   EntityVisibility,
+  Source,
+  SourceStatus,
   Relationship,
   Blindspot,
   Task,
@@ -83,6 +85,59 @@ const DEFAULT_ROLE_OPTIONS = [
 function normalizeOption(value: string) {
   return value.trim().toLowerCase();
 }
+
+// --- ADR-022: Platform icon + source status helpers ---
+
+const PLATFORM_ICONS: Record<string, { icon: string; label: string }> = {
+  github: { icon: "GH", label: "GitHub" },
+  google_drive: { icon: "GD", label: "Google Drive" },
+  notion: { icon: "N", label: "Notion" },
+  confluence: { icon: "CF", label: "Confluence" },
+  dropbox: { icon: "DB", label: "Dropbox" },
+  local: { icon: "LC", label: "Local" },
+};
+
+function getPlatformInfo(sourceType: string): { icon: string; label: string } {
+  const key = sourceType.toLowerCase().replace(/[- ]/g, "_");
+  return PLATFORM_ICONS[key] ?? { icon: sourceType.slice(0, 2).toUpperCase(), label: sourceType };
+}
+
+function getSourceLabel(src: { uri: string; label?: string; type?: string }): string {
+  if (src.label && src.label !== src.type) return src.label;
+  try {
+    const parts = src.uri.replace(/[#?].*/, "").split("/").filter(Boolean);
+    return parts[parts.length - 1] || src.uri;
+  } catch {
+    return src.uri || src.label || src.type || "Unknown";
+  }
+}
+
+function getSourceUrl(src: { uri: string; type?: string }): string | null {
+  if (src.uri.startsWith("http://") || src.uri.startsWith("https://")) return src.uri;
+  // github: scheme -> attempt to construct a URL
+  if (src.type === "github" && !src.uri.startsWith("http")) return null;
+  return null;
+}
+
+const SOURCE_STATUS_STYLES: Record<string, { className: string; label: string }> = {
+  valid: { className: "bg-green-500/15 text-green-400 border-green-500/30", label: "valid" },
+  stale: { className: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30", label: "stale" },
+  unresolvable: { className: "bg-red-500/15 text-red-400 border-red-500/30", label: "broken" },
+};
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  SPEC: "Specs",
+  DECISION: "Decisions",
+  DESIGN: "Design Docs",
+  PLAN: "Plans",
+  REPORT: "Reports",
+  CONTRACT: "Contracts",
+  GUIDE: "Guides",
+  MEETING: "Meeting Notes",
+  REFERENCE: "References",
+  TEST: "Test Docs",
+  OTHER: "Other",
+};
 
 function normalizeVisibility(visibility: string | undefined | null): EntityVisibility {
   if (visibility === "public" || visibility === "restricted" || visibility === "confidential") {
@@ -425,19 +480,28 @@ export default function NodeDetailSheet({
     };
   }, [entity, tasks]);
 
-  // Reference Layer: Documents
+  // Reference Layer: Documents + Sources (ADR-022 Document Bundle)
   const categorizedDocs = useMemo(() => {
-    if (!entity) return { specs: [], adrs: [], sources: [] };
+    if (!entity) return { specs: [], adrs: [], sources: [] as Source[], isIndex: false, sourcesByDocType: {} as Record<string, Source[]> };
     const childDocs = entities.filter((e) => e.parentId === entity.id && e.type === "document");
     const specs = childDocs.filter((d) => d.name.startsWith("SPEC-"));
     const adrs = childDocs.filter((d) => d.name.startsWith("ADR-"));
     const otherDocs = childDocs.filter((d) => !d.name.startsWith("SPEC-") && !d.name.startsWith("ADR-"));
-    
-    return {
-      specs,
-      adrs,
-      sources: [...(entity.sources || []), ...otherDocs.flatMap(d => d.sources || [])],
-    };
+
+    const allSources = [...(entity.sources || []), ...otherDocs.flatMap(d => d.sources || [])];
+    const isIndex = entity.docRole === "index";
+
+    // For index-type documents, group sources by doc_type
+    const sourcesByDocType: Record<string, typeof allSources> = {};
+    if (isIndex) {
+      for (const src of allSources) {
+        const key = src.doc_type || "OTHER";
+        if (!sourcesByDocType[key]) sourcesByDocType[key] = [];
+        sourcesByDocType[key].push(src);
+      }
+    }
+
+    return { specs, adrs, sources: allSources, isIndex, sourcesByDocType };
   }, [entity, entities]);
 
   const hasTasks = categorizedTasks.inProgress.length > 0 || categorizedTasks.review.length > 0 || categorizedTasks.backlog.length > 0;
@@ -467,6 +531,11 @@ export default function NodeDetailSheet({
                         L{entity.level}
                       </Badge>
                     )}
+                    {entity.type === "document" && entity.docRole === "index" && (
+                      <Badge variant="outline" className="border-cyan-500/40 text-cyan-400 bg-cyan-500/10 font-mono text-xs">
+                        index
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {!entity.confirmedByUser && (
@@ -492,6 +561,17 @@ export default function NodeDetailSheet({
               <p className="text-sm text-foreground/70 leading-relaxed mt-3">
                 {entity.summary}
               </p>
+              {entity.type === "document" && entity.changeSummary && (
+                <div className="mt-3 rounded-md border border-cyan-500/20 bg-cyan-500/5 p-2.5">
+                  <div className="text-[10px] font-semibold text-cyan-400/70 uppercase mb-1">Recent Changes</div>
+                  <p className="text-xs text-foreground/60 leading-relaxed">{entity.changeSummary}</p>
+                  {entity.summaryUpdatedAt && (
+                    <div className="text-[10px] text-foreground/30 mt-1">
+                      Updated {entity.summaryUpdatedAt.toLocaleDateString()}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col gap-8 p-6">
@@ -659,7 +739,7 @@ export default function NodeDetailSheet({
                 )}
               </section>
 
-              {/* Reference Layer (Docs) */}
+              {/* Reference Layer (Docs) — ADR-022 Document Bundle */}
               <section>
                 <h3 className="text-xs font-bold uppercase tracking-widest text-foreground/40 mb-4 flex items-center gap-2">
                   <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" />
@@ -669,44 +749,124 @@ export default function NodeDetailSheet({
                   <p className="text-xs text-foreground/30 italic">No reference documents</p>
                 ) : (
                   <div className="space-y-4">
+                    {/* Child document entities (Specs, Decisions) */}
                     {[
-                      { label: "Core Specs", items: categorizedDocs.specs, type: 'entity' },
-                      { label: "Decisions", items: categorizedDocs.adrs, type: 'entity' },
-                      { label: "External Sources", items: categorizedDocs.sources, type: 'source' },
+                      { label: "Core Specs", items: categorizedDocs.specs },
+                      { label: "Decisions", items: categorizedDocs.adrs },
                     ].map((group) => group.items.length > 0 && (
                       <div key={group.label}>
                         <div className="text-[10px] font-semibold uppercase mb-2 text-cyan-400/70">
                           {group.label}
                         </div>
                         <div className="space-y-1">
-                          {group.items.map((item, idx) => (
+                          {group.items.map((item) => (
                             <div
-                              key={group.type === 'entity' ? (item as Entity).id : `src-${idx}`}
+                              key={item.id}
                               className="flex items-center gap-2 py-1.5 group cursor-pointer"
                             >
                               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-foreground/30 group-hover:text-cyan-400 transition-colors">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
                               </svg>
                               <span className="text-xs text-foreground/70 group-hover:text-foreground truncate transition-colors">
-                                {group.type === 'entity'
-                                  ? (item as Entity).name
-                                  : (() => {
-                                      const src = item as any;
-                                      if (src.label && src.label !== src.type) return src.label;
-                                      try {
-                                        const parts = new URL(src.uri).pathname.split('/').filter(Boolean);
-                                        return parts[parts.length - 1] || src.uri;
-                                      } catch {
-                                        return src.uri || src.label || src.type;
-                                      }
-                                    })()
-                                }
+                                {item.name}
                               </span>
+                              {item.docRole === "index" && (
+                                <Badge variant="outline" className="border-cyan-500/30 text-cyan-400/60 text-[9px] py-0 px-1 h-4">index</Badge>
+                              )}
                             </div>
                           ))}
                         </div>
                       </div>
                     ))}
+
+                    {/* Sources — grouped by doc_type for index entities, flat list otherwise */}
+                    {categorizedDocs.sources.length > 0 && (
+                      categorizedDocs.isIndex ? (
+                        // Index mode: group by doc_type
+                        <div className="space-y-3">
+                          {Object.entries(categorizedDocs.sourcesByDocType)
+                            .sort(([a], [b]) => a.localeCompare(b))
+                            .map(([docType, sources]) => (
+                            <div key={docType}>
+                              <div className="text-[10px] font-semibold uppercase mb-2 text-cyan-400/70">
+                                {DOC_TYPE_LABELS[docType] ?? docType}
+                              </div>
+                              <div className="space-y-1">
+                                {sources.map((src, idx) => {
+                                  const platform = getPlatformInfo(src.type || "");
+                                  const url = getSourceUrl(src);
+                                  const statusStyle = SOURCE_STATUS_STYLES[src.source_status ?? "valid"];
+                                  const isUnresolvable = src.source_status === "unresolvable";
+                                  return (
+                                    <div
+                                      key={src.source_id || `src-${idx}`}
+                                      className={`flex items-center gap-2 py-1.5 group ${isUnresolvable ? "opacity-50" : "cursor-pointer"}`}
+                                      onClick={() => { if (url && !isUnresolvable) window.open(url, "_blank"); }}
+                                    >
+                                      <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[8px] font-bold bg-foreground/10 text-foreground/50 shrink-0" title={platform.label}>
+                                        {platform.icon}
+                                      </span>
+                                      <span className={`text-xs truncate transition-colors flex-1 min-w-0 ${isUnresolvable ? "text-foreground/40 line-through" : "text-foreground/70 group-hover:text-foreground"}`}>
+                                        {getSourceLabel(src)}
+                                      </span>
+                                      {src.source_status && src.source_status !== "valid" && statusStyle && (
+                                        <Badge variant="outline" className={`text-[9px] py-0 px-1 h-4 border ${statusStyle.className}`}>
+                                          {statusStyle.label}
+                                        </Badge>
+                                      )}
+                                      {url && !isUnresolvable && (
+                                        <span className="text-[9px] text-foreground/30 group-hover:text-cyan-400 transition-colors whitespace-nowrap" title={`Open in ${platform.label}`}>
+                                          Open
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        // Single / flat mode
+                        <div>
+                          <div className="text-[10px] font-semibold uppercase mb-2 text-cyan-400/70">
+                            Sources
+                          </div>
+                          <div className="space-y-1">
+                            {categorizedDocs.sources.map((src, idx) => {
+                              const platform = getPlatformInfo(src.type || "");
+                              const url = getSourceUrl(src);
+                              const statusStyle = SOURCE_STATUS_STYLES[src.source_status ?? "valid"];
+                              const isUnresolvable = src.source_status === "unresolvable";
+                              return (
+                                <div
+                                  key={src.source_id || `src-${idx}`}
+                                  className={`flex items-center gap-2 py-1.5 group ${isUnresolvable ? "opacity-50" : "cursor-pointer"}`}
+                                  onClick={() => { if (url && !isUnresolvable) window.open(url, "_blank"); }}
+                                >
+                                  <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[8px] font-bold bg-foreground/10 text-foreground/50 shrink-0" title={platform.label}>
+                                    {platform.icon}
+                                  </span>
+                                  <span className={`text-xs truncate transition-colors flex-1 min-w-0 ${isUnresolvable ? "text-foreground/40 line-through" : "text-foreground/70 group-hover:text-foreground"}`}>
+                                    {getSourceLabel(src)}
+                                  </span>
+                                  {src.source_status && src.source_status !== "valid" && statusStyle && (
+                                    <Badge variant="outline" className={`text-[9px] py-0 px-1 h-4 border ${statusStyle.className}`}>
+                                      {statusStyle.label}
+                                    </Badge>
+                                  )}
+                                  {url && !isUnresolvable && (
+                                    <span className="text-[9px] text-foreground/30 group-hover:text-cyan-400 transition-colors whitespace-nowrap" title={`Open in ${platform.label}`}>
+                                      Open
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )
+                    )}
                   </div>
                 )}
               </section>
