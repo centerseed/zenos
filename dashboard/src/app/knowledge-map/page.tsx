@@ -49,10 +49,6 @@ function Sidebar({
 }) {
   const products = entities.filter((e) => e.type === "product");
   const modules = entities.filter((e) => e.type === "module");
-  const confirmed = entities.filter((e) => e.confirmedByUser).length;
-  const confirmedRate =
-    entities.length > 0 ? Math.round((confirmed / entities.length) * 100) : 0;
-
   return (
     <div className={cn("w-[230px] shrink-0 border-r border-border bg-card flex flex-col h-full overflow-y-auto", className)}>
       <div className="px-3 pt-4 pb-3 border-b border-border">
@@ -67,15 +63,6 @@ function Sidebar({
           </div>
         )}
         <h2 className="text-sm font-bold text-foreground">Naruvia</h2>
-        <div className="flex items-center gap-2 mt-2">
-          <div className="flex-1 h-1 rounded-full bg-foreground/5 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-emerald-400/60"
-              style={{ width: `${confirmedRate}%` }}
-            />
-          </div>
-          <span className="text-xs text-foreground/55">{confirmedRate}%</span>
-        </div>
         <GovernanceHealthHint level={healthLevel} />
       </div>
 
