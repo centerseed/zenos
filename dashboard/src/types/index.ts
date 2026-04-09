@@ -11,6 +11,13 @@ export interface Partner {
   displayName: string;
   apiKey: string;
   authorizedEntityIds: string[];
+  activeWorkspaceId?: string | null;
+  homeWorkspaceId?: string | null;
+  availableWorkspaces?: Array<{
+    id: string;
+    name: string;
+    hasUpdate?: boolean;
+  }>;
   sharedPartnerId?: string | null;
   workspaceRole?: PartnerWorkspaceRole | null;
   accessMode?: PartnerAccessMode | null;
@@ -30,10 +37,15 @@ export interface Tags {
   who: string | string[];
 }
 
+export type SourceStatus = "valid" | "stale" | "unresolvable";
+
 export interface Source {
   uri: string;
   label: string;
   type: string;
+  source_id?: string;
+  source_status?: SourceStatus;
+  doc_type?: string;
 }
 
 export interface Entity {
@@ -56,6 +68,10 @@ export interface Entity {
   lastReviewedAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
+  // ADR-022 Document Bundle fields (only for type="document")
+  docRole?: "single" | "index" | null;
+  changeSummary?: string | null;
+  summaryUpdatedAt?: Date | null;
 }
 
 export interface Relationship {
