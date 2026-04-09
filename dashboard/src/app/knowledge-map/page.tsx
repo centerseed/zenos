@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useAuth } from "@/lib/auth";
 import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
-import { GovernanceHealthBanner } from "@/components/GovernanceHealthBanner";
+import { GovernanceHealthHint } from "@/components/GovernanceHealthHint";
 import { LoadingState } from "@/components/LoadingState";
 import { useSearchParams } from "next/navigation";
 import {
@@ -38,12 +38,14 @@ function Sidebar({
   setFocusProduct,
   className,
   onDismiss,
+  healthLevel = "green",
 }: {
   entities: Entity[];
   focusProduct: string | null;
   setFocusProduct: (id: string | null) => void;
   className?: string;
   onDismiss?: () => void;
+  healthLevel?: "green" | "yellow" | "red";
 }) {
   const products = entities.filter((e) => e.type === "product");
   const modules = entities.filter((e) => e.type === "module");
@@ -74,6 +76,7 @@ function Sidebar({
           </div>
           <span className="text-xs text-foreground/55">{confirmedRate}%</span>
         </div>
+        <GovernanceHealthHint level={healthLevel} />
       </div>
 
       <div className="px-2 py-2 border-b border-border">
@@ -349,7 +352,6 @@ function KnowledgeMapContent() {
   return (
     <div className="h-screen flex flex-col bg-background">
       <AppNav />
-      <GovernanceHealthBanner level={healthLevel} />
       {loading ? (
         <LoadingState variant="page" label="Loading knowledge map..." />
       ) : (
@@ -365,6 +367,7 @@ function KnowledgeMapContent() {
             entities={entities}
             focusProduct={focusProduct}
             setFocusProduct={setFocusProduct}
+            healthLevel={healthLevel}
             onDismiss={() => setSidebarOpen(false)}
             className={cn(
               "absolute inset-y-0 left-0 z-50 transition-transform md:relative md:translate-x-0",
