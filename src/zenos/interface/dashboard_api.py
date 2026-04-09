@@ -1482,8 +1482,12 @@ async def get_governance_health(request: Request) -> Response:
     await _ensure_repos()
     pool = await get_pool()
 
-    # 1. Try cache
-    cached = await get_cached_health(pool, effective_id)
+    # 1. Try cache (table may not exist yet — tolerate errors)
+    cached = None
+    try:
+        cached = await get_cached_health(pool, effective_id)
+    except Exception:
+        logger.debug("governance-health: cache read failed (table may not exist)")
 
     if cached is not None:
         computed_at = cached["computed_at"]
@@ -1510,7 +1514,10 @@ async def get_governance_health(request: Request) -> Response:
             current_partner_id.reset(token)
 
         overall_level = health_signal.get("overall_level", "green")
-        await upsert_health_cache(pool, effective_id, overall_level)
+        try:
+            await upsert_health_cache(pool, effective_id, overall_level)
+        except Exception:
+            logger.debug("governance-health: cache write failed (table may not exist)")
         return _json_response({
             "overall_level": overall_level,
             "cached_at": datetime.now(timezone.utc).isoformat(),
