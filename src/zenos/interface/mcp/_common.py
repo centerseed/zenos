@@ -103,7 +103,11 @@ def _unified_response(
     partner = _current_partner.get()
     if partner:
         active_ws = _current_partner_id.get() or str(partner["id"])
-        resp["workspace_context"] = build_workspace_context_sync(partner, active_ws)
+        from zenos.interface.mcp._auth import _original_shared_partner_id
+        resp["workspace_context"] = build_workspace_context_sync(
+            partner, active_ws,
+            original_shared_id=_original_shared_partner_id.get(),
+        )
 
     return resp
 
@@ -117,7 +121,11 @@ def _inject_workspace_context(result: dict) -> dict:
     partner = _current_partner.get()
     if partner:
         active_ws = _current_partner_id.get() or str(partner["id"])
-        result["workspace_context"] = build_workspace_context_sync(partner, active_ws)
+        from zenos.interface.mcp._auth import _original_shared_partner_id
+        result["workspace_context"] = build_workspace_context_sync(
+            partner, active_ws,
+            original_shared_id=_original_shared_partner_id.get(),
+        )
     return result
 
 

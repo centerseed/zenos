@@ -227,3 +227,31 @@ class TestBuildWorkspaceContextSync:
         ctx = build_workspace_context_sync(partner, "home-1")
         for key in ("workspace_id", "workspace_name", "is_home_workspace", "available_workspaces"):
             assert key in ctx, f"Missing key: {key}"
+
+    def test_adjusted_home_view_still_lists_shared_workspace(self):
+        """BUG REPRO: shared member viewing home workspace.
+
+        Runtime path: active_partner_view() strips sharedPartnerId when
+        projecting to home workspace. build_workspace_context_sync then
+        receives the adjusted partner (sharedPartnerId=None).
+        Fix: pass original_shared_id to preserve the shared workspace.
+        """
+        partner = _partner_with_shared("home-1", "shared-99")
+
+        # Simulate runtime: active_partner_view adjusts partner for home view
+        adjusted, _ = active_partner_view(partner, "home-1")
+        assert adjusted["sharedPartnerId"] is None  # confirms the strip
+
+        # Without original_shared_id → bug: only 1 workspace
+        ctx_broken = build_workspace_context_sync(adjusted, "home-1")
+        assert len(ctx_broken["available_workspaces"]) == 1  # confirms the bug path
+
+        # With original_shared_id → fix: 2 workspaces
+        ctx_fixed = build_workspace_context_sync(
+            adjusted, "home-1", original_shared_id="shared-99"
+        )
+        ids = [w["id"] for w in ctx_fixed["available_workspaces"]]
+        assert "shared-99" in ids, (
+            f"Shared workspace missing from available_workspaces. Got: {ids}"
+        )
+        assert "home-1" in ids

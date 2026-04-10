@@ -115,7 +115,11 @@ async def build_available_workspaces(
     return workspaces
 
 
-def build_workspace_context_sync(partner: dict, active_workspace_id: str) -> dict:
+def build_workspace_context_sync(
+    partner: dict,
+    active_workspace_id: str,
+    original_shared_id: str | None = None,
+) -> dict:
     """Assemble the workspace_context dict injected into MCP tool responses.
 
     This is the sync variant — it does NOT perform DB lookups for display names.
@@ -124,14 +128,18 @@ def build_workspace_context_sync(partner: dict, active_workspace_id: str) -> dic
     separately via its own DB access.
 
     Args:
-        partner: Raw partner row dict.
+        partner: Raw partner row dict (may be adjusted by active_partner_view,
+            which strips sharedPartnerId for home workspace views).
         active_workspace_id: The currently active workspace ID.
+        original_shared_id: The original sharedPartnerId before active_partner_view
+            stripped it. When provided, takes precedence over partner["sharedPartnerId"].
 
     Returns:
         workspace_context dict suitable for embedding in MCP responses.
     """
     home_id = str(partner["id"])
-    shared_partner_id = partner.get("sharedPartnerId")
+    # Use original_shared_id if provided (active_partner_view may have stripped it)
+    shared_partner_id = original_shared_id or partner.get("sharedPartnerId")
     shared_id = str(shared_partner_id) if shared_partner_id else None
 
     is_home = active_workspace_id == home_id

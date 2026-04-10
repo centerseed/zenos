@@ -38,6 +38,10 @@ logger = logging.getLogger(__name__)
 
 _current_partner: ContextVar[dict | None] = ContextVar("current_partner", default=None)
 
+# Original shared_partner_id — preserved before active_partner_view strips it.
+# Used by build_workspace_context_sync to always list available workspaces correctly.
+_original_shared_partner_id: ContextVar[str | None] = ContextVar("original_shared_partner_id", default=None)
+
 # Federation scope ContextVar — set by JWT auth path; None means full access (API key path)
 _current_scopes: ContextVar[set[str] | None] = ContextVar("current_scopes", default=None)
 
@@ -91,6 +95,11 @@ class ApiKeyMiddleware:
                     current_partner_id,
                     current_partner_authorized_entity_ids,
                 )
+                # Preserve original shared_partner_id before active_partner_view strips it
+                _original_shared_partner_id.set(
+                    str(partner["sharedPartnerId"]) if partner.get("sharedPartnerId") else None
+                )
+
                 # Resolve active workspace: honour X-Active-Workspace-Id header if valid
                 ws_header = self._extract_workspace_id(scope)
                 resolved_ws = resolve_active_workspace_id(partner, ws_header)
@@ -180,6 +189,11 @@ class ApiKeyMiddleware:
                     status_code=403,
                 )
                 return await response(scope, receive, send)
+
+        # Preserve original shared_partner_id before active_partner_view strips it
+        _original_shared_partner_id.set(
+            str(partner["sharedPartnerId"]) if partner.get("sharedPartnerId") else None
+        )
 
         resolved_ws = resolve_active_workspace_id(partner, ws_header)
         adjusted, effective_id = active_partner_view(partner, resolved_ws)
@@ -287,14 +301,20 @@ def _apply_workspace_override(workspace_id: str) -> dict | None:
     if not partner:
         return None  # No partner context — silently skip (middleware will block auth anyway)
 
-    resolved = resolve_active_workspace_id(partner, workspace_id)
+    # Use original shared_partner_id (not stripped by active_partner_view)
+    orig_shared = _original_shared_partner_id.get()
+
+    # Temporarily restore sharedPartnerId for resolve_active_workspace_id
+    partner_for_resolve = dict(partner)
+    if orig_shared:
+        partner_for_resolve["sharedPartnerId"] = orig_shared
+
+    resolved = resolve_active_workspace_id(partner_for_resolve, workspace_id)
     if resolved != workspace_id:
-        # workspace_id was not in the partner's valid set; resolve fell back to home
         home_id = str(partner["id"])
-        shared_partner_id = partner.get("sharedPartnerId")
         available = [home_id]
-        if shared_partner_id:
-            available.append(str(shared_partner_id))
+        if orig_shared:
+            available.append(orig_shared)
         return _unified_response(
             status="error",
             data={"error": "FORBIDDEN_WORKSPACE"},

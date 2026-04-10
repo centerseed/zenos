@@ -290,6 +290,7 @@ from zenos.interface.mcp.source import read_source as _read_source_fn, batch_upd
 from zenos.interface.mcp.attachment import upload_attachment as _upload_attachment_fn
 from zenos.interface.mcp.setup import setup as _setup_fn
 from zenos.interface.mcp.suggest_policy import suggest_policy as _suggest_policy_fn
+from zenos.interface.mcp.workspace import list_workspaces as _list_workspaces_fn
 from zenos.interface.mcp._scope import require_scope, TOOL_SCOPE_MAP
 
 # Register tools with the MCP instance — each handler is wrapped with require_scope
@@ -311,6 +312,7 @@ batch_update_sources = mcp.tool(tags={"write"}, annotations={"idempotentHint": T
 upload_attachment = mcp.tool(tags={"write"})(require_scope("write")(_upload_attachment_fn))
 setup = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_setup_fn))
 suggest_policy = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_suggest_policy_fn))
+list_workspaces = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_list_workspaces_fn))
 
 # Re-export auth middleware for use in __main__.py and tests
 from zenos.interface.mcp._auth import (
