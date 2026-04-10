@@ -16,26 +16,8 @@ from zenos.domain.governance import (
     find_stale_l2_downstream_entities,
     run_quality_check,
 )
-from zenos.domain.models import (
-    Blindspot,
-    Document,
-    DocumentStatus,
-    DocumentTags,
-    Entity,
-    EntityStatus,
-    EntityType,
-    Gap,
-    Protocol,
-    Relationship,
-    RelationshipType,
-    Severity,
-    Source,
-    SourceType,
-    Tags,
-    Task,
-    TaskPriority,
-    TaskStatus,
-)
+from zenos.domain.action import Task, TaskPriority, TaskStatus
+from zenos.domain.knowledge import Blindspot, Document, DocumentStatus, DocumentTags, Entity, EntityStatus, EntityType, Gap, Protocol, Relationship, RelationshipType, Severity, Source, SourceType, Tags
 
 
 # ──────────────────────────────────────────────
@@ -1563,7 +1545,7 @@ class TestBlindspotTypeSafety:
 class TestWeightedScoring:
     def test_quality_check_item_has_weight_field(self):
         """QualityCheckItem should have a weight field with default 1."""
-        from zenos.domain.models import QualityCheckItem
+        from zenos.domain.shared import QualityCheckItem
         item = QualityCheckItem(name="test", passed=True, detail="ok")
         assert item.weight == 1
 

@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from zenos.domain.models import Tags, Task
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Tags
 
 
 # ---------------------------------------------------------------------------
@@ -44,11 +45,11 @@ class TestContextVar:
     """Tests for _current_partner ContextVar lifecycle."""
 
     def test_default_is_none(self):
-        from zenos.interface.tools import _current_partner
+        from zenos.interface.mcp import _current_partner
         assert _current_partner.get() is None
 
     def test_set_and_get(self):
-        from zenos.interface.tools import _current_partner
+        from zenos.interface.mcp import _current_partner
         partner = {"displayName": "Alice", "email": "alice@example.com"}
         token = _current_partner.set(partner)
         try:
@@ -58,14 +59,14 @@ class TestContextVar:
             _current_partner.reset(token)
 
     def test_reset_restores_default(self):
-        from zenos.interface.tools import _current_partner
+        from zenos.interface.mcp import _current_partner
         partner = {"displayName": "Bob", "email": "bob@example.com"}
         token = _current_partner.set(partner)
         _current_partner.reset(token)
         assert _current_partner.get() is None
 
     def test_nested_set_and_reset(self):
-        from zenos.interface.tools import _current_partner
+        from zenos.interface.mcp import _current_partner
         p1 = {"displayName": "Alice", "email": "alice@example.com"}
         p2 = {"displayName": "Bob", "email": "bob@example.com"}
 
@@ -91,15 +92,15 @@ class TestTaskCreatedByAutoFill:
     """Tests for task tool auto-filling created_by from partner identity."""
 
     async def test_created_by_auto_filled_from_partner(self):
-        from zenos.interface.tools import _task_handler, _current_partner
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import _task_handler, _current_partner
+        from zenos.application.action.task_service import TaskResult
 
         t = _make_task(created_by="Alice")
         create_result = TaskResult(task=t, cascade_updates=[])
 
         token = _current_partner.set({"id": "p_alice", "displayName": "Alice", "email": "alice@test.com"})
         try:
-            with patch("zenos.interface.tools.task_service") as mock_ts:
+            with patch("zenos.interface.mcp.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
                 mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
@@ -118,15 +119,15 @@ class TestTaskCreatedByAutoFill:
             _current_partner.reset(token)
 
     async def test_created_by_overridden_by_partner_context(self):
-        from zenos.interface.tools import _task_handler, _current_partner
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import _task_handler, _current_partner
+        from zenos.application.action.task_service import TaskResult
 
         t = _make_task(created_by="Barry")
         create_result = TaskResult(task=t, cascade_updates=[])
 
         token = _current_partner.set({"id": "p_alice", "displayName": "Alice", "email": "alice@test.com"})
         try:
-            with patch("zenos.interface.tools.task_service") as mock_ts:
+            with patch("zenos.interface.mcp.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
                 mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
@@ -143,7 +144,7 @@ class TestTaskCreatedByAutoFill:
             _current_partner.reset(token)
 
     async def test_created_by_error_when_no_partner_and_not_provided(self):
-        from zenos.interface.tools import _task_handler, _current_partner
+        from zenos.interface.mcp import _task_handler, _current_partner
 
         # Ensure ContextVar is None
         assert _current_partner.get() is None
@@ -158,15 +159,15 @@ class TestTaskCreatedByAutoFill:
         assert "created_by" in result["rejection_reason"]
 
     async def test_superadmin_auto_fill(self):
-        from zenos.interface.tools import _task_handler, _current_partner
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import _task_handler, _current_partner
+        from zenos.application.action.task_service import TaskResult
 
         t = _make_task(created_by="superadmin")
         create_result = TaskResult(task=t, cascade_updates=[])
 
         token = _current_partner.set({"id": "p_admin", "displayName": "superadmin", "email": "admin"})
         try:
-            with patch("zenos.interface.tools.task_service") as mock_ts:
+            with patch("zenos.interface.mcp.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
                 mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
@@ -528,6 +529,7 @@ class TestUpdatePartnerRole:
 
             assert resp.status_code == 200
             mock_repo.update_fields.assert_called_once()
+            assert mock_repo.update_fields.call_args.args[1]["sharedPartnerId"] is None
 
     async def test_update_role_not_found(self):
         from zenos.interface.admin_api import update_partner_role
@@ -725,6 +727,50 @@ class TestUpdatePartnerScope:
         fields = mock_repo.update_fields.call_args[0][1]
         assert fields["accessMode"] == "unassigned"
         assert fields["authorizedEntityIds"] == []
+
+    async def test_update_scope_accepts_camel_case_authorized_entity_ids(self):
+        from zenos.interface.admin_api import update_partner_scope
+
+        request = _mock_request(
+            method="PUT",
+            headers={"authorization": "Bearer fake-token"},
+            body={
+                "roles": ["engineering"],
+                "department": "all",
+                "access_mode": "scoped",
+                "authorizedEntityIds": ["product-1", "product-2"],
+            },
+            path_params={"id": "partner-2"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2",
+            "email": "user@test.com",
+            "displayName": "User",
+            "isAdmin": False,
+            "status": "active",
+            "accessMode": "internal",
+            "sharedPartnerId": "p1",
+            "authorizedEntityIds": [],
+            "roles": [],
+            "department": "all",
+            "invitedBy": None,
+            "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "updatedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        })
+        mock_repo.create_department = AsyncMock(return_value=None)
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+            resp = await update_partner_scope(request)
+
+        assert resp.status_code == 200
+        fields = mock_repo.update_fields.call_args[0][1]
+        assert fields["accessMode"] == "scoped"
+        assert fields["authorizedEntityIds"] == ["product-1", "product-2"]
 
 
 class TestActivatePartner:
@@ -1075,6 +1121,7 @@ class TestCorsHandling:
 
         assert headers["access-control-allow-origin"] == "https://zenos-naruvia.web.app"
         assert "PATCH" in headers["access-control-allow-methods"]
+        assert "X-Active-Workspace-Id" in headers["access-control-allow-headers"]
 
     async def test_cors_headers_for_firebaseapp_origin(self):
         from zenos.interface.admin_api import _cors_headers

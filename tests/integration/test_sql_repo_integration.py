@@ -137,7 +137,7 @@ def set_partner_id_a():
 
 
 def _make_entity(name_suffix: str, etype: str = "product", parent_id: str | None = None):
-    from zenos.domain.models import Entity, Tags
+    from zenos.domain.knowledge import Entity, Tags
 
     return Entity(
         name=f"{TEST_PREFIX}_{name_suffix}",
@@ -151,7 +151,7 @@ def _make_entity(name_suffix: str, etype: str = "product", parent_id: str | None
 
 
 def _make_task(title_suffix: str, status: str = "todo", assignee: str | None = None):
-    from zenos.domain.models import Task
+    from zenos.domain.action import Task
 
     return Task(
         title=f"{TEST_PREFIX}_{title_suffix}",
@@ -170,7 +170,7 @@ def _make_task(title_suffix: str, status: str = "todo", assignee: str | None = N
 
 @pytest.mark.asyncio
 async def test_entity_create_and_read(pool):
-    from zenos.infrastructure.sql_repo import SqlEntityRepository
+    from zenos.infrastructure.knowledge import SqlEntityRepository
 
     repo = SqlEntityRepository(pool)
     entity = _make_entity("create_read")
@@ -189,7 +189,7 @@ async def test_entity_create_and_read(pool):
 
 @pytest.mark.asyncio
 async def test_entity_upsert_update(pool):
-    from zenos.infrastructure.sql_repo import SqlEntityRepository
+    from zenos.infrastructure.knowledge import SqlEntityRepository
 
     repo = SqlEntityRepository(pool)
     entity = _make_entity("upsert_update")
@@ -208,7 +208,7 @@ async def test_entity_upsert_update(pool):
 
 @pytest.mark.asyncio
 async def test_entity_list_all_type_filter(pool):
-    from zenos.infrastructure.sql_repo import SqlEntityRepository
+    from zenos.infrastructure.knowledge import SqlEntityRepository
 
     repo = SqlEntityRepository(pool)
     product_e = _make_entity("filter_product", etype="product")
@@ -229,7 +229,7 @@ async def test_entity_list_all_type_filter(pool):
 
 @pytest.mark.asyncio
 async def test_entity_list_by_parent(pool):
-    from zenos.infrastructure.sql_repo import SqlEntityRepository
+    from zenos.infrastructure.knowledge import SqlEntityRepository
 
     repo = SqlEntityRepository(pool)
     parent = _make_entity("parent_node")
@@ -250,8 +250,8 @@ async def test_entity_list_by_parent(pool):
 
 @pytest.mark.asyncio
 async def test_relationship_add_and_list(pool):
-    from zenos.domain.models import Relationship
-    from zenos.infrastructure.sql_repo import SqlEntityRepository, SqlRelationshipRepository
+    from zenos.domain.knowledge import Relationship
+    from zenos.infrastructure.knowledge import SqlEntityRepository, SqlRelationshipRepository
 
     entity_repo = SqlEntityRepository(pool)
     rel_repo = SqlRelationshipRepository(pool)
@@ -277,8 +277,8 @@ async def test_relationship_add_and_list(pool):
 
 @pytest.mark.asyncio
 async def test_relationship_find_duplicate(pool):
-    from zenos.domain.models import Relationship
-    from zenos.infrastructure.sql_repo import SqlEntityRepository, SqlRelationshipRepository
+    from zenos.domain.knowledge import Relationship
+    from zenos.infrastructure.knowledge import SqlEntityRepository, SqlRelationshipRepository
 
     entity_repo = SqlEntityRepository(pool)
     rel_repo = SqlRelationshipRepository(pool)
@@ -304,8 +304,8 @@ async def test_relationship_find_duplicate(pool):
 
 @pytest.mark.asyncio
 async def test_relationship_list_all(pool):
-    from zenos.domain.models import Relationship
-    from zenos.infrastructure.sql_repo import SqlEntityRepository, SqlRelationshipRepository
+    from zenos.domain.knowledge import Relationship
+    from zenos.infrastructure.knowledge import SqlEntityRepository, SqlRelationshipRepository
 
     entity_repo = SqlEntityRepository(pool)
     rel_repo = SqlRelationshipRepository(pool)
@@ -329,8 +329,8 @@ async def test_relationship_list_all(pool):
 
 @pytest.mark.asyncio
 async def test_document_create_with_linked_entities(pool):
-    from zenos.domain.models import Document, DocumentTags, Source
-    from zenos.infrastructure.sql_repo import SqlDocumentRepository, SqlEntityRepository
+    from zenos.domain.knowledge import Document, DocumentTags, Source
+    from zenos.infrastructure.knowledge import SqlDocumentRepository, SqlEntityRepository
 
     entity_repo = SqlEntityRepository(pool)
     doc_repo = SqlDocumentRepository(pool)
@@ -355,8 +355,8 @@ async def test_document_create_with_linked_entities(pool):
 
 @pytest.mark.asyncio
 async def test_document_update_linked_entities(pool):
-    from zenos.domain.models import Document, DocumentTags, Source
-    from zenos.infrastructure.sql_repo import SqlDocumentRepository, SqlEntityRepository
+    from zenos.domain.knowledge import Document, DocumentTags, Source
+    from zenos.infrastructure.knowledge import SqlDocumentRepository, SqlEntityRepository
 
     entity_repo = SqlEntityRepository(pool)
     doc_repo = SqlDocumentRepository(pool)
@@ -388,9 +388,9 @@ async def test_document_update_linked_entities(pool):
 
 @pytest.mark.asyncio
 async def test_protocol_create_and_read(pool):
-    from zenos.domain.models import Gap
-    from zenos.domain.models import Protocol as OntologyProtocol
-    from zenos.infrastructure.sql_repo import SqlEntityRepository, SqlProtocolRepository
+    from zenos.domain.knowledge import Gap
+    from zenos.domain.knowledge import Protocol as OntologyProtocol
+    from zenos.infrastructure.knowledge import SqlEntityRepository, SqlProtocolRepository
 
     entity_repo = SqlEntityRepository(pool)
     proto_repo = SqlProtocolRepository(pool)
@@ -423,8 +423,8 @@ async def test_protocol_create_and_read(pool):
 
 @pytest.mark.asyncio
 async def test_blindspot_add_with_related_entities(pool):
-    from zenos.domain.models import Blindspot
-    from zenos.infrastructure.sql_repo import SqlBlindspotRepository, SqlEntityRepository
+    from zenos.domain.knowledge import Blindspot
+    from zenos.infrastructure.knowledge import SqlBlindspotRepository, SqlEntityRepository
 
     entity_repo = SqlEntityRepository(pool)
     bs_repo = SqlBlindspotRepository(pool)
@@ -454,7 +454,7 @@ async def test_blindspot_add_with_related_entities(pool):
 
 @pytest.mark.asyncio
 async def test_task_create_and_read(pool):
-    from zenos.infrastructure.sql_repo import SqlTaskRepository
+    from zenos.infrastructure.action import SqlTaskRepository
 
     repo = SqlTaskRepository(pool)
     task = _make_task("basic_task")
@@ -476,7 +476,8 @@ async def test_task_create_and_read(pool):
 
 @pytest.mark.asyncio
 async def test_task_with_linked_entities_and_blockers(pool):
-    from zenos.infrastructure.sql_repo import SqlEntityRepository, SqlTaskRepository
+    from zenos.infrastructure.action import SqlTaskRepository
+    from zenos.infrastructure.knowledge import SqlEntityRepository
 
     entity_repo = SqlEntityRepository(pool)
     task_repo = SqlTaskRepository(pool)
@@ -499,7 +500,7 @@ async def test_task_with_linked_entities_and_blockers(pool):
 
 @pytest.mark.asyncio
 async def test_task_list_all_filters(pool):
-    from zenos.infrastructure.sql_repo import SqlTaskRepository
+    from zenos.infrastructure.action import SqlTaskRepository
 
     repo = SqlTaskRepository(pool)
 
@@ -527,7 +528,7 @@ async def test_task_list_all_filters(pool):
 @pytest.mark.asyncio
 async def test_task_plan_fields_roundtrip(pool):
     """Task plan fields should persist and roundtrip through SQL repo."""
-    from zenos.infrastructure.sql_repo import SqlTaskRepository
+    from zenos.infrastructure.action import SqlTaskRepository
 
     repo = SqlTaskRepository(pool)
     task = _make_task("plan_roundtrip", status="todo")
@@ -548,7 +549,7 @@ async def test_task_plan_fields_roundtrip(pool):
 @pytest.mark.asyncio
 async def test_task_plan_order_unique_per_partner_plan(pool):
     """Same partner + plan_id cannot reuse the same plan_order."""
-    from zenos.infrastructure.sql_repo import SqlTaskRepository
+    from zenos.infrastructure.action import SqlTaskRepository
 
     repo = SqlTaskRepository(pool)
     plan_id = f"{TEST_PREFIX}_plan_unique"
@@ -569,7 +570,7 @@ async def test_task_plan_order_unique_per_partner_plan(pool):
 @pytest.mark.asyncio
 async def test_task_plan_order_can_repeat_across_plans(pool):
     """The same plan_order is allowed when plan_id differs."""
-    from zenos.infrastructure.sql_repo import SqlTaskRepository
+    from zenos.infrastructure.action import SqlTaskRepository
 
     repo = SqlTaskRepository(pool)
 
@@ -595,7 +596,7 @@ async def test_task_plan_order_can_repeat_across_plans(pool):
 async def test_cross_tenant_entity_invisible(pool):
     """Entity created under Partner A must not be visible to Partner B."""
     from zenos.infrastructure.context import current_partner_id
-    from zenos.infrastructure.sql_repo import SqlEntityRepository
+    from zenos.infrastructure.knowledge import SqlEntityRepository
 
     repo = SqlEntityRepository(pool)
 
@@ -624,7 +625,7 @@ async def test_cross_tenant_upsert_blocked(pool):
     the update is a no-op when partner_ids don't match. Partner A's data is intact.
     """
     from zenos.infrastructure.context import current_partner_id
-    from zenos.infrastructure.sql_repo import SqlEntityRepository
+    from zenos.infrastructure.knowledge import SqlEntityRepository
 
     repo = SqlEntityRepository(pool)
 
@@ -665,7 +666,7 @@ async def test_task_upsert_transaction_rollback(pool):
     back and the original description is preserved. If no FK, the upsert
     succeeds — still verifiable.
     """
-    from zenos.infrastructure.sql_repo import SqlTaskRepository
+    from zenos.infrastructure.action import SqlTaskRepository
 
     repo = SqlTaskRepository(pool)
 
@@ -710,7 +711,7 @@ async def test_partner_key_validator():
     """Validate using test partner's API key returns correct partner data."""
     import os
 
-    from zenos.infrastructure.sql_repo import SqlPartnerKeyValidator
+    from zenos.infrastructure.identity import SqlPartnerKeyValidator
 
     os.environ["DATABASE_URL"] = DB_URL
 

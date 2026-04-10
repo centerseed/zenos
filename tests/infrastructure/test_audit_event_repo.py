@@ -46,7 +46,7 @@ class TestSqlAuditEventRepositoryCreate:
     """Verify create() writes the correct SQL and parameters."""
 
     async def test_create_calls_insert_with_required_fields(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -80,7 +80,7 @@ class TestSqlAuditEventRepositoryCreate:
         assert parsed["title"] == "New task"
 
     async def test_create_defaults_actor_type_to_partner(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -100,7 +100,7 @@ class TestSqlAuditEventRepositoryCreate:
         assert params[2] == "partner"  # default actor_type
 
     async def test_create_handles_null_resource_id(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -120,7 +120,7 @@ class TestSqlAuditEventRepositoryCreate:
         assert params[5] is None  # resource_id is None
 
     async def test_create_serializes_empty_changes_json(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -149,7 +149,7 @@ class TestSqlAuditEventRepositoryListEvents:
     """Verify list_events() builds WHERE clause correctly."""
 
     async def test_partner_id_filter_always_present(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -162,7 +162,7 @@ class TestSqlAuditEventRepositoryListEvents:
         assert "partner_id = $1" in sql
 
     async def test_since_filter_appended(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -177,7 +177,7 @@ class TestSqlAuditEventRepositoryListEvents:
         assert since in params
 
     async def test_until_filter_appended(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -192,7 +192,7 @@ class TestSqlAuditEventRepositoryListEvents:
         assert until in params
 
     async def test_operation_filter_appended(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -206,7 +206,7 @@ class TestSqlAuditEventRepositoryListEvents:
         assert "task.create" in params
 
     async def test_actor_id_filter_appended(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -220,7 +220,7 @@ class TestSqlAuditEventRepositoryListEvents:
         assert "actor-99" in params
 
     async def test_multiple_filters_use_incremental_params(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)
@@ -246,7 +246,7 @@ class TestSqlAuditEventRepositoryListEvents:
         assert len(params) == 5
 
     async def test_returns_list_of_dicts(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         # asyncpg Record mock
@@ -262,7 +262,7 @@ class TestSqlAuditEventRepositoryListEvents:
         assert result[0]["operation"] == "task.create"
 
     async def test_limit_applied_in_query(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
 
         conn = _make_conn()
         pool = _make_pool(conn)

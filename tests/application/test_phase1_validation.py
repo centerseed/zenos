@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from zenos.application.task_service import TaskService
+from zenos.application.action.task_service import TaskService
 from zenos.domain.validation import validate_document_frontmatter
 
 

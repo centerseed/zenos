@@ -26,31 +26,9 @@ from zenos.domain.doc_types import (
     is_known_doc_type,
 )
 from zenos.infrastructure.github_adapter import parse_github_url, GitHubAdapter
-from zenos.domain.models import (
-    Blindspot,
-    Document,
-    DocumentStatus,
-    DocumentTags,
-    Entity,
-    EntityStatus,
-    EntityType,
-    Protocol,
-    Relationship,
-    RelationshipType,
-    Severity,
-    Source,
-    SourceType,
-    SplitRecommendation,
-    TagConfidence,
-    Tags,
-)
-from zenos.domain.repositories import (
-    BlindspotRepository,
-    DocumentRepository,
-    EntityRepository,
-    ProtocolRepository,
-    RelationshipRepository,
-)
+from zenos.domain.knowledge import Blindspot, Document, DocumentStatus, DocumentTags, Entity, EntityStatus, EntityType, Protocol, Relationship, RelationshipType, Severity, Source, SourceType, Tags
+from zenos.domain.shared import SplitRecommendation, TagConfidence
+from zenos.domain.knowledge import BlindspotRepository, DocumentRepository, EntityRepository, ProtocolRepository, RelationshipRepository
 from zenos.domain.search import SearchResult, search_ontology
 from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
 
@@ -64,6 +42,21 @@ class EntityWithRelationships:
     """An entity bundled with its outgoing/incoming relationships."""
     entity: Entity
     relationships: list[Relationship]
+
+
+def _bundle_source_status(source: dict) -> str:
+    """Return the effective status for a bundle source.
+
+    ADR-022 introduced `source_status` but some paths still write `status`.
+    Treat them as aliases here so reads stay stable during migration.
+    """
+    return str(source.get("source_status") or source.get("status") or "valid")
+
+
+def _sync_bundle_source_status(source: dict, status: str) -> None:
+    """Write both legacy and canonical status keys for a bundle source."""
+    source["status"] = status
+    source["source_status"] = status
 
 
 @dataclass
@@ -2056,6 +2049,9 @@ class OntologyService:
         suggestions = []
         if has_bundle_op and existing:
             sources: list[dict] = list(existing.sources) if existing.sources else []
+            for src in sources:
+                if isinstance(src, dict):
+                    _sync_bundle_source_status(src, _bundle_source_status(src))
 
             if add_source_data:
                 # Guard: single cannot add 2nd source
@@ -2079,6 +2075,7 @@ class OntologyService:
                     "doc_type": add_source_data.get("doc_type", ""),
                     "doc_status": add_source_data.get("doc_status", ""),
                     "status": "valid",
+                    "source_status": "valid",
                     "note": add_source_data.get("note", ""),
                     "is_primary": add_source_data.get("is_primary", False),
                 }
@@ -2099,9 +2096,11 @@ class OntologyService:
                 found = False
                 for src in sources:
                     if src.get("source_id") == target_sid:
-                        for key in ("uri", "label", "doc_type", "doc_status", "note", "is_primary", "status"):
+                        for key in ("uri", "label", "doc_type", "doc_status", "note", "is_primary", "status", "source_status"):
                             if key in update_source_data and key != "source_id":
                                 src[key] = update_source_data[key]
+                        if "status" in update_source_data or "source_status" in update_source_data:
+                            _sync_bundle_source_status(src, _bundle_source_status(update_source_data))
                         # Re-validate URI if changed
                         if "uri" in update_source_data and src.get("type"):
                             is_valid, error_msg = validate_source_uri(src["type"], src["uri"])
@@ -2146,13 +2145,15 @@ class OntologyService:
                 sources: list[dict] = []
                 for src in sources_payload:
                     if isinstance(src, dict):
+                        status = _bundle_source_status(src)
                         sources.append({
                             "uri": src.get("uri", ""),
                             "type": src.get("type", ""),
                             "label": src.get("label", ""),
                             "doc_type": src.get("doc_type", ""),
                             "doc_status": src.get("doc_status", ""),
-                            "status": src.get("status", "valid"),
+                            "status": status,
+                            "source_status": status,
                             "note": src.get("note", ""),
                             "is_primary": src.get("is_primary", False),
                         })
@@ -2164,15 +2165,20 @@ class OntologyService:
                 else:
                     sources: list[dict] = list(existing.sources) if existing else []
                 if source_data and isinstance(source_data, dict):
+                    source_status = _bundle_source_status(source_data)
                     merged_source = {
                         "uri": source_data.get("uri", existing_source.get("uri", "")),
                         "label": source_data.get("label") or data.get("title") or existing_source.get("label", ""),
                         "type": source_data.get("type", existing_source.get("type", "")),
-                        "status": "valid",
+                        "status": source_status,
+                        "source_status": source_status,
                     }
                     sources = [merged_source]
 
         # Ensure all sources have source_ids (backfill for legacy sources)
+        for src in sources:
+            if isinstance(src, dict):
+                _sync_bundle_source_status(src, _bundle_source_status(src))
         ensure_source_ids(sources)
 
         # Build unified Tags from legacy DocumentTags format
@@ -2468,7 +2474,7 @@ class OntologyService:
                     f"Must include: what, why, how, who"
                 )
 
-        from zenos.domain.models import Gap
+        from zenos.domain.knowledge import Gap
 
         gaps_data = data.get("gaps", [])
         gaps = [

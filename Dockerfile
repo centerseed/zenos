@@ -12,4 +12,4 @@ RUN python -c "from pathlib import Path; import shutil, sysconfig; target = Path
 ENV PORT=8080
 ENV MCP_TRANSPORT=sse
 
-CMD ["python", "-m", "zenos.interface.tools"]
+CMD ["python", "-m", "zenos.interface.mcp"]

@@ -11,13 +11,14 @@ Data is intentionally NOT cleaned up.
 
 from __future__ import annotations
 
+import os
 import re
 
 import pytest
 import pytest_asyncio
 
-from zenos.application.governance_service import GovernanceService
-from zenos.application.ontology_service import OntologyService
+from zenos.application.knowledge.governance_service import GovernanceService
+from zenos.application.knowledge.ontology_service import OntologyService
 from zenos.infrastructure.firestore_repo import (
     FirestoreBlindspotRepository,
     FirestoreDocumentRepository,
@@ -35,6 +36,14 @@ pytestmark = pytest.mark.asyncio(loop_scope="module")
 @pytest.fixture(scope="module", autouse=True)
 def _require_firestore_client():
     """Skip this module when Firestore client is mocked/stubbed by other tests."""
+    has_emulator = bool(os.environ.get("FIRESTORE_EMULATOR_HOST"))
+    has_explicit_creds = bool(os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"))
+    has_opt_in = bool(os.environ.get("RUN_FIRESTORE_E2E"))
+    if not (has_emulator or has_explicit_creds or has_opt_in):
+        pytest.skip(
+            "Firestore E2E requires FIRESTORE_EMULATOR_HOST, "
+            "GOOGLE_APPLICATION_CREDENTIALS, or RUN_FIRESTORE_E2E=1"
+        )
     db = get_db()
     if not hasattr(db, "collection"):
         pytest.skip("Firestore client not available for e2e integration tests")

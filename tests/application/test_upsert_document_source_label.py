@@ -17,8 +17,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from zenos.application.ontology_service import OntologyService
-from zenos.domain.models import Entity, EntityType, Tags
+from zenos.application.knowledge.ontology_service import OntologyService
+from zenos.domain.knowledge import Entity, EntityType, Tags
 
 
 # ---------------------------------------------------------------------------

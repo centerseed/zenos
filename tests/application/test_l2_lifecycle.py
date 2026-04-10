@@ -11,9 +11,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from zenos.application.ontology_service import OntologyService
-from zenos.application.governance_ai import GovernanceInference, InferredRel
-from zenos.domain.models import Entity, Relationship, RelationshipType, Tags
+from zenos.application.knowledge.ontology_service import OntologyService
+from zenos.application.knowledge.governance_ai import GovernanceInference, InferredRel
+from zenos.domain.knowledge import Entity, Relationship, RelationshipType, Tags
 
 
 # ---------------------------------------------------------------------------

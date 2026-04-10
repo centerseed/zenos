@@ -7,7 +7,7 @@ unchanged otherwise.
 
 import pytest
 
-from zenos.interface.tools import SseApiKeyPropagator
+from zenos.interface.mcp import SseApiKeyPropagator
 
 
 # ---------------------------------------------------------------------------

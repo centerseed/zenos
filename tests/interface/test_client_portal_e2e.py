@@ -18,7 +18,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from zenos.domain.models import Blindspot, Entity, Tags, Task
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Blindspot, Entity, Tags
 
 
 # ---------------------------------------------------------------------------

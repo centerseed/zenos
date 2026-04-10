@@ -11,12 +11,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from zenos.domain.models import Blindspot, EntityType, Task, TaskPriority, TaskStatus
-from zenos.domain.repositories import (
-    BlindspotRepository,
-    EntityRepository,
-    TaskRepository,
-)
+from zenos.domain.action import Task, TaskPriority, TaskStatus
+from zenos.domain.knowledge import Blindspot, EntityType
+from zenos.domain.action import TaskRepository
+from zenos.domain.knowledge import BlindspotRepository, EntityRepository
 from zenos.domain.validation import validate_task_title
 from zenos.domain.task_rules import (
     is_valid_initial_status,

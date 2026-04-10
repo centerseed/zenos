@@ -4,22 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from zenos.domain.models import (
-    AccessPolicy,
-    AgentPrincipal,
-    AgentScope,
-    Classification,
-    Entity,
-    EntityEntry,
-    EntryStatus,
-    EntryType,
-    EntityType,
-    InheritanceMode,
-    Relationship,
-    RelationshipType,
-    Tags,
-    UserPrincipal,
-)
+from zenos.domain.identity import AccessPolicy, AgentPrincipal, AgentScope, Classification, InheritanceMode, UserPrincipal
+from zenos.domain.knowledge import Entity, EntityEntry, EntityType, EntryStatus, EntryType, Relationship, RelationshipType, Tags
 
 
 # ──────────────────────────────────────────────

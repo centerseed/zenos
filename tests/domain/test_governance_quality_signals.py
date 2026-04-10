@@ -14,7 +14,7 @@ from zenos.domain.governance import (
     compute_search_unused_signals,
     score_summary_quality,
 )
-from zenos.domain.models import Entity, EntityStatus, EntityType, Tags
+from zenos.domain.knowledge import Entity, EntityStatus, EntityType, Tags
 
 
 # ──────────────────────────────────────────────

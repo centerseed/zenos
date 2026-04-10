@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, call
 
 import pytest
 
-from zenos.application.crm_service import CrmService
+from zenos.application.crm.crm_service import CrmService
 from zenos.domain.crm_models import (
     Activity,
     ActivityType,
@@ -16,7 +16,7 @@ from zenos.domain.crm_models import (
     Deal,
     FunnelStage,
 )
-from zenos.domain.models import Entity, Relationship
+from zenos.domain.knowledge import Entity, Relationship
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ def _make_deal(**kwargs) -> Deal:
 
 
 def _make_entity(**kwargs) -> Entity:
-    from zenos.domain.models import Tags
+    from zenos.domain.knowledge import Tags
     defaults = dict(
         id="e1", name="測試公司", type="company", level=1, summary="科技",
         tags=Tags(what=["company"], why="CRM", how="crm", who=["業務"]),

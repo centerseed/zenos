@@ -4,8 +4,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from zenos.application.task_service import TaskService
-from zenos.domain.models import Task
+from zenos.application.action.task_service import TaskService
+from zenos.domain.action import Task
 
 
 def _make_uow_factory():

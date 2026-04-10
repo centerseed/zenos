@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from zenos.application.task_service import TaskService, _parse_due_date
-from zenos.domain.models import Task
+from zenos.application.action.task_service import TaskService, _parse_due_date
+from zenos.domain.action import Task
 
 
 @pytest.mark.asyncio

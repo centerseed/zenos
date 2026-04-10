@@ -6,7 +6,8 @@ from datetime import datetime, timezone
 import pytest
 from unittest.mock import AsyncMock, patch
 
-from zenos.domain.models import Entity, Task, Tags
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Entity, Tags
 
 
 # ---------------------------------------------------------------------------
@@ -17,11 +18,11 @@ from zenos.domain.models import Entity, Task, Tags
 @pytest.fixture(autouse=True)
 def _mock_tool_bootstrap():
     """Prevent SQL repo bootstrapping in interface unit tests."""
-    with patch("zenos.interface.tools._ensure_services", new=AsyncMock(return_value=None)), \
-         patch("zenos.interface.tools.ontology_service", new=AsyncMock()), \
-         patch("zenos.interface.tools.task_service", new=AsyncMock()), \
-         patch("zenos.interface.tools.entity_repo", new=AsyncMock()), \
-         patch("zenos.interface.tools.entry_repo", new=AsyncMock()):
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.ontology_service", new=AsyncMock()), \
+         patch("zenos.interface.mcp.task_service", new=AsyncMock()), \
+         patch("zenos.interface.mcp.entity_repo", new=AsyncMock()), \
+         patch("zenos.interface.mcp.entry_repo", new=AsyncMock()):
         yield
 
 
@@ -72,7 +73,7 @@ class TestUnifiedResponseHelper:
 
     def test_unified_response_ok_with_data(self):
         """Normal ok response includes all required fields."""
-        from zenos.interface.tools import _unified_response
+        from zenos.interface.mcp import _unified_response
 
         result = _unified_response(data={"id": "abc", "name": "Test"})
 
@@ -87,7 +88,7 @@ class TestUnifiedResponseHelper:
 
     def test_unified_response_rejected_has_rejection_reason(self):
         """Rejected response includes rejection_reason field."""
-        from zenos.interface.tools import _unified_response
+        from zenos.interface.mcp import _unified_response
 
         result = _unified_response(
             status="rejected",
@@ -101,7 +102,7 @@ class TestUnifiedResponseHelper:
 
     def test_unified_response_defaults_are_empty(self):
         """All optional fields default to empty collections."""
-        from zenos.interface.tools import _unified_response
+        from zenos.interface.mcp import _unified_response
 
         result = _unified_response(data={"x": 1})
 
@@ -113,21 +114,21 @@ class TestUnifiedResponseHelper:
 
     def test_unified_response_ok_no_rejection_reason(self):
         """rejection_reason key is absent for ok responses."""
-        from zenos.interface.tools import _unified_response
+        from zenos.interface.mcp import _unified_response
 
         result = _unified_response(data={})
         assert "rejection_reason" not in result
 
     def test_unified_response_carries_warnings(self):
         """Warnings list is preserved in the response."""
-        from zenos.interface.tools import _unified_response
+        from zenos.interface.mcp import _unified_response
 
         result = _unified_response(data={}, warnings=["w1", "w2"])
         assert result["warnings"] == ["w1", "w2"]
 
     def test_unified_response_carries_suggestions(self):
         """Suggestions list is preserved."""
-        from zenos.interface.tools import _unified_response
+        from zenos.interface.mcp import _unified_response
 
         sug = [{"id": "t1", "reason": "follow-up"}]
         result = _unified_response(data={}, suggestions=sug)
@@ -144,9 +145,9 @@ class TestWriteEntitiesUnifiedFormat:
 
     async def test_write_entities_returns_unified_format(self):
         """write(collection='entities') returns unified response with data key."""
-        from zenos.interface.tools import write
-        from zenos.application.ontology_service import UpsertEntityResult
-        from zenos.domain.models import TagConfidence
+        from zenos.interface.mcp import write
+        from zenos.application.knowledge.ontology_service import UpsertEntityResult
+        from zenos.domain.shared import TagConfidence
 
         entity = _make_entity()
         upsert_result = UpsertEntityResult(
@@ -156,7 +157,7 @@ class TestWriteEntitiesUnifiedFormat:
             warnings=None,
         )
 
-        with patch("zenos.interface.tools.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.upsert_entity = AsyncMock(return_value=upsert_result)
 
             result = await write(
@@ -180,11 +181,11 @@ class TestWriteEntitiesUnifiedFormat:
 
     async def test_write_documents_returns_unified_format(self):
         """write(collection='documents') returns unified response."""
-        from zenos.interface.tools import write
+        from zenos.interface.mcp import write
 
         doc_entity = _make_entity(id="doc-1", name="Spec", type="document")
 
-        with patch("zenos.interface.tools.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.upsert_document = AsyncMock(return_value=doc_entity)
 
             result = await write(
@@ -213,13 +214,13 @@ class TestTaskUnifiedFormat:
 
     async def test_task_create_returns_unified_format(self):
         """task(action='create') returns unified response with data key."""
-        from zenos.interface.tools import task
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import task
+        from zenos.application.action.task_service import TaskResult
 
         t = _make_task()
         create_result = TaskResult(task=t, cascade_updates=[])
 
-        with patch("zenos.interface.tools.task_service") as mock_ts:
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
             mock_ts.create_task = AsyncMock(return_value=create_result)
             mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
@@ -237,13 +238,13 @@ class TestTaskUnifiedFormat:
 
     async def test_task_update_returns_unified_format(self):
         """task(action='update') returns unified response with data key."""
-        from zenos.interface.tools import task
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import task
+        from zenos.application.action.task_service import TaskResult
 
         t = _make_task(status="in_progress")
         update_result = TaskResult(task=t, cascade_updates=[])
 
-        with patch("zenos.interface.tools.task_service") as mock_ts:
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
             mock_ts.update_task = AsyncMock(return_value=update_result)
             mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
@@ -264,14 +265,14 @@ class TestConfirmUnifiedFormat:
 
     async def test_confirm_tasks_returns_unified_format(self):
         """confirm(collection='tasks') returns unified response."""
-        from zenos.interface.tools import confirm
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import confirm
+        from zenos.application.action.task_service import TaskResult
 
         t = _make_task(status="done")
         confirm_result = TaskResult(task=t, cascade_updates=[])
 
-        with patch("zenos.interface.tools.task_service") as mock_ts, \
-             patch("zenos.interface.tools.entry_repo") as _mock_er:
+        with patch("zenos.interface.mcp.task_service") as mock_ts, \
+             patch("zenos.interface.mcp.entry_repo") as _mock_er:
             mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
 
             result = await confirm(collection="tasks", id="task-1", accepted=True)
@@ -284,9 +285,9 @@ class TestConfirmUnifiedFormat:
 
     async def test_confirm_entities_returns_unified_format(self):
         """confirm(collection='entities') returns unified response."""
-        from zenos.interface.tools import confirm
+        from zenos.interface.mcp import confirm
 
-        with patch("zenos.interface.tools.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.confirm = AsyncMock(return_value={"confirmed_by_user": True})
 
             result = await confirm(collection="entities", id="ent-1")
@@ -307,7 +308,7 @@ class TestValidationErrorReturnsRejected:
 
     async def test_write_unknown_collection_returns_rejected(self):
         """Calling write() with unknown collection returns status=rejected."""
-        from zenos.interface.tools import write
+        from zenos.interface.mcp import write
 
         result = await write(collection="invalid_col", data={})
 
@@ -317,7 +318,7 @@ class TestValidationErrorReturnsRejected:
 
     async def test_task_missing_title_returns_rejected(self):
         """task(action='create') without title returns status=rejected."""
-        from zenos.interface.tools import task
+        from zenos.interface.mcp import task
 
         result = await task(action="create", created_by="architect")
 
@@ -326,9 +327,9 @@ class TestValidationErrorReturnsRejected:
 
     async def test_confirm_value_error_returns_rejected(self):
         """confirm() that raises ValueError returns status=rejected."""
-        from zenos.interface.tools import confirm
+        from zenos.interface.mcp import confirm
 
-        with patch("zenos.interface.tools.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.confirm = AsyncMock(side_effect=ValueError("Entity not found"))
 
             result = await confirm(collection="entities", id="missing")

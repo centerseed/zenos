@@ -100,7 +100,7 @@ def setup_local(gcp_project: str, github_token: str, venv_python: str) -> None:
     config["mcpServers"]["zenos-local"] = {
         "type": "stdio",
         "command": venv_python,
-        "args": ["-m", "zenos.interface.tools"],
+        "args": ["-m", "zenos.interface.mcp"],
         "env": {
             "GITHUB_TOKEN": github_token,
             "GOOGLE_CLOUD_PROJECT": gcp_project,

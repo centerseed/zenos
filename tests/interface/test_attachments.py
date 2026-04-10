@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from zenos.domain.models import Task
+from zenos.domain.action import Task
 
 
 def _make_task(**overrides) -> Task:
@@ -38,13 +38,13 @@ def _make_task(**overrides) -> Task:
 
 class TestValidateAttachments:
     def test_link_attachment_requires_url(self):
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments([{"type": "link"}], "partner-1")
         assert isinstance(result, dict) and result["error"] == "INVALID_INPUT"
         assert "url" in result["message"]
 
     def test_link_attachment_valid(self):
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments(
             [{"type": "link", "url": "https://example.com"}], "partner-1"
         )
@@ -55,13 +55,13 @@ class TestValidateAttachments:
         assert result[0]["uploaded_by"] == "partner-1"
 
     def test_image_attachment_requires_id(self):
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments([{"type": "image"}], "partner-1")
         assert isinstance(result, dict) and result["error"] == "INVALID_INPUT"
         assert "attachment_id" in result["message"]
 
     def test_file_attachment_with_id(self):
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments(
             [{"type": "file", "attachment_id": "abc123", "filename": "doc.pdf"}],
             "partner-1",
@@ -71,14 +71,14 @@ class TestValidateAttachments:
         assert result[0]["uploaded_by"] == "partner-1"
 
     def test_invalid_type_rejected(self):
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments([{"type": "video"}], "partner-1")
         assert isinstance(result, dict) and result["error"] == "INVALID_INPUT"
         assert "video" in result["message"]
 
     def test_server_sets_uploaded_by(self):
         """uploaded_by is always set from server partner context."""
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments(
             [{"type": "link", "url": "https://x.com", "uploaded_by": "hacker"}],
             "real-partner",
@@ -88,7 +88,7 @@ class TestValidateAttachments:
 
     def test_validate_attachments_merges_gcs_path_from_existing(self):
         """Caller passing only id+type gets gcs_path and content_type merged from existing."""
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
 
         existing = [
             {
@@ -113,7 +113,7 @@ class TestValidateAttachments:
 
     def test_validate_attachments_normalizes_mime_type_to_content_type(self):
         """mime_type passed by caller is converted to content_type."""
-        from zenos.interface.tools import _validate_attachments
+        from zenos.interface.mcp import _validate_attachments
 
         caller_att = [{"type": "file", "id": "att-xyz", "filename": "doc.pdf", "mime_type": "application/pdf"}]
         result = _validate_attachments(caller_att, "partner-1")
@@ -131,15 +131,15 @@ class TestValidateAttachments:
 
 class TestUploadAttachment:
     async def test_upload_signed_url_mode(self):
-        from zenos.interface.tools import upload_attachment, _current_partner
+        from zenos.interface.mcp import upload_attachment, _current_partner
 
         task_obj = _make_task(attachments=[])
         token = _current_partner.set({"id": "partner-1", "defaultProject": "zenos"})
 
         try:
             with (
-                patch("zenos.interface.tools._ensure_services"),
-                patch("zenos.interface.tools.task_service") as mock_ts,
+                patch("zenos.interface.mcp._ensure_services"),
+                patch("zenos.interface.mcp.task_service") as mock_ts,
                 patch("zenos.infrastructure.gcs_client.generate_signed_put_url", return_value="https://signed.url") as mock_sign,
                 patch("zenos.infrastructure.gcs_client._get_client") as mock_client,
             ):
@@ -161,13 +161,13 @@ class TestUploadAttachment:
             _current_partner.reset(token)
 
     async def test_upload_rejects_nonexistent_task(self):
-        from zenos.interface.tools import upload_attachment, _current_partner
+        from zenos.interface.mcp import upload_attachment, _current_partner
 
         token = _current_partner.set({"id": "partner-1", "defaultProject": "zenos"})
         try:
             with (
-                patch("zenos.interface.tools._ensure_services"),
-                patch("zenos.interface.tools.task_service") as mock_ts,
+                patch("zenos.interface.mcp._ensure_services"),
+                patch("zenos.interface.mcp.task_service") as mock_ts,
             ):
                 mock_ts._tasks = AsyncMock()
                 mock_ts._tasks.get_by_id = AsyncMock(return_value=None)
@@ -183,7 +183,7 @@ class TestUploadAttachment:
             _current_partner.reset(token)
 
     async def test_upload_requires_auth(self):
-        from zenos.interface.tools import upload_attachment, _current_partner
+        from zenos.interface.mcp import upload_attachment, _current_partner
 
         token = _current_partner.set(None)
         try:
@@ -204,15 +204,15 @@ class TestUploadAttachment:
 
 class TestTaskWithAttachments:
     async def test_create_task_with_link_attachments(self):
-        from zenos.interface.tools import _task_handler, _current_partner
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import _task_handler, _current_partner
+        from zenos.application.action.task_service import TaskResult
 
         t = _make_task(attachments=[])
         create_result = TaskResult(task=t, cascade_updates=[])
         token = _current_partner.set({"id": "partner-1", "defaultProject": "zenos"})
 
         try:
-            with patch("zenos.interface.tools.task_service") as mock_ts:
+            with patch("zenos.interface.mcp.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
                 mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
@@ -231,7 +231,7 @@ class TestTaskWithAttachments:
             _current_partner.reset(token)
 
     async def test_create_task_with_invalid_attachment_type_fails(self):
-        from zenos.interface.tools import _task_handler, _current_partner
+        from zenos.interface.mcp import _task_handler, _current_partner
 
         token = _current_partner.set({"id": "partner-1", "defaultProject": "zenos"})
         try:
@@ -246,8 +246,8 @@ class TestTaskWithAttachments:
             _current_partner.reset(token)
 
     async def test_update_task_replaces_attachments(self):
-        from zenos.interface.tools import _task_handler, _current_partner
-        from zenos.application.task_service import TaskResult
+        from zenos.interface.mcp import _task_handler, _current_partner
+        from zenos.application.action.task_service import TaskResult
 
         old_task = _make_task(
             attachments=[
@@ -262,8 +262,8 @@ class TestTaskWithAttachments:
 
         try:
             with (
-                patch("zenos.interface.tools.task_service") as mock_ts,
-                patch("zenos.interface.tools._cleanup_removed_attachments") as mock_cleanup,
+                patch("zenos.interface.mcp.task_service") as mock_ts,
+                patch("zenos.interface.mcp.task._cleanup_removed_attachments") as mock_cleanup,
             ):
                 mock_ts._tasks = AsyncMock()
                 mock_ts._tasks.get_by_id = AsyncMock(return_value=old_task)
@@ -289,7 +289,7 @@ class TestTaskWithAttachments:
 
 class TestCleanupRemovedAttachments:
     def test_deletes_removed_gcs_attachments(self):
-        from zenos.interface.tools import _cleanup_removed_attachments
+        from zenos.interface.mcp import _cleanup_removed_attachments
 
         old = [
             {"id": "a1", "gcs_path": "tasks/t/attachments/a1/f.png"},
@@ -303,7 +303,7 @@ class TestCleanupRemovedAttachments:
             assert "a2" in mock_del.call_args.args[1]
 
     def test_skips_link_attachments_without_gcs_path(self):
-        from zenos.interface.tools import _cleanup_removed_attachments
+        from zenos.interface.mcp import _cleanup_removed_attachments
 
         old = [{"id": "link1", "type": "link", "url": "https://x.com"}]
         new = []
@@ -320,7 +320,7 @@ class TestCleanupRemovedAttachments:
 
 class TestSerializeAttachments:
     def test_serialize_adds_proxy_url_for_gcs_attachments(self):
-        from zenos.interface.tools import _serialize
+        from zenos.interface.mcp import _serialize
 
         t = _make_task(
             attachments=[
@@ -333,7 +333,7 @@ class TestSerializeAttachments:
         assert "proxy_url" not in result["attachments"][1]
 
     def test_serialize_empty_attachments(self):
-        from zenos.interface.tools import _serialize
+        from zenos.interface.mcp import _serialize
 
         t = _make_task(attachments=[])
         result = _serialize(t)

@@ -29,7 +29,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route
 
 from zenos.infrastructure.email_client import EmailService
-from zenos.infrastructure.sql_repo import SqlPartnerRepository  # composition root
+from zenos.infrastructure.identity import SqlPartnerRepository
+from zenos.infrastructure.sql_common import get_pool
 from zenos.domain.partner_access import describe_partner_access
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,6 @@ _partner_repo: SqlPartnerRepository | None = None
 async def _ensure_partner_repo() -> SqlPartnerRepository:
     global _partner_repo  # noqa: PLW0603
     if _partner_repo is None:
-        from zenos.infrastructure.sql_repo import get_pool  # lazy import — interface must not import infra at module level
         pool = await get_pool()
         _partner_repo = SqlPartnerRepository(pool)
     return _partner_repo
@@ -82,7 +82,7 @@ def _cors_headers(request: Request) -> dict[str, str]:
         return {
             "access-control-allow-origin": origin,
             "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            "access-control-allow-headers": "Authorization, Content-Type",
+            "access-control-allow-headers": "Authorization, Content-Type, X-Active-Workspace-Id",
             "access-control-max-age": "86400",
         }
     return {}
@@ -639,7 +639,13 @@ async def update_partner_role(request: Request) -> Response:
             return _error_response("last_admin_cannot_demote", "Cannot demote the last admin in the tenant", 400, request=request)
 
     now = datetime.now(timezone.utc)
-    await repo.update_fields(partner_id, {"isAdmin": is_admin, "updatedAt": now})
+    update_fields = {"isAdmin": is_admin, "updatedAt": now}
+    # Promoting a shared-workspace member/guest to admin makes them the owner of
+    # their own home workspace view. Their old tenant link must be cleared or
+    # the frontend will continue treating them as a shared-workspace user.
+    if is_admin:
+        update_fields["sharedPartnerId"] = None
+    await repo.update_fields(partner_id, update_fields)
 
     logger.info(
         "audit",
@@ -662,7 +668,7 @@ async def update_partner_role(request: Request) -> Response:
         "invitedBy": target.get("invitedBy"),
         "createdAt": target.get("createdAt"),
         "updatedAt": now,
-        "sharedPartnerId": target.get("sharedPartnerId"),
+        "sharedPartnerId": None if is_admin else target.get("sharedPartnerId"),
     }, request=request)
 
 
@@ -772,6 +778,8 @@ async def update_partner_scope(request: Request) -> Response:
     roles_raw = body.get("roles", [])
     department_raw = body.get("department", "all")
     authorized_entity_ids_raw = body.get("authorized_entity_ids", None)
+    if authorized_entity_ids_raw is None:
+        authorized_entity_ids_raw = body.get("authorizedEntityIds", None)
     workspace_role_raw = body.get("workspace_role", None)
     access_mode_raw = body.get("access_mode", None)
 
@@ -1043,7 +1051,9 @@ async def list_audit_events(request: Request) -> Response:
 
     tenant_id = _same_tenant_id(caller_id, caller)
 
-    from zenos.infrastructure.sql_repo import SqlAuditEventRepository, get_pool
+    from zenos.infrastructure.agent import SqlAuditEventRepository
+
+    from zenos.infrastructure.sql_common import get_pool
     pool = await get_pool()
     audit_repo = SqlAuditEventRepository(pool)
     events = await audit_repo.list_events(

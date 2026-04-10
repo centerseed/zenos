@@ -27,9 +27,9 @@ from zenos.domain.governance import (
     detect_stale_documents_from_consistency,
     determine_recommended_action,
 )
-from zenos.domain.models import Entity, EntityStatus, EntityType, Relationship, RelationshipType, Tags
-from zenos.application.governance_service import GovernanceService
-from zenos.application.ontology_service import OntologyService
+from zenos.domain.knowledge import Entity, EntityStatus, EntityType, Relationship, RelationshipType, Tags
+from zenos.application.knowledge.governance_service import GovernanceService
+from zenos.application.knowledge.ontology_service import OntologyService
 
 
 # ─────────────────────────────────────────────
@@ -659,7 +659,7 @@ class TestGovernanceServiceTaskRepo:
 # ADR-020: Health Signal KPI tests
 # ──────────────────────────────────────────────
 
-from zenos.domain.models import Blindspot, Protocol
+from zenos.domain.knowledge import Blindspot, Protocol
 
 
 def _health_entity(

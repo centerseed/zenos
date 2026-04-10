@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
-from zenos.infrastructure.sql_repo import SqlToolEventRepository
+from zenos.infrastructure.agent import SqlToolEventRepository
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,20 +184,16 @@ class TestScheduleToolEvent:
     @pytest.mark.asyncio
     async def test_schedule_tool_event_calls_create_task_with_partner_id(self):
         """_schedule_tool_event creates an asyncio task when partner_id is set."""
-        from zenos.interface import tools as tools_mod
+        import zenos.interface.mcp as mcp_mod
+        from zenos.interface.mcp._audit import _schedule_tool_event
 
         fake_repo = AsyncMock()
         fake_repo.log_tool_event = AsyncMock()
 
-        original_repo = tools_mod._tool_event_repo
-        original_partner_id = tools_mod._current_partner_id
+        original_repo = mcp_mod._tool_event_repo
 
         try:
-            tools_mod._tool_event_repo = fake_repo
-            # Patch _current_partner_id.get to return a partner_id
-            mock_ctx = MagicMock()
-            mock_ctx.get = MagicMock(return_value=PARTNER_ID)
-            tools_mod._current_partner_id = mock_ctx
+            mcp_mod._tool_event_repo = fake_repo
 
             created_tasks = []
             original_create_task = asyncio.create_task
@@ -207,8 +203,12 @@ class TestScheduleToolEvent:
                 created_tasks.append(task)
                 return task
 
-            with patch("asyncio.create_task", side_effect=capture_create_task):
-                tools_mod._schedule_tool_event("search", "ent_abc", "my query", 3)
+            mock_ctx = MagicMock()
+            mock_ctx.get = MagicMock(return_value=PARTNER_ID)
+
+            with patch("zenos.infrastructure.context.current_partner_id", mock_ctx):
+                with patch("asyncio.create_task", side_effect=capture_create_task):
+                    _schedule_tool_event("search", "ent_abc", "my query", 3)
 
             # Allow any pending coroutines to complete
             await asyncio.gather(*created_tasks, return_exceptions=True)
@@ -221,22 +221,17 @@ class TestScheduleToolEvent:
                 result_count=3,
             )
         finally:
-            tools_mod._tool_event_repo = original_repo
-            tools_mod._current_partner_id = original_partner_id
+            mcp_mod._tool_event_repo = original_repo
 
     @pytest.mark.asyncio
     async def test_schedule_tool_event_no_op_when_no_partner(self):
         """_schedule_tool_event does nothing when no partner_id in context."""
-        from zenos.interface import tools as tools_mod
+        from zenos.interface.mcp._audit import _schedule_tool_event
 
-        original_partner_id = tools_mod._current_partner_id
-        try:
-            mock_ctx = MagicMock()
-            mock_ctx.get = MagicMock(return_value="")
-            tools_mod._current_partner_id = mock_ctx
+        mock_ctx = MagicMock()
+        mock_ctx.get = MagicMock(return_value="")
 
+        with patch("zenos.infrastructure.context.current_partner_id", mock_ctx):
             with patch("asyncio.create_task") as mock_create_task:
-                tools_mod._schedule_tool_event("get", "ent_xyz", None, None)
+                _schedule_tool_event("get", "ent_xyz", None, None)
                 mock_create_task.assert_not_called()
-        finally:
-            tools_mod._current_partner_id = original_partner_id

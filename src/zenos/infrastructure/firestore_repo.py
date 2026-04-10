@@ -10,18 +10,8 @@ from typing import Any
 from google.cloud import firestore  # type: ignore[import-untyped]
 from google.cloud.firestore_v1 import AsyncClient  # type: ignore[import-untyped]
 
-from zenos.domain.models import (
-    Blindspot,
-    Document,
-    DocumentTags,
-    Entity,
-    Gap,
-    Protocol as OntologyProtocol,
-    Relationship,
-    Source,
-    Tags,
-    Task,
-)
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Blindspot, Document, DocumentTags, Entity, Gap, Protocol as OntologyProtocol, Relationship, Source, Tags
 from zenos.infrastructure.context import current_partner_id
 
 # ---------------------------------------------------------------------------

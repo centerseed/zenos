@@ -30,11 +30,8 @@ from starlette.routing import Route
 
 from zenos.domain.crm_models import Activity, Company, Contact, Deal
 from zenos.infrastructure.context import current_partner_id
-from zenos.infrastructure.sql_repo import (  # composition root — wiring only
-    SqlEntityRepository,
-    SqlRelationshipRepository,
-    get_pool,
-)
+from zenos.infrastructure.knowledge import SqlEntityRepository, SqlRelationshipRepository
+from zenos.infrastructure.sql_common import get_pool
 from zenos.interface.admin_api import (
     _cors_headers,
     _error_response,
@@ -58,7 +55,7 @@ async def _ensure_crm_service():
     if _crm_repos_ready:
         return _crm_service
 
-    from zenos.application.crm_service import CrmService
+    from zenos.application.crm.crm_service import CrmService
     from zenos.infrastructure.crm_sql_repo import CrmSqlRepository
 
     pool = await get_pool()

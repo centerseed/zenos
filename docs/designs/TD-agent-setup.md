@@ -366,7 +366,7 @@ RUN pip install --no-cache-dir .
 ENV PORT=8080
 ENV MCP_TRANSPORT=sse
 
-CMD ["python", "-m", "zenos.interface.tools"]
+CMD ["python", "-m", "zenos.interface.mcp"]
 ```
 
 ---

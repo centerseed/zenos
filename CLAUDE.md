@@ -15,7 +15,7 @@ Semantic Proxy：不是 ERP、不是搜尋引擎、不是文件管理。Phase 0 
 ## Architecture
 
 - DDD 四層：`domain → application → infrastructure → interface`（`src/zenos/`）
-- MCP 入口：`src/zenos/interface/tools.py`
+- MCP 入口：`src/zenos/interface/mcp/` (package，entrypoint 為 `__main__.py`)
 - Frontend：Next.js 15 + Tailwind（`dashboard/`）
 - DB：PostgreSQL schema `zenos`（Cloud SQL `zentropy-4f7a5:asia-east1:zentropy-db`）
 - Deploy：Frontend → Firebase Hosting / Backend → Cloud Run
@@ -37,5 +37,5 @@ cd dashboard && npx vitest run
 ## Known Gotchas
 
 - 部署 Dashboard 只需 `--only hosting` — Firestore rules 已不再使用
-- `python -m zenos.interface.tools` 啟動本地 MCP server（開發除錯用）
+- `python -m zenos.interface.mcp` 啟動本地 MCP server（開發除錯用）
 - 新 session 需深入理解產品：讀 `docs/spec.md` Part 0–1, 4–5, 7；速查 `docs/reference/REF-glossary.md`

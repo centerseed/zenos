@@ -1,0 +1,382 @@
+"""PostgreSQL-backed EntityRepository."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+import asyncpg  # type: ignore[import-untyped]
+
+from zenos.domain.knowledge import Entity, Tags
+from zenos.infrastructure.sql_common import (
+    SCHEMA,
+    _acquire,
+    _dumps,
+    _get_partner_id,
+    _json_loads_safe,
+    _new_id,
+    _now,
+    _to_dt,
+)
+
+
+def _row_to_entity(row: asyncpg.Record) -> Entity:
+    tags_raw = _json_loads_safe(row["tags_json"]) or {}
+    return Entity(
+        id=row["id"],
+        name=row["name"],
+        type=row["type"],
+        level=row["level"],
+        parent_id=row["parent_id"],
+        status=row["status"],
+        summary=row["summary"],
+        tags=Tags(
+            what=tags_raw.get("what", []),
+            why=tags_raw.get("why", ""),
+            how=tags_raw.get("how", ""),
+            who=tags_raw.get("who", []),
+        ),
+        details=_json_loads_safe(row["details_json"]),
+        confirmed_by_user=row["confirmed_by_user"],
+        owner=row["owner"],
+        sources=_json_loads_safe(row["sources_json"]) or [],
+        visibility=row["visibility"],
+        visible_to_roles=list(row["visible_to_roles"] or []) if "visible_to_roles" in row else [],
+        visible_to_members=list(row["visible_to_members"] or []) if "visible_to_members" in row else [],
+        visible_to_departments=list(row["visible_to_departments"] or []) if "visible_to_departments" in row else [],
+        last_reviewed_at=_to_dt(row["last_reviewed_at"]),
+        created_at=_to_dt(row["created_at"]) or _now(),
+        updated_at=_to_dt(row["updated_at"]) or _now(),
+        # ADR-022 Document Bundle fields
+        doc_role=row["doc_role"] if "doc_role" in row.keys() else None,
+        change_summary=row["change_summary"] if "change_summary" in row.keys() else None,
+        summary_updated_at=_to_dt(row["summary_updated_at"]) if "summary_updated_at" in row.keys() else None,
+    )
+
+
+class SqlEntityRepository:
+    """PostgreSQL-backed EntityRepository."""
+
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def get_by_id(self, entity_id: str) -> Entity | None:
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT * FROM {SCHEMA}.entities WHERE id = $1 AND partner_id = $2",
+                entity_id, pid,
+            )
+        return _row_to_entity(row) if row else None
+
+    async def get_by_name(self, name: str) -> Entity | None:
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT * FROM {SCHEMA}.entities WHERE LOWER(name) = LOWER($1) AND partner_id = $2 LIMIT 1",
+                name, pid,
+            )
+        return _row_to_entity(row) if row else None
+
+    async def list_all(self, type_filter: str | None = None) -> list[Entity]:
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            if type_filter is not None:
+                rows = await conn.fetch(
+                    f"SELECT * FROM {SCHEMA}.entities WHERE partner_id = $1 AND type = $2",
+                    pid, type_filter,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"SELECT * FROM {SCHEMA}.entities WHERE partner_id = $1",
+                    pid,
+                )
+        return [_row_to_entity(r) for r in rows]
+
+    async def upsert(self, entity: Entity, *, conn: asyncpg.Connection | None = None) -> Entity:
+        pid = _get_partner_id()
+        now = _now()
+        entity.updated_at = now
+        if entity.id is None:
+            entity.id = _new_id()
+            entity.created_at = now
+
+        tags_raw = {
+            "what": entity.tags.what if isinstance(entity.tags.what, list) else [entity.tags.what],
+            "why": entity.tags.why,
+            "how": entity.tags.how,
+            "who": entity.tags.who if isinstance(entity.tags.who, list) else [entity.tags.who],
+        }
+
+        async with _acquire(self._pool, conn) as _conn:
+            await _conn.execute(
+                f"""
+                INSERT INTO {SCHEMA}.entities (
+                    id, partner_id, name, type, level, parent_id, status, summary,
+                    tags_json, details_json, confirmed_by_user, owner, sources_json,
+                    visibility, visible_to_roles, visible_to_members,
+                    visible_to_departments, last_reviewed_at, created_at, updated_at,
+                    doc_role, change_summary, summary_updated_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+                ON CONFLICT (id) DO UPDATE SET
+                    name=EXCLUDED.name, type=EXCLUDED.type, level=EXCLUDED.level,
+                    parent_id=EXCLUDED.parent_id, status=EXCLUDED.status,
+                    summary=EXCLUDED.summary, tags_json=EXCLUDED.tags_json,
+                    details_json=EXCLUDED.details_json,
+                    confirmed_by_user=EXCLUDED.confirmed_by_user,
+                    owner=EXCLUDED.owner, sources_json=EXCLUDED.sources_json,
+                    visibility=EXCLUDED.visibility,
+                    visible_to_roles=EXCLUDED.visible_to_roles,
+                    visible_to_members=EXCLUDED.visible_to_members,
+                    visible_to_departments=EXCLUDED.visible_to_departments,
+                    last_reviewed_at=EXCLUDED.last_reviewed_at,
+                    updated_at=EXCLUDED.updated_at,
+                    doc_role=EXCLUDED.doc_role,
+                    change_summary=EXCLUDED.change_summary,
+                    summary_updated_at=EXCLUDED.summary_updated_at
+                WHERE entities.partner_id = EXCLUDED.partner_id
+                """,
+                entity.id, pid, entity.name, entity.type, entity.level,
+                entity.parent_id, entity.status, entity.summary,
+                _dumps(tags_raw),
+                _dumps(entity.details) if entity.details is not None else None,
+                entity.confirmed_by_user, entity.owner,
+                _dumps(entity.sources),
+                entity.visibility, entity.visible_to_roles,
+                entity.visible_to_members, entity.visible_to_departments,
+                entity.last_reviewed_at,
+                entity.created_at, entity.updated_at,
+                entity.doc_role, entity.change_summary, entity.summary_updated_at,
+            )
+        return entity
+
+    async def list_unconfirmed(self) -> list[Entity]:
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.entities WHERE confirmed_by_user = false AND partner_id = $1",
+                pid,
+            )
+        return [_row_to_entity(r) for r in rows]
+
+    async def list_by_ids(self, entity_ids: list[str]) -> list[Entity]:
+        if not entity_ids:
+            return []
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.entities WHERE id = ANY($1) AND partner_id = $2",
+                entity_ids, pid,
+            )
+        return [_row_to_entity(r) for r in rows]
+
+    async def list_by_parent(self, parent_id: str) -> list[Entity]:
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.entities WHERE parent_id = $1 AND partner_id = $2",
+                parent_id, pid,
+            )
+        return [_row_to_entity(r) for r in rows]
+
+    async def update_source_status(
+        self,
+        entity_id: str,
+        new_status: str,
+        source_id: str | None = None,
+    ) -> None:
+        """Update source_status for a document entity's source.
+
+        Args:
+            entity_id: The entity to update.
+            new_status: New source_status value (valid/stale/unresolvable).
+            source_id: If provided, update only the source with this source_id.
+                       If None, update sources[0] (backward compatible).
+        """
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            if source_id is None:
+                # Legacy behavior: update first source
+                await conn.execute(
+                    f"""UPDATE {SCHEMA}.entities
+                        SET sources_json = jsonb_set(
+                            jsonb_set(
+                                sources_json,
+                                '{{0,status}}',
+                                $1::jsonb,
+                                true
+                            ),
+                            '{{0,source_status}}',
+                            $1::jsonb,
+                            true
+                        ),
+                        updated_at = now()
+                        WHERE id = $2 AND partner_id = $3""",
+                    json.dumps(new_status), entity_id, pid,
+                )
+            else:
+                # Per-source update: find source by source_id and update its status
+                row = await conn.fetchrow(
+                    f"SELECT sources_json FROM {SCHEMA}.entities WHERE id = $1 AND partner_id = $2",
+                    entity_id, pid,
+                )
+                if row is None:
+                    return
+                sources = json.loads(row["sources_json"]) if row["sources_json"] else []
+                updated = False
+                for src in sources:
+                    if src.get("source_id") == source_id:
+                        src["status"] = new_status
+                        src["source_status"] = new_status
+                        updated = True
+                        break
+                if updated:
+                    await conn.execute(
+                        f"""UPDATE {SCHEMA}.entities
+                            SET sources_json = $1::jsonb, updated_at = now()
+                            WHERE id = $2 AND partner_id = $3""",
+                        json.dumps(sources), entity_id, pid,
+                    )
+
+    async def batch_update_source_uris(
+        self,
+        updates: list[dict],
+        *,
+        atomic: bool = False,
+    ) -> dict:
+        """Batch update source URIs for document entities.
+
+        Supports two payload formats (can be mixed in one batch):
+          - Legacy:  {"document_id": str, "new_uri": str}
+                     Updates the primary source (is_primary=true), or first source.
+          - New:     {"document_id": str, "source_id": str, "new_uri": str}
+                     Updates the source matching source_id exactly.
+
+        Args:
+            updates: List of update dicts.
+            atomic: If True, wrap in a transaction (all-or-nothing).
+
+        Returns:
+            {"updated": [...], "not_found": [...], "errors": [...]}
+        """
+        pid = _get_partner_id()
+        updated = []
+        not_found = []
+        errors = []
+
+        async def _do_updates(conn: asyncpg.Connection):
+            for item in updates:
+                doc_id = item["document_id"]
+                new_uri = item["new_uri"]
+                target_source_id = item.get("source_id")
+                try:
+                    row = await conn.fetchrow(
+                        f"SELECT id, sources_json FROM {SCHEMA}.entities "
+                        f"WHERE id = $1 AND partner_id = $2",
+                        doc_id, pid,
+                    )
+                    if row is None:
+                        if atomic:
+                            raise ValueError(f"Document '{doc_id}' not found")
+                        not_found.append(doc_id)
+                        continue
+
+                    current_sources = json.loads(row["sources_json"]) if row["sources_json"] else []
+                    new_label = new_uri.rsplit("/", 1)[-1] if "/" in new_uri else new_uri
+
+                    if target_source_id:
+                        # New format: update by source_id
+                        source_found = False
+                        for src in current_sources:
+                            if src.get("source_id") == target_source_id:
+                                if src.get("uri") == new_uri:
+                                    updated.append(doc_id)
+                                    source_found = True
+                                    break
+                                src["uri"] = new_uri
+                                src["label"] = new_label
+                                canonical_status = src.get("source_status") or src.get("status") or "valid"
+                                src["status"] = canonical_status
+                                src["source_status"] = canonical_status
+                                source_found = True
+                                break
+                        if not source_found:
+                            if atomic:
+                                raise ValueError(
+                                    f"source_id '{target_source_id}' not found in document '{doc_id}'"
+                                )
+                            errors.append({
+                                "document_id": doc_id,
+                                "source_id": target_source_id,
+                                "error": f"source_id '{target_source_id}' not found",
+                            })
+                            continue
+                    else:
+                        # Legacy format: update primary or first source
+                        if not current_sources:
+                            current_sources = [{
+                                "uri": new_uri,
+                                "label": new_label,
+                                "type": "github",
+                                "status": "valid",
+                                "source_status": "valid",
+                            }]
+                        else:
+                            # Find primary source, or fall back to first
+                            target_idx = 0
+                            for i, src in enumerate(current_sources):
+                                if src.get("is_primary"):
+                                    target_idx = i
+                                    break
+                            if current_sources[target_idx].get("uri") == new_uri:
+                                updated.append(doc_id)
+                                continue
+                            current_sources[target_idx]["uri"] = new_uri
+                            current_sources[target_idx]["label"] = new_label
+                            canonical_status = (
+                                current_sources[target_idx].get("source_status")
+                                or current_sources[target_idx].get("status")
+                                or "valid"
+                            )
+                            current_sources[target_idx]["status"] = canonical_status
+                            current_sources[target_idx]["source_status"] = canonical_status
+
+                    await conn.execute(
+                        f"""UPDATE {SCHEMA}.entities
+                            SET sources_json = $1::jsonb,
+                                updated_at = now()
+                            WHERE id = $2 AND partner_id = $3""",
+                        json.dumps(current_sources), doc_id, pid,
+                    )
+                    updated.append(doc_id)
+                except Exception as exc:
+                    if atomic:
+                        raise
+                    errors.append({"document_id": doc_id, "error": str(exc)})
+
+        if atomic:
+            async with self._pool.acquire() as conn:
+                async with conn.transaction():
+                    await _do_updates(conn)
+        else:
+            async with self._pool.acquire() as conn:
+                await _do_updates(conn)
+
+        return {"updated": updated, "not_found": not_found, "errors": errors}
+
+    async def archive_entity(self, entity_id: str) -> None:
+        """Archive an entity by setting its status to 'archived' (exits search space).
+
+        Used for dead-link document entities that cannot be recovered. Unlike 'stale',
+        'archived' unambiguously marks the entity as intentionally removed from the
+        search space due to an unresolvable source link.
+        """
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""UPDATE {SCHEMA}.entities
+                    SET status = 'archived',
+                        updated_at = now()
+                    WHERE id = $1 AND partner_id = $2""",
+                entity_id, pid,
+            )

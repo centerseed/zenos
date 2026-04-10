@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from zenos.application.task_service import TaskService
-from zenos.application.ontology_service import OntologyService, UpsertEntityResult
-from zenos.domain.models import Entity, EntityType, Tags, Task
+from zenos.application.action.task_service import TaskService
+from zenos.application.knowledge.ontology_service import OntologyService, UpsertEntityResult
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Entity, EntityType, Tags
 
 
 # ──────────────────────────────────────────────

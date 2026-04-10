@@ -18,8 +18,9 @@ from zenos.domain.crm_models import (
     Deal,
     FunnelStage,
 )
-from zenos.domain.models import Entity, Relationship, Tags
-from zenos.domain.repositories import CrmRepository, EntityRepository, RelationshipRepository
+from zenos.domain.knowledge import Entity, Relationship, Tags
+from zenos.domain.knowledge import EntityRepository, RelationshipRepository
+from zenos.domain.repositories import CrmRepository
 
 
 def _new_id() -> str:

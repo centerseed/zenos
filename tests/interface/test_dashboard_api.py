@@ -18,8 +18,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from zenos.application.task_service import TaskResult
-from zenos.domain.models import Blindspot, Entity, Relationship, Tags, Task
+from zenos.application.action.task_service import TaskResult
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Blindspot, Entity, Relationship, Tags
 
 
 # ---------------------------------------------------------------------------

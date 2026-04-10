@@ -116,8 +116,8 @@ class TestListAuditEventsHappyPath:
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.admin_api._get_caller_partner",
                    return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", AsyncMock(return_value=mock_pool)), \
-             patch("zenos.infrastructure.sql_repo.SqlAuditEventRepository", return_value=mock_audit_repo):
+             patch("zenos.infrastructure.sql_common.get_pool", AsyncMock(return_value=mock_pool)), \
+             patch("zenos.infrastructure.agent.SqlAuditEventRepository", return_value=mock_audit_repo):
             resp = await list_audit_events(request)
 
         assert resp.status_code == 200
@@ -149,8 +149,8 @@ class TestListAuditEventsHappyPath:
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
              patch("zenos.interface.admin_api._get_caller_partner",
                    return_value=("p1", {"email": "admin@test.com", "isAdmin": True})), \
-             patch("zenos.infrastructure.sql_repo.get_pool", AsyncMock(return_value=mock_pool)), \
-             patch("zenos.infrastructure.sql_repo.SqlAuditEventRepository", return_value=mock_audit_repo):
+             patch("zenos.infrastructure.sql_common.get_pool", AsyncMock(return_value=mock_pool)), \
+             patch("zenos.infrastructure.agent.SqlAuditEventRepository", return_value=mock_audit_repo):
             resp = await list_audit_events(request)
 
         assert resp.status_code == 200
@@ -164,5 +164,5 @@ class TestListAuditEventsImport:
     """Verify SqlAuditEventRepository is importable from admin_api context."""
 
     async def test_sql_audit_event_repository_importable(self):
-        from zenos.infrastructure.sql_repo import SqlAuditEventRepository
+        from zenos.infrastructure.agent import SqlAuditEventRepository
         assert SqlAuditEventRepository is not None

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .models import Document, DocumentTags, Entity, Protocol, Tags
+from .knowledge import Document, DocumentTags, Entity, Protocol, Tags
 
 
 @dataclass

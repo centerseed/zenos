@@ -16,7 +16,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from zenos.interface.tools import ApiKeyMiddleware
+from zenos.interface.mcp import ApiKeyMiddleware
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +61,7 @@ async def _mock_validate(key: str) -> dict | None:
 def client():
     """TestClient for the middleware-wrapped app with mocked validator."""
     app = _make_test_app()
-    with patch("zenos.interface.tools._partner_validator") as mock_validator:
+    with patch("zenos.interface.mcp._auth._partner_validator") as mock_validator:
         mock_validator.validate = AsyncMock(side_effect=_mock_validate)
         with TestClient(app, raise_server_exceptions=True) as c:
             yield c

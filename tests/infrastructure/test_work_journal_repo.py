@@ -47,7 +47,7 @@ def _make_conn() -> AsyncMock:
 
 async def test_create_returns_uuid_string():
     """create() inserts a row and returns a non-empty UUID string."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     repo = SqlWorkJournalRepository(_make_pool(conn))
@@ -71,7 +71,7 @@ async def test_create_returns_uuid_string():
 
 async def test_create_uses_empty_list_when_tags_is_none():
     """create() defaults tags to [] when not provided."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     repo = SqlWorkJournalRepository(_make_pool(conn))
@@ -85,7 +85,7 @@ async def test_create_uses_empty_list_when_tags_is_none():
 
 async def test_count_returns_integer():
     """count() returns the fetchval result as an integer."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     conn.fetchval = AsyncMock(return_value=7)
@@ -100,7 +100,7 @@ async def test_count_returns_integer():
 
 async def test_list_recent_returns_entries_and_total():
     """list_recent() returns (list[dict], total) tuple."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     _ts = datetime(2026, 4, 4, tzinfo=timezone.utc)
     row = {
@@ -126,7 +126,7 @@ async def test_list_recent_returns_entries_and_total():
 
 async def test_list_recent_applies_project_filter():
     """list_recent() adds project to SQL when specified."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     conn.fetchval = AsyncMock(return_value=0)
@@ -141,7 +141,7 @@ async def test_list_recent_applies_project_filter():
 
 async def test_list_oldest_originals_returns_list():
     """list_oldest_originals() returns oldest non-summary entries."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     conn.fetch = AsyncMock(return_value=[])
@@ -158,7 +158,7 @@ async def test_list_oldest_originals_returns_list():
 
 async def test_delete_by_ids_skips_empty_list():
     """delete_by_ids() does not execute SQL when ids is empty."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     repo = SqlWorkJournalRepository(_make_pool(conn))
@@ -170,7 +170,7 @@ async def test_delete_by_ids_skips_empty_list():
 
 async def test_delete_by_ids_passes_ids():
     """delete_by_ids() executes DELETE with partner_id and ids."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     repo = SqlWorkJournalRepository(_make_pool(conn))
@@ -185,7 +185,7 @@ async def test_delete_by_ids_passes_ids():
 
 async def test_create_summary_sets_is_summary_true():
     """create_summary() inserts row with is_summary=TRUE in SQL."""
-    from zenos.infrastructure.sql_repo import SqlWorkJournalRepository
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
 
     conn = _make_conn()
     repo = SqlWorkJournalRepository(_make_pool(conn))

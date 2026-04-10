@@ -216,6 +216,18 @@ Project: {選擇的專案名稱 或 「未設定」}
 
 ---
 
+## 多 Workspace 使用指引
+
+每個 API key 對應一位用戶。用戶可能同時在自己的 home workspace 和被邀請的 shared workspace 中。
+
+- **預設行為**：不指定 workspace 時，所有 MCP tool 操作在用戶的 **home workspace**。
+- **切換 workspace**：在 `search`、`get`、`write`、`confirm`、`task` 五個 tool 帶 `workspace_id` 參數即可切換。
+- **辨別 workspace**：每次 tool 回傳都包含 `workspace_context`（含 `workspace_id`、`workspace_name`、`available_workspaces`），agent 應在回覆用戶時帶上 workspace 名稱。
+- **歧義處理**：遇到可能存在於多個 workspace 的同名 entity 時，agent 應列出 `available_workspaces` 讓用戶確認目標。
+- **非法 workspace_id**：會收到 `FORBIDDEN_WORKSPACE` 錯誤和可用 workspace 列表，agent 可自動修正。
+
+---
+
 ## 注意事項
 
 - **token 不進 git**：`.claude/mcp.json` 應在 `.gitignore` 中

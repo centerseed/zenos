@@ -220,39 +220,39 @@ class TestSetupToolNoPlatform:
     """DC-1: setup(platform=None) → ask_platform response."""
 
     async def test_action_is_ask_platform(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform=None)
         assert result["action"] == "ask_platform"
 
     async def test_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform=None)
         assert "bundle_version" in result
         assert isinstance(result["bundle_version"], str)
         assert len(result["bundle_version"]) > 0
 
     async def test_has_options_list(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform=None)
         assert "options" in result
         assert isinstance(result["options"], list)
         assert len(result["options"]) >= 3  # at least claude_code, claude_web, codex
 
     async def test_options_have_id_and_label(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform=None)
         for opt in result["options"]:
             assert "id" in opt, "Each option must have 'id'"
             assert "label" in opt, "Each option must have 'label'"
 
     async def test_options_include_claude_code(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform=None)
         ids = [o["id"] for o in result["options"]]
         assert "claude_code" in ids
 
     async def test_has_next_step_guidance(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform=None)
         assert "next_step" in result
 
@@ -261,17 +261,17 @@ class TestSetupToolClaudeCode:
     """DC-2: setup(platform='claude_code') → manifest + slash_commands + claude_md_addition."""
 
     async def test_action_is_install(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert result["action"] == "install"
 
     async def test_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "bundle_version" in result
 
     async def test_has_manifest(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "manifest" in result
         assert "skills" in result["manifest"]
@@ -279,32 +279,32 @@ class TestSetupToolClaudeCode:
 
     async def test_payload_has_no_skill_files(self):
         """skill_files should no longer be in payload (avoids token limit)."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "skill_files" not in result["payload"]
         assert "skill_files" not in result
 
     async def test_payload_has_slash_commands(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "slash_commands" in result["payload"]
         assert len(result["payload"]["slash_commands"]) == 7  # 4 zenos-* + feature + debug + triage
 
     async def test_payload_has_claude_md_addition(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "claude_md_addition" in result["payload"]
         assert len(result["payload"]["claude_md_addition"]) > 0
 
     async def test_instructions_contain_github_fetch(self):
         """Instructions must tell agent to fetch from GitHub."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         instructions_text = " ".join(result["instructions"])
         assert "github" in instructions_text.lower() or "WebFetch" in instructions_text
 
     async def test_platform_field(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert result["platform"] == "claude_code"
 
@@ -313,24 +313,24 @@ class TestSetupToolClaudeWeb:
     """DC-3: setup(platform='claude_web') → project_instructions + project_documents_tip."""
 
     async def test_action_is_install(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_web")
         assert result["action"] == "install"
 
     async def test_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_web")
         assert "bundle_version" in result
 
     async def test_payload_has_project_instructions(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_web")
         instructions = result["payload"]["project_instructions"]
         assert isinstance(instructions, str)
         assert len(instructions) > 0
 
     async def test_project_instructions_contains_governance_loading_hint(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_web")
         instructions = result["payload"]["project_instructions"]
         # Must contain references to the three governance capabilities
@@ -341,7 +341,7 @@ class TestSetupToolClaudeWeb:
         assert "analyze" in instructions
 
     async def test_payload_has_project_documents_tip(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_web")
         assert "project_documents_tip" in result["payload"]
         assert len(result["payload"]["project_documents_tip"]) > 0
@@ -351,36 +351,36 @@ class TestSetupToolCodex:
     """DC-4: setup(platform='codex') → manifest + agents_md_addition."""
 
     async def test_action_is_install(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex")
         assert result["action"] == "install"
 
     async def test_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex")
         assert "bundle_version" in result
 
     async def test_has_manifest(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex")
         assert "manifest" in result
         assert "skills" in result["manifest"]
 
     async def test_payload_has_no_skill_files(self):
         """skill_files should no longer be in payload."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex")
         assert "skill_files" not in result["payload"]
         assert "skill_files" not in result
 
     async def test_payload_has_agents_md_addition(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex")
         assert "agents_md_addition" in result["payload"]
         assert len(result["payload"]["agents_md_addition"]) > 0
 
     async def test_instructions_contain_github_fetch(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex")
         instructions_text = " ".join(result["instructions"])
         assert "github" in instructions_text.lower() or "WebFetch" in instructions_text
@@ -390,24 +390,24 @@ class TestSetupToolUnsupportedPlatform:
     """DC-5: unsupported or 'other' platform → error response."""
 
     async def test_other_platform_returns_error(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="other")
         assert result["error"] == "unsupported_platform"
 
     async def test_unknown_platform_returns_error(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="random_platform_xyz")
         assert result["error"] == "unsupported_platform"
 
     async def test_error_response_has_supported_platforms(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="other")
         assert "supported_platforms" in result
         assert "claude_code" in result["supported_platforms"]
 
     async def test_error_response_has_bundle_version(self):
         """DC-6: even error response from unsupported_platform should have bundle_version."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="other")
         assert "bundle_version" in result
 
@@ -416,24 +416,24 @@ class TestSetupToolBundleVersion:
     """DC-6: all successful responses include bundle_version."""
 
     async def test_ask_platform_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform=None)
         assert "bundle_version" in result
         assert result["bundle_version"] == "2.1.0"
 
     async def test_claude_code_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "bundle_version" in result
         assert result["bundle_version"] == "2.1.0"
 
     async def test_claude_web_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_web")
         assert "bundle_version" in result
 
     async def test_codex_has_bundle_version(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex")
         assert "bundle_version" in result
 
@@ -442,27 +442,27 @@ class TestSetupToolSkillSelection:
     """DC-7: skill_selection affects claude_md_addition governance lines."""
 
     async def test_task_only_claude_md_excludes_document_governance(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="task_only")
         claude_md = result["payload"]["claude_md_addition"]
         assert "document-governance.md" not in claude_md
         assert "l2-knowledge-governance.md" not in claude_md
 
     async def test_task_only_claude_md_includes_task_governance(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="task_only")
         claude_md = result["payload"]["claude_md_addition"]
         assert "task-governance.md" in claude_md
 
     async def test_doc_task_claude_md_excludes_l2(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="doc_task")
         claude_md = result["payload"]["claude_md_addition"]
         assert "l2-knowledge-governance.md" not in claude_md
         assert "document-governance.md" in claude_md
 
     async def test_full_claude_md_includes_all_governance(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="full")
         claude_md = result["payload"]["claude_md_addition"]
         assert "document-governance.md" in claude_md
@@ -470,7 +470,7 @@ class TestSetupToolSkillSelection:
         assert "task-governance.md" in claude_md
 
     async def test_skill_selection_stored_in_response(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="task_only")
         assert result["skill_selection"] == "task_only"
 
@@ -479,28 +479,28 @@ class TestSetupToolSkipOverview:
     """DC-8: skip_overview=True → no governance_overview field."""
 
     async def test_skip_overview_true_omits_field(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skip_overview=True)
         assert "governance_overview" not in result
 
     async def test_skip_overview_false_includes_field(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skip_overview=False)
         assert "governance_overview" in result
         assert len(result["governance_overview"]) > 0
 
     async def test_default_includes_governance_overview(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "governance_overview" in result
 
     async def test_skip_overview_applies_to_claude_web(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_web", skip_overview=True)
         assert "governance_overview" not in result
 
     async def test_skip_overview_applies_to_codex(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex", skip_overview=True)
         assert "governance_overview" not in result
 
@@ -510,27 +510,27 @@ class TestSetupManifestOnly:
 
     async def test_claude_code_no_skill_files_in_response(self):
         """No skill_files key anywhere in the response dict."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skip_overview=True)
         assert "skill_files" not in result
         assert "skill_files" not in result.get("payload", {})
 
     async def test_codex_no_skill_files_in_response(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex", skip_overview=True)
         assert "skill_files" not in result
         assert "skill_files" not in result.get("payload", {})
 
     async def test_instructions_reference_github_raw_url(self):
         """Instructions must tell agent to fetch from GitHub raw URL, not inline."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skip_overview=True)
         instructions_text = " ".join(result["instructions"])
         assert "raw.githubusercontent.com" in instructions_text
 
     async def test_manifest_skills_have_path_and_version_but_no_content(self):
         """Each skill entry in manifest has path and version but NOT content."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skip_overview=True)
         for skill in result["manifest"]["skills"]:
             assert "path" in skill, f"Skill {skill.get('name')} missing 'path'"
@@ -538,7 +538,7 @@ class TestSetupManifestOnly:
             assert "content" not in skill, f"Skill {skill.get('name')} should not have 'content'"
 
     async def test_codex_manifest_skills_no_content(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="codex", skip_overview=True)
         for skill in result["manifest"]["skills"]:
             assert "content" not in skill
@@ -548,24 +548,24 @@ class TestSetupToolInvalidSkillSelection:
     """DC-9: invalid skill_selection → error response."""
 
     async def test_invalid_selection_returns_error(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="invalid_value")
         assert result["error"] == "invalid_skill_selection"
 
     async def test_error_has_message(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="xyz")
         assert "message" in result
         assert len(result["message"]) > 0
 
     async def test_invalid_selection_without_platform_still_errors(self):
         """skill_selection validation happens only when platform is given."""
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         # Without platform → ask_platform (skill_selection not validated yet)
         result = await setup(platform=None, skill_selection="bad")
         assert result["action"] == "ask_platform"
 
     async def test_empty_string_selection_returns_error(self):
-        from zenos.interface.tools import setup
+        from zenos.interface.mcp import setup
         result = await setup(platform="claude_code", skill_selection="")
         assert result["error"] == "invalid_skill_selection"

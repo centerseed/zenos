@@ -32,7 +32,7 @@ NOW = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 def _set_partner(monkeypatch):
     """Patch current_partner_id to return PARTNER_ID."""
     monkeypatch.setattr(
-        "zenos.infrastructure.sql_repo.current_partner_id",
+        "zenos.infrastructure.sql_common.current_partner_id",
         MagicMock(get=MagicMock(return_value=PARTNER_ID)),
     )
 
@@ -106,7 +106,7 @@ class TestSqlEntityRepository:
 
     def test_get_by_id_returns_entity_when_found(self, monkeypatch):
         """get_by_id maps row columns to Entity domain model correctly."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
 
         row = _make_row(**self._entity_row("ent1"))
         pool, conn = _make_pool(fetchrow=row)
@@ -133,7 +133,7 @@ class TestSqlEntityRepository:
 
     def test_get_by_id_returns_none_when_missing(self):
         """get_by_id returns None when row not found."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
         import asyncio
 
         pool, _ = _make_pool(fetchrow=None)
@@ -143,7 +143,7 @@ class TestSqlEntityRepository:
 
     def test_list_all_with_type_filter_includes_type_in_sql(self):
         """list_all passes type filter via SQL AND clause."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
         import asyncio
 
         row = _make_row(**self._entity_row("ent1"))
@@ -158,7 +158,7 @@ class TestSqlEntityRepository:
 
     def test_list_all_without_type_filter(self):
         """list_all without filter only scopes by partner_id."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -171,8 +171,8 @@ class TestSqlEntityRepository:
 
     def test_upsert_new_entity_generates_id(self):
         """upsert with id=None generates a new ID."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
-        from zenos.domain.models import Entity, Tags
+        from zenos.infrastructure.knowledge import SqlEntityRepository
+        from zenos.domain.knowledge import Entity, Tags
         import asyncio
 
         pool, conn = _make_pool()
@@ -190,8 +190,8 @@ class TestSqlEntityRepository:
 
     def test_upsert_existing_entity_keeps_id(self):
         """upsert with existing id preserves the ID."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
-        from zenos.domain.models import Entity, Tags
+        from zenos.infrastructure.knowledge import SqlEntityRepository
+        from zenos.domain.knowledge import Entity, Tags
         import asyncio
 
         pool, _ = _make_pool()
@@ -206,7 +206,7 @@ class TestSqlEntityRepository:
 
     def test_list_unconfirmed_queries_confirmed_false(self):
         """list_unconfirmed filters on confirmed_by_user = false."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -220,7 +220,7 @@ class TestSqlEntityRepository:
 
     def test_list_by_parent_scopes_to_partner(self):
         """list_by_parent passes both parent_id and partner_id."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -255,7 +255,7 @@ class TestSqlRelationshipRepository:
 
     def test_row_maps_target_entity_id_to_target_id(self):
         """Row's target_entity_id column maps to Relationship.target_id domain field."""
-        from zenos.infrastructure.sql_repo import _row_to_relationship
+        from zenos.infrastructure.knowledge.sql_relationship_repo import _row_to_relationship
 
         row = _make_row(**self._rel_row())
         rel = _row_to_relationship(row)
@@ -265,7 +265,7 @@ class TestSqlRelationshipRepository:
 
     def test_list_by_entity_queries_both_directions(self):
         """list_by_entity includes both source and target entity_id in WHERE."""
-        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
+        from zenos.infrastructure.knowledge import SqlRelationshipRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -279,7 +279,7 @@ class TestSqlRelationshipRepository:
 
     def test_find_duplicate_passes_all_three_params(self):
         """find_duplicate queries source, target, type, and partner_id."""
-        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
+        from zenos.infrastructure.knowledge import SqlRelationshipRepository
         import asyncio
 
         pool, conn = _make_pool(fetchrow=None)
@@ -296,8 +296,8 @@ class TestSqlRelationshipRepository:
 
     def test_add_generates_id_for_new_relationship(self):
         """add() with rel.id=None generates a new id."""
-        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
-        from zenos.domain.models import Relationship
+        from zenos.infrastructure.knowledge import SqlRelationshipRepository
+        from zenos.domain.knowledge import Relationship
         import asyncio
 
         pool, _ = _make_pool()
@@ -310,8 +310,8 @@ class TestSqlRelationshipRepository:
 
     def test_add_maps_target_id_to_target_entity_id_in_sql(self):
         """add() stores rel.target_id as target_entity_id in SQL."""
-        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
-        from zenos.domain.models import Relationship
+        from zenos.infrastructure.knowledge import SqlRelationshipRepository
+        from zenos.domain.knowledge import Relationship
         import asyncio
 
         pool, conn = _make_pool()
@@ -328,7 +328,7 @@ class TestSqlRelationshipRepository:
 
     def test_list_all_scopes_by_partner_id(self):
         """list_all queries relationships filtered by partner_id."""
-        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
+        from zenos.infrastructure.knowledge import SqlRelationshipRepository
         import asyncio
 
         row = _make_row(**self._rel_row("rel1"))
@@ -346,7 +346,7 @@ class TestSqlRelationshipRepository:
 
     def test_list_all_returns_empty_when_no_rows(self):
         """list_all returns an empty list when no relationships exist."""
-        from zenos.infrastructure.sql_repo import SqlRelationshipRepository
+        from zenos.infrastructure.knowledge import SqlRelationshipRepository
         import asyncio
 
         pool, _ = _make_pool(fetch=[])
@@ -381,7 +381,7 @@ class TestSqlDocumentRepository:
 
     def test_row_to_document_maps_source_correctly(self):
         """_row_to_document maps source_json to Source domain model."""
-        from zenos.infrastructure.sql_repo import _row_to_document
+        from zenos.infrastructure.knowledge.sql_document_repo import _row_to_document
 
         row = _make_row(**self._doc_row())
         doc = _row_to_document(row, ["ent1", "ent2"])
@@ -393,8 +393,8 @@ class TestSqlDocumentRepository:
 
     def test_upsert_syncs_document_entities_join_table(self):
         """upsert() deletes old rows and inserts new rows in document_entities."""
-        from zenos.infrastructure.sql_repo import SqlDocumentRepository
-        from zenos.domain.models import Document, DocumentTags, Source
+        from zenos.infrastructure.knowledge import SqlDocumentRepository
+        from zenos.domain.knowledge import Document, DocumentTags, Source
         import asyncio
 
         pool, conn = _make_pool()
@@ -414,7 +414,7 @@ class TestSqlDocumentRepository:
 
     def test_update_linked_entities_replaces_rows(self):
         """update_linked_entities() deletes then inserts in document_entities."""
-        from zenos.infrastructure.sql_repo import SqlDocumentRepository
+        from zenos.infrastructure.knowledge import SqlDocumentRepository
         import asyncio
 
         pool, conn = _make_pool()
@@ -430,7 +430,7 @@ class TestSqlDocumentRepository:
 
     def test_list_by_entity_joins_document_entities(self):
         """list_by_entity uses JOIN document_entities in SQL."""
-        from zenos.infrastructure.sql_repo import SqlDocumentRepository
+        from zenos.infrastructure.knowledge import SqlDocumentRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -467,7 +467,7 @@ class TestSqlProtocolRepository:
 
     def test_row_to_protocol_parses_gaps(self):
         """_row_to_protocol parses gaps_json into list[Gap]."""
-        from zenos.infrastructure.sql_repo import _row_to_protocol
+        from zenos.infrastructure.knowledge.sql_protocol_repo import _row_to_protocol
 
         row = _make_row(**self._proto_row())
         proto = _row_to_protocol(row)
@@ -478,7 +478,7 @@ class TestSqlProtocolRepository:
 
     def test_get_by_entity_scopes_to_partner(self):
         """get_by_entity includes partner_id in query."""
-        from zenos.infrastructure.sql_repo import SqlProtocolRepository
+        from zenos.infrastructure.knowledge import SqlProtocolRepository
         import asyncio
 
         pool, conn = _make_pool(fetchrow=None)
@@ -491,8 +491,8 @@ class TestSqlProtocolRepository:
 
     def test_upsert_generates_id_for_new_protocol(self):
         """upsert() with id=None generates a new id."""
-        from zenos.infrastructure.sql_repo import SqlProtocolRepository
-        from zenos.domain.models import Protocol
+        from zenos.infrastructure.knowledge import SqlProtocolRepository
+        from zenos.domain.knowledge import Protocol
         import asyncio
 
         pool, _ = _make_pool()
@@ -505,7 +505,7 @@ class TestSqlProtocolRepository:
 
     def test_list_all_confirmed_only_none_fetches_all(self):
         """list_all(confirmed_only=None) queries without confirmed_by_user filter."""
-        from zenos.infrastructure.sql_repo import SqlProtocolRepository
+        from zenos.infrastructure.knowledge import SqlProtocolRepository
         import asyncio
 
         row = _make_row(**self._proto_row("proto1"))
@@ -523,7 +523,7 @@ class TestSqlProtocolRepository:
 
     def test_list_all_confirmed_only_true_filters_confirmed(self):
         """list_all(confirmed_only=True) adds confirmed_by_user = true filter."""
-        from zenos.infrastructure.sql_repo import SqlProtocolRepository
+        from zenos.infrastructure.knowledge import SqlProtocolRepository
         import asyncio
 
         confirmed_row = {**self._proto_row("proto-confirmed"), "confirmed_by_user": True}
@@ -541,7 +541,7 @@ class TestSqlProtocolRepository:
 
     def test_list_all_confirmed_only_false_filters_unconfirmed(self):
         """list_all(confirmed_only=False) adds confirmed_by_user = false filter."""
-        from zenos.infrastructure.sql_repo import SqlProtocolRepository
+        from zenos.infrastructure.knowledge import SqlProtocolRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[_make_row(**self._proto_row("proto-unconfirmed"))])
@@ -580,7 +580,7 @@ class TestSqlBlindspotRepository:
 
     def test_row_to_blindspot_maps_fields(self):
         """_row_to_blindspot correctly maps all row fields."""
-        from zenos.infrastructure.sql_repo import _row_to_blindspot
+        from zenos.infrastructure.knowledge.sql_blindspot_repo import _row_to_blindspot
 
         row = _make_row(**self._bs_row())
         bs = _row_to_blindspot(row, ["ent1"])
@@ -592,8 +592,8 @@ class TestSqlBlindspotRepository:
 
     def test_add_syncs_blindspot_entities_join_table(self):
         """add() syncs blindspot_entities join table (DELETE + INSERT)."""
-        from zenos.infrastructure.sql_repo import SqlBlindspotRepository
-        from zenos.domain.models import Blindspot
+        from zenos.infrastructure.knowledge import SqlBlindspotRepository
+        from zenos.domain.knowledge import Blindspot
         import asyncio
 
         pool, conn = _make_pool()
@@ -610,7 +610,7 @@ class TestSqlBlindspotRepository:
 
     def test_list_all_with_entity_filter_uses_join(self):
         """list_all(entity_id=...) uses JOIN blindspot_entities."""
-        from zenos.infrastructure.sql_repo import SqlBlindspotRepository
+        from zenos.infrastructure.knowledge import SqlBlindspotRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -623,7 +623,7 @@ class TestSqlBlindspotRepository:
 
     def test_list_all_with_severity_filter(self):
         """list_all(severity=...) includes severity in WHERE."""
-        from zenos.infrastructure.sql_repo import SqlBlindspotRepository
+        from zenos.infrastructure.knowledge import SqlBlindspotRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -635,8 +635,8 @@ class TestSqlBlindspotRepository:
 
     def test_add_generates_id(self):
         """add() with id=None generates a new id."""
-        from zenos.infrastructure.sql_repo import SqlBlindspotRepository
-        from zenos.domain.models import Blindspot
+        from zenos.infrastructure.knowledge import SqlBlindspotRepository
+        from zenos.domain.knowledge import Blindspot
         import asyncio
 
         pool, _ = _make_pool()
@@ -691,7 +691,7 @@ class TestSqlTaskRepository:
 
     def test_row_to_task_maps_linked_and_blocked(self):
         """_row_to_task maps linked_entities and blocked_by from parameters."""
-        from zenos.infrastructure.sql_repo import _row_to_task
+        from zenos.infrastructure.action.sql_task_repo import _row_to_task
 
         row = _make_row(**self._task_row())
         task = _row_to_task(row, ["e1", "e2"], ["task2"])
@@ -702,7 +702,7 @@ class TestSqlTaskRepository:
 
     def test_row_to_task_maps_assignee_role_id(self):
         """_row_to_task reads assignee_role_id from the row."""
-        from zenos.infrastructure.sql_repo import _row_to_task
+        from zenos.infrastructure.action.sql_task_repo import _row_to_task
 
         row_data = self._task_row()
         row_data["assignee_role_id"] = "role-42"
@@ -713,8 +713,8 @@ class TestSqlTaskRepository:
 
     def test_upsert_includes_assignee_role_id_in_sql(self):
         """upsert() INSERT SQL contains assignee_role_id column."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
-        from zenos.domain.models import Task
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
         import asyncio
 
         pool, conn = _make_pool()
@@ -733,7 +733,7 @@ class TestSqlTaskRepository:
 
     def test_get_by_id_fetches_join_tables(self):
         """get_by_id fetches task_entities and task_blockers for the task."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         task_row = _make_row(**self._task_row("task1"))
@@ -748,8 +748,8 @@ class TestSqlTaskRepository:
 
     def test_upsert_syncs_task_entities_and_task_blockers(self):
         """upsert() syncs both task_entities and task_blockers join tables."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
-        from zenos.domain.models import Task
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
         import asyncio
 
         pool, conn = _make_pool()
@@ -767,7 +767,7 @@ class TestSqlTaskRepository:
 
     def test_list_all_with_status_uses_sql_in(self):
         """list_all(status=[...]) uses SQL IN clause instead of client filter."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -783,7 +783,7 @@ class TestSqlTaskRepository:
 
     def test_list_all_with_linked_entity_uses_join(self):
         """list_all(linked_entity=...) joins task_entities."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -798,7 +798,7 @@ class TestSqlTaskRepository:
 
     def test_list_all_excludes_archived_by_default(self):
         """list_all without include_archived excludes archived tasks in SQL."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -810,7 +810,7 @@ class TestSqlTaskRepository:
 
     def test_list_all_with_offset_uses_sql_offset(self):
         """list_all(offset=10) includes OFFSET in the SQL query."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -822,7 +822,7 @@ class TestSqlTaskRepository:
 
     def test_list_all_with_explicit_status_uses_offset(self):
         """list_all with explicit status filter uses OFFSET in SQL."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -836,7 +836,7 @@ class TestSqlTaskRepository:
 
     def test_list_blocked_by_queries_blocker_task_id(self):
         """list_blocked_by queries task_blockers by blocker_task_id."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -849,7 +849,7 @@ class TestSqlTaskRepository:
 
     def test_list_pending_review_filters_review_status(self):
         """list_pending_review filters on status='review' and confirmed_by_creator=false."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
+        from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -863,8 +863,8 @@ class TestSqlTaskRepository:
 
     def test_upsert_new_task_generates_id(self):
         """upsert() with id=None generates a new id."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
-        from zenos.domain.models import Task
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
         import asyncio
 
         pool, _ = _make_pool()
@@ -884,8 +884,8 @@ class TestSqlTaskRepository:
         None (from dashboard API passing body.get() results), causing a NOT NULL
         constraint violation on INSERT.
         """
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
-        from zenos.domain.models import Task, TaskStatus, TaskPriority
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task, TaskPriority, TaskStatus
         import asyncio
 
         pool, conn = _make_pool()
@@ -943,8 +943,8 @@ class TestSqlTaskRepository:
         the caller (task_service.create_task) is responsible for ensuring NOT NULL
         columns are never None before calling upsert.
         """
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
-        from zenos.domain.models import Task, TaskStatus, TaskPriority
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task, TaskPriority, TaskStatus
         import asyncio
 
         pool, conn = _make_pool()
@@ -978,8 +978,8 @@ class TestSqlTaskRepository:
         This is the end-to-end fix verification: TaskService.create_task must
         coerce None to '' for description and project (NOT NULL columns).
         """
-        from zenos.application.task_service import TaskService
-        from zenos.domain.models import Task
+        from zenos.application.action.task_service import TaskService
+        from zenos.domain.action import Task
         from unittest.mock import AsyncMock
         import asyncio
 
@@ -1035,7 +1035,7 @@ class TestSqlPartnerKeyValidator:
     @pytest.mark.asyncio
     async def test_validate_returns_partner_data_for_known_key(self, monkeypatch):
         """validate() returns partner dict for a known API key."""
-        from zenos.infrastructure.sql_repo import SqlPartnerKeyValidator
+        from zenos.infrastructure.identity import SqlPartnerKeyValidator
 
         row = _make_row(
             id="p1", email="a@b.com", display_name="Alice",
@@ -1066,7 +1066,7 @@ class TestSqlPartnerKeyValidator:
     @pytest.mark.asyncio
     async def test_validate_returns_none_for_unknown_key(self, monkeypatch):
         """validate() returns None for an unrecognised key."""
-        from zenos.infrastructure.sql_repo import SqlPartnerKeyValidator
+        from zenos.infrastructure.identity import SqlPartnerKeyValidator
 
         async def mock_refresh(self_inner):
             self_inner._cache = {}
@@ -1081,14 +1081,14 @@ class TestSqlPartnerKeyValidator:
     @pytest.mark.asyncio
     async def test_refresh_cache_queries_active_partners(self, monkeypatch):
         """_refresh_cache queries partners WHERE status = 'active'."""
-        from zenos.infrastructure.sql_repo import SqlPartnerKeyValidator
+        from zenos.infrastructure.identity import SqlPartnerKeyValidator
 
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])
         pool_mock = MagicMock()
         pool_mock.acquire = MagicMock(return_value=_AsyncContextManager(conn))
 
-        with patch("zenos.infrastructure.sql_repo.get_pool", AsyncMock(return_value=pool_mock)):
+        with patch("zenos.infrastructure.identity.sql_partner_key_validator.get_pool", AsyncMock(return_value=pool_mock)):
             validator = SqlPartnerKeyValidator(ttl=300)
             await validator._refresh_cache()
 
@@ -1110,8 +1110,8 @@ class TestCrossTenantAndTransaction:
 
     def test_entity_upsert_cross_partner_blocked(self):
         """Entity upsert SQL contains WHERE partner_id = EXCLUDED.partner_id guard."""
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
-        from zenos.domain.models import Entity, Tags
+        from zenos.infrastructure.knowledge import SqlEntityRepository
+        from zenos.domain.knowledge import Entity, Tags
         import asyncio
 
         pool, conn = _make_pool()
@@ -1127,8 +1127,8 @@ class TestCrossTenantAndTransaction:
 
     def test_document_upsert_uses_transaction(self):
         """Document upsert acquires a transaction wrapping main table + join sync."""
-        from zenos.infrastructure.sql_repo import SqlDocumentRepository
-        from zenos.domain.models import Document, DocumentTags, Source
+        from zenos.infrastructure.knowledge import SqlDocumentRepository
+        from zenos.domain.knowledge import Document, DocumentTags, Source
         import asyncio
 
         pool, conn = _make_pool()
@@ -1146,8 +1146,8 @@ class TestCrossTenantAndTransaction:
 
     def test_task_upsert_uses_transaction(self):
         """Task upsert acquires a transaction wrapping main table + join syncs."""
-        from zenos.infrastructure.sql_repo import SqlTaskRepository
-        from zenos.domain.models import Task
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
         import asyncio
 
         pool, conn = _make_pool()
@@ -1164,8 +1164,8 @@ class TestCrossTenantAndTransaction:
 
     def test_blindspot_add_uses_transaction(self):
         """Blindspot add acquires a transaction wrapping main table + join sync."""
-        from zenos.infrastructure.sql_repo import SqlBlindspotRepository
-        from zenos.domain.models import Blindspot
+        from zenos.infrastructure.knowledge import SqlBlindspotRepository
+        from zenos.domain.knowledge import Blindspot
         import asyncio
 
         pool, conn = _make_pool()
@@ -1209,8 +1209,8 @@ class TestSqlEntityEntryRepository:
 
     def test_create_inserts_and_returns_entry(self, monkeypatch):
         """create() inserts row and returns the entry with partner_id scoping."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
-        from zenos.domain.models import EntityEntry
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
+        from zenos.domain.knowledge import EntityEntry
         import asyncio
 
         pool, conn = _make_pool()
@@ -1234,7 +1234,7 @@ class TestSqlEntityEntryRepository:
 
     def test_get_by_id_returns_entry_when_found(self, monkeypatch):
         """get_by_id maps row to EntityEntry domain model with partner_id scoping."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
         import asyncio
 
         row = _make_row(**self._entry_row("entry1"))
@@ -1255,7 +1255,7 @@ class TestSqlEntityEntryRepository:
 
     def test_get_by_id_returns_none_when_missing(self):
         """get_by_id returns None when row not found."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
         import asyncio
 
         pool, _ = _make_pool(fetchrow=None)
@@ -1265,7 +1265,7 @@ class TestSqlEntityEntryRepository:
 
     def test_list_by_entity_filters_by_active_status_by_default(self, monkeypatch):
         """list_by_entity default status='active' adds status filter to SQL."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
         import asyncio
 
         row = _make_row(**self._entry_row("entry1"))
@@ -1282,7 +1282,7 @@ class TestSqlEntityEntryRepository:
 
     def test_list_by_entity_with_status_none_omits_status_filter(self, monkeypatch):
         """list_by_entity(status=None) fetches all statuses for an entity."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
         import asyncio
 
         pool, conn = _make_pool(fetch=[])
@@ -1296,7 +1296,7 @@ class TestSqlEntityEntryRepository:
 
     def test_update_status_returns_updated_entry(self, monkeypatch):
         """update_status issues UPDATE...RETURNING and maps result to EntityEntry."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
         import asyncio
 
         updated_row_data = self._entry_row("entry1")
@@ -1320,7 +1320,7 @@ class TestSqlEntityEntryRepository:
 
     def test_update_status_returns_none_when_not_found(self):
         """update_status returns None when entry not found."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
         import asyncio
 
         pool, _ = _make_pool(fetchrow=None)
@@ -1332,7 +1332,7 @@ class TestSqlEntityEntryRepository:
 
     def test_search_content_returns_entries_with_entity_name(self, monkeypatch):
         """search_content JOINs entities table and returns entity_name context."""
-        from zenos.infrastructure.sql_repo import SqlEntityEntryRepository
+        from zenos.infrastructure.knowledge import SqlEntityEntryRepository
         import asyncio
 
         row_data = self._entry_row("entry1")
@@ -1364,7 +1364,7 @@ class TestSqlUsageLogRepository:
 
     def test_writes_usage_log_row(self):
         """write_usage_log executes INSERT with correct column mapping."""
-        from zenos.infrastructure.sql_repo import SqlUsageLogRepository
+        from zenos.infrastructure.agent import SqlUsageLogRepository
         import asyncio
 
         pool, conn = _make_pool(execute="INSERT 0 1")
@@ -1391,7 +1391,7 @@ class TestSqlUsageLogRepository:
 
     def test_skips_insert_for_empty_partner_id(self):
         """write_usage_log silently returns without querying when partner_id is empty."""
-        from zenos.infrastructure.sql_repo import SqlUsageLogRepository
+        from zenos.infrastructure.agent import SqlUsageLogRepository
         import asyncio
 
         pool, conn = _make_pool()
@@ -1410,7 +1410,7 @@ class TestSqlUsageLogRepository:
 
     def test_skips_insert_for_none_partner_id(self):
         """write_usage_log treats None as empty and skips the INSERT."""
-        from zenos.infrastructure.sql_repo import SqlUsageLogRepository
+        from zenos.infrastructure.agent import SqlUsageLogRepository
         import asyncio
 
         pool, conn = _make_pool()
@@ -1461,7 +1461,7 @@ class TestSqlPartnerRepository:
 
     def test_get_by_email_returns_partner_dict(self):
         """get_by_email fetches by email and maps row to standardized dict."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         row = _make_partner_row(email="alice@test.com", id="p-alice")
@@ -1482,7 +1482,7 @@ class TestSqlPartnerRepository:
 
     def test_get_by_email_normalizes_case_and_whitespace(self):
         """get_by_email uses normalized comparison instead of exact raw equality."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         row = _make_partner_row(email="alice@test.com", id="p-alice")
@@ -1500,7 +1500,7 @@ class TestSqlPartnerRepository:
 
     def test_get_by_email_returns_none_when_missing(self):
         """get_by_email returns None when no partner matches."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, conn = _make_pool(fetchrow=None)
@@ -1514,7 +1514,7 @@ class TestSqlPartnerRepository:
 
     def test_get_by_id_returns_partner_dict(self):
         """get_by_id fetches by ID and maps row to standardized dict."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         row = _make_partner_row(id="p2", email="bob@test.com", is_admin=True)
@@ -1532,7 +1532,7 @@ class TestSqlPartnerRepository:
 
     def test_get_by_id_returns_none_when_missing(self):
         """get_by_id returns None when partner not found."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, _ = _make_pool(fetchrow=None)
@@ -1542,7 +1542,7 @@ class TestSqlPartnerRepository:
 
     def test_list_all_in_tenant_filters_by_tenant_key(self):
         """list_all_in_tenant returns only partners whose tenant key matches."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         # p1 is the admin (no shared_partner_id → tenant key == id == "p1")
@@ -1564,7 +1564,7 @@ class TestSqlPartnerRepository:
 
     def test_create_inserts_partner_row(self):
         """create executes INSERT with all required fields."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, conn = _make_pool(execute="INSERT 0 1")
@@ -1592,7 +1592,7 @@ class TestSqlPartnerRepository:
 
     def test_update_fields_builds_correct_set_clause(self):
         """update_fields generates SET clause only for provided keys."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, conn = _make_pool(execute="UPDATE 1")
@@ -1610,7 +1610,7 @@ class TestSqlPartnerRepository:
 
     def test_update_fields_skips_empty_dict(self):
         """update_fields is a no-op when fields dict is empty."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, conn = _make_pool()
@@ -1628,7 +1628,7 @@ class TestSqlPartnerRepository:
         6. Delete the partner row
         All steps execute inside a single transaction via conn.execute.
         """
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, conn = _make_pool(execute="DELETE 1")
@@ -1651,7 +1651,7 @@ class TestSqlPartnerRepository:
 
     def test_get_entity_tenant_returns_partner_info(self):
         """get_entity_tenant JOINs entities+partners and returns tenant data."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         row = _make_row(partner_id="p1", shared_partner_id=None)
@@ -1670,7 +1670,7 @@ class TestSqlPartnerRepository:
 
     def test_get_entity_tenant_returns_none_when_not_found(self):
         """get_entity_tenant returns None when entity does not exist."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, _ = _make_pool(fetchrow=None)
@@ -1682,7 +1682,7 @@ class TestSqlPartnerRepository:
 
     def test_update_entity_visibility_executes_update(self):
         """update_entity_visibility issues UPDATE on entities table."""
-        from zenos.infrastructure.sql_repo import SqlPartnerRepository
+        from zenos.infrastructure.identity import SqlPartnerRepository
         import asyncio
 
         pool, conn = _make_pool(execute="UPDATE 1")
@@ -1712,7 +1712,7 @@ class TestGovernanceHealthCache:
 
     def test_get_cached_health_returns_none_when_no_row(self):
         """get_cached_health returns None when cache miss."""
-        from zenos.infrastructure.sql_repo import get_cached_health
+        from zenos.infrastructure.sql_common import get_cached_health
 
         pool, _conn = _make_pool(fetchrow=None)
         import asyncio
@@ -1723,7 +1723,7 @@ class TestGovernanceHealthCache:
 
     def test_get_cached_health_returns_dict_when_row_exists(self):
         """get_cached_health returns {overall_level, computed_at} on hit."""
-        from zenos.infrastructure.sql_repo import get_cached_health
+        from zenos.infrastructure.sql_common import get_cached_health
 
         row = _make_row(overall_level="yellow", computed_at=NOW)
         pool, conn = _make_pool(fetchrow=row)
@@ -1739,7 +1739,7 @@ class TestGovernanceHealthCache:
 
     def test_upsert_health_cache_executes_upsert_sql(self):
         """upsert_health_cache runs INSERT ... ON CONFLICT DO UPDATE."""
-        from zenos.infrastructure.sql_repo import upsert_health_cache
+        from zenos.infrastructure.sql_common import upsert_health_cache
 
         pool, conn = _make_pool()
         import asyncio
@@ -1755,7 +1755,7 @@ class TestGovernanceHealthCache:
 
     def test_upsert_health_cache_overwrites_existing(self):
         """Calling upsert twice uses same SQL (ON CONFLICT handles update)."""
-        from zenos.infrastructure.sql_repo import upsert_health_cache
+        from zenos.infrastructure.sql_common import upsert_health_cache
 
         pool, conn = _make_pool()
         import asyncio

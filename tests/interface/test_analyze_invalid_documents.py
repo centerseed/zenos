@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 
 from zenos.domain.governance import detect_invalid_document_titles
-from zenos.domain.models import Entity, EntityType, Tags
+from zenos.domain.knowledge import Entity, EntityType, Tags
 from zenos.domain.source_uri_validator import GITHUB_BLOB_PATTERN
 
 

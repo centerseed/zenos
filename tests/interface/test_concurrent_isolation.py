@@ -18,7 +18,7 @@ from zenos.infrastructure.context import (
     current_partner_is_admin,
     current_partner_authorized_entity_ids,
 )
-from zenos.interface.tools import ApiKeyMiddleware
+from zenos.interface.mcp import ApiKeyMiddleware
 
 # ---------------------------------------------------------------------------
 # Test partners
@@ -131,7 +131,7 @@ class TestConcurrentContextVarIsolation:
         inner = _make_capturing_app(captures)
         middleware = ApiKeyMiddleware(inner)
 
-        with patch("zenos.interface.tools._partner_validator") as mock_validator:
+        with patch("zenos.interface.mcp._auth._partner_validator") as mock_validator:
             mock_validator.validate = AsyncMock(side_effect=_mock_validate)
 
             scope_a = _build_scope(PARTNER_A["apiKey"])
@@ -166,7 +166,7 @@ class TestConcurrentContextVarIsolation:
         inner = _make_capturing_app(captures)
         middleware = ApiKeyMiddleware(inner)
 
-        with patch("zenos.interface.tools._partner_validator") as mock_validator:
+        with patch("zenos.interface.mcp._auth._partner_validator") as mock_validator:
             mock_validator.validate = AsyncMock(side_effect=_mock_validate)
             scope_a = _build_scope(PARTNER_A["apiKey"])
             await _dispatch(middleware, scope_a, captures)
@@ -186,7 +186,7 @@ class TestConcurrentContextVarIsolation:
 
         middleware = ApiKeyMiddleware(raising_inner)
 
-        with patch("zenos.interface.tools._partner_validator") as mock_validator:
+        with patch("zenos.interface.mcp._auth._partner_validator") as mock_validator:
             mock_validator.validate = AsyncMock(side_effect=_mock_validate)
             scope_a = _build_scope(PARTNER_A["apiKey"])
 
@@ -206,7 +206,7 @@ class TestConcurrentContextVarIsolation:
         inner = _make_capturing_app(captures)
         middleware = ApiKeyMiddleware(inner)
 
-        with patch("zenos.interface.tools._partner_validator") as mock_validator:
+        with patch("zenos.interface.mcp._auth._partner_validator") as mock_validator:
             mock_validator.validate = AsyncMock(side_effect=_mock_validate)
 
             # First: authenticated request from Partner A

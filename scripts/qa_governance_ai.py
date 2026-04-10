@@ -26,9 +26,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from dotenv import load_dotenv
 load_dotenv()
 
-from zenos.application.governance_ai import GovernanceAI, GovernanceInference
-from zenos.application.ontology_service import OntologyService
-from zenos.application.task_service import TaskService
+from zenos.application.knowledge.governance_ai import GovernanceAI, GovernanceInference
+from zenos.application.knowledge.ontology_service import OntologyService
+from zenos.application.action.task_service import TaskService
 from zenos.infrastructure.llm_client import LLMClient, create_llm_client
 from zenos.infrastructure.firestore_repo import (
     FirestoreBlindspotRepository,
@@ -251,7 +251,7 @@ async def test_p0_3():
     # 3.3 Confirmed entity not overwritten
     print("  [....] Testing confirmed entity protection...")
     # First confirm the product
-    from zenos.domain.models import Entity, Tags
+    from zenos.domain.knowledge import Entity, Tags
     confirmed = await entity_repo.get_by_id(product_id)
     if confirmed:
         confirmed.confirmed_by_user = True

@@ -12,9 +12,9 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
-from zenos.domain.models import Entity, EntityType, Tags, SourceType
+from zenos.domain.knowledge import Entity, EntityType, SourceType, Tags
 from zenos.domain.search import search_ontology
-from zenos.application.source_service import SourceService
+from zenos.application.knowledge.source_service import SourceService
 
 
 # ---------------------------------------------------------------------------
@@ -33,7 +33,7 @@ def _make_entity_repo():
 
 def _make_service(entity_repo=None):
     """Create an OntologyService with mocked repos."""
-    from zenos.application.ontology_service import OntologyService
+    from zenos.application.knowledge.ontology_service import OntologyService
 
     entity_repo = entity_repo or _make_entity_repo()
     doc_repo = AsyncMock()

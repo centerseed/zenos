@@ -38,6 +38,16 @@ def _make_journal_repo(
     return repo
 
 
+def _make_partner_ctx(partner_id: str = _PARTNER_ID, partner_data: dict | None = None):
+    """Build mock context vars for _current_partner_id and _current_partner."""
+    mock_pid = MagicMock()
+    mock_pid.get = MagicMock(return_value=partner_id)
+
+    mock_partner = MagicMock()
+    mock_partner.get = MagicMock(return_value=partner_data or {"id": partner_id, "defaultProject": ""})
+    return mock_pid, mock_partner
+
+
 # ---------------------------------------------------------------------------
 # journal_write
 # ---------------------------------------------------------------------------
@@ -45,19 +55,18 @@ def _make_journal_repo(
 
 async def test_journal_write_returns_ok_status():
     """journal_write returns status=ok with id and created_at fields."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_write
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "datetime") as mock_dt,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_dt.now.return_value = _FIXED_TS
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        result = await tools.journal_write(summary="feature done")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_write(summary="feature done")
 
     assert result["status"] == "ok"
     assert "id" in result["data"]
@@ -67,20 +76,19 @@ async def test_journal_write_returns_ok_status():
 
 async def test_journal_write_truncates_summary_to_100_chars():
     """journal_write silently truncates summary exceeding 100 chars."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_write
 
     long_summary = "x" * 200
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "datetime") as mock_dt,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_dt.now.return_value = _FIXED_TS
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        await tools.journal_write(summary=long_summary)
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_write(summary=long_summary)
 
     # The summary passed to repo.create must be at most 100 chars
     call_kwargs = repo.create.call_args[1]
@@ -89,21 +97,20 @@ async def test_journal_write_truncates_summary_to_100_chars():
 
 async def test_journal_write_triggers_compress_when_over_20():
     """journal_write calls _compress_journal when count > 20."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_write
 
     repo = _make_journal_repo(count_return=21)
     compress_mock = AsyncMock()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_compress_journal", compress_mock),
-        patch.object(tools, "datetime") as mock_dt,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_dt.now.return_value = _FIXED_TS
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        result = await tools.journal_write(summary="another entry")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.interface.mcp._compress_journal", compress_mock),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_write(summary="another entry")
 
     compress_mock.assert_awaited_once_with(_PARTNER_ID)
     assert result["data"]["compressed"] is True
@@ -111,21 +118,20 @@ async def test_journal_write_triggers_compress_when_over_20():
 
 async def test_journal_write_does_not_compress_when_under_or_equal_20():
     """journal_write does not trigger compression when count <= 20."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_write
 
     repo = _make_journal_repo(count_return=20)
     compress_mock = AsyncMock()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_compress_journal", compress_mock),
-        patch.object(tools, "datetime") as mock_dt,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_dt.now.return_value = _FIXED_TS
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        result = await tools.journal_write(summary="another entry")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.interface.mcp._compress_journal", compress_mock),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_write(summary="another entry")
 
     compress_mock.assert_not_awaited()
     assert result["data"]["compressed"] is False
@@ -138,7 +144,7 @@ async def test_journal_write_does_not_compress_when_under_or_equal_20():
 
 async def test_journal_read_returns_entries_and_total():
     """journal_read returns entries, count, and total in data."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_read
 
     entry = {
         "id": "e1",
@@ -150,14 +156,15 @@ async def test_journal_read_returns_entries_and_total():
         "is_summary": False,
     }
     repo = _make_journal_repo(list_recent_return=([entry], 5))
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        result = await tools.journal_read(limit=10)
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_read(limit=10)
 
     assert result["status"] == "ok"
     assert result["data"]["total"] == 5
@@ -168,17 +175,18 @@ async def test_journal_read_returns_entries_and_total():
 
 async def test_journal_read_clamps_limit_to_50():
     """journal_read enforces limit <= 50."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_read
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        await tools.journal_read(limit=999)
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_read(limit=999)
 
     call_kwargs = repo.list_recent.call_args[1]
     assert call_kwargs["limit"] == 50
@@ -186,17 +194,18 @@ async def test_journal_read_clamps_limit_to_50():
 
 async def test_journal_read_passes_project_filter():
     """journal_read passes project filter to repository."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_read
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        await tools.journal_read(limit=10, project="ZenOS")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_read(limit=10, project="ZenOS")
 
     call_kwargs = repo.list_recent.call_args[1]
     assert call_kwargs["project"] == "ZenOS"
@@ -204,7 +213,7 @@ async def test_journal_read_passes_project_filter():
 
 async def test_journal_read_serializes_datetime_to_string():
     """journal_read converts created_at datetime to ISO string."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_read
 
     entry = {
         "id": "e1",
@@ -216,14 +225,15 @@ async def test_journal_read_serializes_datetime_to_string():
         "is_summary": False,
     }
     repo = _make_journal_repo(list_recent_return=([entry], 1))
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
+    mock_pid, mock_partner = _make_partner_ctx()
 
-        result = await tools.journal_read()
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_read()
 
     created_at = result["data"]["entries"][0]["created_at"]
     assert isinstance(created_at, str)
@@ -240,21 +250,18 @@ _PARTNER_NO_DEFAULT = {"id": _PARTNER_ID}
 
 async def test_journal_write_autofills_default_project():
     """journal_write uses partner defaultProject when project not passed."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_write
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_current_partner") as mock_partner,
-        patch.object(tools, "datetime") as mock_dt,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
-        mock_dt.now.return_value = _FIXED_TS
+    mock_pid, mock_partner = _make_partner_ctx(partner_data=_PARTNER_WITH_DEFAULT)
 
-        await tools.journal_write(summary="test auto-fill")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_write(summary="test auto-fill")
 
     call_kwargs = repo.create.call_args[1]
     assert call_kwargs["project"] == "zenos"
@@ -262,21 +269,18 @@ async def test_journal_write_autofills_default_project():
 
 async def test_journal_write_explicit_project_overrides_default():
     """journal_write uses explicit project even when defaultProject exists."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_write
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_current_partner") as mock_partner,
-        patch.object(tools, "datetime") as mock_dt,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
-        mock_dt.now.return_value = _FIXED_TS
+    mock_pid, mock_partner = _make_partner_ctx(partner_data=_PARTNER_WITH_DEFAULT)
 
-        await tools.journal_write(summary="override test", project="paceriz")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_write(summary="override test", project="paceriz")
 
     call_kwargs = repo.create.call_args[1]
     assert call_kwargs["project"] == "paceriz"
@@ -284,21 +288,18 @@ async def test_journal_write_explicit_project_overrides_default():
 
 async def test_journal_write_no_default_project_passes_none():
     """journal_write passes None when partner has no defaultProject and caller omits project."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_write
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_current_partner") as mock_partner,
-        patch.object(tools, "datetime") as mock_dt,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_partner.get.return_value = _PARTNER_NO_DEFAULT
-        mock_dt.now.return_value = _FIXED_TS
+    mock_pid, mock_partner = _make_partner_ctx(partner_data=_PARTNER_NO_DEFAULT)
 
-        await tools.journal_write(summary="no default")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_write(summary="no default")
 
     call_kwargs = repo.create.call_args[1]
     assert call_kwargs["project"] is None
@@ -306,19 +307,18 @@ async def test_journal_write_no_default_project_passes_none():
 
 async def test_journal_read_autofills_default_project():
     """journal_read uses partner defaultProject when project not passed."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_read
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_current_partner") as mock_partner,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
+    mock_pid, mock_partner = _make_partner_ctx(partner_data=_PARTNER_WITH_DEFAULT)
 
-        await tools.journal_read()
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_read()
 
     call_kwargs = repo.list_recent.call_args[1]
     assert call_kwargs["project"] == "zenos"
@@ -326,19 +326,18 @@ async def test_journal_read_autofills_default_project():
 
 async def test_journal_read_explicit_project_overrides_default():
     """journal_read uses explicit project even when defaultProject exists."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_read
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_current_partner") as mock_partner,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_partner.get.return_value = _PARTNER_WITH_DEFAULT
+    mock_pid, mock_partner = _make_partner_ctx(partner_data=_PARTNER_WITH_DEFAULT)
 
-        await tools.journal_read(project="paceriz")
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_read(project="paceriz")
 
     call_kwargs = repo.list_recent.call_args[1]
     assert call_kwargs["project"] == "paceriz"
@@ -346,19 +345,18 @@ async def test_journal_read_explicit_project_overrides_default():
 
 async def test_journal_read_no_default_project_passes_none():
     """journal_read passes None when partner has no defaultProject and caller omits project."""
-    import zenos.interface.tools as tools
+    from zenos.interface.mcp.journal import journal_read
 
     repo = _make_journal_repo()
-    with (
-        patch.object(tools, "_journal_repo", repo),
-        patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-        patch.object(tools, "_current_partner_id") as mock_pid,
-        patch.object(tools, "_current_partner") as mock_partner,
-    ):
-        mock_pid.get.return_value = _PARTNER_ID
-        mock_partner.get.return_value = _PARTNER_NO_DEFAULT
+    mock_pid, mock_partner = _make_partner_ctx(partner_data=_PARTNER_NO_DEFAULT)
 
-        await tools.journal_read()
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_read()
 
     call_kwargs = repo.list_recent.call_args[1]
     assert call_kwargs["project"] is None

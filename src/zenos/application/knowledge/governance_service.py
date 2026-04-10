@@ -32,21 +32,9 @@ from zenos.domain.governance import (
     find_stale_l2_downstream_entities,
     run_quality_check,
 )
-from zenos.domain.models import (
-    Blindspot,
-    Entity,
-    EntityType,
-    QualityCheckItem,
-    QualityReport,
-    Severity,
-    StalenessWarning,
-)
-from zenos.domain.repositories import (
-    BlindspotRepository,
-    EntityRepository,
-    ProtocolRepository,
-    RelationshipRepository,
-)
+from zenos.domain.knowledge import Blindspot, Entity, EntityType, Severity
+from zenos.domain.shared import QualityCheckItem, QualityReport, StalenessWarning
+from zenos.domain.knowledge import BlindspotRepository, EntityRepository, ProtocolRepository, RelationshipRepository
 
 logger = logging.getLogger(__name__)
 

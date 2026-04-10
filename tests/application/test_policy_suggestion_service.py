@@ -8,8 +8,8 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock
 
-from zenos.application.policy_suggestion_service import PolicySuggestionService
-from zenos.domain.models import Entity, Tags
+from zenos.application.identity.policy_suggestion_service import PolicySuggestionService
+from zenos.domain.knowledge import Entity, Tags
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

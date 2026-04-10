@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from zenos.application.source_service import SourceService
-from zenos.domain.models import Entity, EntityStatus, Tags
+from zenos.application.knowledge.source_service import SourceService
+from zenos.domain.knowledge import Entity, EntityStatus, Tags
 
 
 # ---------------------------------------------------------------------------
@@ -61,6 +61,19 @@ class _StubSourceAdapter:
 
     async def read_content(self, uri: str) -> str:
         return self._content
+
+
+class _RaisingSourceAdapter:
+    """Raises a fixed exception for any URI."""
+
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    async def read_content(self, uri: str) -> str:
+        raise self._exc
+
+    async def search_alternatives_for_uri(self, uri: str) -> list[str]:
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -242,3 +255,31 @@ async def test_read_source_without_source_uri_reads_first():
 
     assert result == "content of first-uri.md"
     assert adapter.read_uris == ["first-uri.md"]
+
+
+@pytest.mark.asyncio
+async def test_read_source_with_recovery_honors_source_status_alias():
+    """Recovery path reads source_status when legacy status key is absent."""
+    entity = Entity(
+        id="uuid-012",
+        name="Alias Status Doc",
+        type="document",
+        summary="doc with canonical source_status only",
+        tags=Tags(what=["test"], why="testing", how="unit", who=["dev"]),
+        sources=[
+            {
+                "source_id": "src-1",
+                "uri": "missing.md",
+                "label": "missing",
+                "type": "github",
+                "source_status": "unresolvable",
+            }
+        ],
+    )
+    repo = _StubEntityRepo([entity])
+    adapter = _RaisingSourceAdapter(FileNotFoundError("gone"))
+    svc = SourceService(entity_repo=repo, source_adapter=adapter)
+
+    result = await svc.read_source_with_recovery("uuid-012")
+
+    assert result == {"error": "ALREADY_UNRESOLVABLE"}

@@ -8,8 +8,9 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock
 
-from zenos.application.permission_risk_service import PermissionRiskService
-from zenos.domain.models import Entity, Tags, Task, TaskStatus, TaskPriority
+from zenos.application.identity.permission_risk_service import PermissionRiskService
+from zenos.domain.action import Task, TaskPriority, TaskStatus
+from zenos.domain.knowledge import Entity, Tags
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

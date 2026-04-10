@@ -4,21 +4,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from zenos.domain.models import (
-    Document,
-    DocumentTags,
-    Entity,
-    EntityStatus,
-    EntityType,
-    Gap,
-    Protocol,
-    Severity,
-    Source,
-    SourceType,
-    Tags,
-)
+from zenos.domain.knowledge import Document, DocumentTags, Entity, EntityStatus, EntityType, Gap, Protocol, Severity, Source, SourceType, Tags
 from zenos.domain.search import SearchResult, search_ontology, _tokenize, _score_match
-from zenos.application.ontology_service import _collect_subtree_ids, _build_ancestors
+from zenos.application.knowledge.ontology_service import _collect_subtree_ids, _build_ancestors
 
 
 # ──────────────────────────────────────────────

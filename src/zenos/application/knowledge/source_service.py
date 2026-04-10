@@ -6,8 +6,13 @@ by resolving the source URI through the appropriate adapter.
 
 from __future__ import annotations
 
-from zenos.domain.models import SourceType
-from zenos.domain.repositories import EntityRepository, SourceAdapter
+from zenos.domain.knowledge import SourceType
+from zenos.domain.knowledge import EntityRepository, SourceAdapter
+
+
+def _source_status(source: dict) -> str:
+    """Return the effective status for a source dict."""
+    return str(source.get("source_status") or source.get("status") or "valid")
 
 
 class SourceService:
@@ -116,7 +121,7 @@ class SourceService:
             source = entity.sources[0]
         uri = source.get("uri", "") if not source_uri else source_uri
         source_type = source.get("type", "")
-        current_status = source.get("status", "valid")
+        current_status = _source_status(source)
 
         # Short-circuit if already unresolvable — don't call external APIs
         if current_status == "unresolvable":
@@ -153,7 +158,7 @@ class SourceService:
             return True
         # For index docs, archive only when ALL sources are unresolvable
         for src in (entity.sources or []):
-            if src.get("status", "valid") != "unresolvable":
+            if _source_status(src) != "unresolvable":
                 return False
         return True
 

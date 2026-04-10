@@ -208,9 +208,9 @@ class TestPartnerDataScope:
           4. Admin sets current_partner_id = admin.id
           5. Admin reads list_all() → entity is found
         """
-        from zenos.domain.models import Entity, Tags
+        from zenos.domain.knowledge import Entity, Tags
         from zenos.infrastructure.context import current_partner_id
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
 
         pool, store = _make_stateful_pool()
         repo = SqlEntityRepository(pool)
@@ -262,9 +262,9 @@ class TestPartnerDataScope:
         This confirms scoping works correctly: data written under ISOLATED_ID
         does not appear in admin's list_all().
         """
-        from zenos.domain.models import Entity, Tags
+        from zenos.domain.knowledge import Entity, Tags
         from zenos.infrastructure.context import current_partner_id
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
 
         pool, store = _make_stateful_pool()
         repo = SqlEntityRepository(pool)
@@ -305,9 +305,9 @@ class TestPartnerDataScope:
         Verifies that SqlEntityRepository.upsert passes whatever value is in
         current_partner_id directly to the SQL INSERT as the partner_id column.
         """
-        from zenos.domain.models import Entity, Tags
+        from zenos.domain.knowledge import Entity, Tags
         from zenos.infrastructure.context import current_partner_id
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
 
         pool, store = _make_stateful_pool()
         repo = SqlEntityRepository(pool)
@@ -341,9 +341,9 @@ class TestPartnerDataScope:
         Directly inspects the mock conn.execute call arguments to confirm
         the partner_id positional parameter equals what was set in the ContextVar.
         """
-        from zenos.domain.models import Entity, Tags
+        from zenos.domain.knowledge import Entity, Tags
         from zenos.infrastructure.context import current_partner_id
-        from zenos.infrastructure.sql_repo import SqlEntityRepository
+        from zenos.infrastructure.knowledge import SqlEntityRepository
 
         pool, store = _make_stateful_pool()
 

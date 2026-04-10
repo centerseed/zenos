@@ -14,8 +14,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from zenos.application.ontology_service import UpsertEntityResult
-from zenos.domain.models import Blindspot, Entity, Tags, Task
+from zenos.application.knowledge.ontology_service import UpsertEntityResult
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Blindspot, Entity, Tags
 from zenos.infrastructure.context import current_partner_department, current_partner_roles
 
 
@@ -415,14 +416,14 @@ class _McpPartnerContext:
         self._tokens = []
 
     def __enter__(self):
-        from zenos.interface.tools import _current_partner
+        from zenos.interface.mcp import _current_partner
         self._tokens.append(("partner", _current_partner.set(self.partner)))
         self._tokens.append(("roles", current_partner_roles.set(self.partner.get("roles", []))))
         self._tokens.append(("dept", current_partner_department.set(self.partner.get("department", "all"))))
         return self
 
     def __exit__(self, *args):
-        from zenos.interface.tools import _current_partner
+        from zenos.interface.mcp import _current_partner
         for name, token in reversed(self._tokens):
             if name == "partner":
                 _current_partner.reset(token)
@@ -434,11 +435,11 @@ class _McpPartnerContext:
 
 @pytest.fixture(autouse=True)
 def _mock_mcp_bootstrap():
-    with patch("zenos.interface.tools._ensure_services", new=AsyncMock(return_value=None)), \
-         patch("zenos.interface.tools.ontology_service", new=AsyncMock()), \
-         patch("zenos.interface.tools.task_service", new=AsyncMock()), \
-         patch("zenos.interface.tools.entity_repo", new=AsyncMock()), \
-         patch("zenos.interface.tools.entry_repo", new=AsyncMock()):
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.ontology_service", new=AsyncMock()), \
+         patch("zenos.interface.mcp.task_service", new=AsyncMock()), \
+         patch("zenos.interface.mcp.entity_repo", new=AsyncMock()), \
+         patch("zenos.interface.mcp.entry_repo", new=AsyncMock()):
         yield
 
 
@@ -448,11 +449,11 @@ class TestMcpTaskIsolation:
 
     async def test_finance_member_can_search_restricted_tasks(self):
         """Finance member can see restricted tasks in their department (SPEC §4.1 + department filter)."""
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(FINANCE_PARTNER):
-            with patch("zenos.interface.tools.task_service") as mock_ts, \
-                 patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.task_service") as mock_ts, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=ALL_TASKS)
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_entity_get_by_id)
                 result = await search(collection="tasks")
@@ -463,11 +464,11 @@ class TestMcpTaskIsolation:
         assert "task-confidential" not in task_ids
 
     async def test_admin_sees_all_via_mcp(self):
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(ADMIN_PARTNER):
-            with patch("zenos.interface.tools.task_service") as mock_ts, \
-                 patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.task_service") as mock_ts, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=ALL_TASKS)
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_entity_get_by_id)
                 result = await search(collection="tasks")
@@ -476,10 +477,10 @@ class TestMcpTaskIsolation:
         assert len(task_ids) == 4
 
     async def test_mcp_write_blocked_for_invisible_entity(self):
-        from zenos.interface.tools import write
+        from zenos.interface.mcp import write
 
         with _McpPartnerContext(MARKETING_PARTNER):
-            with patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_repo.get_by_id = AsyncMock(return_value=CONFIDENTIAL_ENTITY)
                 mock_repo.get_by_name = AsyncMock(return_value=CONFIDENTIAL_ENTITY)
                 result = await write(
@@ -503,13 +504,13 @@ class TestCrossLayerConsistency:
         Uses FINANCE_PARTNER to test restricted visibility: finance dept passes the department
         filter on ent-restricted (visible_to_departments=['finance']).
         """
-        from zenos.interface.tools import search as mcp_search
+        from zenos.interface.mcp import search as mcp_search
         from zenos.interface.dashboard_api import list_tasks as api_list_tasks
 
         # MCP layer
         with _McpPartnerContext(FINANCE_PARTNER):
-            with patch("zenos.interface.tools.task_service") as mock_ts, \
-                 patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.task_service") as mock_ts, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=ALL_TASKS)
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_entity_get_by_id)
                 mcp_result = await mcp_search(collection="tasks")
@@ -701,11 +702,11 @@ class TestScopedPartnerBlindspotIsolation:
 
     async def test_mcp_scoped_partner_sees_no_blindspots(self):
         """DC-7: MCP search(collection='blindspots') returns empty for scoped partner."""
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(SCOPED_PARTNER):
-            with patch("zenos.interface.tools.ontology_service") as mock_os, \
-                 patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_os.list_blindspots = AsyncMock(return_value=ALL_BLINDSPOTS)
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_scoped_entity_get_by_id)
                 result = await search(collection="blindspots")
@@ -713,10 +714,10 @@ class TestScopedPartnerBlindspotIsolation:
         assert result["blindspots"] == [], "Scoped partner should see no blindspots via MCP"
 
     async def test_mcp_unassigned_partner_sees_no_blindspots(self):
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(UNASSIGNED_PARTNER):
-            with patch("zenos.interface.tools.ontology_service") as mock_os:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os:
                 mock_os.list_blindspots = AsyncMock(return_value=ALL_BLINDSPOTS)
                 result = await search(collection="blindspots")
 
@@ -751,11 +752,11 @@ class TestScopedPartnerTaskIsolation:
 
     async def test_mcp_scoped_partner_task_isolation(self):
         """DC-5/DC-8 partial: MCP search(collection='tasks') filters for scoped partner."""
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(SCOPED_PARTNER):
-            with patch("zenos.interface.tools.task_service") as mock_ts, \
-                 patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.task_service") as mock_ts, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=ALL_SCOPED_TASKS)
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_scoped_entity_get_by_id)
                 mock_repo.list_all = AsyncMock(return_value=list(SCOPED_ALL_ENTITIES))
@@ -782,10 +783,10 @@ class TestScopedPartnerTaskIsolation:
         assert body["tasks"] == []
 
     async def test_mcp_unassigned_partner_sees_no_tasks(self):
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(UNASSIGNED_PARTNER):
-            with patch("zenos.interface.tools.task_service") as mock_ts:
+            with patch("zenos.interface.mcp.task_service") as mock_ts:
                 mock_ts.list_tasks = AsyncMock(return_value=ALL_SCOPED_TASKS)
                 result = await search(collection="tasks")
 
@@ -844,7 +845,7 @@ class TestLegacyRoleRestrictedCompatibility:
 
     async def test_legacy_role_restricted_visible_to_member(self):
         """Legacy role-restricted normalizes to restricted, which members can see (SPEC §4.1)."""
-        from zenos.application.ontology_service import OntologyService
+        from zenos.application.knowledge.ontology_service import OntologyService
 
         role_restricted = _make_entity(
             id="ent-role",
@@ -864,7 +865,7 @@ class TestLegacyRoleRestrictedCompatibility:
 
     async def test_legacy_role_restricted_visible_to_non_matching_member(self):
         """Legacy role-restricted normalizes to restricted — all members can see it, regardless of role."""
-        from zenos.application.ontology_service import OntologyService
+        from zenos.application.knowledge.ontology_service import OntologyService
 
         role_restricted = _make_entity(
             id="ent-role",
@@ -884,7 +885,7 @@ class TestLegacyRoleRestrictedCompatibility:
 
     async def test_legacy_role_restricted_hidden_from_guest(self):
         """Guest still cannot see legacy role-restricted entities."""
-        from zenos.application.ontology_service import OntologyService
+        from zenos.application.knowledge.ontology_service import OntologyService
 
         role_restricted = _make_entity(
             id="ent-role",
@@ -939,13 +940,13 @@ class TestScopedPartnerTaskVisibilityIgnoresEntityVisibility:
 
     async def test_mcp_scoped_partner_sees_task_linked_to_restricted_entity_in_l1(self):
         """DC-1: task linked to restricted entity in L1 scope is visible to scoped partner."""
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         tasks = [SCOPED_TASK_RESTRICTED_IN_L1, SCOPED_TASK_OUT_L1, SCOPED_TASK_NO_LINK]
 
         with _McpPartnerContext(SCOPED_PARTNER):
-            with patch("zenos.interface.tools.task_service") as mock_ts, \
-                 patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.task_service") as mock_ts, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=tasks)
                 mock_repo.list_all = AsyncMock(return_value=SCOPED_ALL_ENTITIES_WITH_RESTRICTED)
                 result = await search(collection="tasks")
@@ -959,15 +960,15 @@ class TestScopedPartnerTaskVisibilityIgnoresEntityVisibility:
 
     async def test_mcp_scoped_partner_and_dashboard_api_task_visibility_consistent_for_restricted_entity(self):
         """DC-2: MCP and Dashboard API agree on task visibility for restricted entity in L1 scope."""
-        from zenos.interface.tools import search as mcp_search
+        from zenos.interface.mcp import search as mcp_search
         from zenos.interface.dashboard_api import list_tasks as api_list_tasks
 
         tasks = [SCOPED_TASK_RESTRICTED_IN_L1, SCOPED_TASK_OUT_L1, SCOPED_TASK_NO_LINK]
 
         # MCP layer
         with _McpPartnerContext(SCOPED_PARTNER):
-            with patch("zenos.interface.tools.task_service") as mock_ts, \
-                 patch("zenos.interface.tools.entity_repo") as mock_repo:
+            with patch("zenos.interface.mcp.task_service") as mock_ts, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=tasks)
                 mock_repo.list_all = AsyncMock(return_value=SCOPED_ALL_ENTITIES_WITH_RESTRICTED)
                 mcp_result = await mcp_search(collection="tasks")
@@ -1215,10 +1216,10 @@ class TestS04QuerySlicingGuestMemberOwner:
 
     async def test_mcp_owner_sees_all_entities(self):
         """MCP layer: owner sees all entities (L1+L2) via search including restricted and confidential."""
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(S04_OWNER_PARTNER):
-            with patch("zenos.interface.tools.ontology_service") as mock_os:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os:
                 mock_os.list_entities = AsyncMock(return_value=S04_ALL_ENTITIES)
                 # Default entity_level is L1+L2, so L3 is excluded from this assertion
                 result = await search(collection="entities")
@@ -1234,10 +1235,10 @@ class TestS04QuerySlicingGuestMemberOwner:
 
     async def test_mcp_member_sees_public_and_restricted_entities(self):
         """MCP layer: member sees public + restricted, not confidential (SPEC §4.1)."""
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(S04_MEMBER_PARTNER):
-            with patch("zenos.interface.tools.ontology_service") as mock_os:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os:
                 mock_os.list_entities = AsyncMock(return_value=S04_ALL_ENTITIES)
                 result = await search(collection="entities")
 
@@ -1249,10 +1250,10 @@ class TestS04QuerySlicingGuestMemberOwner:
 
     async def test_mcp_guest_sees_only_authorized_subtree_public_via_search(self):
         """MCP layer: guest sees only authorized L1 subtree + public via search."""
-        from zenos.interface.tools import search
+        from zenos.interface.mcp import search
 
         with _McpPartnerContext(S04_GUEST_PARTNER):
-            with patch("zenos.interface.tools.ontology_service") as mock_os:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os:
                 mock_os.list_entities = AsyncMock(return_value=S04_ALL_ENTITIES)
                 # The guest subtree calculation uses ontology_service._entities.list_all
                 mock_os._entities = AsyncMock()
@@ -1276,7 +1277,7 @@ class TestS04QuerySlicingGuestMemberOwner:
             path_params={"id": "s04-l2-a"},
         )
 
-        from zenos.domain.models import Relationship
+        from zenos.domain.knowledge import Relationship
 
         def _make_rel(src, tgt):
             return Relationship(

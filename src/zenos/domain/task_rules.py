@@ -8,15 +8,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from .models import (
-    Blindspot,
-    Entity,
-    EntityStatus,
-    Severity,
-    Task,
-    TaskPriority,
-    TaskStatus,
-)
+from .action import Task, TaskPriority, TaskStatus
+from .knowledge import Blindspot, Entity, EntityStatus, Severity
 
 # ──────────────────────────────────────────────
 # State machine

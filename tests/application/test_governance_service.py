@@ -4,9 +4,9 @@ import pytest
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
-from zenos.application.governance_service import GovernanceService
-from zenos.application.ontology_service import OntologyService
-from zenos.domain.models import Entity, Relationship, RelationshipType, Tags
+from zenos.application.knowledge.governance_service import GovernanceService
+from zenos.application.knowledge.ontology_service import OntologyService
+from zenos.domain.knowledge import Entity, Relationship, RelationshipType, Tags
 
 
 def _entity(**overrides) -> Entity:

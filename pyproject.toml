@@ -30,3 +30,79 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+
+[tool.importlinter]
+root_packages = ["zenos"]
+
+# --- Layer isolation ---
+
+[[tool.importlinter.contracts]]
+name = "Domain layer has zero external dependencies"
+type = "forbidden"
+source_modules = ["zenos.domain"]
+forbidden_modules = [
+    "zenos.application",
+    "zenos.infrastructure",
+    "zenos.interface",
+]
+
+[[tool.importlinter.contracts]]
+name = "Application layer does not touch infrastructure or interface"
+type = "forbidden"
+source_modules = ["zenos.application"]
+forbidden_modules = [
+    "zenos.infrastructure",
+    "zenos.interface",
+]
+
+[[tool.importlinter.contracts]]
+name = "Infrastructure layer does not know about interface"
+type = "forbidden"
+source_modules = ["zenos.infrastructure"]
+forbidden_modules = ["zenos.interface"]
+
+# --- Domain sub-package direction ---
+
+[[tool.importlinter.contracts]]
+name = "Knowledge does not import Action (Knowledge -> Action forbidden)"
+type = "forbidden"
+source_modules = ["zenos.domain.knowledge"]
+forbidden_modules = ["zenos.domain.action"]
+
+[[tool.importlinter.contracts]]
+name = "Identity does not know concrete entity or task sub-packages"
+type = "forbidden"
+source_modules = ["zenos.domain.identity"]
+forbidden_modules = [
+    "zenos.domain.knowledge",
+    "zenos.domain.action",
+]
+
+# --- Application sub-package isolation ---
+
+[[tool.importlinter.contracts]]
+name = "application.knowledge does not import sibling application services"
+type = "forbidden"
+source_modules = ["zenos.application.knowledge"]
+forbidden_modules = [
+    "zenos.application.action",
+    "zenos.application.identity",
+]
+
+[[tool.importlinter.contracts]]
+name = "application.action does not import sibling application services"
+type = "forbidden"
+source_modules = ["zenos.application.action"]
+forbidden_modules = [
+    "zenos.application.knowledge",
+    "zenos.application.identity",
+]
+
+[[tool.importlinter.contracts]]
+name = "application.identity does not import sibling application services"
+type = "forbidden"
+source_modules = ["zenos.application.identity"]
+forbidden_modules = [
+    "zenos.application.knowledge",
+    "zenos.application.action",
+]

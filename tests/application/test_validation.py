@@ -11,10 +11,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from zenos.application.ontology_service import OntologyService
-from zenos.application.task_service import TaskService
-from zenos.application.governance_ai import GovernanceInference, InferredRel
-from zenos.domain.models import Blindspot, Entity, Protocol, Relationship, Tags, Task
+from zenos.application.knowledge.ontology_service import OntologyService
+from zenos.application.action.task_service import TaskService
+from zenos.application.knowledge.governance_ai import GovernanceInference, InferredRel
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Blindspot, Entity, Protocol, Relationship, Tags
 
 
 # ---------------------------------------------------------------------------
@@ -2398,7 +2399,7 @@ class TestGuestWriteGuard:
 
     async def test_guest_can_create_task(self):
         """Guest partner is not restricted from creating tasks in TaskService."""
-        from zenos.application.task_service import TaskService
+        from zenos.application.action.task_service import TaskService
 
         task_repo = AsyncMock()
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)

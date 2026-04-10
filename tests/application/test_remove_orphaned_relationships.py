@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from zenos.domain.models import Entity, EntityType, Relationship, Tags
+from zenos.domain.knowledge import Entity, EntityType, Relationship, Tags
 
 
 def _make_entity(entity_id: str, name: str = "Test") -> Entity:
@@ -69,7 +69,7 @@ class FakeEntityRepo:
 
 def _make_service(entities: list[Entity], relationships: list[Relationship]):
     """Create a minimal OntologyService with fake repos."""
-    from zenos.application.ontology_service import OntologyService
+    from zenos.application.knowledge.ontology_service import OntologyService
 
     service = object.__new__(OntologyService)
     service._entities = FakeEntityRepo(entities)
@@ -135,7 +135,7 @@ class TestRemoveOrphanedRelationships:
     @pytest.mark.asyncio
     async def test_no_list_all_returns_empty(self):
         """When relationship repo lacks list_all, returns empty result gracefully."""
-        from zenos.application.ontology_service import OntologyService
+        from zenos.application.knowledge.ontology_service import OntologyService
 
         ent_a = _make_entity("ent-A")
         service = object.__new__(OntologyService)

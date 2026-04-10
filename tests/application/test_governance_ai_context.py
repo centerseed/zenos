@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from zenos.application.governance_ai import (
+from zenos.application.knowledge.governance_ai import (
     ConsolidationMergeGroup,
     ConsolidationProposal,
     GovernanceAI,

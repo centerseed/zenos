@@ -5,14 +5,8 @@ from __future__ import annotations
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-from zenos.application.governance_service import GovernanceService, LEVERAGE_THRESHOLD
-from zenos.domain.models import (
-    Entity,
-    EntityType,
-    Relationship,
-    RelationshipType,
-    Tags,
-)
+from zenos.application.knowledge.governance_service import GovernanceService, LEVERAGE_THRESHOLD
+from zenos.domain.knowledge import Entity, EntityType, Relationship, RelationshipType, Tags
 
 
 # ──────────────────────────────────────────────
@@ -193,12 +187,26 @@ async def test_analyze_graph_topology_no_cycle_in_dag():
 # analyze_graph_topology: goal disconnected
 # ──────────────────────────────────────────────
 
-async def test_analyze_graph_topology_detects_goal_disconnected():
-    """A module with no path to any GOAL entity should be flagged as goal_disconnected."""
+async def test_analyze_graph_topology_skips_goal_disconnected_when_no_goals():
+    """When no GOAL entities exist, goal_disconnected check should be skipped entirely."""
     module = _entity(id="mod-1", name="Lost Module", type="module")
     other = _entity(id="other-1", name="Other Module", type="module")
     rel = _rel("mod-1", "other-1")
     service = _make_service([module, other], relationships=[rel])
+
+    issues = await service.analyze_graph_topology()
+
+    goal_issues = [i for i in issues if i["type"] == "goal_disconnected"]
+    assert len(goal_issues) == 0
+
+
+async def test_analyze_graph_topology_detects_goal_disconnected():
+    """A module with no path to any GOAL entity should be flagged when GOALs exist."""
+    module = _entity(id="mod-1", name="Lost Module", type="module")
+    other = _entity(id="other-1", name="Other Module", type="module")
+    goal = _entity(id="goal-1", name="North Star", type=EntityType.GOAL)
+    rel = _rel("mod-1", "other-1")
+    service = _make_service([module, other, goal], relationships=[rel])
 
     issues = await service.analyze_graph_topology()
 
@@ -466,7 +474,7 @@ async def test_run_blindspot_analysis_deduplicates_topology_blindspots():
     On the second call all existing descriptions are already in blindspot_repo.list_all(),
     so blindspot_repo.add() must NOT be called again for any of them.
     """
-    from zenos.domain.models import Blindspot, Severity
+    from zenos.domain.knowledge import Blindspot, Severity
 
     # A module with no relationships will generate two topology issues:
     # 1) isolated_node  (no relationships at all)

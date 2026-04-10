@@ -218,12 +218,12 @@ class TestActivity:
 
 class TestEntityTypeExtension:
     def test_company_and_person_in_entity_type(self):
-        from zenos.domain.models import EntityType
+        from zenos.domain.knowledge import EntityType
         assert EntityType.COMPANY == "company"
         assert EntityType.PERSON == "person"
 
     def test_original_types_still_present(self):
-        from zenos.domain.models import EntityType
+        from zenos.domain.knowledge import EntityType
         assert EntityType.PRODUCT == "product"
         assert EntityType.MODULE == "module"
         assert EntityType.DOCUMENT == "document"

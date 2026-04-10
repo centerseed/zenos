@@ -32,11 +32,17 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
-from zenos.application.governance_service import GovernanceService
-from zenos.application.ontology_service import OntologyService, _collect_subtree_ids
-from zenos.application.task_service import TaskService
+from zenos.application.knowledge.governance_service import GovernanceService
+from zenos.application.knowledge.ontology_service import OntologyService, _collect_subtree_ids
+from zenos.application.action.task_service import TaskService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
-from zenos.domain.models import Blindspot, Entity, EntityType, Relationship, Task
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship
+from zenos.application.identity.workspace_context import (
+    active_partner_view,
+    build_available_workspaces,
+    resolve_active_workspace_id,
+)
 from zenos.domain.partner_access import (
     describe_partner_access,
     is_guest,
@@ -44,19 +50,11 @@ from zenos.domain.partner_access import (
 )
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.unit_of_work import UnitOfWork
-from zenos.infrastructure.sql_repo import (  # composition root
-    PostgresTaskCommentRepository,
-    SqlBlindspotRepository,
-    SqlEntityRepository,
-    SqlPartnerRepository,
-    SqlProtocolRepository,
-    SqlRelationshipRepository,
-    SqlTaskRepository,
-    SqlToolEventRepository,
-    get_cached_health,
-    get_pool,
-    upsert_health_cache,
-)
+from zenos.infrastructure.action import PostgresTaskCommentRepository, SqlTaskRepository
+from zenos.infrastructure.agent import SqlToolEventRepository
+from zenos.infrastructure.identity import SqlPartnerRepository
+from zenos.infrastructure.knowledge import SqlBlindspotRepository, SqlEntityRepository, SqlProtocolRepository, SqlRelationshipRepository
+from zenos.infrastructure.sql_common import get_cached_health, get_pool, upsert_health_cache
 from zenos.interface.admin_api import (
     _cors_headers,
     _error_response,
@@ -113,60 +111,6 @@ def _requested_active_workspace_id(request: Request) -> str | None:
     return raw or None
 
 
-async def _build_available_workspaces(partner: dict) -> list[dict]:
-    workspaces = [{"id": partner["id"], "name": "我的工作區", "hasUpdate": False}]
-    shared_partner_id = partner.get("sharedPartnerId")
-    if not shared_partner_id:
-        return workspaces
-
-    await _ensure_repos()
-    owner = await _partner_repo.get_by_id(str(shared_partner_id))
-    owner_name = (
-        (owner or {}).get("displayName")
-        or (owner or {}).get("email")
-        or "共享工作區"
-    )
-    workspaces.append({
-        "id": str(shared_partner_id),
-        "name": f"{owner_name} 的工作區",
-        "hasUpdate": False,
-    })
-    return workspaces
-
-
-def _resolve_active_workspace_id(partner: dict, requested_id: str | None) -> str:
-    home_id = str(partner["id"])
-    shared_id = str(partner["sharedPartnerId"]) if partner.get("sharedPartnerId") else None
-    if requested_id and requested_id in {home_id, shared_id}:
-        return requested_id
-    return home_id
-
-
-def _active_partner_view(partner: dict, active_workspace_id: str) -> tuple[dict, str]:
-    """Project a raw partner row into the selected active-workspace context."""
-    shared_partner_id = str(partner["sharedPartnerId"]) if partner.get("sharedPartnerId") else None
-    if shared_partner_id and active_workspace_id == str(partner["id"]):
-        projected = dict(partner)
-        projected["sharedPartnerId"] = None
-        projected["isAdmin"] = True
-        projected["accessMode"] = "internal"
-        projected["workspaceRole"] = "owner"
-        projected["authorizedEntityIds"] = []
-        return projected, str(partner["id"])
-
-    projected = dict(partner)
-    access = describe_partner_access(projected)
-    projected["accessMode"] = access["access_mode"]
-    # Only set workspaceRole when partner is NOT unassigned.
-    # Setting workspaceRole="guest" on an unassigned partner causes
-    # resolve_access_mode to reclassify them as "scoped" (since it
-    # prioritises workspaceRole over accessMode), breaking the
-    # unassigned → empty-result fast-path.
-    if access["access_mode"] != "unassigned":
-        projected["workspaceRole"] = access["workspace_role"]
-    return projected, shared_partner_id or str(partner["id"])
-
-
 # ──────────────────────────────────────────────
 # Auth helper — Firebase token → partner scope
 # ──────────────────────────────────────────────
@@ -187,11 +131,11 @@ async def _auth_and_scope(request: Request) -> tuple[dict | None, str | None]:
     partner = await _get_partner_by_email_sql(email)
     if not partner:
         return None, None
-    active_workspace_id = _resolve_active_workspace_id(
+    active_workspace_id = resolve_active_workspace_id(
         partner,
         _requested_active_workspace_id(request),
     )
-    adjusted_partner, effective_id = _active_partner_view(partner, active_workspace_id)
+    adjusted_partner, effective_id = active_partner_view(partner, active_workspace_id)
     adjusted_partner["activeWorkspaceId"] = active_workspace_id
     adjusted_partner["homeWorkspaceId"] = partner["id"]
     adjusted_partner["isHomeWorkspace"] = active_workspace_id == str(partner["id"])
@@ -476,16 +420,80 @@ async def get_partner_me(request: Request) -> Response:
     if not raw_partner:
         return _error_response("NOT_FOUND", f"No partner found for email {email}", 404, request=request)
 
-    active_workspace_id = _resolve_active_workspace_id(
+    active_workspace_id = resolve_active_workspace_id(
         raw_partner,
         _requested_active_workspace_id(request),
     )
-    partner, _ = _active_partner_view(raw_partner, active_workspace_id)
+    partner, _ = active_partner_view(raw_partner, active_workspace_id)
     partner["activeWorkspaceId"] = active_workspace_id
     partner["homeWorkspaceId"] = raw_partner["id"]
     partner["isHomeWorkspace"] = active_workspace_id == str(raw_partner["id"])
-    partner["availableWorkspaces"] = await _build_available_workspaces(raw_partner)
+
+    async def _lookup_partner(pid: str) -> dict | None:
+        await _ensure_repos()
+        return await _partner_repo.get_by_id(pid)
+
+    partner["availableWorkspaces"] = await build_available_workspaces(raw_partner, _lookup_partner)
     return _json_response({"partner": partner}, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: GET /api/partner/preferences
+# Endpoint: PATCH /api/partner/preferences
+# ──────────────────────────────────────────────
+
+
+async def get_partner_preferences(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    email = decoded.get("email")
+    if not email:
+        return _error_response("INVALID_INPUT", "Email not found in token", 400, request=request)
+
+    raw_partner = await _get_partner_by_email_sql(email)
+    if not raw_partner:
+        return _error_response("NOT_FOUND", f"No partner found for email {email}", 404, request=request)
+
+    await _ensure_repos()
+    preferences = await _partner_repo.get_preferences(str(raw_partner["id"]))
+    return _json_response({"preferences": preferences}, request=request)
+
+
+async def update_partner_preferences(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    email = decoded.get("email")
+    if not email:
+        return _error_response("INVALID_INPUT", "Email not found in token", 400, request=request)
+
+    raw_partner = await _get_partner_by_email_sql(email)
+    if not raw_partner:
+        return _error_response("NOT_FOUND", f"No partner found for email {email}", 404, request=request)
+
+    import json as _json
+
+    body = await request.body()
+    try:
+        patch = _json.loads(body)
+    except (ValueError, TypeError):
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    if not isinstance(patch, dict):
+        return _error_response("INVALID_INPUT", "Body must be a JSON object", 400, request=request)
+
+    await _ensure_repos()
+    updated = await _partner_repo.update_preferences(str(raw_partner["id"]), patch)
+    return _json_response({"preferences": updated}, request=request)
 
 
 # ──────────────────────────────────────────────
@@ -1555,6 +1563,8 @@ async def get_governance_health(request: Request) -> Response:
 
 dashboard_routes = [
     Route("/api/partner/me", get_partner_me, methods=["GET", "OPTIONS"]),
+    Route("/api/partner/preferences", get_partner_preferences, methods=["GET", "OPTIONS"]),
+    Route("/api/partner/preferences", update_partner_preferences, methods=["PATCH", "OPTIONS"]),
     Route("/api/data/entities", list_entities, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities/{id}/children", get_entity_children, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities/{id}/relationships", get_entity_relationships, methods=["GET", "OPTIONS"]),

@@ -6,8 +6,9 @@ information silos (isolation) or data leaks (overexposure).
 
 from __future__ import annotations
 
-from zenos.domain.models import Entity
-from zenos.domain.repositories import EntityRepository, TaskRepository
+from zenos.domain.knowledge import Entity
+from zenos.domain.action import TaskRepository
+from zenos.domain.knowledge import EntityRepository
 
 _SENSITIVE_KEYWORDS = [
     "薪資", "salary", "財務", "finance", "人事", "hr",

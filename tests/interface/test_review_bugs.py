@@ -13,7 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from zenos.domain.models import Entity, Tags, Task
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Entity, Tags
 
 pytestmark = pytest.mark.asyncio
 
@@ -76,19 +77,21 @@ class TestJournalEmptyPartnerId:
     """journal tools should reject when partner_id is empty string."""
 
     async def test_journal_write_rejects_empty_partner_id(self):
-        import zenos.interface.tools as tools
+        from zenos.interface.mcp.journal import journal_write
 
         repo = _make_journal_repo()
-        with (
-            patch.object(tools, "_journal_repo", repo),
-            patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-            patch.object(tools, "_current_partner_id") as mock_pid,
-            patch.object(tools, "datetime") as mock_dt,
-        ):
-            mock_pid.get.return_value = ""  # empty partner_id
-            mock_dt.now.return_value = datetime(2026, 4, 4, tzinfo=timezone.utc)
+        mock_pid = MagicMock()
+        mock_pid.get = MagicMock(return_value="")  # empty partner_id
+        mock_partner = MagicMock()
+        mock_partner.get = MagicMock(return_value={})
 
-            result = await tools.journal_write(summary="test")
+        with (
+            patch("zenos.interface.mcp._journal_repo", repo),
+            patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+            patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+            patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+        ):
+            result = await journal_write(summary="test")
 
         # Should be rejected, not ok
         assert result["status"] == "rejected", (
@@ -97,17 +100,21 @@ class TestJournalEmptyPartnerId:
         )
 
     async def test_journal_read_rejects_empty_partner_id(self):
-        import zenos.interface.tools as tools
+        from zenos.interface.mcp.journal import journal_read
 
         repo = _make_journal_repo()
-        with (
-            patch.object(tools, "_journal_repo", repo),
-            patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-            patch.object(tools, "_current_partner_id") as mock_pid,
-        ):
-            mock_pid.get.return_value = ""  # empty partner_id
+        mock_pid = MagicMock()
+        mock_pid.get = MagicMock(return_value="")  # empty partner_id
+        mock_partner = MagicMock()
+        mock_partner.get = MagicMock(return_value={})
 
-            result = await tools.journal_read()
+        with (
+            patch("zenos.interface.mcp._journal_repo", repo),
+            patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+            patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+            patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+        ):
+            result = await journal_read()
 
         assert result["status"] == "rejected", (
             "BUG: journal_read accepted empty partner_id — "
@@ -124,17 +131,21 @@ class TestJournalNegativeLimit:
     """journal_read with negative limit should not produce invalid SQL."""
 
     async def test_journal_read_negative_limit_clamped_to_positive(self):
-        import zenos.interface.tools as tools
+        from zenos.interface.mcp.journal import journal_read
 
         repo = _make_journal_repo()
-        with (
-            patch.object(tools, "_journal_repo", repo),
-            patch.object(tools, "_ensure_journal_repo", AsyncMock()),
-            patch.object(tools, "_current_partner_id") as mock_pid,
-        ):
-            mock_pid.get.return_value = "partner-1"
+        mock_pid = MagicMock()
+        mock_pid.get = MagicMock(return_value="partner-1")
+        mock_partner = MagicMock()
+        mock_partner.get = MagicMock(return_value={"id": "partner-1", "defaultProject": ""})
 
-            await tools.journal_read(limit=-5)
+        with (
+            patch("zenos.interface.mcp._journal_repo", repo),
+            patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+            patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+            patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+        ):
+            await journal_read(limit=-5)
 
         call_kwargs = repo.list_recent.call_args[1]
         assert call_kwargs["limit"] >= 1, (

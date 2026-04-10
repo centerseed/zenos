@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from zenos.application.source_service import SourceService
-from zenos.domain.models import Entity, EntityStatus, SourceType, Tags
+from zenos.application.knowledge.source_service import SourceService
+from zenos.domain.knowledge import Entity, EntityStatus, SourceType, Tags
 from zenos.infrastructure.github_adapter import GitHubAdapter
 
 

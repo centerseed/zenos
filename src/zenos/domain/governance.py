@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
-from .models import (
+from .knowledge import (
     Blindspot,
     Document,
     DocumentStatus,
@@ -18,14 +18,16 @@ from .models import (
     EntityStatus,
     EntityType,
     Protocol,
-    QualityCheckItem,
-    QualityReport,
     Relationship,
     RelationshipType,
     Severity,
+    Tags,
+)
+from .shared import (
+    QualityCheckItem,
+    QualityReport,
     SplitRecommendation,
     StalenessWarning,
-    Tags,
     TagConfidence,
 )
 

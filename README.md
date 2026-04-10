@@ -139,13 +139,13 @@ export MCP_TRANSPORT='stdio'   # 本地 client 直連建議用 stdio
 ### 4) 啟動 MCP server
 
 ```bash
-python -m zenos.interface.tools
+python -m zenos.interface.mcp
 ```
 
 SSE 模式（給 HTTP client）：
 
 ```bash
-MCP_TRANSPORT=sse PORT=8080 python -m zenos.interface.tools
+MCP_TRANSPORT=sse PORT=8080 python -m zenos.interface.mcp
 ```
 
 ## 部署

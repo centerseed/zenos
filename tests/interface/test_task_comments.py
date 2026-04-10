@@ -19,7 +19,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from zenos.domain.models import Entity, Tags, Task
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Entity, Tags
 
 
 # ---------------------------------------------------------------------------
@@ -399,7 +400,7 @@ class TestPostgresTaskCommentRepositoryCreate:
     async def test_create_returns_author_name_from_partners(self):
         """create() fetches display_name from partners and includes it as author_name."""
         from datetime import datetime, timezone
-        from zenos.infrastructure.sql_repo import PostgresTaskCommentRepository
+        from zenos.infrastructure.action import PostgresTaskCommentRepository
 
         insert_row = {
             "id": "uuid-comment-1",
@@ -422,7 +423,7 @@ class TestPostgresTaskCommentRepositoryCreate:
     async def test_create_falls_back_to_partner_id_when_partner_not_found(self):
         """create() uses partner_id as author_name when partner row is missing."""
         from datetime import datetime, timezone
-        from zenos.infrastructure.sql_repo import PostgresTaskCommentRepository
+        from zenos.infrastructure.action import PostgresTaskCommentRepository
 
         insert_row = {
             "id": "uuid-comment-2",
@@ -452,7 +453,7 @@ class TestPostgresTaskCommentRepositoryListByTask:
 
     async def test_list_by_task_join_uses_partners_id(self):
         """list_by_task() SQL must JOIN partners on p.id, not p.uid."""
-        from zenos.infrastructure.sql_repo import PostgresTaskCommentRepository
+        from zenos.infrastructure.action import PostgresTaskCommentRepository
 
         conn = AsyncMock()
         conn.fetch = AsyncMock(return_value=[])

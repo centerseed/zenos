@@ -1,6 +1,7 @@
 import asyncio
 import os
-from zenos.infrastructure.sql_repo import get_pool, SqlTaskRepository
+from zenos.infrastructure.action import SqlTaskRepository
+from zenos.infrastructure.sql_common import get_pool
 from zenos.infrastructure.context import current_partner_id
 
 async def fix_tasks():
