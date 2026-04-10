@@ -86,6 +86,7 @@ from zenos.infrastructure.sql_repo import (
 )
 from zenos.infrastructure.github_adapter import GitHubAdapter
 from zenos.infrastructure.context import (
+    current_partner_authorized_entity_ids as _ctx_authorized_entity_ids,
     current_partner_department,
     current_partner_id as _current_partner_id,
     current_partner_is_admin,
@@ -93,6 +94,11 @@ from zenos.infrastructure.context import (
 )
 from zenos.interface.governance_rules import GOVERNANCE_RULES
 from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
+from zenos.application.workspace_context import (
+    resolve_active_workspace_id,
+    active_partner_view,
+    build_workspace_context_sync,
+)
 
 # ──────────────────────────────────────────────
 # Agent Identity — ContextVar for partner data
@@ -136,13 +142,18 @@ class ApiKeyMiddleware:
                     current_partner_id,
                     current_partner_authorized_entity_ids,
                 )
+                # Resolve active workspace: honour X-Active-Workspace-Id header if valid
+                ws_header = self._extract_workspace_id(scope)
+                resolved_ws = resolve_active_workspace_id(partner, ws_header)
+                adjusted, effective_id = active_partner_view(partner, resolved_ws)
+
                 token = _current_partner.set(partner)
-                token_pid = current_partner_id.set(partner.get("sharedPartnerId") or partner.get("id", ""))
+                token_pid = current_partner_id.set(effective_id)
                 token_roles = current_partner_roles.set(list(partner.get("roles") or []))
                 token_department = current_partner_department.set(str(partner.get("department") or "all"))
-                token_admin = current_partner_is_admin.set(bool(partner.get("isAdmin", False)))
+                token_admin = current_partner_is_admin.set(bool(adjusted.get("isAdmin", False)))
                 token_auth_ids = current_partner_authorized_entity_ids.set(
-                    list(partner.get("authorizedEntityIds") or [])
+                    list(adjusted.get("authorizedEntityIds") or [])
                 )
                 try:
                     return await self.app(scope, receive, send)
@@ -177,6 +188,13 @@ class ApiKeyMiddleware:
         qs = parse_qs(scope.get("query_string", b"").decode())
         keys = qs.get("api_key", [])
         return keys[0] if keys else None
+
+    @staticmethod
+    def _extract_workspace_id(scope) -> str | None:
+        """Extract X-Active-Workspace-Id header value, or None if absent."""
+        headers = dict(scope.get("headers", []))
+        ws = headers.get(b"x-active-workspace-id", b"").decode().strip()
+        return ws or None
 
 
 class SseApiKeyPropagator:
@@ -575,7 +593,7 @@ def _unified_response(
     rejection_reason: str | None = None,
 ) -> dict:
     """Phase 1 unified response format for all MCP tool responses."""
-    return {
+    resp: dict = {
         "status": status,
         "data": data,
         "warnings": warnings or [],
@@ -583,8 +601,66 @@ def _unified_response(
         "similar_items": similar_items or [],
         "context_bundle": context_bundle or {},
         "governance_hints": governance_hints or {},
-        **({"rejection_reason": rejection_reason} if rejection_reason else {}),
     }
+    if rejection_reason is not None:
+        resp["rejection_reason"] = rejection_reason
+
+    # Inject workspace_context when a partner is authenticated
+    partner = _current_partner.get()
+    if partner:
+        active_ws = _current_partner_id.get() or str(partner["id"])
+        resp["workspace_context"] = build_workspace_context_sync(partner, active_ws)
+
+    return resp
+
+
+def _inject_workspace_context(result: dict) -> dict:
+    """Inject workspace_context into any dict response that doesn't go through _unified_response."""
+    partner = _current_partner.get()
+    if partner:
+        active_ws = _current_partner_id.get() or str(partner["id"])
+        result["workspace_context"] = build_workspace_context_sync(partner, active_ws)
+    return result
+
+
+def _apply_workspace_override(workspace_id: str) -> dict | None:
+    """Attempt to switch the active workspace for the current request.
+
+    Validates *workspace_id* against the authenticated partner's allowed
+    workspaces, then mutates the ContextVars for the remainder of the
+    request if valid.
+
+    Returns:
+        None when the switch succeeded (caller should continue normally).
+        An error response dict when *workspace_id* is not in the allowed
+        set (caller should return this dict immediately).
+    """
+    partner = _current_partner.get()
+    if not partner:
+        return None  # No partner context — silently skip (middleware will block auth anyway)
+
+    resolved = resolve_active_workspace_id(partner, workspace_id)
+    if resolved != workspace_id:
+        # workspace_id was not in the partner's valid set; resolve fell back to home
+        home_id = str(partner["id"])
+        shared_partner_id = partner.get("sharedPartnerId")
+        available = [home_id]
+        if shared_partner_id:
+            available.append(str(shared_partner_id))
+        return _unified_response(
+            status="error",
+            data={"error": "FORBIDDEN_WORKSPACE"},
+            warnings=[
+                f"workspace_id '{workspace_id}' 不在你的可用 workspace 列表中。"
+                f" 可用：{available}"
+            ],
+        )
+
+    adjusted, effective_id = active_partner_view(partner, resolved)
+    _current_partner_id.set(effective_id)
+    current_partner_is_admin.set(bool(adjusted.get("isAdmin", False)))
+    _ctx_authorized_entity_ids.set(list(adjusted.get("authorizedEntityIds") or []))
+    return None
 
 
 def _new_id() -> str:
@@ -999,6 +1075,7 @@ async def search(
     product_id: str | None = None,
     product: str | None = None,
     entity_level: str | None = None,
+    workspace_id: str | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -1044,7 +1121,12 @@ async def search(
             "L1,L2" = 搜 L1+L2（預設行為）
             "L1,L2,L3" 或 "all" = 搜所有層級（含 L3 文件/細節）
             不傳時預設只搜 L1+L2，排除 L3 細節節點。
+        workspace_id: 選填。切換到指定 workspace 執行搜尋（必須在你的可用列表內）。
     """
+    if workspace_id:
+        err = _apply_workspace_override(workspace_id)
+        if err is not None:
+            return err
     await _ensure_services()
     results: dict = {}
 
@@ -1118,7 +1200,7 @@ async def search(
             if eid:
                 _schedule_tool_event("search", eid, query, exposed_count)
 
-        return results
+        return _inject_workspace_context(results)
 
     # Collection-specific listing
     collections = (
@@ -1269,7 +1351,7 @@ async def search(
         if eid:
             _schedule_tool_event("search", eid, query or None, total_count)
 
-    return results
+    return _inject_workspace_context(results)
 
 
 # ===================================================================
@@ -1285,6 +1367,7 @@ async def get(
     collection: str,
     name: str | None = None,
     id: str | None = None,
+    workspace_id: str | None = None,
 ) -> dict:
     """取得一個特定項目的完整資訊。
 
@@ -1305,7 +1388,12 @@ async def get(
         collection: entities/documents/protocols/blindspots/tasks
         name: 項目名稱（entities 和 protocols 支援按名稱查詢）
         id: 項目 ID（所有集合都支援）
+        workspace_id: 選填。切換到指定 workspace 執行查詢（必須在你的可用列表內）。
     """
+    if workspace_id:
+        err = _apply_workspace_override(workspace_id)
+        if err is not None:
+            return err
     await _ensure_services()
     if not name and not id:
         return {"error": "INVALID_INPUT", "message": "Must provide either name or id"}
@@ -1370,7 +1458,7 @@ async def get(
             response["impact_chain"] = await ontology_service.compute_impact_chain(eid, direction="forward")
             response["reverse_impact_chain"] = await ontology_service.compute_impact_chain(eid, direction="reverse")
         _schedule_tool_event("get", eid, None, None)
-        return response
+        return _inject_workspace_context(response)
 
     elif collection == "protocols":
         if name:
@@ -1387,7 +1475,7 @@ async def get(
             return {"error": "NOT_FOUND", "message": "Protocol not found"}
         if not await _is_protocol_visible(result):
             return {"error": "NOT_FOUND", "message": "Protocol not found"}
-        return _serialize(result)
+        return _inject_workspace_context(_serialize(result))
 
     elif collection == "documents":
         doc_id = id or name
@@ -1411,7 +1499,7 @@ async def get(
         for src in (serialized.get("sources") or []):
             if src.get("doc_type"):
                 src["canonical_type"] = compute_canonical_type(src["doc_type"])
-        return serialized
+        return _inject_workspace_context(serialized)
 
     elif collection == "blindspots":
         if not id:
@@ -1421,7 +1509,7 @@ async def get(
             return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
         if not await _is_blindspot_visible(result):
             return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
-        return _serialize(result)
+        return _inject_workspace_context(_serialize(result))
 
     elif collection == "tasks":
         if not id:
@@ -1432,7 +1520,7 @@ async def get(
         task_obj, _ = enriched
         if not await _is_task_visible(task_obj):
             return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
-        return await _enrich_task_result(task_obj)
+        return _inject_workspace_context(await _enrich_task_result(task_obj))
 
     else:
         return {
@@ -1477,6 +1565,10 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
         "notion": "Notion MCP",
         "wiki": "Wiki MCP",
     }
+
+    def _source_status(source: dict) -> str:
+        return str(source.get("source_status") or source.get("status") or "valid")
+
     try:
         doc_record = await ontology_service.get_document(doc_id)
         if doc_record is None:
@@ -1494,7 +1586,12 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
         # --- ADR-022: source_id-aware source selection ---
         sources = doc_record.sources or []
         all_source_info = [
-            {"source_id": s.get("source_id", ""), "label": s.get("label", ""), "status": s.get("status", "valid")}
+            {
+                "source_id": s.get("source_id", ""),
+                "label": s.get("label", ""),
+                "status": _source_status(s),
+                "source_status": _source_status(s),
+            }
             for s in sources
         ]
 
@@ -1512,15 +1609,15 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             # Primary fallback logic (D6) — prefer primary+valid, then any valid
             # 1. is_primary=true AND valid
             target_source = next(
-                (s for s in sources if s.get("is_primary") and s.get("status", "valid") == "valid"),
+                (s for s in sources if s.get("is_primary") and _source_status(s) == "valid"),
                 None,
             )
             # 2. First valid source (regardless of primary flag)
             if target_source is None:
-                target_source = next((s for s in sources if s.get("status", "valid") == "valid"), None)
+                target_source = next((s for s in sources if _source_status(s) == "valid"), None)
             # 3. Last stale source (if no valid)
             if target_source is None and sources:
-                stale_sources = [s for s in sources if s.get("status") == "stale"]
+                stale_sources = [s for s in sources if _source_status(s) == "stale"]
                 target_source = stale_sources[-1] if stale_sources else sources[-1]
 
         if target_source is None:
@@ -1528,7 +1625,7 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
 
         uri = target_source.get("uri", "")
         source_type = target_source.get("type", "")
-        source_status = target_source.get("status", "valid")
+        source_status = _source_status(target_source)
 
         # Build alternative_sources (other sources in the same bundle)
         current_sid = target_source.get("source_id", "")
@@ -1601,6 +1698,7 @@ async def write(
     collection: str,
     data: dict,
     id: str | None = None,
+    workspace_id: str | None = None,
 ) -> dict:
     """建立或更新 ontology 中的知識條目。
 
@@ -1681,7 +1779,12 @@ async def write(
         collection: entities/documents/protocols/blindspots/relationships/entries
         data: 集合對應的欄位（見上方說明）
         id: entries 更新 status 時提供既有 entry ID；其他集合新增時不提供
+        workspace_id: 選填。切換到指定 workspace 執行寫入（必須在你的可用列表內）。
     """
+    if workspace_id:
+        err = _apply_workspace_override(workspace_id)
+        if err is not None:
+            return err
     await _ensure_services()
     try:
         if id:
@@ -2090,6 +2193,7 @@ async def confirm(
     mark_stale_entity_ids: list[str] | None = None,
     new_blindspot: dict | None = None,
     entity_entries: list[dict] | None = None,
+    workspace_id: str | None = None,
 ) -> dict:
     """確認（批准）一個 AI 產出的 draft 或驗收一個已完成的任務。
 
@@ -2118,7 +2222,12 @@ async def confirm(
         entity_entries: 任務完成時回寫的知識條目 list。
             每個 entry 格式：{entity_id: str, type: "decision"|"insight"|"limitation"|"change"|"context", content: str(1-200字)}
             僅 tasks 集合 + accepted=True 時生效。
+        workspace_id: 選填。切換到指定 workspace 執行確認（必須在你的可用列表內）。
     """
+    if workspace_id:
+        err = _apply_workspace_override(workspace_id)
+        if err is not None:
+            return err
     await _ensure_services()
     try:
         if collection == "tasks":
@@ -2655,6 +2764,7 @@ async def task(
     plan_order: int | None = None,
     depends_on_task_ids: list[str] | None = None,
     attachments: list[dict] | None = None,
+    workspace_id: str | None = None,
 ) -> dict:
     """管理知識驅動的行動項目（Action Layer）。
 
@@ -2732,7 +2842,12 @@ async def task(
 
     系統欄位：
         updated_by: 不接受 caller 直接傳入；由 server 依當次 actor context 自動寫入
+        workspace_id: 選填。切換到指定 workspace 執行任務操作（必須在你的可用列表內）。
     """
+    if workspace_id:
+        err = _apply_workspace_override(workspace_id)
+        if err is not None:
+            return err
     return await _task_handler(
         action=action,
         title=title,
@@ -2985,7 +3100,11 @@ async def analyze(
         return repairs
 
     async def _check_entry_saturation() -> list[dict]:
-        """Detect saturated entities (>= 20 active entries) and produce consolidation proposals."""
+        """Detect saturated (entity, department) groups (>= 20 active entries) and produce consolidation proposals.
+
+        Each (entity_id, department) pair is checked independently so entries from
+        different departments are never merged in the same consolidation proposal.
+        """
         if entry_repo is None or _governance_ai is None:
             return []
         saturated = await entry_repo.list_saturated_entities(threshold=20)
@@ -2997,18 +3116,24 @@ async def analyze(
             entity_id = item["entity_id"]
             entity_name = item["entity_name"]
             active_count = item["active_count"]
-            entries = await entry_repo.list_by_entity(entity_id, status="active")
+            dept = item.get("department")  # may be None (unassigned group)
+            all_entries = await entry_repo.list_by_entity(entity_id, status="active")
+            # Strict per-department isolation: only consolidate entries of this group
+            entries = [e for e in all_entries if e.department == dept]
             entry_dicts = [
                 {"id": e.id, "type": e.type, "content": e.content}
                 for e in entries
             ]
             proposal = _governance_ai.consolidate_entries(entity_id, entity_name, entry_dicts)
-            proposals.append({
+            result_item: dict = {
                 "entity_id": entity_id,
                 "entity_name": entity_name,
                 "active_count": active_count,
                 "consolidation_proposal": proposal.model_dump() if proposal else None,
-            })
+            }
+            if dept is not None:
+                result_item["department"] = dept
+            proposals.append(result_item)
         return proposals
 
     # ADR-020: lightweight health check — KPIs only, no heavy analysis

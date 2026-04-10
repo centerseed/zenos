@@ -337,8 +337,13 @@ class SqlEntityRepository:
                 await conn.execute(
                     f"""UPDATE {SCHEMA}.entities
                         SET sources_json = jsonb_set(
-                            sources_json,
-                            '{{0,status}}',
+                            jsonb_set(
+                                sources_json,
+                                '{{0,status}}',
+                                $1::jsonb,
+                                true
+                            ),
+                            '{{0,source_status}}',
                             $1::jsonb,
                             true
                         ),
@@ -359,6 +364,7 @@ class SqlEntityRepository:
                 for src in sources:
                     if src.get("source_id") == source_id:
                         src["status"] = new_status
+                        src["source_status"] = new_status
                         updated = True
                         break
                 if updated:
@@ -426,6 +432,9 @@ class SqlEntityRepository:
                                     break
                                 src["uri"] = new_uri
                                 src["label"] = new_label
+                                canonical_status = src.get("source_status") or src.get("status") or "valid"
+                                src["status"] = canonical_status
+                                src["source_status"] = canonical_status
                                 source_found = True
                                 break
                         if not source_found:
@@ -442,7 +451,13 @@ class SqlEntityRepository:
                     else:
                         # Legacy format: update primary or first source
                         if not current_sources:
-                            current_sources = [{"uri": new_uri, "label": new_label, "type": "github"}]
+                            current_sources = [{
+                                "uri": new_uri,
+                                "label": new_label,
+                                "type": "github",
+                                "status": "valid",
+                                "source_status": "valid",
+                            }]
                         else:
                             # Find primary source, or fall back to first
                             target_idx = 0
@@ -455,6 +470,13 @@ class SqlEntityRepository:
                                 continue
                             current_sources[target_idx]["uri"] = new_uri
                             current_sources[target_idx]["label"] = new_label
+                            canonical_status = (
+                                current_sources[target_idx].get("source_status")
+                                or current_sources[target_idx].get("status")
+                                or "valid"
+                            )
+                            current_sources[target_idx]["status"] = canonical_status
+                            current_sources[target_idx]["source_status"] = canonical_status
 
                     await conn.execute(
                         f"""UPDATE {SCHEMA}.entities
@@ -1720,19 +1742,21 @@ class SqlEntityEntryRepository:
         return _row_to_entry(row) if row else None
 
     async def list_saturated_entities(self, threshold: int = 20) -> list[dict]:
-        """Return entities that have >= threshold active entries.
+        """Return (entity, department) groups that have >= threshold active entries.
 
-        Returns list of dicts: {entity_id, entity_name, active_count}.
+        Returns list of dicts: {entity_id, entity_name, department, active_count}.
+        department may be None (treated as its own group).
         """
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                f"""SELECT ee.entity_id, e.name AS entity_name, COUNT(*) AS active_count
+                f"""SELECT ee.entity_id, e.name AS entity_name,
+                           ee.department, COUNT(*) AS active_count
                     FROM {SCHEMA}.entity_entries ee
                     JOIN {SCHEMA}.entities e
                       ON e.id = ee.entity_id AND e.partner_id = ee.partner_id
                     WHERE ee.partner_id = $1 AND ee.status = 'active'
-                    GROUP BY ee.entity_id, e.name
+                    GROUP BY ee.entity_id, e.name, ee.department
                     HAVING COUNT(*) >= $2
                     ORDER BY active_count DESC""",
                 pid, threshold,
@@ -1741,6 +1765,7 @@ class SqlEntityEntryRepository:
             {
                 "entity_id": r["entity_id"],
                 "entity_name": r["entity_name"],
+                "department": r["department"],
                 "active_count": int(r["active_count"]),
             }
             for r in rows
@@ -1932,12 +1957,13 @@ def _row_to_partner_dict(row: asyncpg.Record) -> dict:
         "createdAt": row["created_at"] if "created_at" in row else None,
         "updatedAt": row["updated_at"] if "updated_at" in row else None,
         "inviteExpiresAt": row["invite_expires_at"] if "invite_expires_at" in row else None,
+        "preferences": row["preferences"] if "preferences" in row and row["preferences"] else {},
     }
 
 
 _PARTNER_SELECT_COLS = """id, email, display_name, api_key, authorized_entity_ids,
                        status, is_admin, shared_partner_id, access_mode, default_project, invited_by,
-                       roles, department, created_at, updated_at, invite_expires_at"""
+                       roles, department, created_at, updated_at, invite_expires_at, preferences"""
 
 
 class SqlPartnerRepository:
@@ -2011,6 +2037,35 @@ class SqlPartnerRepository:
                 data["updatedAt"],
                 data.get("inviteExpiresAt"),
             )
+
+    async def get_preferences(self, partner_id: str) -> dict:
+        """Fetch preferences JSONB for a partner. Returns empty dict if unset."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT preferences FROM {SCHEMA}.partners WHERE id = $1 LIMIT 1",
+                partner_id,
+            )
+        if not row or not row["preferences"]:
+            return {}
+        return row["preferences"]
+
+    async def update_preferences(self, partner_id: str, patch: dict) -> dict:
+        """Shallow-merge patch into existing preferences JSONB. Returns updated preferences."""
+        import json as _json
+
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""UPDATE {SCHEMA}.partners
+                    SET preferences = COALESCE(preferences, '{{}}'::jsonb) || $2::jsonb,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    RETURNING preferences""",
+                partner_id,
+                _json.dumps(patch),
+            )
+        if not row or not row["preferences"]:
+            return {}
+        return row["preferences"]
 
     async def list_departments(self, tenant_id: str) -> list[str]:
         """Return stored departments plus any in-use partner departments."""
