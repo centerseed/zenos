@@ -4,12 +4,13 @@ id: SPEC-agent-integration-contract
 status: Approved
 ontology_entity: agent-integration
 created: 2026-03-26
-updated: 2026-03-27
+updated: 2026-04-10
 ---
 
 # SPEC: ZenOS Agent Integration Contract
 
 > PM: Codex | Date: 2026-03-26 | Status: Approved
+> Layering note: direct ZenOS MCP 與 app-facing MCP facade 可並存。direct API key 模式是現行做法，但不是唯一長期模型；app-facing delegation 以 `SPEC-zenos-auth-federation` 為準。
 
 ## 問題
 
@@ -21,6 +22,7 @@ ZenOS 想做的是公司的共享 context layer，而不是某一個特定 agent
 - 不同 agent 的 skill 機制、prompt 習慣、slash command 文化不一致
 - 若 ZenOS 的使用建立在「先學會某個 skill」之上，知識圖譜就只會被少數熟手使用
 - 目前很多團隊以 CLI/UI 型 agent 為主，不想管理額外 API key
+- 未來上層 application 可能以 app-facing MCP facade 代表 user 呼叫 ZenOS，而不是直接發放 ZenOS API key
 
 因此需要一份明確的 integration contract，回答：
 
@@ -38,7 +40,8 @@ ZenOS 想做的是公司的共享 context layer，而不是某一個特定 agent
 3. 保留 skill 作為 onboarding 與批次流程加速器，但不讓 skill 成為日常操作的單點依賴。
 4. 建立一套可跨 Claude Code、Codex、未來其他 agent host 重用的接入協議。
 5. 在不依賴 API key 常駐 worker 的前提下，提供可運作的半自動審核閉環。
-6. 讓 owner 可在 WebUI 一站式看到 draft、審核意見、最終確認入口。
+6. 讓 owner 可在一個 approval surface 一站式看到 draft、審核意見、最終確認入口。
+7. 保留 `direct ZenOS MCP` 與 `app-facing MCP facade` 兩條接入路徑，但兩者都必須落到同一套 ZenOS authorization runtime。
 
 ---
 
@@ -245,15 +248,15 @@ integration contract 必須保留這個分界。
 
 ### 5. Owner 最終確認
 
-- owner 必須在 WebUI 完成最終確認
+- owner 必須在一個 owner-facing approval surface 完成最終確認
 - 確認通過後，文件離開 draft 狀態
 - 確認退回時，必須保留退回原因與下一步責任人
 
 ---
 
-## WebUI Control Tower 要求
+## Approval Surface 要求
 
-WebUI 至少必須提供三個可操作視角：
+owner-facing approval surface 至少必須提供三個可操作視角：
 
 1. `Draft Inbox`
 - 顯示所有 draft 文件、關聯節點、目前任務狀態
@@ -278,14 +281,19 @@ WebUI 至少必須提供三個可操作視角：
 
 ### Mode 0.5: Human-triggered semi-automation
 
-適用：以 Claude CLI / Codex UI 為主，不使用 API key 的團隊
+適用：以 Claude CLI / Codex UI 為主，且已具備 app-facing delegated credential 路徑的團隊
 
 做法：
 
 - MCP-first
 - 人工啟動 agent session
 - agent 啟動即先拉 role queue 再執行審核
-- owner 在 WebUI 完成最終確認
+- owner 在 approval surface 完成最終確認
+
+限制：
+
+- 此模式不是目前 direct MCP 的零設定基線
+- 若團隊沒有 API key，則必須先完成 app-facing federation / delegated credential 接入，才能成立
 
 完成條件：
 
@@ -311,7 +319,7 @@ WebUI 至少必須提供三個可操作視角：
 
 ### Phase 3: Skill refinement
 
-### Phase 3.5: WebUI control tower
+### Phase 3.5: Approval surface control tower
 
 完成條件：
 
@@ -329,7 +337,7 @@ ZenOS 的 agent integration 採用以下原則：
 - `MCP tools` 是主接點
 - `server-side intelligence` 是無縫體驗核心
 - `skills` 是 onboarding 與 batch workflow 加速器
-- 半自動情境以 role queue + WebUI control tower 建立跨廠牌協作
+- 半自動情境以 role queue + owner-facing approval surface 建立跨廠牌協作
 
 ---
 
@@ -337,6 +345,6 @@ ZenOS 的 agent integration 採用以下原則：
 
 1. 將 setup 文案更新為 `會話先拉 queue` 的最小慣例。
 2. 補齊 task queue 的可見欄位與審核輸出格式定義。
-3. 補一份 WebUI 規格，定義三個面板欄位與操作事件。
+3. 補一份 approval surface 規格，定義三個面板欄位與操作事件。
 4. 設計 reviewer/editor/owner 的責任邊界與驗收標準。
 5. 規劃從半自動模式升級到事件驅動模式的遷移路徑。
