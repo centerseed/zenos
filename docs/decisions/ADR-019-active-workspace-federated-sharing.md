@@ -49,7 +49,7 @@ ZenOS 主產品不再以 `client portal` 作為主要身份模型。
 
 - user 是完整使用者
 - workspace 是協作容器
-- 分享是以 `product(L1)` 為入口，把 ontology 子樹共享給他人
+- 分享是以 `L1` 為入口，把 ontology 子樹共享給他人；`product` 是最常見類型，但不是唯一類型
 - shared workspace 的 `guest` 仍可使用 `Knowledge Map`
 - shared workspace 的 `guest` / `member` 主導航目前固定為 `Knowledge Map / Products / Tasks`
 
@@ -102,5 +102,5 @@ ZenOS 主產品不再以 `client portal` 作為主要身份模型。
 1. 以 `active workspace context` 重做前端 nav 與 route guard
 2. 將 guest 在 shared workspace 的主導航調整為 `Knowledge Map / Products / Tasks`
 3. 將 Web `Projects` 文案與主語意收斂為 `Products`
-4. 以 `product(L1)` 作為共享授權入口與 server 查詢裁切基準
+4. 以 `L1 subtree` 作為共享授權入口與 server 查詢裁切基準
 5. 補齊多 workspace、guest shared subtree、member 全 workspace、home workspace full app surface 的驗收場景

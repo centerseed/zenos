@@ -42,7 +42,7 @@ ZenOS 已確認採用 `Prosumer-First` 的多 workspace 協作模型，但先前
 - 每次登入後先回 `home workspace`
 - 系統所有資料與功能判定，皆以 `active workspace context` 為準
 - 跨 workspace 共享目前只涵蓋知識地圖對應的 L1-L3 與其 task / doc
-- `product(L1)` 是分享與導航主軸
+- `L1` 是分享與導航主軸；`product` 是最常見類型，但不是唯一類型
 - `project` 不是獨立主軸，而是一種 L3 entity
 - shared workspace 中，`guest` 與 `member` 目前都以 `Knowledge Map / Products / Tasks` 為主要 surface
 
@@ -99,7 +99,7 @@ ZenOS 主產品不再以 `client portal` 作為主要身份模型。
 
 - user 是完整使用者
 - workspace 是協作容器
-- 分享是以 `product(L1)` 為入口，把 ontology 子樹共享給他人
+- 分享是以 `L1` 為入口，把 ontology 子樹共享給他人
 - shared workspace 的 `guest` 仍可使用 `Knowledge Map`
 - shared workspace 的 `member` / `guest` 主導航目前固定為 `Knowledge Map / Products / Tasks`
 
@@ -141,7 +141,7 @@ ZenOS 的 ontology 主軸正式收斂為：
 
 Guest 的正規規則一律固定為：
 
-- 只能在當前 workspace 內看見 `authorized_entity_ids` 對應的 `product(L1)` 子樹
+- 只能在當前 workspace 內看見 `authorized_entity_ids` 對應的 `L1` 子樹
 - 可進入 shared workspace 的 `Knowledge Map`
 - 只可看見授權子樹中的 `public` entity / document / task
 - 不可看 `restricted`
@@ -256,7 +256,7 @@ Server 端必須強制執行同一套資料裁切；前端與 agent 只能消費
 
 1. 後端 runtime 全面以 `active workspace context` 與 `workspaceRole` 為正規權限輸出，`accessMode` 退為相容欄位
 2. 實作 visibility migration：`role-restricted -> restricted`
-3. 以 `product(L1)` 作為共享授權入口與 server 查詢裁切基準
+3. 以 `L1 subtree` 作為共享授權入口與 server 查詢裁切基準
 4. 嚴格禁止 guest 建立 L1 / L2，只允許建立 task 與掛在授權 L2 下的 L3
 5. Dashboard navigation 與 route guard 改為 active-workspace-based：shared workspace 的 `member` / `guest` 皆顯示 `Knowledge Map / Products / Tasks`
 6. Web `Projects` 文案與主語意收斂為 `Products`

@@ -34,7 +34,7 @@ When: 該 user 再次進入 Dashboard
 Then: 原本的「我的工作區」入口升級為 workspace picker，且可切換兩個 workspace
 
 ### S5: Guest 在 shared workspace 可看到 Knowledge Map
-Given: hhh1230 被 Barry 分享某個 product(L1)，角色為 guest
+Given: hhh1230 被 Barry 分享某個 L1 subtree，角色為 guest
 When: hhh1230 切到 Barry workspace
 Then: 主導航顯示 Knowledge Map / Products / Tasks，且可進入 Knowledge Map
 
@@ -44,12 +44,12 @@ When: hhh1230 回到自己的 home workspace
 Then: 可看到完整功能集合，不因自己在 Barry workspace 是 guest 而被裁切
 
 ### S7: Guest 只可見授權 L1 子樹
-Given: Barry 分享 product A 給 hhh1230，但未分享 product B
+Given: Barry 分享 L1-A 給 hhh1230，但未分享 L1-B
 When: hhh1230 進入 Barry workspace 的 Knowledge Map
-Then: 只看得到 product A 子樹，看不到 product B、其節點、其 impacts 或其存在提示
+Then: 只看得到 L1-A 子樹，看不到 L1-B、其節點、其 impacts 或其存在提示
 
 ### S8: Guest 看不到 restricted 與 confidential
-Given: product A 已分享給 hhh1230，且其下同時存在 public / restricted / confidential 節點
+Given: 某個已分享的 L1 子樹下同時存在 public / restricted / confidential 節點
 When: hhh1230 進入 Barry workspace
 Then: 只看得到 public 節點，看不到 restricted 與 confidential
 
@@ -59,7 +59,7 @@ When: 該 user 進入 Barry workspace
 Then: 可看整個 workspace 的 ontology / products / tasks，只受 visibility 規則限制
 
 ### S10: Guest 可建立 task
-Given: hhh1230 在 Barry workspace 中被授權某個 product(L1)
+Given: hhh1230 在 Barry workspace 中被授權某個 L1 subtree
 When: hhh1230 建立一個新 task
 Then: 該 task 成功建立，且掛在其授權範圍內
 

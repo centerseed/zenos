@@ -5,9 +5,14 @@ status: Draft
 ontology_entity: L3 文件治理
 created: 2026-04-09
 updated: 2026-04-09
+supersedes:
+  - SPEC-doc-source-governance
 ---
 
 # Feature Spec: Document Bundle — L3 文件節點升級為語意文件索引
+
+> SSOT note: 本 spec 是 `doc entity` 的單一真相來源。
+> `doc_role`、multi-source schema、source platform contract、URI 驗證、`read_source` 能力邊界、rollout 狀態，都以本文件為準。
 
 ## 背景與動機
 
@@ -21,10 +26,11 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 
 > ZenOS 是語意索引層，不是內容倉庫。管「意義和關聯」，內容留在原生系統，透過 MCP 聯邦模式讓 AI agent 同時擁有語意理解和內容存取能力。
 
-本 spec 做三件事：
+本 spec 做四件事：
 1. **Document Bundle**：L3 doc entity 從「單一文件代理」升級為「語意文件索引」，一個 entity 聚合同一主題的多份文件
 2. **泛用文件類別**：擴展文件類別系統，讓非軟體開發的文件也能被穩定治理
-3. **治理 Skill 泛用化**：更新 `document-governance.md`，讓任何產業的 agent 都能遵循一致的文件治理流程
+3. **Source Platform Contract**：定義不同平台 URI 如何掛在同一個 doc entity 上，以及哪些平台今天真的可讀
+4. **治理 Skill 泛用化**：更新 `document-governance.md`，讓任何產業的 agent 都能遵循一致的文件治理流程
 
 ## 目標用戶
 
@@ -41,10 +47,90 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 | Spec | 分析 | 處理方式 |
 |------|------|---------|
 | SPEC-doc-governance (Approved) | **範圍重疊**。該 spec 定義每份正式文件獨立分類/識別/生命週期。本 spec 將 L3 doc entity 從「一份文件」重新定義為「一組文件的索引」，改變了 L3 的語意身份。 | 不直接修改 Approved spec。本 spec 定義 Document Index 為 L3 的新子類型，與原有 Single Document 共存。個別文件的生命週期追蹤移到 source 層級的 `doc_status` 欄位，保留治理精神。**需要在 SPEC-doc-governance 補充 amendment 說明 L3 新增 Index 子類型。** |
-| SPEC-doc-source-governance (Draft) | **需要更新**。source_uri 驗證規則繼續適用於每個 source。開放問題「source_status 放頂層還是每個 source」確認為：**放在每個 source 上**。 | 更新 Draft spec，將 source_status 定義移到 source 層級 |
+| SPEC-doc-source-governance (Draft) | **內容已吸收**。source_uri 驗證、source_status、dead-link policy、platform rollout 由本 spec 直接定義。 | 本 spec 成為 SSOT；舊 spec 降為導向文件 |
 | SPEC-batch-doc-governance (如存在) | **介面衝突**。`batch_update_sources` 假設 single URI per doc。 | 需要擴展為支援 per-source 操作，使用 `source_id` 定位 |
 
 ---
+
+## 核心模型總覽
+
+> 本 spec 是 doc entity 與 source platform support 的唯一 SSOT。凡是回答「doc entity 是否支援某平台文件資料」、「某平台 URI 是否可被收錄」、「今天是否真的可讀原文」時，都以本章與後續需求為準。
+
+### doc entity 的核心定位
+
+`doc entity` 是語意文件索引，不是檔案本體。
+
+- `single`：一個 doc entity 對應一份正式文件
+- `index`：一個 doc entity 對應同一語意主題下的多份正式文件
+
+不論 `single` 或 `index`，實際內容都存在外部平台；ZenOS 只保存：
+
+- 文件主題語意
+- ontology 掛載脈絡
+- source metadata
+- source status
+- change summary
+
+### 不同平台 URI 如何被支援
+
+不同平台的文件不是靠不同 doc entity 型別處理，而是靠同一個 doc entity 底下的多個 `source` 處理。
+
+```text
+doc entity
+  -> sources[]
+     -> source.type
+     -> source.uri
+     -> source_id
+     -> source_status
+     -> doc_type
+```
+
+因此，支援新平台時不需要重做 doc entity；只需要補：
+
+1. `source.type`
+2. URI validation
+3. reader adapter
+4. dead-link policy
+
+這代表 ZenOS 的平台擴充模型是：
+
+> `doc entity` 是穩定殼層，`source platform` 是可插拔能力。
+
+### Source Platform Contract
+
+每個 source platform 至少要定義：
+
+- URI validation
+- type normalization
+- read capability
+- dead-link policy
+- setup hint
+
+平台能力必須分層理解，避免誤把「可以掛 URI」等同於「今天可讀原文」：
+
+| 層次 | 問題 | 說明 |
+|------|------|------|
+| `type normalization` | 這是什麼平台？ | 由 URI pattern 推斷或驗證 `source.type` |
+| `URI validation` | 這個 URI 格式合不合法？ | server-side validator 負責拒絕非法值 |
+| `status governance` | 這個 source 現在有效嗎？ | 由 `source_status` 與 dead-link policy 表達 |
+| `reader adapter` | ZenOS 今天能不能真的讀到內容？ | 由 `read_source(doc_id, source_id?)` 的 adapter 決定 |
+
+### rollout 能力矩陣
+
+| source_type | 合法 URI contract | 可掛入 doc entity | source_status 治理 | 內容讀取 | rollout 狀態 |
+|------------|-------------------|------------------|--------------------|----------|-------------|
+| `github` | `https://github.com/{owner}/{repo}/blob/{branch}/{path}` | 是 | 正式支援 | **正式支援** | Phase 1 |
+| `gdrive` | `https://drive.google.com/file/d/{id}/...` 或 `https://docs.google.com/...`，且需 file ID | 是 | 正式支援 | 規格已定，adapter 待補 | Phase 1.5 |
+| `notion` | `https://www.notion.so/...` 且含 UUID 段 | 是 | 基本支援 | 規格已定，adapter 待補 | Later |
+| `wiki` | 完整 `https://...`，且不得為 `/edit` | 是 | 基本支援 | 規格已定，adapter 待補 | Later |
+| `url` | 完整 `https://...` | 是 | 基本支援 | 不保證，預設 metadata only | Later |
+
+規則：
+
+1. multi-source contract 可以先定案，不需等待所有平台 adapter 完成。
+2. spec 必須明確區分「doc entity 架構已支援」與「某平台 today 可讀原文」。
+3. `可掛入 doc entity` 只代表資料模型與治理 contract 已支援，不代表 reader 已落地。
+4. 當某 source type 尚未有正式 reader adapter 時，`read_source` 必須回傳 unavailable / setup_hint，不得假裝支援。
 
 ## 需求
 
@@ -121,6 +207,18 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
   - Given agent 呼叫 `read_source(doc_id, source_id="xxx")`，When 執行，Then 讀取指定 source
   - Given read_source 回傳 stale（gdrive 類型），Then response 包含 `setup_hint: "Google Drive MCP"` 和 `alternative_sources` 列表
   - Given bundle 中 source A 失敗但 source B 可用，Then response 的 `alternative_sources` 包含 source B 的 source_id 和 label
+
+#### P0-3.1: 平台能力與 reader adapter 對齊
+
+- **描述**：每個 source type 的 `read_source` 行為必須與 rollout 能力矩陣一致。
+- **規則**：
+  - `github`：可讀原文，屬正式支援
+  - `gdrive` / `notion` / `wiki`：在 reader adapter 未完成前，可建立 source、可治理 status、可回傳 setup_hint，但不得宣稱正式可讀
+  - 尚未有 reader adapter 的 type，`read_source` 應回傳結構化 unavailable，而不是嘗試偽造內容
+- **Acceptance Criteria**：
+  - Given `github` source，When `read_source` 執行，Then 取得原文或結構化 dead-link 結果
+  - Given `gdrive` source 且 reader adapter 尚未落地，When `read_source` 執行，Then 回傳 unavailable/setup_hint，而不是假裝成功
+  - Given `notion` 或 `wiki` source 且 reader adapter 尚未落地，When `read_source` 執行，Then 回傳 unavailable/setup_hint
 
 #### P0-4: 泛用文件類別系統
 
@@ -278,6 +376,18 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
   - Given agent 傳入合法 Google Doc URL，When `write` 執行，Then source 正常寫入，type 設為 `gdrive`
   - Given agent 傳入 Google Drive 資料夾 URL，When `write` 執行，Then 回傳 400
 
+#### P0-8.1: Notion / Wiki / Generic URL URI 驗證
+
+- **描述**：非 GitHub / GDrive 平台也必須有最小合法 URI contract，讓 doc entity 能穩定保存多平台 source。
+- **驗證規則**：
+  1. `notion`：必須為 `https://www.notion.so/...` 且帶 UUID
+  2. `wiki`：必須為完整 `https://` view URL，不接受 `/edit`
+  3. `url`：必須為完整 `https://` URL，不接受相對路徑或裸字串
+- **Acceptance Criteria**：
+  - Given agent 傳入不含 UUID 的 Notion URL，When `write` 執行，Then 回傳 400
+  - Given agent 傳入 wiki edit URL，When `write` 執行，Then 回傳 400
+  - Given agent 傳入裸字串作為 `url` 類型 source，When `write` 執行，Then 回傳 400
+
 #### P0-9: Dashboard 外鏈跳轉與 Source 列表
 
 - **描述**：Dashboard 在 doc entity 詳情頁顯示所有 source。對 index 類型，按 doc_type 分組顯示。每個 source 旁有平台圖標和「在 XXX 中打開」按鈕。
@@ -378,6 +488,7 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 - **L3 文件治理 impact chain** — 本 spec 變更影響下游：L3 Task 治理規則、MCP 介面設計、Dashboard 知識地圖
 - **source 從 object 升級為 array** — 需要 DB migration。每個 source 帶 source_id（UUID）
 - **source_status 在 source 層級** — 確認 SPEC-doc-source-governance 開放問題：每個 source 獨立追蹤 source_status
+- **source platform rollout** — `github` 先正式支援；`gdrive` / `notion` / `wiki` 先定義 contract 與 setup_hint，後續補 reader adapter
 - **doc_role 欄位** — documents 表新增 enum 欄位，預設 `single`（向後相容）
 - **doc_type 映射** — server-side 維護新舊類別映射表，搜尋時透明展開
 - **change_summary 欄位** — documents 表新增 text 欄位 + timestamp
@@ -386,7 +497,7 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 - **Git URI 驗證為 server-side reject** — 不依賴 agent，server 直接拒絕
 - **governance_guide("document") 更新** — 回傳內容需包含泛用類別表和路由決策樹
 - **SPEC-doc-governance 需補 amendment** — 說明 L3 新增 index 子類型，不改變原有 single 行為
-- **SPEC-doc-source-governance 需更新** — source_status 移到 source 層級
+- **SPEC-doc-source-governance 已被吸收** — 本 spec 成為 doc entity/source platform 的單一真相來源
 
 ## 已決議事項（原開放問題）
 
@@ -398,4 +509,4 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 
 ## 開放問題
 
-（無）
+1. `wiki` 是否要拆成 `confluence` / `generic_wiki`，而不是維持單一泛稱？
