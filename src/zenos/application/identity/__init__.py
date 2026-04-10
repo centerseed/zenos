@@ -12,6 +12,7 @@ from .workspace_context import (
 )
 from .permission_risk_service import PermissionRiskService
 from .policy_suggestion_service import PolicySuggestionService
+from .federation_service import FederationService
 
 __all__ = [
     "resolve_active_workspace_id",
@@ -20,4 +21,5 @@ __all__ = [
     "build_workspace_context_sync",
     "PermissionRiskService",
     "PolicySuggestionService",
+    "FederationService",
 ]

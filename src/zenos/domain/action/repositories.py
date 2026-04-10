@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol as TypingProtocol
 
-from .models import Task
+from .models import Plan, Task
 
 
 class TaskRepository(TypingProtocol):
@@ -36,3 +36,20 @@ class TaskRepository(TypingProtocol):
     async def list_pending_review(self) -> list[Task]:
         """Tasks in review status with confirmedByCreator=false."""
         ...
+
+
+class PlanRepository(TypingProtocol):
+    """Persistence interface for Action Layer plans."""
+
+    async def get_by_id(self, plan_id: str) -> Plan | None: ...
+
+    async def upsert(self, plan: Plan) -> Plan: ...
+
+    async def list_all(
+        self,
+        *,
+        status: list[str] | None = None,
+        project: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Plan]: ...

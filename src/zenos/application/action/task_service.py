@@ -14,6 +14,7 @@ from typing import Any
 from zenos.domain.action import Task, TaskPriority, TaskStatus
 from zenos.domain.knowledge import Blindspot, EntityType
 from zenos.domain.action import TaskRepository
+from zenos.domain.action.repositories import PlanRepository
 from zenos.domain.knowledge import BlindspotRepository, EntityRepository
 from zenos.domain.validation import validate_task_title
 from zenos.domain.task_rules import (
@@ -87,6 +88,7 @@ class TaskService:
         governance_ai: object | None = None,
         relationship_repo: object | None = None,
         uow_factory: Any | None = None,
+        plan_repo: PlanRepository | None = None,
     ) -> None:
         self._tasks = task_repo
         self._entities = entity_repo
@@ -94,6 +96,7 @@ class TaskService:
         self._governance_ai = governance_ai
         self._relationships = relationship_repo
         self._uow_factory = uow_factory
+        self._plans = plan_repo
 
     # ──────────────────────────────────────────
     # Create
@@ -174,6 +177,12 @@ class TaskService:
             raise ValueError("plan_id is required when plan_order is provided")
         if plan_order is not None and int(plan_order) < 1:
             raise ValueError("plan_order must be >= 1")
+        if plan_id and self._plans is not None:
+            existing_plan = await self._plans.get_by_id(plan_id)
+            if existing_plan is None:
+                raise ValueError(
+                    f"plan_id '{plan_id}' does not exist. Create the plan first."
+                )
 
         # Priority recommendation
         due_date = _parse_due_date(data.get("due_date"))
@@ -258,6 +267,14 @@ class TaskService:
                 raise ValueError("result is required when status is 'review'")
 
             task.status = new_status
+
+            # Auto-advance plan draft → active when a task becomes in_progress
+            if new_status == TaskStatus.IN_PROGRESS and task.plan_id and self._plans is not None:
+                plan = await self._plans.get_by_id(task.plan_id)
+                if plan is not None and plan.status == "draft":
+                    plan.status = "active"
+                    plan.updated_at = datetime.utcnow()
+                    await self._plans.upsert(plan)
 
             # Cascade unblocking when done or cancelled
             if new_status in (TaskStatus.DONE, TaskStatus.CANCELLED):

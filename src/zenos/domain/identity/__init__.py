@@ -13,7 +13,8 @@ from .models import (  # noqa: F401
     AgentScope,
     UserPrincipal,
 )
-from .repositories import PartnerRepository  # noqa: F401
+from .repositories import PartnerRepository, TrustedAppRepository, IdentityLinkRepository  # noqa: F401
+from .federation import FederationScope, TrustedApp, IdentityLink  # noqa: F401
 
 __all__ = [
     # enums
@@ -29,4 +30,10 @@ __all__ = [
     "UserPrincipal",
     # repositories
     "PartnerRepository",
+    "TrustedAppRepository",
+    "IdentityLinkRepository",
+    # federation
+    "FederationScope",
+    "TrustedApp",
+    "IdentityLink",
 ]

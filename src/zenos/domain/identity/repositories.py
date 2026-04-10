@@ -4,6 +4,30 @@ from __future__ import annotations
 
 from typing import Protocol as TypingProtocol
 
+from .federation import TrustedApp, IdentityLink
+
+
+class TrustedAppRepository(TypingProtocol):
+    """Persistence interface for trusted app lookups."""
+
+    async def get_by_id(self, app_id: str) -> TrustedApp | None: ...
+
+    async def get_by_name(self, app_name: str) -> TrustedApp | None: ...
+
+    async def create(self, app_name: str, app_secret_hash: str, allowed_issuers: list[str], allowed_scopes: list[str]) -> TrustedApp: ...
+
+    async def update_status(self, app_id: str, status: str) -> None: ...
+
+
+class IdentityLinkRepository(TypingProtocol):
+    """Persistence interface for identity link lookups."""
+
+    async def get(self, app_id: str, issuer: str, external_user_id: str) -> IdentityLink | None: ...
+
+    async def create(self, app_id: str, issuer: str, external_user_id: str, zenos_principal_id: str, email: str | None = None) -> IdentityLink: ...
+
+    async def list_by_principal(self, zenos_principal_id: str) -> list[IdentityLink]: ...
+
 
 class PartnerRepository(TypingProtocol):
     """Persistence interface for partner lookups."""

@@ -7,6 +7,29 @@ from datetime import datetime
 
 
 @dataclass
+class Plan:
+    """Action Layer plan: a grouping, sequencing, and completion boundary for tasks.
+
+    Plans are owned by a partner and group related tasks under a shared goal.
+    A plan defines entry/exit criteria and tracks its own lifecycle independently
+    from its constituent tasks.
+    """
+    goal: str
+    status: str  # PlanStatus value
+    created_by: str
+    id: str | None = None
+    owner: str | None = None
+    entry_criteria: str | None = None
+    exit_criteria: str | None = None
+    project: str = ""
+    project_id: str | None = None
+    updated_by: str | None = None
+    result: str | None = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
 class Task:
     """Action Layer task: a knowledge-driven action item.
 

@@ -2,7 +2,8 @@
 
 Contains:
 - _current_partner ContextVar
-- ApiKeyMiddleware (ASGI)
+- _current_scopes ContextVar (federation scope enforcement)
+- ApiKeyMiddleware (ASGI) — supports API key and delegated JWT
 - SseApiKeyPropagator (ASGI)
 - _apply_workspace_override()
 """
@@ -37,6 +38,9 @@ logger = logging.getLogger(__name__)
 
 _current_partner: ContextVar[dict | None] = ContextVar("current_partner", default=None)
 
+# Federation scope ContextVar — set by JWT auth path; None means full access (API key path)
+_current_scopes: ContextVar[set[str] | None] = ContextVar("current_scopes", default=None)
+
 # ──────────────────────────────────────────────
 # API Key authentication middleware
 # ──────────────────────────────────────────────
@@ -44,12 +48,25 @@ _current_partner: ContextVar[dict | None] = ContextVar("current_partner", defaul
 PartnerKeyValidator = SqlPartnerKeyValidator
 _partner_validator = PartnerKeyValidator()
 
+# JWT validator — module-level singleton (reads ZENOS_JWT_SECRET from env on first use)
+_jwt_service: object | None = None
+
+
+def _get_jwt_service():
+    """Lazily initialise JwtService singleton."""
+    global _jwt_service  # noqa: PLW0603
+    if _jwt_service is None:
+        from zenos.infrastructure.identity import JwtService
+        _jwt_service = JwtService()
+    return _jwt_service
+
 
 class ApiKeyMiddleware:
     """Pure ASGI middleware — compatible with SSE streaming.
 
-    Authentication:
-    - Validate key against active partners in SQL (partners table).
+    Authentication — dual-path:
+    - Delegated JWT (starts with "eyJ"): verify via JwtService → set partner context from DB.
+    - API key: validate against active partners in SQL (partners table); grants full scopes.
     """
 
     def __init__(self, app):
@@ -62,8 +79,12 @@ class ApiKeyMiddleware:
         key = self._extract_key(scope)
         path = scope.get("path", "")
 
-        # Partner key (SQL)
         if key:
+            # ── JWT path (delegated credential) ──────────────────────────
+            if key.startswith("eyJ"):
+                return await self._handle_jwt(key, path, scope, receive, send)
+
+            # ── API key path ──────────────────────────────────────────────
             partner = await _partner_validator.validate(key)
             if partner is not None:
                 from zenos.infrastructure.context import (
@@ -83,6 +104,8 @@ class ApiKeyMiddleware:
                 token_auth_ids = current_partner_authorized_entity_ids.set(
                     list(adjusted.get("authorizedEntityIds") or [])
                 )
+                # API key path always has full scopes
+                token_scopes = _current_scopes.set({"read", "write", "task"})
                 try:
                     return await self.app(scope, receive, send)
                 finally:
@@ -92,6 +115,7 @@ class ApiKeyMiddleware:
                     current_partner_department.reset(token_department)
                     current_partner_is_admin.reset(token_admin)
                     current_partner_authorized_entity_ids.reset(token_auth_ids)
+                    _current_scopes.reset(token_scopes)
             logger.warning(
                 "Auth rejected: key=%.8s... path=%s cache_size=%d",
                 key, path, len(_partner_validator._cache),
@@ -101,6 +125,69 @@ class ApiKeyMiddleware:
 
         response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
         return await response(scope, receive, send)
+
+    async def _handle_jwt(self, token: str, path: str, scope, receive, send):
+        """Authenticate via delegated JWT credential."""
+        from zenos.infrastructure.identity import SqlPartnerRepository
+        from zenos.infrastructure.sql_common import get_pool
+        from zenos.infrastructure.context import (
+            current_partner_id,
+            current_partner_authorized_entity_ids,
+        )
+
+        jwt_service = _get_jwt_service()
+        payload = jwt_service.verify_delegated_credential(token)
+        if payload is None:
+            logger.warning("JWT auth rejected: invalid or expired token, path=%s", path)
+            response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
+            return await response(scope, receive, send)
+
+        principal_id = payload.get("sub")
+        if not principal_id:
+            logger.warning("JWT auth rejected: missing sub claim, path=%s", path)
+            response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
+            return await response(scope, receive, send)
+
+        # Load partner from DB
+        try:
+            pool = await get_pool()
+            partner_repo = SqlPartnerRepository(pool)
+            partner = await partner_repo.get_by_id(principal_id)
+        except Exception:
+            logger.exception("JWT auth: failed to load partner %s", principal_id)
+            response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
+            return await response(scope, receive, send)
+
+        if partner is None:
+            logger.warning("JWT auth rejected: principal %s not found", principal_id)
+            response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
+            return await response(scope, receive, send)
+
+        ws_header = self._extract_workspace_id(scope)
+        resolved_ws = resolve_active_workspace_id(partner, ws_header)
+        adjusted, effective_id = active_partner_view(partner, resolved_ws)
+
+        scopes = set(payload.get("scopes") or ["read"])
+
+        token_ctx = _current_partner.set(adjusted)
+        token_pid = current_partner_id.set(effective_id)
+        token_roles = current_partner_roles.set(list(partner.get("roles") or []))
+        token_department = current_partner_department.set(str(partner.get("department") or "all"))
+        token_admin = current_partner_is_admin.set(bool(adjusted.get("isAdmin", False)))
+        token_auth_ids = current_partner_authorized_entity_ids.set(
+            list(adjusted.get("authorizedEntityIds") or [])
+        )
+        token_scopes = _current_scopes.set(scopes)
+        try:
+            return await self.app(scope, receive, send)
+        finally:
+            _current_partner.reset(token_ctx)
+            current_partner_id.reset(token_pid)
+            current_partner_roles.reset(token_roles)
+            current_partner_department.reset(token_department)
+            current_partner_is_admin.reset(token_admin)
+            current_partner_authorized_entity_ids.reset(token_auth_ids)
+            _current_scopes.reset(token_scopes)
 
     @staticmethod
     def _extract_key(scope) -> str | None:

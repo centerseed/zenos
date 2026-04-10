@@ -60,10 +60,11 @@ from zenos.application.knowledge.governance_ai import GovernanceAI
 from zenos.application.knowledge.governance_service import GovernanceService
 from zenos.application.knowledge.ontology_service import OntologyService
 from zenos.application.knowledge.source_service import SourceService
+from zenos.application.action.plan_service import PlanService
 from zenos.application.action.task_service import TaskService
 from zenos.infrastructure.llm_client import create_llm_client
 from zenos.infrastructure.unit_of_work import UnitOfWork
-from zenos.infrastructure.action import SqlTaskRepository
+from zenos.infrastructure.action import SqlPlanRepository, SqlTaskRepository
 from zenos.infrastructure.agent import SqlToolEventRepository, SqlUsageLogRepository, SqlWorkJournalRepository
 from zenos.infrastructure.knowledge import SqlBlindspotRepository, SqlDocumentRepository, SqlEntityEntryRepository, SqlEntityRepository, SqlProtocolRepository, SqlRelationshipRepository
 from zenos.infrastructure.sql_common import get_pool
@@ -78,12 +79,13 @@ protocol_repo: SqlProtocolRepository | None = None
 blindspot_repo: SqlBlindspotRepository | None = None
 task_repo: SqlTaskRepository | None = None
 entry_repo: SqlEntityEntryRepository | None = None
+plan_repo: SqlPlanRepository | None = None
 
 
 async def _ensure_repos() -> None:
     """Lazily initialise all SQL repositories on first tool invocation."""
     global _repos_ready, entity_repo, relationship_repo, document_repo
-    global protocol_repo, blindspot_repo, task_repo, entry_repo
+    global protocol_repo, blindspot_repo, task_repo, entry_repo, plan_repo
     if _repos_ready:
         return
     pool = await get_pool()
@@ -94,6 +96,7 @@ async def _ensure_repos() -> None:
     blindspot_repo = SqlBlindspotRepository(pool)
     task_repo = SqlTaskRepository(pool)
     entry_repo = SqlEntityEntryRepository(pool)
+    plan_repo = SqlPlanRepository(pool)
     _repos_ready = True
 
 
@@ -214,11 +217,12 @@ ontology_service: OntologyService | None = None
 governance_service: GovernanceService | None = None
 source_service: SourceService | None = None
 task_service: TaskService | None = None
+plan_service: PlanService | None = None
 
 
 async def _ensure_services() -> None:
     """Wire services once repos are ready."""
-    global ontology_service, governance_service, source_service, task_service
+    global ontology_service, governance_service, source_service, task_service, plan_service
     await _ensure_repos()
     await _ensure_governance_ai()
     if ontology_service is None:
@@ -245,6 +249,11 @@ async def _ensure_services() -> None:
             entity_repo=entity_repo,
             source_adapter=source_adapter,
         )
+    if plan_service is None:
+        plan_service = PlanService(
+            plan_repo=plan_repo,
+            task_repo=task_repo,
+        )
     if task_service is None:
         task_service = TaskService(
             task_repo=task_repo,
@@ -253,6 +262,7 @@ async def _ensure_services() -> None:
             governance_ai=_governance_ai,
             relationship_repo=relationship_repo,
             uow_factory=lambda: UnitOfWork(task_repo._pool),
+            plan_repo=plan_repo,
         )
 
 
@@ -268,6 +278,7 @@ from zenos.interface.mcp.get import get as _get_fn
 from zenos.interface.mcp.write import write as _write_fn
 from zenos.interface.mcp.confirm import confirm as _confirm_fn
 from zenos.interface.mcp.task import task as _task_fn, _task_handler
+from zenos.interface.mcp.plan import plan as _plan_fn, _plan_handler
 from zenos.interface.mcp.analyze import analyze as _analyze_fn
 from zenos.interface.mcp.journal import journal_write as _journal_write_fn, journal_read as _journal_read_fn
 from zenos.interface.mcp.governance import (
@@ -286,6 +297,7 @@ get = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_get_fn)
 write = mcp.tool(tags={"write"}, annotations={"idempotentHint": True})(_write_fn)
 confirm = mcp.tool(tags={"write"})(_confirm_fn)
 task = mcp.tool(tags={"write"})(_task_fn)
+plan = mcp.tool(tags={"write"})(_plan_fn)
 analyze = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_analyze_fn)
 journal_write = mcp.tool(tags={"write"})(_journal_write_fn)
 journal_read = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_journal_read_fn)
@@ -322,6 +334,7 @@ from zenos.interface.mcp.task import (
     _validate_attachments,
     _cleanup_removed_attachments,
 )
+from zenos.interface.mcp.plan import _plan_handler
 
 __all__ = [
     "mcp",
@@ -333,6 +346,7 @@ __all__ = [
     "_ensure_journal_repo",
     "_compress_journal",
     "_task_handler",
+    "_plan_handler",
     # singletons
     "entity_repo",
     "relationship_repo",
@@ -341,10 +355,12 @@ __all__ = [
     "blindspot_repo",
     "task_repo",
     "entry_repo",
+    "plan_repo",
     "ontology_service",
     "governance_service",
     "source_service",
     "task_service",
+    "plan_service",
     "_governance_ai",
     "_tool_event_repo",
     "_journal_repo",
@@ -354,6 +370,7 @@ __all__ = [
     "write",
     "confirm",
     "task",
+    "plan",
     "analyze",
     "journal_write",
     "journal_read",
