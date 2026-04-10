@@ -264,6 +264,30 @@ export async function getPartnerMe(token: string): Promise<Partner> {
   return normalizePartner(res.partner as unknown as Record<string, unknown>);
 }
 
+export async function getPreferences(token: string): Promise<import("@/types").PartnerPreferences> {
+  const res = await apiFetch<{ preferences: import("@/types").PartnerPreferences }>("/api/partner/preferences", token);
+  return res.preferences ?? {};
+}
+
+export async function updatePreferences(
+  token: string,
+  patch: import("@/types").PartnerPreferences,
+): Promise<import("@/types").PartnerPreferences> {
+  const activeWorkspaceId = getStoredActiveWorkspaceId();
+  const res = await fetch(`${API_BASE}/api/partner/preferences`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
+    },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(`API /api/partner/preferences: ${res.status}`);
+  const data = await res.json();
+  return data.preferences ?? {};
+}
+
 export async function getPartners(token: string): Promise<Partner[]> {
   const res = await apiFetch<{ partners: Partner[] }>("/api/partners", token);
   return (res.partners ?? []).map((partner) => normalizePartner(partner as unknown as Record<string, unknown>));

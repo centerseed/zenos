@@ -50,7 +50,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       try {
-        const token = await user.getIdToken();
+        const token = await user.getIdToken(true);
         const partner = await getPartnerMe(token);
         setState({ user, partner, loading: false, error: null });
       } catch (err) {
@@ -69,7 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const currentUser = getAuthInstance().currentUser;
     if (!currentUser) return;
     try {
-      const token = await currentUser.getIdToken();
+      const token = await currentUser.getIdToken(true);
       const partner = await getPartnerMe(token);
       setState({ user: currentUser, partner, loading: false, error: null });
     } catch (err) {

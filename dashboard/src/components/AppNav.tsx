@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth";
 import { useMemo, useState } from "react";
 import { APP_COPY } from "@/lib/i18n";
 import { resolveActiveWorkspace } from "@/lib/partner";
+import { setActiveWorkspaceId } from "@/lib/api";
 
 /** Shared workspace surface: shown when isHomeWorkspace=false and workspaceRole is member or guest */
 const SHARED_WORKSPACE_NAV_ITEMS = [
@@ -109,7 +110,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
 
 export function AppNav() {
   const pathname = usePathname();
-  const { partner, signOut } = useAuth();
+  const { partner, signOut, refetchPartner } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const { isHomeWorkspace, workspaceRole } = resolveActiveWorkspace(partner);
@@ -134,7 +135,7 @@ export function AppNav() {
   // Until then, we derive a single-workspace list from the current partner context,
   // so the entry always renders correctly and won't crash when the field is absent.
   const availableWorkspaces = useMemo<WorkspaceInfo[]>(() => {
-    const raw = (partner as unknown as { availableWorkspaces?: WorkspaceInfo[] })?.availableWorkspaces;
+    const raw = partner?.availableWorkspaces;
     if (Array.isArray(raw) && raw.length > 0) return raw;
     return [{ id: partner?.id ?? "home", name: "我的工作區" }];
   }, [partner]);
@@ -164,7 +165,14 @@ export function AppNav() {
               </span>
             </span>
           </Link>
-          <WorkspaceEntry availableWorkspaces={availableWorkspaces} activeWorkspaceId={partner.id} />
+          <WorkspaceEntry
+            availableWorkspaces={availableWorkspaces}
+            activeWorkspaceId={partner.activeWorkspaceId ?? partner.id}
+            onSwitch={(workspaceId) => {
+              setActiveWorkspaceId(workspaceId);
+              void refetchPartner();
+            }}
+          />
           <nav className="hidden md:flex items-center gap-1">
             {navItems.map(({ href, label }) => {
               const isActive = pathname.startsWith(href);

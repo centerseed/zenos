@@ -25,9 +25,22 @@ export interface Partner {
   status: "active" | "suspended" | "invited";
   roles?: string[];
   department?: string;
+  preferences?: PartnerPreferences;
   invitedBy: string | null;
   createdAt: Date;
   updatedAt: Date;
+}
+
+export interface OnboardingPreferences {
+  step1_done?: boolean;
+  step4_done?: boolean;
+  dismissed?: boolean;
+  platform_type?: "technical" | "non_technical";
+  platform_id?: string;
+}
+
+export interface PartnerPreferences {
+  onboarding?: OnboardingPreferences;
 }
 
 export interface Tags {

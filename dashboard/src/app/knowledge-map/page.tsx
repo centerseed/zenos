@@ -6,6 +6,7 @@ import { AuthGuard } from "@/components/AuthGuard";
 import { AppNav } from "@/components/AppNav";
 import { GovernanceHealthHint } from "@/components/GovernanceHealthHint";
 import { LoadingState } from "@/components/LoadingState";
+import { OnboardingChecklist, OnboardingStartButton } from "@/components/OnboardingChecklist";
 import { useSearchParams } from "next/navigation";
 import {
   getAllEntities,
@@ -15,8 +16,9 @@ import {
   getGovernanceHealth,
   getTasks,
   getQualitySignals,
+  updatePreferences,
 } from "@/lib/api";
-import type { Entity, Blindspot, Relationship, Task, QualitySignals, ImpactChainHop } from "@/types";
+import type { Entity, Blindspot, Relationship, Task, QualitySignals, ImpactChainHop, OnboardingPreferences } from "@/types";
 import { NODE_TYPE_COLORS, NODE_TYPE_LABELS } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import dynamic from "next/dynamic";
@@ -137,6 +139,41 @@ function KnowledgeMapContent() {
   
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [focusProduct, setFocusProduct] = useState<string | null>(null);
+
+  // Onboarding state
+  const [showOnboardingChecklist, setShowOnboardingChecklist] = useState(false);
+  const [onboardingPrefs, setOnboardingPrefs] = useState<OnboardingPreferences>({});
+
+  // Derive onboarding visibility: empty workspace + not dismissed
+  const l1l2Count = useMemo(
+    () => entities.filter((e) => e.type === "product" || e.type === "module").length,
+    [entities],
+  );
+  const isEmptyWorkspace = !loading && l1l2Count === 0;
+  const onboardingDismissed = onboardingPrefs.dismissed === true;
+  const showOnboardingButton = isEmptyWorkspace && !onboardingDismissed && !showOnboardingChecklist;
+
+  // Load onboarding prefs from partner
+  useEffect(() => {
+    if (partner?.preferences?.onboarding) {
+      setOnboardingPrefs(partner.preferences.onboarding);
+    }
+  }, [partner]);
+
+  const handleUpdateOnboardingPrefs = useCallback(
+    async (patch: OnboardingPreferences) => {
+      const merged = { ...onboardingPrefs, ...patch };
+      setOnboardingPrefs(merged);
+      if (!user) return;
+      try {
+        const token = await user.getIdToken();
+        await updatePreferences(token, { onboarding: merged });
+      } catch (err) {
+        console.error("Failed to save onboarding preferences:", err);
+      }
+    },
+    [user, onboardingPrefs],
+  );
 
   useEffect(() => {
     if (!user || !partner) return;
@@ -336,11 +373,31 @@ function KnowledgeMapContent() {
     });
   }, []);
 
+  const platformType = onboardingPrefs.platform_type ?? "non_technical";
+
   return (
     <div className="h-screen flex flex-col bg-background">
       <AppNav />
       {loading ? (
         <LoadingState variant="page" label="Loading knowledge map..." />
+      ) : showOnboardingButton ? (
+        /* Empty workspace: show "start" button */
+        <div className="flex-1 flex items-center justify-center">
+          <OnboardingStartButton onClick={() => setShowOnboardingChecklist(true)} />
+        </div>
+      ) : showOnboardingChecklist && isEmptyWorkspace ? (
+        /* Checklist open */
+        <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
+          <OnboardingChecklist
+            hasPartner={!!partner}
+            hasEntities={l1l2Count > 0}
+            onboardingPrefs={onboardingPrefs}
+            apiKey={partner?.apiKey ?? ""}
+            onUpdatePrefs={handleUpdateOnboardingPrefs}
+            platformType={platformType}
+            platformId={onboardingPrefs.platform_id}
+          />
+        </div>
       ) : (
         <div className="flex-1 flex overflow-hidden relative">
           <button
@@ -349,7 +406,7 @@ function KnowledgeMapContent() {
           >
             Menu
           </button>
-          
+
           <Sidebar
             entities={entities}
             focusProduct={focusProduct}

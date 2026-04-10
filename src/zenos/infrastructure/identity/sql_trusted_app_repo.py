@@ -27,10 +27,15 @@ class SqlTrustedAppRepository:
         )
 
     async def get_by_id(self, app_id: str) -> TrustedApp | None:
+        try:
+            parsed_id = uuid.UUID(app_id)
+        except (ValueError, AttributeError):
+            logger.debug("get_by_id: invalid UUID format: %s", app_id)
+            return None
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM zenos.trusted_apps WHERE app_id = $1",
-                uuid.UUID(app_id),
+                parsed_id,
             )
         if row is None:
             return None

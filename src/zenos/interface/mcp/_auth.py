@@ -164,6 +164,23 @@ class ApiKeyMiddleware:
             return await response(scope, receive, send)
 
         ws_header = self._extract_workspace_id(scope)
+
+        # Enforce JWT workspace_ids claim: if the token restricts workspaces,
+        # the requested workspace must be in the allowed set.
+        jwt_workspace_ids = payload.get("workspace_ids")
+        if jwt_workspace_ids is not None and ws_header:
+            allowed_ws = {str(w) for w in jwt_workspace_ids}
+            if ws_header not in allowed_ws:
+                logger.warning(
+                    "JWT auth rejected: workspace %s not in token workspace_ids %s",
+                    ws_header, allowed_ws,
+                )
+                response = JSONResponse(
+                    {"error": "FORBIDDEN", "detail": "workspace_id not allowed by token"},
+                    status_code=403,
+                )
+                return await response(scope, receive, send)
+
         resolved_ws = resolve_active_workspace_id(partner, ws_header)
         adjusted, effective_id = active_partner_view(partner, resolved_ws)
 

@@ -290,25 +290,27 @@ from zenos.interface.mcp.source import read_source as _read_source_fn, batch_upd
 from zenos.interface.mcp.attachment import upload_attachment as _upload_attachment_fn
 from zenos.interface.mcp.setup import setup as _setup_fn
 from zenos.interface.mcp.suggest_policy import suggest_policy as _suggest_policy_fn
+from zenos.interface.mcp._scope import require_scope, TOOL_SCOPE_MAP
 
-# Register tools with the MCP instance
-search = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_search_fn)
-get = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_get_fn)
-write = mcp.tool(tags={"write"}, annotations={"idempotentHint": True})(_write_fn)
-confirm = mcp.tool(tags={"write"})(_confirm_fn)
-task = mcp.tool(tags={"write"})(_task_fn)
-plan = mcp.tool(tags={"write"})(_plan_fn)
-analyze = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_analyze_fn)
-journal_write = mcp.tool(tags={"write"})(_journal_write_fn)
-journal_read = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_journal_read_fn)
-governance_guide = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_governance_guide_fn)
-find_gaps = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_find_gaps_fn)
-common_neighbors = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_common_neighbors_fn)
-read_source = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_read_source_fn)
-batch_update_sources = mcp.tool(tags={"write"}, annotations={"idempotentHint": True})(_batch_update_sources_fn)
-upload_attachment = mcp.tool(tags={"write"})(_upload_attachment_fn)
-setup = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_setup_fn)
-suggest_policy = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(_suggest_policy_fn)
+# Register tools with the MCP instance — each handler is wrapped with require_scope
+# to enforce JWT scope constraints (API key path always has full scopes).
+search = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_search_fn))
+get = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_get_fn))
+write = mcp.tool(tags={"write"}, annotations={"idempotentHint": True})(require_scope("write")(_write_fn))
+confirm = mcp.tool(tags={"write"})(require_scope("write")(_confirm_fn))
+task = mcp.tool(tags={"write"})(require_scope("task")(_task_fn))
+plan = mcp.tool(tags={"write"})(require_scope("task")(_plan_fn))
+analyze = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_analyze_fn))
+journal_write = mcp.tool(tags={"write"})(require_scope("write")(_journal_write_fn))
+journal_read = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_journal_read_fn))
+governance_guide = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_governance_guide_fn))
+find_gaps = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_find_gaps_fn))
+common_neighbors = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_common_neighbors_fn))
+read_source = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_read_source_fn))
+batch_update_sources = mcp.tool(tags={"write"}, annotations={"idempotentHint": True})(require_scope("write")(_batch_update_sources_fn))
+upload_attachment = mcp.tool(tags={"write"})(require_scope("write")(_upload_attachment_fn))
+setup = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_setup_fn))
+suggest_policy = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_suggest_policy_fn))
 
 # Re-export auth middleware for use in __main__.py and tests
 from zenos.interface.mcp._auth import (

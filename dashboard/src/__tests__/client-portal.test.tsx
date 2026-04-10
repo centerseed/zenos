@@ -240,7 +240,7 @@ describe("SetupPage — owner guard", () => {
     render(<Page />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("mcp-config")).toBeInTheDocument();
+      expect(screen.getByTestId("mcp-url-display")).toBeInTheDocument();
     });
     expect(mockRouterReplace).not.toHaveBeenCalled();
   });
