@@ -4,7 +4,7 @@ id: SPEC-identity-and-access
 status: Under Review
 ontology_entity: 身份與權限管理
 created: 2026-04-08
-updated: 2026-04-08
+updated: 2026-04-10
 supersedes:
   - SPEC-permission-model
   - SPEC-partner-access-scope
@@ -28,13 +28,37 @@ ZenOS 採用 `Prosumer-First` 的多 Workspace 協作模型：
 
 本 Spec 是 ZenOS 身份、workspace、授權、共享與主導航行為的單一真相來源。
 
+Layering note：
+
+- 本 spec 定義 `ZenOS Core` 的 Identity & Access Layer
+- 跨 workspace 共享邊界，以 `ZenOS Core` contract 為準
+- application-specific surface 是否共享，必須由各 application spec 額外定義
+- external app 若要接入 ZenOS，auth federation contract 以 `SPEC-zenos-auth-federation` 為準
+
+## 1.1 身份來源原則
+
+- ZenOS 可以有自己的第一方登入方式（例如 ZenOS 自有 Firebase Auth）
+- 但 ZenOS 不得要求所有 application layer 共用同一個 identity provider
+- 上層 app 的 end-user authentication 與 ZenOS 的 workspace authorization 必須分離
+- external app 接入 ZenOS 時，必須透過 federation / delegated credential 進入同一套 authorization runtime
+
 ## 2. 核心模型
 
 ### 2.1 Identity Layer
 
-- 實體：Firebase Auth User（Email / UID）
-- 定位：代表真實使用者，不直接承載資料權限
-- 規則：一個 user 可同時加入多個 workspace
+身份來源不限於單一 identity provider。ZenOS 接受以下身份來源：
+
+| 來源 | 適用場景 | 驗證方式 |
+|------|---------|---------|
+| ZenOS 自有 Firebase Auth（Email / UID） | Dashboard、第一方產品 | `firebase_admin.auth.verify_id_token()` |
+| External App Identity（透過 identity_link） | 上層 app 的 end-user | Federation exchange → delegated credential（見 SPEC-zenos-auth-federation、ADR-029） |
+| API Key | MCP agent / CLI | `SqlPartnerKeyValidator` 查 partners 表 |
+
+- 定位：代表真實使用者或外部 app 代理的使用者，不直接承載資料權限
+- 規則：
+  - 一個 user 可同時加入多個 workspace
+  - 外部 app 的 end-user 必須透過 `identity_links` 映射到 ZenOS principal（即 partner），才能操作 ontology
+  - 所有身份來源最終都收斂到同一個 partner-based authorization runtime
 
 ### 2.2 Workspace Layer
 
@@ -62,7 +86,7 @@ ZenOS 採用 `Prosumer-First` 的多 Workspace 協作模型：
 | :--- | :--- | :--- | :--- | :--- |
 | `owner` | workspace 建立者 / 管理者 | 該 workspace 全域 | 可建立 L1 / L2 / L3 / task / doc | home workspace = 全功能；shared workspace = 全功能 |
 | `member` | workspace 內部成員 | 該 workspace 全域，受 visibility 限制 | 可建立 L1 / L2 / L3 / task / doc | `Knowledge Map` / `Products` / `Tasks` |
-| `guest` | 被分享進來的外部協作者 | 僅限被授權的 L1 product 子樹，受 visibility 限制 | 可建立 L3 / task；不可建立 L1 / L2 | `Knowledge Map` / `Products` / `Tasks` |
+| `guest` | 被分享進來的外部協作者 | 僅限被授權的 L1 子樹，受 visibility 限制 | 可建立 L3 / task；不可建立 L1 / L2 | `Knowledge Map` / `Products` / `Tasks` |
 
 補充規則：
 
@@ -74,23 +98,25 @@ ZenOS 採用 `Prosumer-First` 的多 Workspace 協作模型：
 
 ### 3.1 L1 主軸
 
-- `product` 是主要 L1 主軸
-- 跨 workspace 分享的授權入口，以 `product(L1)` 為準
+- `L1` 是 workspace 內可被獨立授權與分享的主軸 root
+- `product` 是最常見的 L1 類型，但不是唯一類型
+- 在 B2B 協作場景下，`company/customer/account` 也可以是 L1；前提是它承擔的是一整棵 ontology subtree 的分享邊界，而不是單純 CRM view model
+- 跨 workspace 分享的授權入口，以 `L1 subtree` 為準
 - owner 只需要決定「分享哪些 L1 給誰」，不做額外 node whitelist
 
 ### 3.2 L2 / L3 模型
 
-- `L2` 是 product 底下的持久知識節點
+- `L2` 是 L1 底下的持久知識節點
 - `project` 不是獨立主軸，而是一種 `L3 entity`
 - `project(L3)` 用於聚合 task / doc / delivery context
-- `task` 本身也是 L3 entity，可直接存在，不必先包在 project 下
+- `task` 不是 L3 entity；task 屬於 `ZenOS Core Action Layer`，但可直接連結到 L1/L2/L3 context，不必先包在 project 下
 - `doc` 可直接掛在 L2，或掛在某個 L3 doc entity，不必先掛在 project 下
 - `project(L3)` 可同時隸屬多個 L1，但這是例外情境，不可反向改寫 L1 主軸模型
 
 ### 3.3 應用層邊界
 
 - 目前只有知識地圖對應的 L1-L3、以及依附其上的 task / doc 可跨 workspace 共享
-- CRM、設定、其他 application modules 目前只存在於自己的 workspace，不納入共享面
+- CRM、設定、Zentropy 等其他 application modules 目前只存在於自己的 workspace surface，不納入共享面，除非各自 spec 明確定義共享 contract
 - 未來若企業版要開放更多模組，必須透過新 spec / ADR 明確擴充，不得默默沿用當前 guest/member 模型
 
 ## 4. 可見性與授權規則
@@ -119,7 +145,7 @@ ZenOS 採用 `Prosumer-First` 的多 Workspace 協作模型：
 
 guest 在 shared workspace 中的資料裁切規則如下：
 
-- 系統先算出該 guest 被授權的 L1 product 集合
+- 系統先算出該 guest 被授權的 L1 集合
 - guest 僅可見這些 L1 底下的授權子樹
 - 未授權節點、未授權關聯、未授權 impacts 全部直接隱藏
 - 不顯示灰階、鎖頭、占位提示，也不透露未授權範圍存在

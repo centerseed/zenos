@@ -4,8 +4,13 @@ id: SPEC-task-governance
 status: Approved
 ontology_entity: action-layer
 created: 2026-03-26
-updated: 2026-03-31
+updated: 2026-04-10
 ---
+
+# Feature Spec: ZenOS Task Governance
+
+> Layering note: 本 spec 只定義 `ZenOS Core` 中的 Action Layer 治理規則。
+> `Task` 與 `Plan` 的平台定位以 `SPEC-zenos-core` 為準；application-specific subtask / checklist / execution step 不在本 spec 範圍。
 
 ## 2026-03-31 Task 附件支援（最新增補）
 
@@ -170,8 +175,6 @@ Step 3：上傳成功後，將 `{ type, name, attachment_id }` 帶入 `task(acti
 | `completed_at` | datetime \| null | 否 | 完成時間 | `done` 時應有值 |
 | `attachments` | attachment[] | 否 | 附件列表（圖片 / 檔案 / 連結） | 詳見「Task 附件支援」章節 |
 
-# Feature Spec: ZenOS Task Governance
-
 > **治理定位：External（Task 治理模組）**
 > 本 spec 定義 agent 和用戶在建立與管理 task 時必須遵循的規則。屬於可疊加的 Task 治理模組，可獨立於 Doc 治理模組啟用。
 > 規則內容透過 `governance_guide("task")` 提供給任何 MCP client。
@@ -239,7 +242,7 @@ Task 開得太硬，agent 會繞過 ZenOS 回到外部工具或私有筆記。
 
 ## Plan 層定義（新增）
 
-Plan 是 task 群的治理容器，不是額外的長文件層。
+Plan 是 `ZenOS Core Action Layer` 中的 task 群治理容器，不是額外的長文件層，也不是 application-specific PM UX。
 
 定位：
 
@@ -254,7 +257,7 @@ Plan 必須至少定義以下欄位（可透過 task metadata 或等價方式表
 3. `owner`：計畫責任人
 4. `entry_criteria`：何時可啟動
 5. `exit_criteria`：何時可結案
-6. `status`：計畫狀態（例如 active / blocked / done）
+6. `status`：計畫狀態（例如 draft / active / completed / cancelled）
 
 Plan 強制規則：
 
@@ -298,7 +301,7 @@ Plan 強制規則：
 
 ### 與 L2 / L3 的權責邊界（防重複治理）
 
-本 spec 是 Action Layer 的權威規範，不重寫 L2 或 L3 規則。三層分工如下：
+本 spec 是 `ZenOS Core Action Layer` 的權威規範，不重寫 L2 或 L3 規則。三層分工如下：
 
 | 治理面向 | 權威文件 | 本 spec 行為 |
 |---------|----------|--------------|
@@ -306,7 +309,7 @@ Plan 強制規則：
 | 文件分類 / frontmatter / supersede / archive | `SPEC-doc-governance` | 僅引用，不重定義 |
 | Task 建票品質 / 粒度 / 去重 / 驗收 | `SPEC-task-governance` | 完整定義 |
 
-任何「新治理原則」或「文件生命週期規則」若還在定義 what/why/boundary，必須先落到 SPEC/ADR/TD；Task 只承接可指派、可驗收的執行邊界。
+任何「新治理原則」或「文件生命週期規則」若還在定義 what/why/boundary，必須先落到 SPEC/ADR/TD；Task 只承接可指派、可驗收的執行邊界。application-specific subtask / checklist / private execution step 不得直接擴張本 spec 的 Task 定義。
 
 ---
 
