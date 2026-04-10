@@ -114,14 +114,8 @@ async def write(
         id: entries 更新 status 時提供既有 entry ID；其他集合新增時不提供
         workspace_id: 選填。切換到指定 workspace 執行寫入（必須在你的可用列表內）。
     """
-    from zenos.interface.mcp import (
-        _ensure_services,
-        ontology_service,
-        governance_service,
-        task_service,
-        entity_repo,
-        entry_repo,
-    )
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     if workspace_id:
         err = _apply_workspace_override(workspace_id)
@@ -142,9 +136,9 @@ async def write(
             existing_name = data.get("name")
             existing_entity = None
             if existing_id:
-                existing_entity = await entity_repo.get_by_id(existing_id)
+                existing_entity = await _mcp.entity_repo.get_by_id(existing_id)
             elif existing_name:
-                existing_entity = await entity_repo.get_by_name(existing_name)
+                existing_entity = await _mcp.entity_repo.get_by_name(existing_name)
             if existing_entity:
                 auth_error = _check_write_visibility(existing_entity, data)
                 if auth_error:
@@ -159,7 +153,7 @@ async def write(
             else:
                 _before_visibility = None
 
-            result = await ontology_service.upsert_entity(data, partner=_current_partner.get())
+            result = await _mcp.ontology_service.upsert_entity(data, partner=_current_partner.get())
             serialized = _serialize(result)
             entity_id = serialized.get("entity", {}).get("id")
             _audit_log(
@@ -219,7 +213,7 @@ async def write(
         elif collection == "documents":
             # Backward compat: collection="documents" now creates entity(type="document")
             if data.get("sync_mode"):
-                result = await ontology_service.sync_document_governance(data)
+                result = await _mcp.ontology_service.sync_document_governance(data)
                 serialized = _serialize(result)
                 _audit_log(
                     event_type="ontology.document.sync",
@@ -227,7 +221,7 @@ async def write(
                     changes={"input": data},
                 )
                 return _unified_response(data=serialized)
-            result = await ontology_service.upsert_document(data, partner=_current_partner.get())
+            result = await _mcp.ontology_service.upsert_document(data, partner=_current_partner.get())
             serialized = _serialize(result)
             _audit_log(
                 event_type="ontology.document.upsert",
@@ -245,7 +239,7 @@ async def write(
             )
 
         elif collection == "protocols":
-            result = await ontology_service.upsert_protocol(data)
+            result = await _mcp.ontology_service.upsert_protocol(data)
             serialized = _serialize(result)
             _audit_log(
                 event_type="ontology.protocol.upsert",
@@ -262,7 +256,7 @@ async def write(
             )
 
         elif collection == "blindspots":
-            result = await ontology_service.add_blindspot(data)
+            result = await _mcp.ontology_service.add_blindspot(data)
             serialized = _serialize(result)
 
             # Red blindspots auto-create a draft task for immediate attention
@@ -272,7 +266,7 @@ async def write(
                 effective_project = (
                     _partner_ctx.get("defaultProject", "") if _partner_ctx else ""
                 )
-                existing_tasks = await task_service.list_tasks(
+                existing_tasks = await _mcp.task_service.list_tasks(
                     limit=200,
                     project=effective_project or None,
                 )
@@ -320,7 +314,7 @@ async def write(
                 # Infer assignee from related entities' who tag
                 assignee = None
                 for eid in (result.related_entity_ids or []):
-                    entity = await entity_repo.get_by_id(eid)
+                    entity = await _mcp.entity_repo.get_by_id(eid)
                     if entity and entity.tags.who:
                         who = entity.tags.who
                         if isinstance(who, list):
@@ -345,7 +339,7 @@ async def write(
                     "updated_by": creator_id,
                     "assignee": assignee,
                 }
-                auto_task_result = await task_service.create_task(auto_task_data)
+                auto_task_result = await _mcp.task_service.create_task(auto_task_data)
                 serialized["auto_created_task"] = _serialize(auto_task_result.task)
 
             _audit_log(
@@ -373,7 +367,7 @@ async def write(
             )
 
         elif collection == "relationships":
-            result = await ontology_service.add_relationship(
+            result = await _mcp.ontology_service.add_relationship(
                 source_id=data["source_entity_id"],
                 target_id=data["target_entity_id"],
                 rel_type=data["type"],
@@ -387,11 +381,11 @@ async def write(
                 changes={"input": data},
             )
             # Suggest verbs when caller did not provide one
-            if result.verb is None and governance_service is not None:
-                src_entity = await entity_repo.get_by_id(data["source_entity_id"])
-                tgt_entity = await entity_repo.get_by_id(data["target_entity_id"])
+            if result.verb is None and _mcp.governance_service is not None:
+                src_entity = await _mcp.entity_repo.get_by_id(data["source_entity_id"])
+                tgt_entity = await _mcp.entity_repo.get_by_id(data["target_entity_id"])
                 if src_entity is not None and tgt_entity is not None:
-                    suggested_verbs = await governance_service.suggest_relationship_verb(
+                    suggested_verbs = await _mcp.governance_service.suggest_relationship_verb(
                         src_entity, tgt_entity
                     )
                     serialized["suggested_verbs"] = suggested_verbs
@@ -425,7 +419,7 @@ async def write(
                         return _unified_response(status="rejected", data={}, rejection_reason="status=archived 時必填 archive_reason")
                     if archive_reason not in ("merged", "manual"):
                         return _unified_response(status="rejected", data={}, rejection_reason="archive_reason 必須是 merged 或 manual")
-                updated = await entry_repo.update_status(id, new_status, superseded_by, archive_reason)
+                updated = await _mcp.entry_repo.update_status(id, new_status, superseded_by, archive_reason)
                 if updated is None:
                     return _unified_response(
                         status="rejected",
@@ -470,14 +464,14 @@ async def write(
                 department=partner_department,
                 source_task_id=data.get("source_task_id"),
             )
-            result = await entry_repo.create(entry)
+            result = await _mcp.entry_repo.create(entry)
             _audit_log(
                 event_type="ontology.entry.create",
                 target={"collection": collection, "id": result.id},
                 changes={"input": data},
             )
             serialized = _serialize(result)
-            active_count = await entry_repo.count_active_by_entity(entity_id, department=partner_department)
+            active_count = await _mcp.entry_repo.count_active_by_entity(entity_id, department=partner_department)
             entry_warnings: list[str] = []
             if active_count >= 20:
                 entry_warnings.append(

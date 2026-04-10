@@ -92,13 +92,8 @@ async def search(
             不傳時預設只搜 L1+L2，排除 L3 細節節點。
         workspace_id: 選填。切換到指定 workspace 執行搜尋（必須在你的可用列表內）。
     """
-    from zenos.interface.mcp import (
-        _ensure_services,
-        ontology_service,
-        task_service,
-        entity_repo,
-        entry_repo,
-    )
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     if workspace_id:
         err = _apply_workspace_override(workspace_id)
@@ -109,7 +104,7 @@ async def search(
 
     # Resolve product name → product_id (product takes priority over product_id)
     if product is not None:
-        resolved = await entity_repo.get_by_name(product)
+        resolved = await _mcp.entity_repo.get_by_name(product)
         if resolved is None:
             return {
                 "error": f"找不到名為 '{product}' 的產品。請確認名稱是否正確。",
@@ -122,7 +117,7 @@ async def search(
 
     # Keyword search mode (cross-collection)
     if query.strip() and collection == "all":
-        search_results = await ontology_service.search(
+        search_results = await _mcp.ontology_service.search(
             query, max_level=max_level, product_id=product_id,
         )
         visible_results = [r for r in search_results if (r.type != "entity" or _is_entity_visible(r))]
@@ -135,7 +130,7 @@ async def search(
         # Auto-fill project from partner context if caller omits it
         _partner_ctx = _current_partner.get()
         effective_project_kw = project or (_partner_ctx.get("defaultProject", "") if _partner_ctx else "")
-        all_tasks = await task_service.list_tasks(limit=200, project=effective_project_kw or None)
+        all_tasks = await _mcp.task_service.list_tasks(limit=200, project=effective_project_kw or None)
         query_lower = query.lower()
         matched_tasks = [
             t for t in all_tasks
@@ -154,14 +149,14 @@ async def search(
 
         # Also search entity entries content (filter by parent entity visibility)
         partner_department = str(current_partner_department.get() or "all")
-        entry_hits = await entry_repo.search_content(query, limit=limit, department=partner_department)
+        entry_hits = await _mcp.entry_repo.search_content(query, limit=limit, department=partner_department)
         if entry_hits:
             visible_entries = []
             for hit in entry_hits:
                 entry_obj = hit["entry"]
                 parent_eid = getattr(entry_obj, "entity_id", None)
                 if parent_eid:
-                    parent_entity = await entity_repo.get_by_id(parent_eid)
+                    parent_entity = await _mcp.entity_repo.get_by_id(parent_eid)
                     if parent_entity and not _is_entity_visible(parent_entity):
                         continue
                 visible_entries.append(
@@ -190,13 +185,13 @@ async def search(
             type_filter = status if status in (
                 "product", "module", "goal", "role", "project"
             ) else None
-            entities = await ontology_service.list_entities(type_filter=type_filter)
+            entities = await _mcp.ontology_service.list_entities(type_filter=type_filter)
             entities = [e for e in entities if _is_entity_visible(e)]
             # Apply L1 scope filter for guests
             _partner_ctx = _current_partner.get() or {}
             _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
             if _access and _access["is_guest"]:
-                all_entities_for_map = await ontology_service._entities.list_all()
+                all_entities_for_map = await _mcp.ontology_service._entities.list_all()
                 _entity_map = {e.id: e for e in all_entities_for_map if e.id}
                 _allowed: set[str] = set()
                 for _l1_id in _access["authorized_l1_ids"]:
@@ -221,7 +216,7 @@ async def search(
 
         elif col == "documents":
             # Query document entities (type="document") from entities collection
-            doc_entities = await ontology_service._entities.list_all(type_filter="document")
+            doc_entities = await _mcp.ontology_service._entities.list_all(type_filter="document")
             doc_entities = [d for d in doc_entities if _is_entity_visible(d)]
             partner_ctx = _current_partner.get()
             if partner_ctx and is_guest(partner_ctx):
@@ -234,7 +229,7 @@ async def search(
             doc_entities = [d for d in doc_entities if d.status != "archived"]
             # Apply product_id filter for documents via parent_id chain
             if product_id is not None:
-                all_entities = await ontology_service._entities.list_all()
+                all_entities = await _mcp.ontology_service._entities.list_all()
                 entity_map = {e.id: e for e in all_entities if e.id}
                 subtree_ids = _collect_subtree_ids(product_id, entity_map)
                 doc_entities = [d for d in doc_entities if d.parent_id in subtree_ids]
@@ -249,7 +244,7 @@ async def search(
                         filtered.append(d)
                 doc_entities = filtered
             if entity_name:
-                entity = await ontology_service._entities.get_by_name(entity_name)
+                entity = await _mcp.ontology_service._entities.get_by_name(entity_name)
                 if entity and entity.id:
                     doc_entities = [
                         d for d in doc_entities if d.parent_id == entity.id
@@ -261,15 +256,15 @@ async def search(
         elif col == "protocols":
             from zenos.interface.mcp._visibility import _is_protocol_visible
             if confirmed_only is False:
-                protos = await ontology_service._protocols.list_unconfirmed()
+                protos = await _mcp.ontology_service._protocols.list_unconfirmed()
             else:
-                protos = await ontology_service._protocols.list_all(confirmed_only=confirmed_only)
+                protos = await _mcp.ontology_service._protocols.list_all(confirmed_only=confirmed_only)
             visible_protos = [p for p in protos if await _is_protocol_visible(p)]
             results["protocols"] = [_serialize(p) for p in visible_protos[offset:offset + limit]]
 
         elif col == "blindspots":
             from zenos.interface.mcp._visibility import _is_blindspot_visible
-            blindspots = await ontology_service.list_blindspots(
+            blindspots = await _mcp.ontology_service.list_blindspots(
                 entity_name=entity_name, severity=severity
             )
             if confirmed_only is not None:
@@ -285,7 +280,7 @@ async def search(
             # Auto-fill project from partner context if caller omits it
             _partner = _current_partner.get()
             effective_project = project or (_partner.get("defaultProject", "") if _partner else "")
-            tasks = await task_service.list_tasks(
+            tasks = await _mcp.task_service.list_tasks(
                 assignee=assignee,
                 created_by=created_by,
                 status=status_list,
@@ -312,7 +307,7 @@ async def search(
                     "message": "search(collection='entries') 目前需要提供 query 關鍵字",
                 }
             partner_department = str(current_partner_department.get() or "all")
-            entry_hits = await entry_repo.search_content(
+            entry_hits = await _mcp.entry_repo.search_content(
                 query,
                 limit=limit,
                 department=partner_department,

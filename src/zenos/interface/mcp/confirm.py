@@ -60,12 +60,8 @@ async def confirm(
             僅 tasks 集合 + accepted=True 時生效。
         workspace_id: 選填。切換到指定 workspace 執行確認（必須在你的可用列表內）。
     """
-    from zenos.interface.mcp import (
-        _ensure_services,
-        ontology_service,
-        task_service,
-        entry_repo,
-    )
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     if workspace_id:
         err = _apply_workspace_override(workspace_id)
@@ -74,7 +70,7 @@ async def confirm(
     await _ensure_services()
     try:
         if collection == "tasks":
-            result = await task_service.confirm_task(
+            result = await _mcp.task_service.confirm_task(
                 task_id=id,
                 accepted=accepted,
                 rejection_reason=rejection_reason,
@@ -85,7 +81,7 @@ async def confirm(
             )
 
             # Write entity entries (knowledge feedback loop) — only when accepted
-            if accepted and entity_entries and entry_repo is not None:
+            if accepted and entity_entries and _mcp.entry_repo is not None:
                 partner_ctx = _current_partner.get() or {}
                 pid = partner_ctx.get("id", "")
                 partner_department = str(
@@ -111,7 +107,7 @@ async def confirm(
                         department=partner_department,
                         source_task_id=id,
                     )
-                    await entry_repo.create(entry)
+                    await _mcp.entry_repo.create(entry)
             task_data = await _enrich_task_result(result.task)
             if result.cascade_updates:
                 task_data["cascadeUpdates"] = [
@@ -152,7 +148,7 @@ async def confirm(
                 ),
             )
         else:
-            result = await ontology_service.confirm(collection, id)
+            result = await _mcp.ontology_service.confirm(collection, id)
             confirm_data = dict(result) if isinstance(result, dict) else result
             _audit_log(
                 event_type="ontology.confirm",

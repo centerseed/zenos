@@ -22,9 +22,10 @@ async def suggest_policy(
     Returns:
         dict — {entity_id, suggested_visibility, reason, risk_score}
     """
-    from zenos.interface.mcp import _ensure_services, ontology_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
     from zenos.application.identity.policy_suggestion_service import PolicySuggestionService
 
     await _ensure_services()
-    svc = PolicySuggestionService(entity_repo=ontology_service._entities)
+    svc = PolicySuggestionService(entity_repo=_mcp.ontology_service._entities)
     return await svc.suggest(entity_id)

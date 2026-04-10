@@ -37,7 +37,8 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
         source_id: 可選。指定要讀取的 source（用於 doc_role=index 的多 source 文件）。
                    不指定時讀取 primary source 或第一個 valid source。
     """
-    from zenos.interface.mcp import _ensure_services, ontology_service, source_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     await _ensure_services()
     # MCP setup_hint mapping for adapter suggestions
@@ -52,7 +53,7 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
         return str(source.get("source_status") or source.get("status") or "valid")
 
     try:
-        doc_record = await ontology_service.get_document(doc_id)
+        doc_record = await _mcp.ontology_service.get_document(doc_id)
         if doc_record is None:
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
         partner = _current_partner.get() or {}
@@ -133,13 +134,13 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
         # Read the actual content via adapter — pass selected URI so the
         # service reads the correct source, not always sources[0].
         result = None
-        reader = getattr(source_service, "read_source_with_recovery", None)
+        reader = getattr(_mcp.source_service, "read_source_with_recovery", None)
         if reader is not None:
             maybe = reader(doc_id, source_uri=uri)
             if inspect.isawaitable(maybe):
                 result = await maybe
         if result is None:
-            result = await source_service.read_source(doc_id, source_uri=uri)
+            result = await _mcp.source_service.read_source(doc_id, source_uri=uri)
         if isinstance(result, str):
             resp = {"doc_id": doc_id, "content": result}
             if current_sid:
@@ -194,13 +195,14 @@ async def batch_update_sources(
     Returns:
         {status, data: {updated: [...], not_found: [...], errors: [...]}}
     """
-    from zenos.interface.mcp import _ensure_services, ontology_service, governance_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
     from zenos.infrastructure.sql_common import get_pool, upsert_health_cache
     from zenos.infrastructure.context import current_partner_id as _current_partner_id
 
     await _ensure_services()
     try:
-        result = await ontology_service.batch_update_document_sources(
+        result = await _mcp.ontology_service.batch_update_document_sources(
             updates, atomic=atomic
         )
 
@@ -213,7 +215,7 @@ async def batch_update_sources(
         # ADR-020: attach health signal after batch sync
         health_signal = None
         try:
-            health_signal = await governance_service.compute_health_signal()
+            health_signal = await _mcp.governance_service.compute_health_signal()
             # ADR-021: persist to DB cache for Dashboard consumption
             if health_signal:
                 try:

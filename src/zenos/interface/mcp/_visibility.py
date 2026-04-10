@@ -74,7 +74,7 @@ async def _guest_allowed_entity_ids() -> set[str]:
     resolution fails. Guest access should fail closed.
     """
     from zenos.interface.mcp._auth import _current_partner
-    from zenos.interface.mcp import entity_repo
+    import zenos.interface.mcp as _mcp
 
     partner = _current_partner.get()
     if not partner or not is_guest(partner):
@@ -86,7 +86,7 @@ async def _guest_allowed_entity_ids() -> set[str]:
         if not authorized_ids:
             return set()
 
-        all_entities_list = await entity_repo.list_all()
+        all_entities_list = await _mcp.entity_repo.list_all()
         entity_map = {e.id: e for e in (all_entities_list or []) if e.id}
         allowed: set[str] = set()
         for l1_id in authorized_ids:
@@ -123,7 +123,7 @@ async def _is_task_visible(task: object) -> bool:
       Tasks with no linked entities are always visible (fail-open).
     """
     from zenos.interface.mcp._auth import _current_partner
-    from zenos.interface.mcp import entity_repo
+    import zenos.interface.mcp as _mcp
 
     try:
         linked = getattr(task, "linked_entities", None) or []
@@ -141,7 +141,7 @@ async def _is_task_visible(task: object) -> bool:
             if not linked:
                 return False
             authorized_ids = describe_partner_access(partner)["authorized_l1_ids"]
-            all_entities_list = await entity_repo.list_all()
+            all_entities_list = await _mcp.entity_repo.list_all()
             entity_map = {e.id: e for e in (all_entities_list or []) if e.id}
             allowed: set[str] = set()
             for l1_id in authorized_ids:
@@ -161,7 +161,7 @@ async def _is_task_visible(task: object) -> bool:
                 eid = eid.get("id", "")
             if not eid:
                 continue
-            entity = await entity_repo.get_by_id(eid)
+            entity = await _mcp.entity_repo.get_by_id(eid)
             if entity and not _is_entity_visible(entity):
                 return False
         return True
@@ -173,7 +173,7 @@ async def _is_task_visible(task: object) -> bool:
 async def _is_protocol_visible(protocol: object) -> bool:
     """Protocol inherits visibility from its linked entity."""
     from zenos.interface.mcp._auth import _current_partner
-    from zenos.interface.mcp import entity_repo
+    import zenos.interface.mcp as _mcp
 
     try:
         entity_id = getattr(protocol, "entity_id", None)
@@ -186,7 +186,7 @@ async def _is_protocol_visible(protocol: object) -> bool:
             return True
         if is_unassigned_partner(partner):
             return False
-        entity = await entity_repo.get_by_id(entity_id)
+        entity = await _mcp.entity_repo.get_by_id(entity_id)
         if entity is None:
             return True  # entity deleted = show protocol
         return _is_entity_visible(entity)
@@ -203,7 +203,7 @@ async def _is_blindspot_visible(blindspot: object) -> bool:
     Guests never see blindspots.
     """
     from zenos.interface.mcp._auth import _current_partner
-    from zenos.interface.mcp import entity_repo
+    import zenos.interface.mcp as _mcp
 
     try:
         partner = _current_partner.get() or {}
@@ -220,7 +220,7 @@ async def _is_blindspot_visible(blindspot: object) -> bool:
         if not related:
             return True
         for eid in related:
-            entity = await entity_repo.get_by_id(eid)
+            entity = await _mcp.entity_repo.get_by_id(eid)
             if entity and _is_entity_visible(entity):
                 return True  # at least one visible
         return False

@@ -59,16 +59,8 @@ async def analyze(
                  duplicate_blindspots, duplicate_blindspot_rate, median_confirm_latency_days,
                  active_l2_missing_impacts, weekly_review_required}（check_type="all" 時包含）
     """
-    from zenos.interface.mcp import (
-        _ensure_services,
-        _ensure_governance_ai,
-        ontology_service,
-        governance_service,
-        task_service,
-        entry_repo,
-        _governance_ai,
-        _tool_event_repo,
-    )
+    from zenos.interface.mcp import _ensure_services, _ensure_governance_ai
+    import zenos.interface.mcp as _mcp
     from zenos.infrastructure.context import current_partner_id as _current_partner_id
     from zenos.infrastructure.sql_common import get_pool, upsert_health_cache
 
@@ -89,7 +81,7 @@ async def analyze(
         return False
 
     async def _infer_l2_repairs() -> list[dict]:
-        all_entities = await ontology_service._entities.list_all()
+        all_entities = await _mcp.ontology_service._entities.list_all()
         active_modules = [
             e for e in all_entities
             if e.type == "module" and e.status == "active" and e.id
@@ -106,7 +98,7 @@ async def analyze(
         for ent in all_entities:
             if not ent.id:
                 continue
-            rels = await ontology_service._relationships.list_by_entity(ent.id)
+            rels = await _mcp.ontology_service._relationships.list_by_entity(ent.id)
             for rel in rels:
                 if rel.id in seen_rel_ids:
                     continue
@@ -159,7 +151,8 @@ async def analyze(
         different departments are never merged in the same consolidation proposal.
         """
         # Re-read from module-level since _ensure_services may have updated it
-        from zenos.interface.mcp import _governance_ai as _gai, entry_repo as _erepo
+        _erepo = _mcp.entry_repo
+        _gai = _mcp._governance_ai
         if _erepo is None or _gai is None:
             return []
         saturated = await _erepo.list_saturated_entities(threshold=20)
@@ -193,7 +186,7 @@ async def analyze(
 
     # ADR-020: lightweight health check — KPIs only, no heavy analysis
     if check_type == "health":
-        health_signal = await governance_service.compute_health_signal()
+        health_signal = await _mcp.governance_service.compute_health_signal()
         # ADR-021: persist to DB cache for Dashboard consumption
         try:
             pool = await get_pool()
@@ -207,9 +200,9 @@ async def analyze(
     if check_type in ("all", "quality"):
         # Gather entry counts per entity for sparsity check
         _entries_by_entity: dict[str, int] | None = None
-        if entry_repo is not None:
+        if _mcp.entry_repo is not None:
             try:
-                all_entities_for_sparsity = await ontology_service._entities.list_all()
+                all_entities_for_sparsity = await _mcp.ontology_service._entities.list_all()
                 active_module_ids = [
                     e.id for e in all_entities_for_sparsity
                     if e.type == "module" and e.status == "active" and e.id
@@ -217,14 +210,14 @@ async def analyze(
                 _entries_by_entity = {}
                 for eid in active_module_ids:
                     try:
-                        cnt = await entry_repo.count_active_by_entity(eid)
+                        cnt = await _mcp.entry_repo.count_active_by_entity(eid)
                         _entries_by_entity[eid] = cnt
                     except Exception:
                         _entries_by_entity[eid] = 0
             except Exception:
                 logger.warning("Entry sparsity data collection failed", exc_info=True)
 
-        report = await governance_service.run_quality_check(entries_by_entity=_entries_by_entity)
+        report = await _mcp.governance_service.run_quality_check(entries_by_entity=_entries_by_entity)
         results["quality"] = _serialize(report)
         try:
             l2_repairs = await _infer_l2_repairs()
@@ -238,7 +231,7 @@ async def analyze(
             # Repair suggestion is additive and should not break quality report.
             logger.warning("L2 repairs inference failed", exc_info=True)
         try:
-            backfill = await governance_service.infer_l2_backfill_proposals()
+            backfill = await _mcp.governance_service.infer_l2_backfill_proposals()
             results["quality"]["l2_backfill_proposals"] = backfill
             results["quality"]["l2_backfill_count"] = len(backfill)
         except Exception:
@@ -246,24 +239,24 @@ async def analyze(
 
         # L2 governance: impacts target validity
         try:
-            validity_report = await governance_service.check_impacts_target_validity()
+            validity_report = await _mcp.governance_service.check_impacts_target_validity()
             results["quality"]["l2_impacts_validity"] = validity_report
         except Exception:
             logger.warning("L2 impacts target validity check failed", exc_info=True)
 
         # P0-2: quality correction priority
         try:
-            priority_report = await governance_service.run_quality_correction_priority()
+            priority_report = await _mcp.governance_service.run_quality_correction_priority()
             results["quality"]["quality_correction_priority"] = priority_report
         except Exception:
             logger.warning("Quality correction priority failed", exc_info=True)
 
         # L2 governance: stale L2 downstream (entity part from domain; task part here)
         try:
-            downstream_entities = await governance_service.find_stale_l2_downstream_entities()
+            downstream_entities = await _mcp.governance_service.find_stale_l2_downstream_entities()
             # Enrich with open tasks at interface layer (task_repo available here)
             _open_statuses = {"todo", "in_progress", "review"}
-            all_tasks = await task_service.list_tasks(limit=500)
+            all_tasks = await _mcp.task_service.list_tasks(limit=500)
             for entry in downstream_entities:
                 mod_id = entry["stale_module_id"]
                 affected_tasks = [
@@ -284,14 +277,14 @@ async def analyze(
 
         # L2 governance: reverse impacts check
         try:
-            reverse_impacts = await governance_service.check_reverse_impacts()
+            reverse_impacts = await _mcp.governance_service.check_reverse_impacts()
             results["quality"]["l2_reverse_impacts"] = reverse_impacts
         except Exception:
             logger.warning("L2 reverse impacts check failed", exc_info=True)
 
         # L2 governance: review overdue check
         try:
-            overdue = await governance_service.check_governance_review_overdue()
+            overdue = await _mcp.governance_service.check_governance_review_overdue()
             results["quality"]["l2_governance_review_overdue"] = overdue
             results["quality"]["l2_review_overdue_count"] = len(overdue)
         except Exception:
@@ -307,10 +300,10 @@ async def analyze(
 
         # Search-unused signals
         try:
-            if _tool_event_repo is not None:
+            if _mcp._tool_event_repo is not None:
                 partner_id = _current_partner_id.get() or ""
-                all_entities_for_signals = await ontology_service._entities.list_all()
-                usage_stats = await _tool_event_repo.get_entity_usage_stats(partner_id, days=30)
+                all_entities_for_signals = await _mcp.ontology_service._entities.list_all()
+                usage_stats = await _mcp._tool_event_repo.get_entity_usage_stats(partner_id, days=30)
                 search_unused = compute_search_unused_signals(usage_stats, all_entities_for_signals)
                 if search_unused:
                     results["quality"]["search_unused_signals"] = search_unused
@@ -319,7 +312,7 @@ async def analyze(
 
         # Summary quality flags
         try:
-            all_entities_for_quality = await ontology_service._entities.list_all()
+            all_entities_for_quality = await _mcp.ontology_service._entities.list_all()
             l2_entities = [
                 e for e in all_entities_for_quality
                 if e.type == "module" and e.status in ("active", "draft") and e.id
@@ -339,7 +332,7 @@ async def analyze(
             logger.warning("Summary quality flags check failed", exc_info=True)
 
     if check_type in ("all", "staleness", "document_consistency"):
-        staleness_result = await governance_service.run_staleness_check()
+        staleness_result = await _mcp.governance_service.run_staleness_check()
         staleness_warnings = staleness_result["warnings"]
         doc_consistency_warnings = staleness_result["document_consistency_warnings"]
         if check_type != "document_consistency":
@@ -356,13 +349,13 @@ async def analyze(
             }
 
     if check_type in ("all", "blindspot"):
-        blindspots = await governance_service.run_blindspot_analysis()
+        blindspots = await _mcp.governance_service.run_blindspot_analysis()
         results["blindspots"] = {
             "blindspots": [_serialize(b) for b in blindspots],
             "count": len(blindspots),
         }
         try:
-            task_signal_suggestions = await governance_service.infer_blindspots_from_tasks()
+            task_signal_suggestions = await _mcp.governance_service.infer_blindspots_from_tasks()
             results["blindspots"]["task_signal_suggestions"] = task_signal_suggestions
             results["blindspots"]["task_signal_count"] = len(task_signal_suggestions)
         except Exception:
@@ -372,7 +365,7 @@ async def analyze(
 
     if check_type == "impacts":
         try:
-            validity_report = await governance_service.check_impacts_target_validity()
+            validity_report = await _mcp.governance_service.check_impacts_target_validity()
             results.setdefault("quality", {})["l2_impacts_validity"] = validity_report
         except Exception:
             logger.warning("Impacts target validity check failed (impacts check_type)", exc_info=True)
@@ -380,13 +373,13 @@ async def analyze(
     if check_type in ("all", "permission_risk"):
         from zenos.application.identity.permission_risk_service import PermissionRiskService
         risk_svc = PermissionRiskService(
-            entity_repo=ontology_service._entities,
-            task_repo=task_service._tasks,
+            entity_repo=_mcp.ontology_service._entities,
+            task_repo=_mcp.task_service._tasks,
         )
         results["permission_risk"] = await risk_svc.analyze_risk()
 
     if check_type in ("all", "invalid_documents"):
-        all_doc_entities = await ontology_service._entities.list_all(type_filter="document")
+        all_doc_entities = await _mcp.ontology_service._entities.list_all(type_filter="document")
         invalid_docs = detect_invalid_document_titles(all_doc_entities)
         # Task 40: enrich each item with proposed_title and action
         from zenos.domain.source_uri_validator import GITHUB_BLOB_PATTERN
@@ -414,7 +407,7 @@ async def analyze(
 
     if check_type in ("all", "orphaned_relationships"):
         try:
-            orphan_result = await ontology_service.remove_orphaned_relationships()
+            orphan_result = await _mcp.ontology_service.remove_orphaned_relationships()
             results["orphaned_relationships"] = orphan_result
         except Exception:
             logger.warning("Orphaned relationships check failed", exc_info=True)
@@ -433,7 +426,7 @@ async def analyze(
     if check_type == "all":
         try:
             # ADR-020: delegate KPI computation to GovernanceService (single source of truth)
-            health_signal = await governance_service.compute_health_signal()
+            health_signal = await _mcp.governance_service.compute_health_signal()
             kpi_data = health_signal.get("kpis", {})
 
             # Backward-compatible flat KPI format for existing consumers

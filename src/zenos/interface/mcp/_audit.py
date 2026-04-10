@@ -92,12 +92,12 @@ async def _log_tool_event(
     result_count: int | None,
 ) -> None:
     """Write a single tool event row. Errors are logged as warnings only."""
-    from zenos.interface.mcp import _tool_event_repo
+    import zenos.interface.mcp as _mcp
 
-    if _tool_event_repo is None:
+    if _mcp._tool_event_repo is None:
         return
     try:
-        await _tool_event_repo.log_tool_event(
+        await _mcp._tool_event_repo.log_tool_event(
             partner_id=partner_id,
             tool_name=tool_name,
             entity_id=entity_id,

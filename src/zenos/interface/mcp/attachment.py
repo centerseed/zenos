@@ -34,7 +34,8 @@ async def upload_attachment(
         content_type: MIME type（如 "image/png", "application/pdf"）
         description: 附件描述（可選）
     """
-    from zenos.interface.mcp import _ensure_services, task_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     try:
         partner = _current_partner.get()
@@ -44,7 +45,7 @@ async def upload_attachment(
         await _ensure_services()
 
         # Validate task exists and belongs to current partner
-        task_obj = await task_service._tasks.get_by_id(task_id)
+        task_obj = await _mcp.task_service._tasks.get_by_id(task_id)
         if task_obj is None:
             return {"error": "NOT_FOUND", "message": f"Task '{task_id}' not found"}
 
@@ -72,7 +73,7 @@ async def upload_attachment(
 
         # Append to task's attachments
         task_obj.attachments.append(attachment)
-        await task_service._tasks.upsert(task_obj)
+        await _mcp.task_service._tasks.upsert(task_obj)
 
         result = {
             "attachment_id": attachment_id,

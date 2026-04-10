@@ -27,7 +27,8 @@ async def _plan_handler(
     offset: int = 0,
 ) -> dict:
     """Core plan handler — extracted for testability."""
-    from zenos.interface.mcp import _ensure_services, plan_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     try:
         partner = _current_partner.get()
@@ -49,9 +50,9 @@ async def _plan_handler(
 
             effective_project = project or partner_default_project
 
-            if plan_service is None:
+            if _mcp.plan_service is None:
                 await _ensure_services()
-            plan = await plan_service.create_plan({
+            plan = await _mcp.plan_service.create_plan({
                 "goal": goal,
                 "created_by": created_by,
                 "owner": owner,
@@ -95,9 +96,9 @@ async def _plan_handler(
             if actor_id:
                 updates["updated_by"] = actor_id
 
-            if plan_service is None:
+            if _mcp.plan_service is None:
                 await _ensure_services()
-            plan = await plan_service.update_plan(id, updates)
+            plan = await _mcp.plan_service.update_plan(id, updates)
             _audit_log(
                 event_type="plan.update",
                 target={"collection": "plans", "id": id},
@@ -111,9 +112,9 @@ async def _plan_handler(
                     status="rejected", data={},
                     rejection_reason="id is required for plan get",
                 )
-            if plan_service is None:
+            if _mcp.plan_service is None:
                 await _ensure_services()
-            plan_dict = await plan_service.get_plan(id)
+            plan_dict = await _mcp.plan_service.get_plan(id)
             return _unified_response(data=plan_dict)
 
         elif action == "list":
@@ -121,9 +122,9 @@ async def _plan_handler(
             if status:
                 status_filter = [s.strip() for s in status.split(",") if s.strip()]
 
-            if plan_service is None:
+            if _mcp.plan_service is None:
                 await _ensure_services()
-            plans = await plan_service.list_plans(
+            plans = await _mcp.plan_service.list_plans(
                 status=status_filter,
                 project=project or None,
                 limit=limit,

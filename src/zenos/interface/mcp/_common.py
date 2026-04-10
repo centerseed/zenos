@@ -179,9 +179,9 @@ def _build_governance_hints(
 
 async def _enrich_task_result(task_obj) -> dict:
     """Serialize a task and apply enrichment (expanded entities/role/blindspot)."""
-    from zenos.interface.mcp import task_service
+    import zenos.interface.mcp as _mcp
     task_dict = _serialize(task_obj)
-    enr = await task_service.enrich_task(task_obj)
+    enr = await _mcp.task_service.enrich_task(task_obj)
     task_dict["linked_entities"] = enr["expanded_entities"]
     if "assignee_role" in enr:
         task_dict["assignee_role"] = enr["assignee_role"]
@@ -198,7 +198,7 @@ async def _build_context_bundle(
     limit: int = 5,
 ) -> dict:
     """Build a compact context bundle for write/confirm/search responses."""
-    from zenos.interface.mcp import entity_repo, protocol_repo, blindspot_repo
+    import zenos.interface.mcp as _mcp
     from zenos.interface.mcp._visibility import _is_entity_visible, _is_protocol_visible, _is_blindspot_visible
 
     bundle: dict = {
@@ -212,9 +212,9 @@ async def _build_context_bundle(
         if not eid or eid in seen:
             continue
         seen.add(eid)
-        if entity_repo is None:
+        if _mcp.entity_repo is None:
             continue
-        entity = await entity_repo.get_by_id(eid)
+        entity = await _mcp.entity_repo.get_by_id(eid)
         if entity is None or not _is_entity_visible(entity):
             continue
         bundle["entities"].append(
@@ -230,9 +230,9 @@ async def _build_context_bundle(
             break
 
     if protocol_id:
-        if protocol_repo is None:
+        if _mcp.protocol_repo is None:
             return bundle
-        proto = await protocol_repo.get_by_id(protocol_id)
+        proto = await _mcp.protocol_repo.get_by_id(protocol_id)
         if proto and await _is_protocol_visible(proto):
             bundle["protocol"] = {
                 "id": proto.id,
@@ -241,9 +241,9 @@ async def _build_context_bundle(
             }
 
     if blindspot_id:
-        if blindspot_repo is None:
+        if _mcp.blindspot_repo is None:
             return bundle
-        bs = await blindspot_repo.get_by_id(blindspot_id)
+        bs = await _mcp.blindspot_repo.get_by_id(blindspot_id)
         if bs and await _is_blindspot_visible(bs):
             bundle["blindspot"] = {
                 "id": bs.id,

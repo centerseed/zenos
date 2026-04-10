@@ -94,10 +94,11 @@ async def find_gaps(
     Returns:
         {gaps: [{type, entity_id, entity_name, severity, suggestion}], total, by_type}
     """
-    from zenos.interface.mcp import _ensure_services, ontology_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     await _ensure_services()
-    result = await ontology_service.find_gaps(gap_type, scope_product)
+    result = await _mcp.ontology_service.find_gaps(gap_type, scope_product)
     return _unified_response(data=result)
 
 
@@ -125,11 +126,12 @@ async def common_neighbors(
     Returns:
         {entity_a, entity_b, common_neighbors: [{neighbor_id, neighbor_name, edge_type_a, edge_type_b}], count}
     """
-    from zenos.interface.mcp import _ensure_services, ontology_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     await _ensure_services()
     try:
-        result = await ontology_service.find_common_neighbors(entity_a, entity_b)
+        result = await _mcp.ontology_service.find_common_neighbors(entity_a, entity_b)
     except ValueError as e:
         return _unified_response(
             status="rejected", data={}, rejection_reason=str(e)

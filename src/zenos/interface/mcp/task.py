@@ -136,7 +136,8 @@ async def _task_handler(
     Called by the ``task`` MCP tool wrapper. Tests import this function
     directly to avoid calling a ``FunctionTool`` object.
     """
-    from zenos.interface.mcp import _ensure_services, task_service
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     def _looks_like_markdown(text: str) -> bool:
         markers = ("# ", "## ", "- ", "* ", "1. ", "|", "```", "**", "[", "](")
@@ -277,9 +278,9 @@ async def _task_handler(
                     return validated
                 data["attachments"] = validated
 
-            if task_service is None:
+            if _mcp.task_service is None:
                 await _ensure_services()
-            task_result = await task_service.create_task(data)
+            task_result = await _mcp.task_service.create_task(data)
             task_data = await _enrich_task_result(task_result.task)
             _audit_log(
                 event_type="task.create",
@@ -351,9 +352,9 @@ async def _task_handler(
             # Attachments: full replacement with GCS cleanup for removed items
             if attachments is not None:
                 # Fetch existing task first so we can merge server-side fields
-                if task_service is None:
+                if _mcp.task_service is None:
                     await _ensure_services()
-                old_task = await task_service._tasks.get_by_id(id)
+                old_task = await _mcp.task_service._tasks.get_by_id(id)
                 existing_atts = old_task.attachments if old_task else None
 
                 validated = _validate_attachments(
@@ -367,9 +368,9 @@ async def _task_handler(
                 if old_task:
                     _cleanup_removed_attachments(old_task.attachments, validated)
 
-            if task_service is None:
+            if _mcp.task_service is None:
                 await _ensure_services()
-            task_result = await task_service.update_task(id, updates)
+            task_result = await _mcp.task_service.update_task(id, updates)
             task_data = await _enrich_task_result(task_result.task)
             if task_result.cascade_updates:
                 task_data["cascadeUpdates"] = [

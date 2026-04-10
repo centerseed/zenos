@@ -35,7 +35,8 @@ async def journal_write(
         dict — {id, created_at, compressed: bool}
     """
     import json as _json
-    from zenos.interface.mcp import _ensure_journal_repo, _journal_repo, _compress_journal
+    from zenos.interface.mcp import _ensure_journal_repo, _compress_journal
+    import zenos.interface.mcp as _mcp
     from zenos.infrastructure.context import current_partner_id as _current_partner_id
 
     # Coerce tags: agent 有時會傳 JSON 字串而非 list
@@ -46,8 +47,7 @@ async def journal_write(
             tags = [t.strip() for t in tags.split(",") if t.strip()]
 
     await _ensure_journal_repo()
-    # Re-read after _ensure_journal_repo to get the initialized instance
-    from zenos.interface.mcp import _journal_repo as jr
+    jr = _mcp._journal_repo
     assert jr is not None
     partner_id = _current_partner_id.get()
     if not partner_id:
@@ -99,10 +99,11 @@ async def journal_read(
         每個 entry 包含：id, created_at, project, flow_type, summary, tags, is_summary
     """
     from zenos.interface.mcp import _ensure_journal_repo
+    import zenos.interface.mcp as _mcp
     from zenos.infrastructure.context import current_partner_id as _current_partner_id
 
     await _ensure_journal_repo()
-    from zenos.interface.mcp import _journal_repo as jr
+    jr = _mcp._journal_repo
     assert jr is not None
     partner_id = _current_partner_id.get()
     if not partner_id:

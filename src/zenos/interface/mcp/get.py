@@ -48,16 +48,8 @@ async def get(
         id: 項目 ID（所有集合都支援）
         workspace_id: 選填。切換到指定 workspace 執行查詢（必須在你的可用列表內）。
     """
-    from zenos.interface.mcp import (
-        _ensure_services,
-        ontology_service,
-        task_service,
-        entity_repo,
-        relationship_repo,
-        protocol_repo,
-        blindspot_repo,
-        entry_repo,
-    )
+    from zenos.interface.mcp import _ensure_services
+    import zenos.interface.mcp as _mcp
 
     if workspace_id:
         err = _apply_workspace_override(workspace_id)
@@ -71,12 +63,12 @@ async def get(
 
     if collection == "entities":
         if name:
-            result = await ontology_service.get_entity(name)
+            result = await _mcp.ontology_service.get_entity(name)
         elif id:
-            entity = await entity_repo.get_by_id(id)
+            entity = await _mcp.entity_repo.get_by_id(id)
             if entity is None:
                 return {"error": "NOT_FOUND", "message": f"Entity '{id}' not found"}
-            rels = await relationship_repo.list_by_entity(id)
+            rels = await _mcp.relationship_repo.list_by_entity(id)
             from zenos.application.knowledge.ontology_service import EntityWithRelationships
             result = EntityWithRelationships(entity=entity, relationships=rels)
         else:
@@ -99,7 +91,7 @@ async def get(
             visible_relationships = []
             for rel in result.relationships:
                 other_id = rel.target_id if rel.source_entity_id == eid else rel.source_entity_id
-                other_entity = await entity_repo.get_by_id(other_id)
+                other_entity = await _mcp.entity_repo.get_by_id(other_id)
                 if other_entity is None:
                     continue
                 if partner and is_guest(partner):
@@ -121,23 +113,23 @@ async def get(
             # Remove flat list to avoid payload duplication
             response.pop("relationships", None)
         # Attach active entries so callers see the entity as a knowledge container
-        active_entries = await entry_repo.list_by_entity(eid) if eid else []
+        active_entries = await _mcp.entry_repo.list_by_entity(eid) if eid else []
         response["active_entries"] = [_serialize(e) for e in active_entries]
         if eid:
-            response["impact_chain"] = await ontology_service.compute_impact_chain(eid, direction="forward")
-            response["reverse_impact_chain"] = await ontology_service.compute_impact_chain(eid, direction="reverse")
+            response["impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="forward")
+            response["reverse_impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="reverse")
         _schedule_tool_event("get", eid, None, None)
         return _inject_workspace_context(response)
 
     elif collection == "protocols":
         if name:
-            result = await ontology_service.get_protocol(name)
+            result = await _mcp.ontology_service.get_protocol(name)
         elif id:
             # Backward compatibility: first treat id as protocol doc id,
             # fallback to legacy behavior where id is entity_id.
-            result = await protocol_repo.get_by_id(id)
+            result = await _mcp.protocol_repo.get_by_id(id)
             if result is None:
-                result = await protocol_repo.get_by_entity(id)
+                result = await _mcp.protocol_repo.get_by_entity(id)
         else:
             result = None
         if result is None:
@@ -151,7 +143,7 @@ async def get(
         if not doc_id:
             return {"error": "INVALID_INPUT", "message": "Provide id for documents"}
         # Try entity(type=document) first, then legacy documents
-        result = await ontology_service.get_document(doc_id)
+        result = await _mcp.ontology_service.get_document(doc_id)
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
         if partner and is_guest(partner):
@@ -173,7 +165,7 @@ async def get(
     elif collection == "blindspots":
         if not id:
             return {"error": "INVALID_INPUT", "message": "Provide id for blindspots"}
-        result = await blindspot_repo.get_by_id(id)
+        result = await _mcp.blindspot_repo.get_by_id(id)
         if result is None:
             return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
         if not await _is_blindspot_visible(result):
@@ -183,7 +175,7 @@ async def get(
     elif collection == "tasks":
         if not id:
             return {"error": "INVALID_INPUT", "message": "Provide id for tasks"}
-        enriched = await task_service.get_task_enriched(id)
+        enriched = await _mcp.task_service.get_task_enriched(id)
         if enriched is None:
             return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
         task_obj, _ = enriched
