@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────
 
 _current_partner: ContextVar[dict | None] = ContextVar("current_partner", default=None)
+# Raw authenticated partner row (before active_partner_view projection).
+_raw_authenticated_partner: ContextVar[dict | None] = ContextVar(
+    "raw_authenticated_partner", default=None,
+)
 
 # Original shared_partner_id — preserved before active_partner_view strips it.
 # Used by build_workspace_context_sync to always list available workspaces correctly.
@@ -44,6 +48,10 @@ _original_shared_partner_id: ContextVar[str | None] = ContextVar("original_share
 
 # Federation scope ContextVar — set by JWT auth path; None means full access (API key path)
 _current_scopes: ContextVar[set[str] | None] = ContextVar("current_scopes", default=None)
+# Delegated JWT workspace restrictions; None means unrestricted (API key path or legacy token).
+_current_jwt_workspace_ids: ContextVar[set[str] | None] = ContextVar(
+    "current_jwt_workspace_ids", default=None,
+)
 
 # ──────────────────────────────────────────────
 # API Key authentication middleware
@@ -106,6 +114,7 @@ class ApiKeyMiddleware:
                 adjusted, effective_id = active_partner_view(partner, resolved_ws)
 
                 token = _current_partner.set(adjusted)
+                token_raw = _raw_authenticated_partner.set(dict(partner))
                 token_pid = current_partner_id.set(effective_id)
                 token_roles = current_partner_roles.set(list(partner.get("roles") or []))
                 token_department = current_partner_department.set(str(partner.get("department") or "all"))
@@ -115,16 +124,19 @@ class ApiKeyMiddleware:
                 )
                 # API key path always has full scopes
                 token_scopes = _current_scopes.set({"read", "write", "task"})
+                token_jwt_ws = _current_jwt_workspace_ids.set(None)
                 try:
                     return await self.app(scope, receive, send)
                 finally:
                     _current_partner.reset(token)
+                    _raw_authenticated_partner.reset(token_raw)
                     current_partner_id.reset(token_pid)
                     current_partner_roles.reset(token_roles)
                     current_partner_department.reset(token_department)
                     current_partner_is_admin.reset(token_admin)
                     current_partner_authorized_entity_ids.reset(token_auth_ids)
                     _current_scopes.reset(token_scopes)
+                    _current_jwt_workspace_ids.reset(token_jwt_ws)
             logger.warning(
                 "Auth rejected: key=%.8s... path=%s cache_size=%d",
                 key, path, len(_partner_validator._cache),
@@ -173,22 +185,10 @@ class ApiKeyMiddleware:
             return await response(scope, receive, send)
 
         ws_header = self._extract_workspace_id(scope)
-
-        # Enforce JWT workspace_ids claim: if the token restricts workspaces,
-        # the requested workspace must be in the allowed set.
         jwt_workspace_ids = payload.get("workspace_ids")
-        if jwt_workspace_ids is not None and ws_header:
+        allowed_ws: set[str] | None = None
+        if jwt_workspace_ids is not None:
             allowed_ws = {str(w) for w in jwt_workspace_ids}
-            if ws_header not in allowed_ws:
-                logger.warning(
-                    "JWT auth rejected: workspace %s not in token workspace_ids %s",
-                    ws_header, allowed_ws,
-                )
-                response = JSONResponse(
-                    {"error": "FORBIDDEN", "detail": "workspace_id not allowed by token"},
-                    status_code=403,
-                )
-                return await response(scope, receive, send)
 
         # Preserve original shared_partner_id before active_partner_view strips it
         _original_shared_partner_id.set(
@@ -196,11 +196,22 @@ class ApiKeyMiddleware:
         )
 
         resolved_ws = resolve_active_workspace_id(partner, ws_header)
+        if allowed_ws is not None and resolved_ws not in allowed_ws:
+            logger.warning(
+                "JWT auth rejected: resolved workspace %s not in token workspace_ids %s",
+                resolved_ws, allowed_ws,
+            )
+            response = JSONResponse(
+                {"error": "FORBIDDEN", "detail": "workspace_id not allowed by token"},
+                status_code=403,
+            )
+            return await response(scope, receive, send)
         adjusted, effective_id = active_partner_view(partner, resolved_ws)
 
         scopes = set(payload.get("scopes") or ["read"])
 
         token_ctx = _current_partner.set(adjusted)
+        token_raw = _raw_authenticated_partner.set(dict(partner))
         token_pid = current_partner_id.set(effective_id)
         token_roles = current_partner_roles.set(list(partner.get("roles") or []))
         token_department = current_partner_department.set(str(partner.get("department") or "all"))
@@ -209,16 +220,19 @@ class ApiKeyMiddleware:
             list(adjusted.get("authorizedEntityIds") or [])
         )
         token_scopes = _current_scopes.set(scopes)
+        token_jwt_ws = _current_jwt_workspace_ids.set(allowed_ws)
         try:
             return await self.app(scope, receive, send)
         finally:
             _current_partner.reset(token_ctx)
+            _raw_authenticated_partner.reset(token_raw)
             current_partner_id.reset(token_pid)
             current_partner_roles.reset(token_roles)
             current_partner_department.reset(token_department)
             current_partner_is_admin.reset(token_admin)
             current_partner_authorized_entity_ids.reset(token_auth_ids)
             _current_scopes.reset(token_scopes)
+            _current_jwt_workspace_ids.reset(token_jwt_ws)
 
     @staticmethod
     def _extract_key(scope) -> str | None:
@@ -303,9 +317,10 @@ def _apply_workspace_override(workspace_id: str) -> dict | None:
 
     # Use original shared_partner_id (not stripped by active_partner_view)
     orig_shared = _original_shared_partner_id.get()
+    raw_partner = _raw_authenticated_partner.get()
 
-    # Temporarily restore sharedPartnerId for resolve_active_workspace_id
-    partner_for_resolve = dict(partner)
+    # Resolve/switch based on the raw authenticated row whenever available.
+    partner_for_resolve = dict(raw_partner) if raw_partner else dict(partner)
     if orig_shared:
         partner_for_resolve["sharedPartnerId"] = orig_shared
 
@@ -324,7 +339,18 @@ def _apply_workspace_override(workspace_id: str) -> dict | None:
             ],
         )
 
-    adjusted, effective_id = active_partner_view(partner, resolved)
+    jwt_allowed_ws = _current_jwt_workspace_ids.get()
+    if jwt_allowed_ws is not None and workspace_id not in jwt_allowed_ws:
+        return _unified_response(
+            status="error",
+            data={"error": "FORBIDDEN"},
+            warnings=[
+                f"workspace_id '{workspace_id}' 不在 delegated credential 允許的 workspace_ids 內。"
+                f" 允許：{sorted(jwt_allowed_ws)}"
+            ],
+        )
+
+    adjusted, effective_id = active_partner_view(partner_for_resolve, resolved)
     _current_partner.set(adjusted)
     _current_partner_id.set(effective_id)
     current_partner_is_admin.set(bool(adjusted.get("isAdmin", False)))

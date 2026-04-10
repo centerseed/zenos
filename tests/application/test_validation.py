@@ -1110,7 +1110,7 @@ class TestTaskSchemaAlignedValidation:
             "blocked_by": ["task-123"],
             "blocked_reason": "Waiting for upstream API decision",
         })
-        assert result.task.status == "blocked"
+        assert result.task.status == "todo"
         assert result.task.blocked_reason == "Waiting for upstream API decision"
 
     async def test_update_to_review_requires_result(self):

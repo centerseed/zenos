@@ -151,6 +151,84 @@ class TestApplyWorkspaceOverride:
         assert result is not None
         assert result["data"]["error"] == "FORBIDDEN_WORKSPACE"
 
+    def test_switch_from_home_projection_to_shared_updates_effective_workspace(self):
+        """Regression: home-view projection must still be able to switch to shared workspace."""
+        from zenos.interface.mcp import _apply_workspace_override
+        from zenos.interface.mcp._auth import (
+            _current_partner,
+            _original_shared_partner_id,
+            _raw_authenticated_partner,
+        )
+        from zenos.application.identity.workspace_context import active_partner_view
+        from zenos.infrastructure.context import current_partner_id
+
+        raw_partner = _make_partner("home-1", shared_id="shared-99")
+        raw_partner.update({
+            "workspaceRole": "guest",
+            "accessMode": "scoped",
+            "authorizedEntityIds": ["l1-a"],
+        })
+        # Simulate middleware default behavior: request starts in home workspace.
+        home_projected, _ = active_partner_view(raw_partner, "home-1")
+        assert home_projected["sharedPartnerId"] is None
+        assert home_projected["workspaceRole"] == "owner"
+
+        token_partner = _current_partner.set(home_projected)
+        token_pid = current_partner_id.set("home-1")
+        token_orig_shared = _original_shared_partner_id.set("shared-99")
+        token_raw = _raw_authenticated_partner.set(raw_partner)
+        try:
+            result = _apply_workspace_override("shared-99")
+            assert result is None
+            assert current_partner_id.get() == "shared-99"
+            switched = _current_partner.get()
+            assert switched is not None
+            assert switched.get("workspaceRole") == "guest"
+            assert switched.get("sharedPartnerId") == "shared-99"
+        finally:
+            _current_partner.reset(token_partner)
+            current_partner_id.reset(token_pid)
+            _original_shared_partner_id.reset(token_orig_shared)
+            _raw_authenticated_partner.reset(token_raw)
+
+    def test_switch_back_to_home_restores_owner_projection(self):
+        """Shared workspace context can switch back to home and regain owner projection."""
+        from zenos.interface.mcp import _apply_workspace_override
+        from zenos.interface.mcp._auth import (
+            _current_partner,
+            _original_shared_partner_id,
+            _raw_authenticated_partner,
+        )
+        from zenos.application.identity.workspace_context import active_partner_view
+        from zenos.infrastructure.context import current_partner_id
+
+        raw_partner = _make_partner("home-1", shared_id="shared-99")
+        raw_partner.update({
+            "workspaceRole": "guest",
+            "accessMode": "scoped",
+            "authorizedEntityIds": ["l1-a"],
+        })
+        shared_projected, _ = active_partner_view(raw_partner, "shared-99")
+        assert shared_projected.get("workspaceRole") == "guest"
+
+        token_partner = _current_partner.set(shared_projected)
+        token_pid = current_partner_id.set("shared-99")
+        token_orig_shared = _original_shared_partner_id.set("shared-99")
+        token_raw = _raw_authenticated_partner.set(raw_partner)
+        try:
+            result = _apply_workspace_override("home-1")
+            assert result is None
+            assert current_partner_id.get() == "home-1"
+            switched = _current_partner.get()
+            assert switched is not None
+            assert switched.get("workspaceRole") == "owner"
+            assert switched.get("sharedPartnerId") is None
+        finally:
+            _current_partner.reset(token_partner)
+            current_partner_id.reset(token_pid)
+            _original_shared_partner_id.reset(token_orig_shared)
+            _raw_authenticated_partner.reset(token_raw)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # workspace_context injected in _unified_response

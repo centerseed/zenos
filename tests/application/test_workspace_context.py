@@ -52,6 +52,12 @@ class TestResolveActiveWorkspaceId:
         result = resolve_active_workspace_id(partner, None)
         assert result == "home-1"
 
+    def test_no_requested_id_with_shared_partner_still_returns_home(self):
+        """ADR-024/SPEC: missing workspace_id must default to home, not shared."""
+        partner = _partner_with_shared("home-1", "shared-99")
+        result = resolve_active_workspace_id(partner, None)
+        assert result == "home-1"
+
     def test_requested_home_id_is_accepted(self):
         partner = _partner_with_shared("home-1", "shared-99")
         result = resolve_active_workspace_id(partner, "home-1")

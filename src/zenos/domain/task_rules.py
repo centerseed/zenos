@@ -43,6 +43,7 @@ def normalize_task_status(status: str) -> str:
     """Map deprecated statuses into canonical statuses."""
     return {
         "backlog": TaskStatus.TODO,
+        "blocked": TaskStatus.TODO,
         "archived": TaskStatus.DONE,
     }.get(status, status)
 

@@ -292,7 +292,7 @@ class SqlTaskRepository:
         if status is not None:
             normalized = []
             for s in status:
-                mapped = {"backlog": "todo", "blocked": "in_progress", "archived": "done"}.get(s, s)
+                mapped = {"backlog": "todo", "blocked": "todo", "archived": "done"}.get(s, s)
                 if mapped not in normalized:
                     normalized.append(mapped)
             status = normalized

@@ -487,7 +487,7 @@ async def test_task_with_linked_entities_and_blockers(pool):
     task1 = _make_task("blocker_task", status="in_progress")
     saved_t1 = await task_repo.upsert(task1)
 
-    task2 = _make_task("blocked_task", status="blocked")
+    task2 = _make_task("blocked_task", status="todo")
     task2.blocked_reason = "waiting on blocker task"  # required by chk_tasks_blocked_reason
     task2.linked_entities = [entity.id]
     task2.blocked_by = [saved_t1.id]

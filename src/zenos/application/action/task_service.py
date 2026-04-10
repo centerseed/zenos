@@ -167,8 +167,6 @@ class TaskService:
         blocked_reason = data.get("blocked_reason")
         if blocked_by and not blocked_reason:
             raise ValueError("blocked_reason is required when blocked_by is set")
-        if blocked_by and status == TaskStatus.TODO:
-            status = TaskStatus.BLOCKED
         plan_id = data.get("plan_id")
         plan_order = data.get("plan_order")
         depends_on_task_ids = data.get("depends_on_task_ids", [])

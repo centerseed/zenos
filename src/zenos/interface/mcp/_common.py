@@ -31,7 +31,7 @@ def _serialize(obj: object) -> dict:
     if "created_by" in data and "priority_reason" in data and "status" in data:
         data["status"] = {
             "backlog": "todo",
-            "blocked": "in_progress",
+            "blocked": "todo",
             "archived": "done",
         }.get(data["status"], data["status"])
         # Add proxy_url to attachments that have gcs_path
