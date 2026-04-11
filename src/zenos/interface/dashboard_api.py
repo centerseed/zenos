@@ -17,6 +17,7 @@ Endpoints:
   DELETE /api/data/tasks/{taskId}/attachments/{attachmentId} — delete attachment
   GET    /attachments/{attachment_id}                     — proxy-stream attachment file
   POST   /api/docs/{docId}/publish                        — publish latest source as snapshot revision
+  POST   /api/docs/{docId}/content                        — write markdown directly as snapshot revision
   GET    /api/docs/{docId}                                — document delivery metadata
   GET    /api/docs/{docId}/content                        — read latest published markdown snapshot
   PATCH  /api/docs/{docId}/access                         — update document visibility
@@ -1863,6 +1864,94 @@ async def publish_document_snapshot(request: Request) -> Response:
     )
 
 
+async def save_document_content(request: Request) -> Response:
+    """Write markdown directly into GCS and publish as latest snapshot revision."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("FORBIDDEN", "Current workspace cannot write document content", 403, request=request)
+    if is_guest(partner):
+        return _error_response("FORBIDDEN", "Guest cannot write document content", 403, request=request)
+
+    doc_id = request.path_params.get("docId")
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+    if not isinstance(body, dict):
+        return _error_response("INVALID_INPUT", "Request body must be a JSON object", 400, request=request)
+
+    content = body.get("content")
+    if not isinstance(content, str):
+        return _error_response("INVALID_INPUT", "content must be a string", 400, request=request)
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        doc_entity = await _entity_repo.get_by_id(doc_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not doc_entity or doc_entity.type != EntityType.DOCUMENT:
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+    if not await _is_document_visible_for_partner(doc_entity, partner, effective_id):
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+
+    source_id = body.get("source_id")
+    if source_id is not None:
+        source_id = str(source_id).strip() or None
+    source_version_ref = body.get("source_version_ref")
+    if source_version_ref is not None:
+        source_version_ref = str(source_version_ref).strip() or None
+    if source_version_ref is None:
+        source_version_ref = "manual"
+
+    try:
+        from zenos.infrastructure.gcs_client import get_documents_bucket, upload_blob
+
+        revision_id = uuid.uuid4().hex
+        snapshot_path = f"docs/{doc_id}/revisions/{revision_id}.md"
+        bucket = get_documents_bucket()
+        payload = content.encode("utf-8")
+        upload_blob(bucket, snapshot_path, payload, "text/markdown; charset=utf-8")
+        content_hash = hashlib.sha256(payload).hexdigest()
+    except Exception:
+        logger.exception("Failed to write markdown snapshot for %s", doc_id)
+        return _error_response("GCS_ERROR", "Failed to write document snapshot", 500, request=request)
+
+    try:
+        stored_revision_id = await _create_revision_and_mark_ready(
+            partner_id=effective_id,
+            doc_id=doc_id,
+            source_id=source_id,
+            source_version_ref=source_version_ref,
+            snapshot_bucket=bucket,
+            snapshot_object_path=snapshot_path,
+            content_hash=content_hash,
+            content_type="text/markdown; charset=utf-8",
+            created_by=effective_id,
+        )
+    except Exception:
+        logger.exception("Failed to persist direct markdown revision metadata for %s", doc_id)
+        return _error_response("INTERNAL_ERROR", "Failed to persist snapshot revision", 500, request=request)
+
+    return _json_response(
+        {
+            "doc_id": doc_id,
+            "canonical_path": f"/docs/{doc_id}",
+            "revision_id": stored_revision_id,
+            "delivery_status": "ready",
+            "source_id": source_id,
+            "source_version_ref": source_version_ref,
+        },
+        request=request,
+    )
+
+
 async def get_document_delivery(request: Request) -> Response:
     """Return document delivery metadata for Reader page."""
     if request.method == "OPTIONS":
@@ -2270,6 +2359,7 @@ dashboard_routes = [
     Route("/api/data/tasks", create_task, methods=["POST", "OPTIONS"]),
     Route("/attachments/{attachment_id}", get_attachment, methods=["GET", "OPTIONS"]),
     Route("/api/docs/{docId}/publish", publish_document_snapshot, methods=["POST", "OPTIONS"]),
+    Route("/api/docs/{docId}/content", save_document_content, methods=["POST", "OPTIONS"]),
     Route("/api/docs/{docId}", get_document_delivery, methods=["GET", "OPTIONS"]),
     Route("/api/docs/{docId}/content", get_document_content, methods=["GET", "OPTIONS"]),
     Route("/api/docs/{docId}/access", update_document_access, methods=["PATCH", "OPTIONS"]),

@@ -223,6 +223,30 @@ export async function publishDocumentSnapshot(
   return hydrateDates(await res.json());
 }
 
+export async function saveDocumentMarkdown(
+  token: string,
+  docId: string,
+  content: string,
+  opts?: { source_id?: string; source_version_ref?: string }
+): Promise<{ revision_id: string; canonical_path: string } | null> {
+  const activeWorkspaceId = getStoredActiveWorkspaceId();
+  const res = await fetch(`${API_BASE}/api/docs/${docId}/content`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
+    },
+    body: JSON.stringify({
+      content,
+      ...(opts?.source_id ? { source_id: opts.source_id } : {}),
+      ...(opts?.source_version_ref ? { source_version_ref: opts.source_version_ref } : {}),
+    }),
+  });
+  if (!res.ok) return null;
+  return hydrateDates(await res.json());
+}
+
 export async function updateDocumentVisibility(
   token: string,
   docId: string,

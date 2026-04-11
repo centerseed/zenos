@@ -12,6 +12,7 @@ import {
   getDocumentContent,
   getDocumentDelivery,
   publishDocumentSnapshot,
+  saveDocumentMarkdown,
   updateDocumentVisibility,
 } from "@/lib/api";
 import type { EntityVisibility } from "@/types";
@@ -23,9 +24,11 @@ function DocumentReaderInner() {
 
   const [loading, setLoading] = useState(true);
   const [publishing, setPublishing] = useState(false);
+  const [savingContent, setSavingContent] = useState(false);
   const [savingVisibility, setSavingVisibility] = useState(false);
   const [metadata, setMetadata] = useState<Awaited<ReturnType<typeof getDocumentDelivery>>>(null);
   const [content, setContent] = useState<string>("");
+  const [draftContent, setDraftContent] = useState<string>("");
   const [message, setMessage] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [selectedVisibility, setSelectedVisibility] = useState<EntityVisibility>("public");
@@ -61,6 +64,7 @@ function DocumentReaderInner() {
         if (cancelled) return;
         setMetadata(meta);
         setContent(body?.content ?? "");
+        setDraftContent(body?.content ?? "");
         if (!body?.content) {
           setMessage("這份文件尚未發布 snapshot。請先點擊 Publish Snapshot。");
         }
@@ -94,9 +98,34 @@ function DocumentReaderInner() {
       ]);
       setMetadata(meta);
       setContent(body?.content ?? "");
+      setDraftContent(body?.content ?? "");
       setMessage("Snapshot 發布完成。");
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function handleSaveMarkdown() {
+    if (!user || !docId) return;
+    setSavingContent(true);
+    setMessage(null);
+    try {
+      const token = await user.getIdToken();
+      const result = await saveDocumentMarkdown(token, docId, draftContent);
+      if (!result) {
+        setMessage("保存 markdown 失敗。");
+        return;
+      }
+      const [meta, body] = await Promise.all([
+        getDocumentDelivery(token, docId),
+        getDocumentContent(token, docId),
+      ]);
+      setMetadata(meta);
+      setContent(body?.content ?? "");
+      setDraftContent(body?.content ?? "");
+      setMessage("Markdown 已寫入 GCS snapshot。");
+    } finally {
+      setSavingContent(false);
     }
   }
 
@@ -163,6 +192,13 @@ function DocumentReaderInner() {
             >
               Create Share Link
             </button>
+            <button
+              onClick={handleSaveMarkdown}
+              disabled={savingContent}
+              className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-50"
+            >
+              {savingContent ? "Saving..." : "Save Markdown"}
+            </button>
           </div>
         </div>
 
@@ -201,6 +237,18 @@ function DocumentReaderInner() {
             {message}
           </div>
         )}
+
+        <section className="mb-4 rounded-xl border border-border bg-card p-4">
+          <div className="mb-2 text-xs text-muted-foreground">
+            Lightweight edit (GCS snapshot): 可直接修改 markdown 並儲存成最新 revision。
+          </div>
+          <textarea
+            value={draftContent}
+            onChange={(e) => setDraftContent(e.target.value)}
+            placeholder="在這裡貼上或編輯 markdown..."
+            className="h-56 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground"
+          />
+        </section>
 
         {loading ? (
           <LoadingState label="Loading document..." />

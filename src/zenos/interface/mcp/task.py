@@ -130,6 +130,7 @@ async def _task_handler(
     plan_order: int | None = None,
     depends_on_task_ids: list[str] | None = None,
     attachments: list[dict] | None = None,
+    conn: Any | None = None,
 ) -> dict:
     """Core task handler logic — extracted for testability.
 
@@ -280,7 +281,7 @@ async def _task_handler(
 
             if _mcp.task_service is None:
                 await _ensure_services()
-            task_result = await _mcp.task_service.create_task(data)
+            task_result = await _mcp.task_service.create_task(data, conn=conn)
             task_data = await _enrich_task_result(task_result.task)
             _audit_log(
                 event_type="task.create",

@@ -21,6 +21,7 @@ import {
   getDocumentDelivery,
   getDocumentContent,
   publishDocumentSnapshot,
+  saveDocumentMarkdown,
   updateDocumentVisibility,
   createDocumentShareLink,
   revokeDocumentShareLink,
@@ -733,6 +734,32 @@ describe("document delivery APIs", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ visibility: "restricted" }),
+      })
+    );
+  });
+
+  it("calls POST /api/docs/{docId}/content with markdown payload", async () => {
+    const fakeFetch = mockFetch({ revision_id: "rev-2", canonical_path: "/docs/doc-1" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await saveDocumentMarkdown(FAKE_TOKEN, "doc-1", "# hello", {
+      source_id: "manual-source",
+      source_version_ref: "manual-v1",
+    });
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/docs/doc-1/content`,
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${FAKE_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          content: "# hello",
+          source_id: "manual-source",
+          source_version_ref: "manual-v1",
+        }),
       })
     );
   });

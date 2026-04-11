@@ -7,6 +7,7 @@ import asyncpg  # type: ignore[import-untyped]
 from zenos.domain.knowledge import EntityEntry
 from zenos.infrastructure.sql_common import (
     SCHEMA,
+    _acquire_with_tx,
     _get_partner_id,
     _now,
     _to_dt,
@@ -40,11 +41,11 @@ class SqlEntityEntryRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    async def create(self, entry: EntityEntry) -> EntityEntry:
+    async def create(self, entry: EntityEntry, *, conn: asyncpg.Connection | None = None) -> EntityEntry:
         """Insert a new entry and return it."""
         pid = _get_partner_id()
-        async with self._pool.acquire() as conn:
-            await conn.execute(
+        async with _acquire_with_tx(self._pool, conn) as _conn:
+            await _conn.execute(
                 f"""
                 INSERT INTO {SCHEMA}.entity_entries (
                     id, partner_id, entity_id, type, content,

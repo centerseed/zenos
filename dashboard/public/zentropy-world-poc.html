@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zentropy</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0f1a;--surface:rgba(255,255,255,0.04);--surface-hover:rgba(255,255,255,0.07);
+  --border:rgba(255,255,255,0.08);--border-hi:rgba(255,255,255,0.14);
+  --text:#eef0f4;--t60:rgba(255,255,255,0.6);--t40:rgba(255,255,255,0.38);--t20:rgba(255,255,255,0.18);
+  --cta:#3b5ee8;--amber:#fbbf24;--amber-bg:rgba(251,191,36,0.06);--amber-border:rgba(251,191,36,0.14);
+  --green:#4ade80;--red:#f87171;--blue:#60a5fa;
+}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,'SF Pro Display','Segoe UI',system-ui,sans-serif;min-height:100dvh;-webkit-font-smoothing:antialiased}
+
+/* Header */
+header{position:sticky;top:0;z-index:50;background:var(--bg);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;height:56px;padding:0 24px}
+.logo{font-size:18px;font-weight:700;background:linear-gradient(to right,#fff,rgba(255,255,255,0.5));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.h-stat{font-size:12px;color:var(--t40);font-variant-numeric:tabular-nums}
+.h-stat b{color:var(--t60);font-weight:600}
+
+/* Main scroll area */
+main{padding:20px 24px 100px;max-width:1100px;margin:0 auto}
+
+/* Top insight (the "gift") */
+.insight-hero{
+  background:var(--amber-bg);border:1px solid var(--amber-border);
+  border-radius:12px;padding:16px 20px;margin-bottom:24px;
+  display:flex;gap:14px;align-items:flex-start;
+}
+.insight-hero-icon{font-size:20px;flex-shrink:0;margin-top:1px}
+.insight-hero-body{flex:1}
+.insight-hero-label{font-size:10px;text-transform:uppercase;letter-spacing:1.5px;color:var(--amber);font-weight:600;margin-bottom:6px}
+.insight-hero-text{font-size:14px;line-height:1.7;color:rgba(251,191,36,0.75)}
+.insight-hero-text em{color:var(--text);font-style:normal;font-weight:500}
+
+/* Area grid */
+.area-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px;align-items:start}
+
+/* Area card */
+.area-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  overflow:hidden;transition:border-color 0.2s,background 0.2s;
+}
+.area-card:hover{border-color:var(--border-hi);background:var(--surface-hover)}
+.area-card.silent{opacity:0.45;border-style:dashed}
+.area-card.silent:hover{opacity:0.7}
+
+/* Card header */
+.ac-head{padding:16px 18px 12px;display:flex;align-items:center;gap:12px}
+.ac-icon{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
+.ac-info{flex:1;min-width:0}
+.ac-name{font-size:15px;font-weight:600;display:flex;align-items:center;gap:8px}
+.ac-stage{font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px;border:1px solid var(--border)}
+.ac-meta{font-size:12px;color:var(--t40);margin-top:2px}
+
+/* Energy bar in card */
+.ac-energy{padding:0 18px 14px;display:flex;align-items:center;gap:10px}
+.ac-ebar{flex:1;height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden}
+.ac-efill{height:100%;border-radius:2px;transition:width 0.6s}
+.ac-elabel{font-size:11px;color:var(--t40);white-space:nowrap}
+
+/* Card insight line */
+.ac-insight{padding:0 18px 14px;font-size:12px;line-height:1.5;color:var(--t40);font-style:italic}
+
+/* Task list in card */
+.ac-tasks{border-top:1px solid var(--border);padding:6px 0}
+.ac-task{display:flex;align-items:center;gap:10px;padding:8px 18px;font-size:13px;transition:background 0.15s}
+.ac-task:hover{background:rgba(255,255,255,0.03)}
+.ac-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.ac-dot.done{background:var(--green)}
+.ac-dot.active{background:var(--blue)}
+.ac-dot.inbox{background:var(--amber)}
+.ac-ttitle{flex:1;color:var(--t60);line-height:1.3}
+.ac-ttitle.completed{text-decoration:line-through;opacity:0.4}
+.ac-tenergy{font-size:11px;flex-shrink:0}
+.ac-more{padding:8px 18px;font-size:11px;color:var(--t20);cursor:pointer}
+.ac-more:hover{color:var(--t40)}
+
+/* Products in card */
+.ac-prod{padding:4px 18px;font-size:11px;color:var(--t20);text-transform:uppercase;letter-spacing:1px;font-weight:600;margin-top:4px}
+
+/* Connections */
+.ac-conns{border-top:1px solid var(--border);padding:10px 18px;display:flex;gap:8px;flex-wrap:wrap}
+.ac-conn{font-size:11px;color:var(--t40);display:flex;align-items:center;gap:4px}
+.ac-conn-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+
+/* Silent card body */
+.ac-silent-body{padding:12px 18px 16px;font-size:13px;color:var(--t20);text-align:center}
+
+/* Bottom bar */
+#bar{
+  position:fixed;bottom:0;left:0;right:0;z-index:50;
+  background:rgba(10,15,26,0.95);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);
+  border-top:1px solid var(--border);
+  padding:12px 24px;padding-bottom:max(12px,env(safe-area-inset-bottom));
+  display:flex;align-items:center;gap:12px;
+}
+.tabs{display:flex;gap:6px;flex-shrink:0}
+.tab{padding:6px 14px;border-radius:20px;font-size:12px;font-weight:500;border:1px solid var(--border);background:none;color:var(--t40);cursor:pointer;transition:all 0.15s;font-family:inherit}
+.tab.on{background:rgba(255,255,255,0.06);color:var(--text);border-color:var(--border-hi)}
+.tab:hover:not(.on){color:var(--t60)}
+.inp-row{flex:1;display:flex;gap:8px;max-width:640px}
+#inp{flex:1;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:14px;font-family:inherit;outline:none;transition:border-color 0.15s}
+#inp:focus{border-color:var(--blue)}
+#inp::placeholder{color:var(--t20)}
+.send{background:var(--cta);border:none;border-radius:8px;padding:10px 20px;color:#fff;font-size:13px;font-weight:500;font-family:inherit;cursor:pointer;transition:background 0.15s;display:flex;align-items:center;gap:6px}
+.send:hover{background:#2d4ed4}
+
+/* Reflect */
+#reflect{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(200%);
+  max-width:420px;width:calc(100% - 32px);z-index:60;
+  background:rgba(15,20,35,0.95);backdrop-filter:blur(24px);
+  border:1px solid var(--border);border-radius:12px;
+  padding:18px 24px;text-align:center;
+  opacity:0;transition:all 0.4s cubic-bezier(.22,1,.36,1);
+}
+#reflect.show{transform:translateX(-50%) translateY(0);opacity:1}
+.ref-q{font-size:14px;color:var(--t60);margin-bottom:14px}
+.ref-opts{display:flex;gap:8px;justify-content:center;flex-wrap:wrap}
+.ref-opt{padding:8px 14px;border-radius:20px;font-size:12px;cursor:pointer;border:1px solid var(--border);background:none;color:var(--t40);transition:all 0.15s;font-family:inherit}
+.ref-opt:hover{background:rgba(255,255,255,0.06);color:var(--text);border-color:var(--border-hi)}
+
+@media(max-width:768px){
+  header{padding:0 16px}
+  main{padding:16px 16px 100px}
+  .area-grid{grid-template-columns:1fr}
+  #bar{padding:10px 16px}
+  .inp-row{max-width:none}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="logo">Zentropy</span>
+  <span class="h-stat" id="hstat"></span>
+</header>
+
+<main>
+  <div id="hero"></div>
+  <div class="area-grid" id="grid"></div>
+</main>
+
+<div id="bar">
+  <div class="tabs">
+    <button class="tab on" data-t="task">任務</button>
+    <button class="tab" data-t="idea">想法</button>
+    <button class="tab" data-t="discuss">討論</button>
+  </div>
+  <div class="inp-row">
+    <input id="inp" placeholder="傾倒你的想法，AI 會幫你整理..." autocomplete="off">
+    <button class="send" id="send">✦ 記錄</button>
+  </div>
+</div>
+
+<div id="reflect">
+  <div class="ref-q">做完了，感覺如何？</div>
+  <div class="ref-opts">
+    <button class="ref-opt" data-e="1.0">☀️ 有收穫</button>
+    <button class="ref-opt" data-e="0.6">⚡ 興奮</button>
+    <button class="ref-opt" data-e="0.2">😐 還好</button>
+    <button class="ref-opt" data-e="-0.8">🌑 消耗</button>
+    <button class="ref-opt" data-e="0">⏭ 跳過</button>
+  </div>
+</div>
+
+<script>
+const AREAS=[
+  {id:'work',label:'事業',hue:220,icon:'💼',color:'#6b8aec',
+   insight:'行政佔了大部分，能量偏負。但設計和提案的能量是正的。',
+   products:[
+    {name:'客戶 A 專案',tasks:[
+      {t:'跟設計師討論 logo 方向',d:'active',e:0},
+      {t:'報價單送出',d:'active',e:0},
+      {t:'提案修改',d:'done',e:0.8},
+    ]},
+    {name:'行政管理',tasks:[
+      {t:'報帳',d:'done',e:-0.8},
+      {t:'每週會議紀錄',d:'done',e:-0.5},
+      {t:'回覆 email',d:'done',e:-0.3},
+      {t:'寫週報',d:'done',e:-0.4},
+    ]},
+    {name:'團隊',tasks:[
+      {t:'新人 onboarding 流程',d:'done',e:0.3},
+      {t:'OKR 季度檢討',d:'inbox',e:0},
+      {t:'行政雜務整理',d:'done',e:-0.7},
+    ]},
+  ]},
+  {id:'create',label:'創作',hue:35,icon:'✨',color:'#e8a84c',
+   insight:'每一筆輸入的能量都很高。這是你最有活力的面向。',
+   products:[
+    {name:'Side Project',tasks:[
+      {t:'Landing page 設計',d:'done',e:1.0},
+      {t:'畫 logo 草稿',d:'done',e:0.9},
+    ]},
+    {name:'內容',tasks:[
+      {t:'想寫 AI 產品設計的文章',d:'inbox',e:0.9},
+      {t:'看到很棒的 UI 動畫想學',d:'inbox',e:0.8},
+    ]},
+  ]},
+  {id:'family',label:'家庭',hue:340,icon:'🏠',color:'#d76b8a',
+   insight:null,
+   products:[
+    {name:'',tasks:[
+      {t:'帶小孩去露營',d:'inbox',e:0.5},
+      {t:'媽媽生日禮物',d:'active',e:0.4},
+    ]},
+  ]},
+  {id:'health',label:'健康',hue:150,icon:'💚',color:'#5bbf8a',
+   insight:'只有一筆輸入，而且標記為消耗。沉默本身就是訊號。',
+   products:[
+    {name:'',tasks:[
+      {t:'最近都沒運動...',d:'inbox',e:-0.3},
+    ]},
+  ]},
+  {id:'learn',label:'學習',hue:270,icon:'📚',color:'#9b7ed8',
+   insight:null,
+   products:[
+    {name:'閱讀',tasks:[
+      {t:'看完《高效原力》很有啟發',d:'done',e:0.8},
+      {t:'研究遊戲設計框架',d:'active',e:0.7},
+    ]},
+    {name:'技能',tasks:[
+      {t:'想學 WebGL 做視覺化',d:'inbox',e:0.6},
+    ]},
+  ]},
+  {id:'relation',label:'人際',hue:15,icon:'👥',color:'#d98a6b',
+   insight:null,
+   products:[]},
+];
+
+const CONNS=[{f:'work',t:'create'},{f:'work',t:'family'},{f:'create',t:'learn'}];
+
+function all(a){return a.products.flatMap(p=>p.tasks)}
+function cnt(a){return all(a).length}
+function nrg(a){const ts=all(a).filter(t=>t.e);return ts.length?ts.reduce((s,t)=>s+t.e,0)/ts.length:0}
+function stg(a){const c=cnt(a),r=all(a).filter(t=>t.e).length;if(!c)return 0;if(c<3)return 1;if(c<8)return 2;return(c>=8&&r>=3)?3:2}
+const SNAME=['沉默','種子','萌芽','開花'];
+const SICON=['','●','🌱','🌸'];
+
+function render(){
+  const total=AREAS.reduce((s,a)=>s+cnt(a),0);
+  const done=AREAS.reduce((s,a)=>s+all(a).filter(t=>t.d==='done').length,0);
+  const active=AREAS.filter(a=>cnt(a)>0).length;
+  document.getElementById('hstat').innerHTML=`<b>${active}</b>/6 面向 · <b>${total}</b> 筆 · <b>${done}</b> 完成`;
+
+  // Hero insight
+  const posCount=AREAS.reduce((s,a)=>s+all(a).filter(t=>t.e>0.3).length,0);
+  const negCount=AREAS.reduce((s,a)=>s+all(a).filter(t=>t.e<-0.3).length,0);
+  document.getElementById('hero').innerHTML=`
+    <div class="insight-hero">
+      <div class="insight-hero-icon">💡</div>
+      <div class="insight-hero-body">
+        <div class="insight-hero-label">Zentropy 發現</div>
+        <div class="insight-hero-text">你最近完成的事裡，<em>${negCount} 件讓你覺得消耗</em>，${posCount} 件讓你有能量。每次做<em>設計相關</em>的事你都很有活力，但你 85% 的時間在處理行政。</div>
+      </div>
+    </div>`;
+
+  // Area cards — sorted: most active first, silent last
+  const sorted=[...AREAS].sort((a,b)=>{
+    if(cnt(a)===0&&cnt(b)>0) return 1;
+    if(cnt(b)===0&&cnt(a)>0) return -1;
+    return cnt(b)-cnt(a);
+  });
+
+  let html='';
+  sorted.forEach(a=>{
+    const s=stg(a),e=nrg(a),c=cnt(a);
+    const pct=total?Math.round(c/total*100):0;
+    const conns=CONNS.filter(cn=>cn.f===a.id||cn.t===a.id);
+
+    if(c===0){
+      // Silent card
+      html+=`<div class="area-card silent">
+        <div class="ac-head">
+          <div class="ac-icon" style="background:rgba(255,255,255,0.06)">${a.icon}</div>
+          <div class="ac-info">
+            <div class="ac-name">${a.label} <span class="ac-stage" style="opacity:0.3">${SNAME[s]}</span></div>
+          </div>
+        </div>
+        <div class="ac-silent-body">這個面向還沒有任何輸入</div>
+      </div>`;
+      return;
+    }
+
+    const eBar=Math.max(5,(e+1)/2*100);
+    const eLabel=e>=0.3?'充電中':e>=-0.2?'平穩':'消耗中';
+    const eColor=e>=0.3?'var(--amber)':e>=-0.2?a.color:'var(--t40)';
+    const iconBg=`hsla(${a.hue},${Math.max(20,50+e*20)}%,${Math.max(15,25+e*10)}%,0.3)`;
+
+    html+=`<div class="area-card">
+      <div class="ac-head">
+        <div class="ac-icon" style="background:${iconBg}">${a.icon}</div>
+        <div class="ac-info">
+          <div class="ac-name" style="color:${a.color}">${a.label} <span class="ac-stage">${SICON[s]} ${SNAME[s]}</span></div>
+          <div class="ac-meta">${c} 筆 · 佔 ${pct}%</div>
+        </div>
+      </div>
+
+      <div class="ac-energy">
+        <div class="ac-ebar"><div class="ac-efill" style="width:${eBar}%;background:${eColor}"></div></div>
+        <div class="ac-elabel">${eLabel}</div>
+      </div>`;
+
+    if(a.insight) html+=`<div class="ac-insight">${a.insight}</div>`;
+
+    // Tasks grouped by product
+    html+=`<div class="ac-tasks">`;
+    a.products.forEach(p=>{
+      if(p.name) html+=`<div class="ac-prod">${p.name}</div>`;
+      p.tasks.forEach(t=>{
+        const cls=t.d==='done'?'ac-ttitle completed':'ac-ttitle';
+        const dot=t.d==='done'?'ac-dot done':t.d==='active'?'ac-dot active':'ac-dot inbox';
+        let eIcon='';
+        if(t.e>0.5) eIcon='☀️';
+        else if(t.e<-0.3) eIcon='🌑';
+        html+=`<div class="ac-task"><div class="${dot}"></div><div class="${cls}">${t.t}</div><span class="ac-tenergy">${eIcon}</span></div>`;
+      });
+    });
+    html+=`</div>`;
+
+    // Connections
+    if(conns.length){
+      html+=`<div class="ac-conns">`;
+      conns.forEach(cn=>{
+        const oid=cn.f===a.id?cn.t:cn.f;
+        const o=AREAS.find(aa=>aa.id===oid);
+        if(o) html+=`<div class="ac-conn"><div class="ac-conn-dot" style="background:${o.color}"></div>${o.label}</div>`;
+      });
+      html+=`</div>`;
+    }
+
+    html+=`</div>`;
+  });
+
+  document.getElementById('grid').innerHTML=html;
+}
+
+// Input
+let curTab='task';
+document.querySelectorAll('.tab').forEach(t=>{
+  t.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(tt=>tt.classList.remove('on'));
+    t.classList.add('on');curTab=t.dataset.t;
+    document.getElementById('inp').placeholder={task:'要做什麼...',idea:'想到什麼...',discuss:'想討論什麼...'}[curTab];
+  });
+});
+
+function guess(t){
+  if(/設計|logo|文章|side project|寫作|畫|創/.test(t))return'create';
+  if(/小孩|媽|爸|家|露營|生日/.test(t))return'family';
+  if(/運動|健身|走路|跑步|健康|瑜珈/.test(t))return'health';
+  if(/學|書|課|研究|看完/.test(t))return'learn';
+  if(/朋友|聚|吃飯|約|社交/.test(t))return'relation';
+  return'work';
+}
+
+function sendInput(){
+  const inp=document.getElementById('inp'),text=inp.value.trim();
+  if(!text)return;
+  const aid=guess(text),area=AREAS.find(a=>a.id===aid);
+  if(!area)return;
+  if(!area.products.length)area.products.push({name:'',tasks:[]});
+  area.products[0].tasks.unshift({t:text,d:curTab==='task'?'inbox':'active',e:0});
+  inp.value='';render();
+  if(curTab==='task'&&Math.random()<0.35){
+    setTimeout(()=>{window._la=aid;document.getElementById('reflect').classList.add('show')},600);
+  }
+}
+document.getElementById('send').addEventListener('click',sendInput);
+document.getElementById('inp').addEventListener('keydown',e=>{if(e.key==='Enter')sendInput()});
+
+document.querySelectorAll('.ref-opt').forEach(o=>{
+  o.addEventListener('click',()=>{
+    const e=parseFloat(o.dataset.e);
+    if(window._la){const area=AREAS.find(a=>a.id===window._la);if(area){const ts=all(area);if(ts.length){ts[0].e=e;ts[0].d='done'}}}
+    document.getElementById('reflect').classList.remove('show');render();
+  });
+});
+
+render();
+</script>
+</body>
+</html>

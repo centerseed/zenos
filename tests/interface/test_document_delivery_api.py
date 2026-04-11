@@ -190,3 +190,51 @@ async def test_create_document_share_link_success():
     assert body["doc_id"] == "doc-1"
     assert body["share_url"].startswith("/s?token=")
     assert body["max_access_count"] == 10
+
+
+async def test_save_document_content_success():
+    from zenos.interface.dashboard_api import save_document_content
+
+    request = _make_request(
+        method="POST",
+        path_params={"docId": "doc-1"},
+        body={"content": "# from agent\n\nhello", "source_version_ref": "manual-v1"},
+    )
+    partner = {"id": "p1", "isAdmin": False, "sharedPartnerId": None}
+    doc_entity = _make_doc_entity("doc-1")
+
+    with (
+        patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(partner, "p1"))),
+        patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)),
+        patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo,
+        patch("zenos.interface.dashboard_api._is_document_visible_for_partner", new=AsyncMock(return_value=True)),
+        patch("zenos.infrastructure.gcs_client.get_documents_bucket", return_value="docs-bucket"),
+        patch("zenos.infrastructure.gcs_client.upload_blob", return_value=None),
+        patch("zenos.interface.dashboard_api._create_revision_and_mark_ready", new=AsyncMock(return_value="rev-2")),
+    ):
+        mock_entity_repo.get_by_id = AsyncMock(return_value=doc_entity)
+        resp = await save_document_content(request)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["doc_id"] == "doc-1"
+    assert body["revision_id"] == "rev-2"
+    assert body["source_version_ref"] == "manual-v1"
+
+
+async def test_save_document_content_rejects_non_object_json_body():
+    from zenos.interface.dashboard_api import save_document_content
+
+    request = _make_request(
+        method="POST",
+        path_params={"docId": "doc-1"},
+        body=[],
+    )
+    partner = {"id": "p1", "isAdmin": False, "sharedPartnerId": None}
+
+    with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(partner, "p1"))):
+        resp = await save_document_content(request)
+
+    assert resp.status_code == 400
+    body = json.loads(resp.body)
+    assert body["error"] == "INVALID_INPUT"

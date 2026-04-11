@@ -102,7 +102,7 @@ class TaskService:
     # Create
     # ──────────────────────────────────────────
 
-    async def create_task(self, data: dict) -> TaskResult:
+    async def create_task(self, data: dict, *, conn: Any | None = None) -> TaskResult:
         """Create a new task with priority recommendation and context assembly."""
         # Governance validation: task title
         title_errors, _ = validate_task_title(data.get("title", ""))
@@ -231,7 +231,14 @@ class TaskService:
             attachments=data.get("attachments") or [],
         )
 
-        saved = await self._tasks.upsert(task)
+        if conn is None:
+            saved = await self._tasks.upsert(task)
+        else:
+            # SQL repositories support conn-scoped writes for cross-repo atomicity.
+            try:
+                saved = await self._tasks.upsert(task, conn=conn)
+            except TypeError:
+                saved = await self._tasks.upsert(task)
         return TaskResult(task=saved, cascade_updates=[])
 
     # ──────────────────────────────────────────
