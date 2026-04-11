@@ -1,8 +1,26 @@
-# L3 文件治理規則 v2.0（含完整範例）
+# L3 文件治理規則 v2.1（含完整範例）
 
 ## 文件的定位
-L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
+L3 document entity 是正式文件的語意代理。
+
+- metadata 永遠在 ZenOS（entity / source / relationship / status）。
+- 內容承載有兩種合法模式：
+  - 外部 Authoring 模式：source 在 Git/Drive/Notion，ZenOS 以 source_uri 追蹤。
+  - ZenOS Delivery 模式：markdown 內容可直接寫入 ZenOS snapshot（GCS private），作為穩定 permalink 的閱讀版本。
+
 文件不是 L2（文件是 L2 概念的具體體現），不是task（文件沒有 owner 和 AC）。
+
+### 內容承載雙模式（新增）
+
+| 模式 | Source of Truth | 典型場景 | 要點 |
+|------|------------------|----------|------|
+| 外部 Authoring | Git/Drive/Notion | 重度編輯、多人協作、版本管理 | ZenOS 管 metadata + 權限 + 分享，不接管主編輯流程 |
+| ZenOS Delivery Snapshot | ZenOS（GCS private revision） | 快速分享、避免 branch 清理 404、輕量直接改 md | 內容寫進 snapshot revision，經 ZenOS ACL 讀取 |
+
+選擇原則：
+- 要「正式編輯協作」→ 優先外部 Authoring 模式。
+- 要「快速發布可讀版本」或「直接讓 agent 改 md 並分享」→ 使用 ZenOS Delivery Snapshot。
+- 兩者可並存：外部來源做主編輯，ZenOS snapshot 做穩定發布面。
 
 ## 情境 → 文件對應（泛用版）
 
@@ -187,6 +205,11 @@ write(collection="documents", data={
     → 判斷類別（11 類 + legacy 別名自動轉換）
     → write(collection="documents", data={...}) 建新 entity
     ↓
+2c. 使用者明確要求「直接把 markdown 寫進 ZenOS 文件（不經 Git）」
+    → 走 Document Delivery 內容寫入流程（POST /api/docs/{doc_id}/content）
+    → 產生/更新 snapshot revision（GCS private）
+    → Reader 走 /docs permalink，不依賴外部 source 可用性
+    ↓
 3. 檔案已刪除/改名？
     → stale：暫時不可達
     → unresolvable：確認已永久刪除
@@ -254,6 +277,22 @@ write(
 
 3. batch write 更新
 ```
+
+## ZenOS 直寫 Markdown（Delivery 寫入）流程
+
+適用條件：
+- 用戶明確要求「不要經 git，直接更新文件內容」
+- 目標是快速發布可讀版本，而非多人重度協作編輯
+
+流程：
+1. 先確認 document entity 存在（沒有就先 `write(collection="documents")` 建 metadata）。
+2. 呼叫 Delivery 內容寫入 API（`POST /api/docs/{doc_id}/content`）提交 markdown。
+3. 系統建立新 revision 並更新 `primary_snapshot_revision_id`。
+4. 分享與閱讀使用 `/docs` 與 share-link，不直接暴露 GCS object URL。
+
+治理要求：
+- 這條流程是「內容發布」，不是取代 capture 的知識抽取；必要時仍需補 `entries` / `relationships`。
+- 若文件長期要多人協作，仍應保留外部 Authoring source（Git/Drive）並定期 republish snapshot。
 
 ## 寫文件前必做：查重
 

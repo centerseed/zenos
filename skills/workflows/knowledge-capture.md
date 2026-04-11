@@ -8,7 +8,7 @@ description: >
   或說「把這個專案加入 ZenOS」「幫我建這個服務的 ontology」「把這個 repo 的文件掃進去」，
   或在討論完某個設計決策後想保存到知識層時，一定要使用這個 skill。
   引數範例：無引數、path/to/file.md、/Users/me/project/（目錄）
-version: 2.2.0
+version: 2.3.0
 ---
 
 # /zenos-capture — 知識捕獲 + 首次建構
@@ -25,6 +25,15 @@ version: 2.2.0
 | 無引數 | 對話捕獲 | 快（秒） |
 | 單一檔案路徑 | 檔案捕獲 | 快（秒） |
 | 目錄路徑 | **首次建構模式** | 分鐘級（批量） |
+
+## 意圖分流（新增）
+
+以下情境**不要走 /zenos-capture 主流程**：
+- 用戶要「直接改文件內容」「直接把 md 寫到 document」「不經 git 發布內容」。
+
+改走：
+- Document Delivery 內容寫入流程（`POST /api/docs/{doc_id}/content`）發布 snapshot。
+- capture 只負責知識抽取（entity / entries / relationships / document metadata），不是文件內容編輯器。
 
 ---
 
@@ -573,7 +582,8 @@ mcp__zenos__journal_read(project="{專案名}", limit=5)
 ## 核心原則
 
 - **意圖性 vs 事實性維度**：Why/How 是意圖性維度，AI 填的一律 draft；What/Who 是事實性維度，AI 可直接填入
-- **Documents 不存原始內容**：document entity 只存語意摘要，原文留在來源（Git/Drive）。Entry 則是直接記錄知識內容
+- **Documents 預設不存原始內容（metadata-first）**：capture 預設只存 document metadata 與語意摘要，原文留在來源（Git/Drive）
+- **例外：Delivery 直寫模式可存 markdown snapshot**：若用戶明確要求直接發布內容，可走 Document Delivery 內容寫入流程（GCS private revision）
 - **首次建構先骨架後神經**：先確認實體結構，再大量建文件 entry
 - **快，且只記 code 裡沒有的知識**：速度比完美重要。Entry 記決策脈絡、已知限制、重要變更——agent 讀 code 拿不到的東西
 - **100 字一個知識點**：entry content 上限 200 字元（~100 中文字）。寫不下代表要拆或粒度太大
