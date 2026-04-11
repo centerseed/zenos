@@ -768,6 +768,15 @@ export default function NodeDetailSheet({
                               <span className="text-xs text-foreground/70 group-hover:text-foreground truncate transition-colors">
                                 {item.name}
                               </span>
+                              {item.id && (
+                                <a
+                                  href={`/docs?docId=${encodeURIComponent(item.id)}`}
+                                  className="ml-auto text-[10px] text-cyan-400/70 hover:text-cyan-300 underline underline-offset-2"
+                                  title="Open ZenOS Reader"
+                                >
+                                  Reader
+                                </a>
+                              )}
                               {item.docRole === "index" && (
                                 <Badge variant="outline" className="border-cyan-500/30 text-cyan-400/60 text-[9px] py-0 px-1 h-4">index</Badge>
                               )}

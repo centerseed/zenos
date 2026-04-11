@@ -16,6 +16,13 @@ Endpoints:
   POST   /api/data/tasks/{taskId}/attachments             — upload attachment (returns signed URL)
   DELETE /api/data/tasks/{taskId}/attachments/{attachmentId} — delete attachment
   GET    /attachments/{attachment_id}                     — proxy-stream attachment file
+  POST   /api/docs/{docId}/publish                        — publish latest source as snapshot revision
+  GET    /api/docs/{docId}                                — document delivery metadata
+  GET    /api/docs/{docId}/content                        — read latest published markdown snapshot
+  PATCH  /api/docs/{docId}/access                         — update document visibility
+  POST   /api/docs/{docId}/share-links                    — create revocable share token
+  DELETE /api/docs/share-links/{tokenId}                  — revoke share token
+  GET    /s/{token}                                       — public read via share token
 
 Auth: Firebase ID token → email → SQL partners table → partner scope.
 CORS: allows requests from the Dashboard origin.
@@ -24,9 +31,10 @@ CORS: allows requests from the Dashboard origin.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from starlette.requests import Request
 from starlette.responses import Response
@@ -34,10 +42,11 @@ from starlette.routing import Route
 
 from zenos.application.knowledge.governance_service import GovernanceService
 from zenos.application.knowledge.ontology_service import OntologyService, _collect_subtree_ids
+from zenos.application.knowledge.source_service import SourceService
 from zenos.application.action.task_service import TaskService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.action import Task
-from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship
+from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship, SourceType
 from zenos.application.identity.workspace_context import (
     active_partner_view,
     build_available_workspaces,
@@ -53,8 +62,9 @@ from zenos.infrastructure.unit_of_work import UnitOfWork
 from zenos.infrastructure.action import PostgresTaskCommentRepository, SqlTaskRepository
 from zenos.infrastructure.agent import SqlToolEventRepository
 from zenos.infrastructure.identity import SqlPartnerRepository
+from zenos.infrastructure.github_adapter import GitHubAdapter
 from zenos.infrastructure.knowledge import SqlBlindspotRepository, SqlEntityRepository, SqlProtocolRepository, SqlRelationshipRepository
-from zenos.infrastructure.sql_common import get_cached_health, get_pool, upsert_health_cache
+from zenos.infrastructure.sql_common import SCHEMA, get_cached_health, get_pool, upsert_health_cache
 from zenos.interface.admin_api import (
     _cors_headers,
     _error_response,
@@ -189,6 +199,197 @@ async def _compute_impact_chains_with_context(
         )
     finally:
         current_partner_id.reset(token)
+
+
+# ──────────────────────────────────────────────
+# Document Delivery helpers
+# ──────────────────────────────────────────────
+
+
+def _effective_source_status(source: dict) -> str:
+    return str(source.get("source_status") or source.get("status") or "valid")
+
+
+def _select_publish_source(sources: list[dict]) -> dict | None:
+    if not sources:
+        return None
+    primary_valid = next(
+        (s for s in sources if s.get("is_primary") and _effective_source_status(s) == "valid"),
+        None,
+    )
+    if primary_valid:
+        return primary_valid
+    first_valid = next((s for s in sources if _effective_source_status(s) == "valid"), None)
+    if first_valid:
+        return first_valid
+    primary_any = next((s for s in sources if s.get("is_primary")), None)
+    return primary_any or sources[0]
+
+
+def _parse_iso_datetime(raw: str | None) -> datetime | None:
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+async def _is_document_visible_for_partner(doc: Entity, partner: dict, effective_id: str) -> bool:
+    if partner.get("isAdmin"):
+        return True
+    if is_unassigned_partner(partner):
+        return False
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
+        entity_map = {e.id: e for e in all_entities if e.id}
+        allowed_ids = _build_allowed_entity_ids(partner, entity_map)
+        if not doc.id or doc.id not in allowed_ids:
+            return False
+        return doc.visibility == "public"
+    return OntologyService.is_entity_visible_for_partner(doc, partner)
+
+
+async def _get_latest_revision(partner_id: str, doc_id: str) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT id, doc_id, source_id, source_version_ref, snapshot_bucket,
+                   snapshot_object_path, content_hash, render_format, content_type, created_at
+            FROM {SCHEMA}.document_revisions
+            WHERE partner_id = $1 AND doc_id = $2
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            partner_id,
+            doc_id,
+        )
+    return dict(row) if row else None
+
+
+async def _get_revision_by_id(partner_id: str, revision_id: str) -> dict | None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT id, doc_id, source_id, source_version_ref, snapshot_bucket,
+                   snapshot_object_path, content_hash, render_format, content_type, created_at
+            FROM {SCHEMA}.document_revisions
+            WHERE partner_id = $1 AND id = $2
+            LIMIT 1
+            """,
+            partner_id,
+            revision_id,
+        )
+    return dict(row) if row else None
+
+
+async def _create_revision_and_mark_ready(
+    *,
+    partner_id: str,
+    doc_id: str,
+    source_id: str | None,
+    source_version_ref: str | None,
+    snapshot_bucket: str,
+    snapshot_object_path: str,
+    content_hash: str,
+    content_type: str,
+    created_by: str,
+) -> str:
+    revision_id = uuid.uuid4().hex
+    canonical_path = f"/docs/{doc_id}"
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        async with conn.transaction():
+            await conn.execute(
+                f"""
+                INSERT INTO {SCHEMA}.document_revisions (
+                    id, partner_id, doc_id, source_id, source_version_ref,
+                    snapshot_bucket, snapshot_object_path, content_hash, render_format,
+                    content_type, created_by
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'markdown',$9,$10)
+                """,
+                revision_id,
+                partner_id,
+                doc_id,
+                source_id,
+                source_version_ref,
+                snapshot_bucket,
+                snapshot_object_path,
+                content_hash,
+                content_type,
+                created_by,
+            )
+            await conn.execute(
+                f"""
+                UPDATE {SCHEMA}.entities
+                SET canonical_path = $1,
+                    primary_snapshot_revision_id = $2,
+                    last_published_at = now(),
+                    delivery_status = 'ready',
+                    updated_at = now()
+                WHERE partner_id = $3 AND id = $4
+                """,
+                canonical_path,
+                revision_id,
+                partner_id,
+                doc_id,
+            )
+    return revision_id
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _lookup_doc_for_share_token(token: str) -> dict | None:
+    token_digest = _token_hash(token)
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT
+                st.id AS token_id,
+                st.partner_id,
+                st.doc_id,
+                st.expires_at,
+                st.max_access_count,
+                st.used_count,
+                st.revoked_at,
+                e.name AS doc_name,
+                e.primary_snapshot_revision_id
+            FROM {SCHEMA}.document_share_tokens st
+            JOIN {SCHEMA}.entities e
+              ON e.partner_id = st.partner_id AND e.id = st.doc_id
+            WHERE st.token_hash = $1
+            LIMIT 1
+            """,
+            token_digest,
+        )
+    return dict(row) if row else None
+
+
+async def _increment_share_token_usage(token_id: str, partner_id: str) -> None:
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            UPDATE {SCHEMA}.document_share_tokens
+            SET used_count = used_count + 1
+            WHERE id = $1 AND partner_id = $2
+            """,
+            token_id,
+            partner_id,
+        )
 
 
 # ──────────────────────────────────────────────
@@ -1558,6 +1759,490 @@ async def get_governance_health(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Document Delivery Endpoints
+# ──────────────────────────────────────────────
+
+
+async def publish_document_snapshot(request: Request) -> Response:
+    """Publish a document source into a private snapshot revision."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("FORBIDDEN", "Current workspace cannot publish documents", 403, request=request)
+    if is_guest(partner):
+        return _error_response("FORBIDDEN", "Guest cannot publish document snapshots", 403, request=request)
+
+    doc_id = request.path_params.get("docId")
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        doc_entity = await _entity_repo.get_by_id(doc_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not doc_entity or doc_entity.type != EntityType.DOCUMENT:
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+    if not await _is_document_visible_for_partner(doc_entity, partner, effective_id):
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+
+    source = _select_publish_source(doc_entity.sources or [])
+    if not source:
+        return _error_response("INVALID_INPUT", "Document has no source to publish", 400, request=request)
+
+    source_uri = str(source.get("uri", "")).strip()
+    source_type = str(source.get("type", "")).strip()
+    source_id = source.get("source_id")
+    if not source_uri:
+        return _error_response("INVALID_INPUT", "Selected source has empty URI", 400, request=request)
+    if source_type != SourceType.GITHUB:
+        return _error_response(
+            "SOURCE_UNAVAILABLE",
+            f"Source type '{source_type}' is not yet publishable in Phase 1",
+            409,
+            request=request,
+        )
+
+    source_service = SourceService(entity_repo=_entity_repo, source_adapter=GitHubAdapter())
+    token = current_partner_id.set(effective_id)
+    try:
+        content = await source_service.read_source(doc_id, source_uri=source_uri)
+    except FileNotFoundError:
+        return _error_response("SOURCE_NOT_FOUND", "Source file not found", 404, request=request)
+    except PermissionError:
+        return _error_response("SOURCE_FORBIDDEN", "Permission denied while reading source", 403, request=request)
+    except ValueError as exc:
+        return _error_response("INVALID_INPUT", str(exc), 400, request=request)
+    except RuntimeError as exc:
+        return _error_response("SOURCE_ERROR", str(exc), 409, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+    try:
+        from zenos.infrastructure.gcs_client import get_documents_bucket, upload_blob
+
+        revision_id = uuid.uuid4().hex
+        snapshot_path = f"docs/{doc_id}/revisions/{revision_id}.md"
+        bucket = get_documents_bucket()
+        payload = content.encode("utf-8")
+        upload_blob(bucket, snapshot_path, payload, "text/markdown; charset=utf-8")
+        content_hash = hashlib.sha256(payload).hexdigest()
+    except Exception:
+        logger.exception("Failed to write document snapshot for %s", doc_id)
+        return _error_response("GCS_ERROR", "Failed to write document snapshot", 500, request=request)
+
+    try:
+        stored_revision_id = await _create_revision_and_mark_ready(
+            partner_id=effective_id,
+            doc_id=doc_id,
+            source_id=source_id,
+            source_version_ref=source_uri,
+            snapshot_bucket=bucket,
+            snapshot_object_path=snapshot_path,
+            content_hash=content_hash,
+            content_type="text/markdown; charset=utf-8",
+            created_by=effective_id,
+        )
+    except Exception:
+        logger.exception("Failed to persist revision metadata for %s", doc_id)
+        return _error_response("INTERNAL_ERROR", "Failed to persist snapshot revision", 500, request=request)
+
+    return _json_response(
+        {
+            "doc_id": doc_id,
+            "canonical_path": f"/docs/{doc_id}",
+            "revision_id": stored_revision_id,
+            "delivery_status": "ready",
+            "source_id": source_id,
+            "source_uri": source_uri,
+        },
+        request=request,
+    )
+
+
+async def get_document_delivery(request: Request) -> Response:
+    """Return document delivery metadata for Reader page."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("NOT_FOUND", f"Document '{request.path_params.get('docId')}' not found", 404, request=request)
+
+    doc_id = request.path_params.get("docId")
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        doc_entity = await _entity_repo.get_by_id(doc_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not doc_entity or doc_entity.type != EntityType.DOCUMENT:
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+    if not await _is_document_visible_for_partner(doc_entity, partner, effective_id):
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT canonical_path, primary_snapshot_revision_id, last_published_at, delivery_status
+            FROM {SCHEMA}.entities
+            WHERE partner_id = $1 AND id = $2
+            """,
+            effective_id,
+            doc_id,
+        )
+    latest_revision = await _get_latest_revision(effective_id, doc_id)
+
+    return _json_response(
+        {
+            "document": {
+                "id": doc_entity.id,
+                "name": doc_entity.name,
+                "summary": doc_entity.summary,
+                "visibility": doc_entity.visibility,
+                "sources": doc_entity.sources or [],
+                "doc_role": doc_entity.doc_role or "single",
+                "canonical_path": row["canonical_path"] if row else None,
+                "primary_snapshot_revision_id": row["primary_snapshot_revision_id"] if row else None,
+                "last_published_at": row["last_published_at"] if row else None,
+                "delivery_status": row["delivery_status"] if row else None,
+                "latest_revision": latest_revision,
+            }
+        },
+        request=request,
+    )
+
+
+async def get_document_content(request: Request) -> Response:
+    """Return latest published markdown snapshot content after ACL check."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("NOT_FOUND", f"Document '{request.path_params.get('docId')}' not found", 404, request=request)
+
+    doc_id = request.path_params.get("docId")
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        doc_entity = await _entity_repo.get_by_id(doc_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not doc_entity or doc_entity.type != EntityType.DOCUMENT:
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+    if not await _is_document_visible_for_partner(doc_entity, partner, effective_id):
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT primary_snapshot_revision_id, canonical_path, delivery_status
+            FROM {SCHEMA}.entities
+            WHERE partner_id = $1 AND id = $2
+            """,
+            effective_id,
+            doc_id,
+        )
+
+    primary_revision_id = row["primary_snapshot_revision_id"] if row else None
+    revision = (
+        await _get_revision_by_id(effective_id, primary_revision_id)
+        if primary_revision_id
+        else None
+    )
+    if revision is None:
+        revision = await _get_latest_revision(effective_id, doc_id)
+    if revision is None:
+        return _error_response("NOT_FOUND", "No published snapshot for this document", 404, request=request)
+
+    try:
+        from google.cloud.exceptions import NotFound as GcsNotFound  # type: ignore[import-untyped]
+        from zenos.infrastructure.gcs_client import download_blob
+
+        raw, content_type = download_blob(
+            revision["snapshot_bucket"],
+            revision["snapshot_object_path"],
+        )
+        content = raw.decode("utf-8")
+    except GcsNotFound:
+        return _error_response("NOT_FOUND", "Snapshot object not found", 404, request=request)
+    except Exception:
+        logger.exception("Failed to load snapshot content for %s", doc_id)
+        return _error_response("INTERNAL_ERROR", "Failed to read snapshot content", 500, request=request)
+
+    return _json_response(
+        {
+            "doc_id": doc_id,
+            "canonical_path": row["canonical_path"] if row else f"/docs/{doc_id}",
+            "delivery_status": row["delivery_status"] if row else None,
+            "revision": revision,
+            "content_type": content_type,
+            "content": content,
+        },
+        request=request,
+    )
+
+
+async def update_document_access(request: Request) -> Response:
+    """Update document visibility (grants are reserved for next iteration)."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("FORBIDDEN", "Current workspace cannot update document access", 403, request=request)
+    if is_guest(partner):
+        return _error_response("FORBIDDEN", "Guest cannot update document access", 403, request=request)
+
+    doc_id = request.path_params.get("docId")
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    visibility = str(body.get("visibility", "")).strip()
+    if visibility not in {"public", "restricted", "confidential"}:
+        return _error_response(
+            "INVALID_INPUT",
+            "visibility must be one of: public, restricted, confidential",
+            400,
+            request=request,
+        )
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        doc_entity = await _entity_repo.get_by_id(doc_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not doc_entity or doc_entity.type != EntityType.DOCUMENT:
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+    if not await _is_document_visible_for_partner(doc_entity, partner, effective_id):
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            UPDATE {SCHEMA}.entities
+            SET visibility = $1,
+                updated_at = now()
+            WHERE partner_id = $2 AND id = $3
+            """,
+            visibility,
+            effective_id,
+            doc_id,
+        )
+
+    warnings: list[str] = []
+    if "grants" in body:
+        warnings.append("grants payload is reserved for Phase 1.5 and was not persisted")
+
+    return _json_response(
+        {"doc_id": doc_id, "visibility": visibility, "warnings": warnings},
+        request=request,
+    )
+
+
+async def create_document_share_link(request: Request) -> Response:
+    """Create revocable external share token for a document."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("FORBIDDEN", "Current workspace cannot create share links", 403, request=request)
+    if is_guest(partner):
+        return _error_response("FORBIDDEN", "Guest cannot create share links", 403, request=request)
+
+    doc_id = request.path_params.get("docId")
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if body is None:
+        body = {}
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        doc_entity = await _entity_repo.get_by_id(doc_id)
+    finally:
+        current_partner_id.reset(token)
+
+    if not doc_entity or doc_entity.type != EntityType.DOCUMENT:
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+    if not await _is_document_visible_for_partner(doc_entity, partner, effective_id):
+        return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
+
+    expires_at = _parse_iso_datetime(body.get("expires_at"))
+    if expires_at is None:
+        expires_in_hours = body.get("expires_in_hours", 24 * 7)
+        try:
+            expires_in_hours = int(expires_in_hours)
+        except Exception:
+            return _error_response("INVALID_INPUT", "expires_in_hours must be an integer", 400, request=request)
+        if expires_in_hours <= 0:
+            return _error_response("INVALID_INPUT", "expires_in_hours must be > 0", 400, request=request)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=expires_in_hours)
+
+    max_access_count = body.get("max_access_count")
+    if max_access_count is not None:
+        try:
+            max_access_count = int(max_access_count)
+        except Exception:
+            return _error_response("INVALID_INPUT", "max_access_count must be an integer", 400, request=request)
+        if max_access_count <= 0:
+            return _error_response("INVALID_INPUT", "max_access_count must be > 0", 400, request=request)
+
+    token_id = uuid.uuid4().hex
+    raw_token = f"{uuid.uuid4().hex}{uuid.uuid4().hex}"
+    digest = _token_hash(raw_token)
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            INSERT INTO {SCHEMA}.document_share_tokens (
+                id, partner_id, doc_id, token_hash, scope,
+                expires_at, max_access_count, used_count, revoked_at, created_by
+            ) VALUES ($1,$2,$3,$4,'read',$5,$6,0,NULL,$7)
+            """,
+            token_id,
+            effective_id,
+            doc_id,
+            digest,
+            expires_at,
+            max_access_count,
+            effective_id,
+        )
+
+    return _json_response(
+        {
+            "token_id": token_id,
+            "doc_id": doc_id,
+            "share_url": f"/s?token={raw_token}",
+            "expires_at": expires_at,
+            "max_access_count": max_access_count,
+        },
+        request=request,
+    )
+
+
+async def revoke_document_share_link(request: Request) -> Response:
+    """Revoke a previously created share token."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("FORBIDDEN", "Current workspace cannot revoke share links", 403, request=request)
+    if is_guest(partner):
+        return _error_response("FORBIDDEN", "Guest cannot revoke share links", 403, request=request)
+
+    token_id = request.path_params.get("tokenId")
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            UPDATE {SCHEMA}.document_share_tokens
+            SET revoked_at = now()
+            WHERE id = $1 AND partner_id = $2
+            RETURNING id, doc_id, revoked_at
+            """,
+            token_id,
+            effective_id,
+        )
+    if row is None:
+        return _error_response("NOT_FOUND", f"Share token '{token_id}' not found", 404, request=request)
+    return _json_response(
+        {"token_id": row["id"], "doc_id": row["doc_id"], "revoked_at": row["revoked_at"]},
+        request=request,
+    )
+
+
+async def access_document_share_link(request: Request) -> Response:
+    """Public endpoint: resolve token and return shared markdown snapshot."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    token = request.path_params.get("token")
+    token_row = await _lookup_doc_for_share_token(token)
+    if token_row is None:
+        return _error_response("NOT_FOUND", "Share link not found", 404, request=request)
+    if token_row.get("revoked_at") is not None:
+        return _error_response("UNAUTHORIZED", "Share link is revoked", 401, request=request)
+
+    now = datetime.now(timezone.utc)
+    expires_at = token_row.get("expires_at")
+    if expires_at is not None and expires_at <= now:
+        return _error_response("EXPIRED", "Share link expired", 410, request=request)
+
+    max_access = token_row.get("max_access_count")
+    used_count = int(token_row.get("used_count") or 0)
+    if max_access is not None and used_count >= int(max_access):
+        return _error_response("EXPIRED", "Share link exhausted", 410, request=request)
+
+    partner_id = token_row["partner_id"]
+    doc_id = token_row["doc_id"]
+    revision_id = token_row.get("primary_snapshot_revision_id")
+    revision = await _get_revision_by_id(partner_id, revision_id) if revision_id else None
+    if revision is None:
+        revision = await _get_latest_revision(partner_id, doc_id)
+    if revision is None:
+        return _error_response("NOT_FOUND", "No published snapshot for this document", 404, request=request)
+
+    try:
+        from google.cloud.exceptions import NotFound as GcsNotFound  # type: ignore[import-untyped]
+        from zenos.infrastructure.gcs_client import download_blob
+
+        raw, content_type = download_blob(
+            revision["snapshot_bucket"],
+            revision["snapshot_object_path"],
+        )
+        content = raw.decode("utf-8")
+    except GcsNotFound:
+        return _error_response("NOT_FOUND", "Snapshot object not found", 404, request=request)
+    except Exception:
+        logger.exception("Failed to read shared snapshot for doc %s", doc_id)
+        return _error_response("INTERNAL_ERROR", "Failed to load shared document", 500, request=request)
+
+    await _increment_share_token_usage(token_row["token_id"], partner_id)
+
+    return _json_response(
+        {
+            "doc": {
+                "id": doc_id,
+                "name": token_row.get("doc_name") or doc_id,
+            },
+            "revision_id": revision["id"],
+            "content_type": content_type,
+            "content": content,
+        },
+        request=request,
+    )
+
+
+# ──────────────────────────────────────────────
 # Route table
 # ──────────────────────────────────────────────
 
@@ -1584,4 +2269,11 @@ dashboard_routes = [
     Route("/api/data/tasks", list_tasks, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks", create_task, methods=["POST", "OPTIONS"]),
     Route("/attachments/{attachment_id}", get_attachment, methods=["GET", "OPTIONS"]),
+    Route("/api/docs/{docId}/publish", publish_document_snapshot, methods=["POST", "OPTIONS"]),
+    Route("/api/docs/{docId}", get_document_delivery, methods=["GET", "OPTIONS"]),
+    Route("/api/docs/{docId}/content", get_document_content, methods=["GET", "OPTIONS"]),
+    Route("/api/docs/{docId}/access", update_document_access, methods=["PATCH", "OPTIONS"]),
+    Route("/api/docs/{docId}/share-links", create_document_share_link, methods=["POST", "OPTIONS"]),
+    Route("/api/docs/share-links/{tokenId}", revoke_document_share_link, methods=["DELETE", "OPTIONS"]),
+    Route("/s/{token}", access_document_share_link, methods=["GET", "OPTIONS"]),
 ]

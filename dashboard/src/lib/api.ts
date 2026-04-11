@@ -160,6 +160,130 @@ export async function getEntityContext(
   }
 }
 
+export interface DocumentDeliveryResponse {
+  document: {
+    id: string;
+    name: string;
+    summary: string;
+    visibility: Entity["visibility"];
+    sources: Entity["sources"];
+    doc_role?: "single" | "index" | null;
+    canonical_path?: string | null;
+    primary_snapshot_revision_id?: string | null;
+    last_published_at?: Date | null;
+    delivery_status?: "ready" | "stale" | "blocked" | null;
+    latest_revision?: Record<string, unknown> | null;
+  };
+}
+
+export interface DocumentContentResponse {
+  doc_id: string;
+  canonical_path?: string | null;
+  delivery_status?: "ready" | "stale" | "blocked" | null;
+  revision?: Record<string, unknown> | null;
+  content_type: string;
+  content: string;
+}
+
+export async function getDocumentDelivery(
+  token: string,
+  docId: string
+): Promise<DocumentDeliveryResponse | null> {
+  try {
+    return await apiFetch<DocumentDeliveryResponse>(`/api/docs/${docId}`, token);
+  } catch {
+    return null;
+  }
+}
+
+export async function getDocumentContent(
+  token: string,
+  docId: string
+): Promise<DocumentContentResponse | null> {
+  try {
+    return await apiFetch<DocumentContentResponse>(`/api/docs/${docId}/content`, token);
+  } catch {
+    return null;
+  }
+}
+
+export async function publishDocumentSnapshot(
+  token: string,
+  docId: string
+): Promise<{ revision_id: string; canonical_path: string } | null> {
+  const activeWorkspaceId = getStoredActiveWorkspaceId();
+  const res = await fetch(`${API_BASE}/api/docs/${docId}/publish`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
+    },
+  });
+  if (!res.ok) return null;
+  return hydrateDates(await res.json());
+}
+
+export async function updateDocumentVisibility(
+  token: string,
+  docId: string,
+  visibility: Entity["visibility"]
+): Promise<{ visibility: Entity["visibility"]; warnings?: string[] } | null> {
+  const activeWorkspaceId = getStoredActiveWorkspaceId();
+  const res = await fetch(`${API_BASE}/api/docs/${docId}/access`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
+    },
+    body: JSON.stringify({ visibility }),
+  });
+  if (!res.ok) return null;
+  return hydrateDates(await res.json());
+}
+
+export async function createDocumentShareLink(
+  token: string,
+  docId: string,
+  opts?: { expires_in_hours?: number; max_access_count?: number }
+): Promise<{ token_id: string; share_url: string; expires_at: Date } | null> {
+  const activeWorkspaceId = getStoredActiveWorkspaceId();
+  const res = await fetch(`${API_BASE}/api/docs/${docId}/share-links`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
+    },
+    body: JSON.stringify(opts ?? {}),
+  });
+  if (!res.ok) return null;
+  return hydrateDates(await res.json());
+}
+
+export async function revokeDocumentShareLink(
+  token: string,
+  tokenId: string
+): Promise<boolean> {
+  const activeWorkspaceId = getStoredActiveWorkspaceId();
+  const res = await fetch(`${API_BASE}/api/docs/share-links/${tokenId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
+    },
+  });
+  return res.ok;
+}
+
+export async function getSharedDocumentByToken(
+  token: string
+): Promise<{ doc: { id: string; name: string }; content: string } | null> {
+  const res = await fetch(`${API_BASE}/s/${encodeURIComponent(token)}`);
+  if (!res.ok) return null;
+  return hydrateDates(await res.json());
+}
+
 /** Fetch child entities of a parent */
 export async function getChildEntities(
   token: string,

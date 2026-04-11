@@ -18,6 +18,13 @@ import {
   deleteTaskAttachment,
   addLinkAttachment,
   getQualitySignals,
+  getDocumentDelivery,
+  getDocumentContent,
+  publishDocumentSnapshot,
+  updateDocumentVisibility,
+  createDocumentShareLink,
+  revokeDocumentShareLink,
+  getSharedDocumentByToken,
 } from "@/lib/api";
 
 const FAKE_TOKEN = "fake-token-abc";
@@ -662,6 +669,119 @@ describe("getQualitySignals", () => {
   it("throws on non-ok response", async () => {
     vi.stubGlobal("fetch", mockFetch({}, false, 401));
     await expect(getQualitySignals(FAKE_TOKEN)).rejects.toThrow("401");
+  });
+});
+
+// ─── Document Delivery APIs ───
+
+describe("document delivery APIs", () => {
+  it("calls GET /api/docs/{docId} for getDocumentDelivery", async () => {
+    const fakeFetch = mockFetch({ document: { id: "doc-1" } });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await getDocumentDelivery(FAKE_TOKEN, "doc-1");
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/docs/doc-1`,
+      expect.objectContaining({
+        headers: { Authorization: `Bearer ${FAKE_TOKEN}` },
+      })
+    );
+  });
+
+  it("calls GET /api/docs/{docId}/content for getDocumentContent", async () => {
+    const fakeFetch = mockFetch({ doc_id: "doc-1", content_type: "text/markdown", content: "# hi" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await getDocumentContent(FAKE_TOKEN, "doc-1");
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/docs/doc-1/content`,
+      expect.objectContaining({
+        headers: { Authorization: `Bearer ${FAKE_TOKEN}` },
+      })
+    );
+  });
+
+  it("calls POST /api/docs/{docId}/publish for publishDocumentSnapshot", async () => {
+    const fakeFetch = mockFetch({ revision_id: "rev-1", canonical_path: "/docs/doc-1" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await publishDocumentSnapshot(FAKE_TOKEN, "doc-1");
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/docs/doc-1/publish`,
+      expect.objectContaining({
+        method: "POST",
+        headers: { Authorization: `Bearer ${FAKE_TOKEN}` },
+      })
+    );
+  });
+
+  it("calls PATCH /api/docs/{docId}/access with visibility payload", async () => {
+    const fakeFetch = mockFetch({ visibility: "restricted" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await updateDocumentVisibility(FAKE_TOKEN, "doc-1", "restricted");
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/docs/doc-1/access`,
+      expect.objectContaining({
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${FAKE_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ visibility: "restricted" }),
+      })
+    );
+  });
+
+  it("calls POST /api/docs/{docId}/share-links with options", async () => {
+    const fakeFetch = mockFetch({
+      token_id: "tok-1",
+      share_url: "/s?token=abc",
+      expires_at: "2026-04-11T00:00:00Z",
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await createDocumentShareLink(FAKE_TOKEN, "doc-1", { expires_in_hours: 24, max_access_count: 5 });
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/docs/doc-1/share-links`,
+      expect.objectContaining({
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${FAKE_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ expires_in_hours: 24, max_access_count: 5 }),
+      })
+    );
+  });
+
+  it("calls DELETE /api/docs/share-links/{tokenId} for revokeDocumentShareLink", async () => {
+    const fakeFetch = mockFetch({});
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await revokeDocumentShareLink(FAKE_TOKEN, "tok-1");
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/docs/share-links/tok-1`,
+      expect.objectContaining({
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${FAKE_TOKEN}` },
+      })
+    );
+  });
+
+  it("URL-encodes token in getSharedDocumentByToken", async () => {
+    const fakeFetch = mockFetch({ doc: { id: "doc-1", name: "Doc" }, content: "# shared" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await getSharedDocumentByToken("abc/def==");
+
+    expect(fakeFetch).toHaveBeenCalledWith(`${API_BASE}/s/abc%2Fdef%3D%3D`);
   });
 });
 

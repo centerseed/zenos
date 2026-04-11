@@ -16,6 +16,7 @@ from google.cloud import storage  # type: ignore[import-untyped]
 logger = logging.getLogger(__name__)
 
 _BUCKET_NAME = os.environ.get("GCS_ATTACHMENTS_BUCKET", "zenos-naruvia-attachments")
+_DOCUMENTS_BUCKET_NAME = os.environ.get("GCS_DOCUMENTS_BUCKET", "zenos-naruvia-documents")
 
 # Module-level lazy singleton
 _client: storage.Client | None = None
@@ -130,3 +131,8 @@ def delete_blob(bucket_name: str, gcs_path: str) -> None:
 def get_default_bucket() -> str:
     """Return the configured attachments bucket name."""
     return _BUCKET_NAME
+
+
+def get_documents_bucket() -> str:
+    """Return the configured documents snapshot bucket name."""
+    return _DOCUMENTS_BUCKET_NAME

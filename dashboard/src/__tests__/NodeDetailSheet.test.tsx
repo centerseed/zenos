@@ -237,6 +237,28 @@ describe("NodeDetailSheet — External Sources label fallback", () => {
   });
 });
 
+describe("NodeDetailSheet — document reader link", () => {
+  it("renders Reader link with encoded query docId for child SPEC docs", () => {
+    const childSpec = makeEntity({
+      id: "doc spec/1",
+      name: "SPEC-Document-Delivery",
+      type: "document",
+      parentId: "entity-1",
+      docRole: "single",
+    });
+
+    render(
+      <NodeDetailSheet
+        {...defaultProps}
+        entities={[childSpec]}
+      />
+    );
+
+    const readerLink = screen.getByRole("link", { name: "Reader" });
+    expect(readerLink).toHaveAttribute("href", "/docs?docId=doc%20spec%2F1");
+  });
+});
+
 describe("NodeDetailSheet — permission editor", () => {
   it("renders selectable permission options for admins and saves normalized arrays", async () => {
     authState.user = {
