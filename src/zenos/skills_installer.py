@@ -33,11 +33,22 @@ class SkillRelease:
 
 
 @dataclass(frozen=True)
+class SkillPackage:
+    id: str
+    display_name: str | None
+    required: bool
+    depends_on: tuple[str, ...]
+    skills: tuple[str, ...]
+    description: str | None = None
+
+
+@dataclass(frozen=True)
 class ReleaseManifest:
     source: str
     source_type: str
     source_root: str
     skills: tuple[SkillRelease, ...]
+    packages: tuple[SkillPackage, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -74,11 +85,26 @@ def load_manifest(source: str = DEFAULT_MANIFEST_SOURCE) -> ReleaseManifest:
         raise SkillInstallError(f"No skills defined in manifest: {manifest_source}")
     for skill in skills:
         parse_semver(skill.version)
+    packages: list[SkillPackage] = []
+    for pkg in payload.get("packages", []):
+        if not isinstance(pkg, dict):
+            continue
+        packages.append(
+            SkillPackage(
+                id=str(pkg.get("id") or ""),
+                display_name=pkg.get("display_name"),
+                required=bool(pkg.get("required")),
+                depends_on=tuple(str(x) for x in (pkg.get("depends_on") or [])),
+                skills=tuple(str(x) for x in (pkg.get("skills") or [])),
+                description=pkg.get("description"),
+            )
+        )
     return ReleaseManifest(
         source=manifest_source,
         source_type=source_type,
         source_root=source_root,
         skills=tuple(skills),
+        packages=tuple(packages),
     )
 
 
@@ -86,12 +112,14 @@ def install_skills(
     *,
     skills_dir: str | Path,
     source: str = DEFAULT_MANIFEST_SOURCE,
+    packages: list[str] | None = None,
 ) -> list[SkillInstallResult]:
     manifest = load_manifest(source)
     target_root = Path(skills_dir).expanduser().resolve()
     target_root.mkdir(parents=True, exist_ok=True)
     results: list[SkillInstallResult] = []
-    for release in manifest.skills:
+    releases = _select_releases(manifest, packages)
+    for release in releases:
         current_dir = target_root / release.name
         local_version = read_installed_version(current_dir)
         if local_version is not None and parse_semver(local_version) >= parse_semver(release.version):
@@ -117,6 +145,52 @@ def install_skills(
             )
         )
     return results
+
+
+def _select_releases(
+    manifest: ReleaseManifest,
+    packages: list[str] | None,
+) -> tuple[SkillRelease, ...]:
+    if not packages:
+        return manifest.skills
+    if not manifest.packages:
+        raise SkillInstallError("Manifest does not define packages")
+
+    package_map = {pkg.id: pkg for pkg in manifest.packages if pkg.id}
+    requested = {pkg.id for pkg in manifest.packages if pkg.required}
+    for pkg_id in packages:
+        if pkg_id not in package_map:
+            raise SkillInstallError(f"Unknown package id: {pkg_id}")
+        requested.add(pkg_id)
+
+    resolved: set[str] = set()
+
+    def _visit(pkg_id: str) -> None:
+        if pkg_id in resolved:
+            return
+        pkg = package_map.get(pkg_id)
+        if pkg is None:
+            raise SkillInstallError(f"Unknown package dependency: {pkg_id}")
+        resolved.add(pkg_id)
+        for dep in pkg.depends_on:
+            _visit(dep)
+
+    for pkg_id in requested:
+        _visit(pkg_id)
+
+    selected_skill_names: set[str] = set()
+    for pkg_id in resolved:
+        pkg = package_map[pkg_id]
+        selected_skill_names.update(pkg.skills)
+
+    skill_names = {release.name for release in manifest.skills}
+    missing = sorted(selected_skill_names - skill_names)
+    if missing:
+        raise SkillInstallError(
+            "Manifest package references unknown skills: " + ", ".join(missing)
+        )
+
+    return tuple(r for r in manifest.skills if r.name in selected_skill_names)
 
 
 def format_summary(results: list[SkillInstallResult]) -> str:

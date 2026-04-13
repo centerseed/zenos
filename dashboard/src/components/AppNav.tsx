@@ -20,6 +20,7 @@ const MEMBER_NAV_ITEMS = [
   { href: "/knowledge-map", label: "知識地圖" },
   { href: "/projects", label: "專案" },
   { href: "/tasks", label: "任務" },
+  { href: "/marketing", label: "行銷" },
   { href: "/clients", label: "客戶" },
 ];
 

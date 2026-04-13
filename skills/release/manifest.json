@@ -5,7 +5,7 @@
     "owner": "Barry",
     "repository": "https://github.com/centerseed/zenos"
   },
-  "published_at": "2026-04-07",
+  "published_at": "2026-04-13",
   "skills": [
     {
       "name": "zenos-setup",
@@ -125,6 +125,92 @@
       "path": "workflows/brainstorm",
       "files": ["SKILL.md"],
       "owner": "Barry"
+    },
+    {
+      "name": "marketing-intel",
+      "version": "0.1.0",
+      "path": "workflows/marketing-intel",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "marketing-plan",
+      "version": "0.1.0",
+      "path": "workflows/marketing-plan",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "marketing-generate",
+      "version": "0.1.0",
+      "path": "workflows/marketing-generate",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "marketing-adapt",
+      "version": "0.1.0",
+      "path": "workflows/marketing-adapt",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
+      "name": "marketing-publish",
+      "version": "0.1.0",
+      "path": "workflows/marketing-publish",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    }
+  ],
+  "packages": [
+    {
+      "id": "core-governance",
+      "display_name": "基礎治理",
+      "description": "ZenOS 基礎治理與通用工作流",
+      "required": true,
+      "depends_on": [],
+      "skills": [
+        "zenos-setup",
+        "zenos-capture",
+        "zenos-sync",
+        "zenos-governance",
+        "brainstorm",
+        "challenger",
+        "triage"
+      ]
+    },
+    {
+      "id": "development-flow",
+      "display_name": "開發流程",
+      "description": "Architect/Developer/QA 與工程工作流",
+      "required": false,
+      "depends_on": ["core-governance"],
+      "skills": [
+        "architect",
+        "designer",
+        "developer",
+        "pm",
+        "qa",
+        "debugger",
+        "feature",
+        "debug",
+        "coach"
+      ]
+    },
+    {
+      "id": "marketing-module",
+      "display_name": "行銷模組",
+      "description": "Marketing 角色與 marketing-* 工作流",
+      "required": false,
+      "depends_on": ["core-governance"],
+      "skills": [
+        "marketing",
+        "marketing-intel",
+        "marketing-plan",
+        "marketing-generate",
+        "marketing-adapt",
+        "marketing-publish"
+      ]
     }
   ]
 }

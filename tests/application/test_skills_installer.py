@@ -116,3 +116,47 @@ def test_install_skills_restores_previous_version_on_replace_failure(
         install_skills(skills_dir=skills_dir, source=str(tmp_path))
 
     assert (current_dir / "SKILL.md").read_text(encoding="utf-8") == original_content
+
+
+def test_install_skills_supports_package_selection(tmp_path: Path) -> None:
+    skills_root = tmp_path / "skills" / "release"
+    skills_root.mkdir(parents=True)
+    manifest = {
+        "schema_version": 1,
+        "skills": [
+            {"name": "zenos-sync", "version": "1.0.0", "path": "zenos-sync", "files": ["SKILL.md"]},
+            {"name": "marketing-intel", "version": "0.1.0", "path": "workflows/marketing-intel", "files": ["SKILL.md"]},
+            {"name": "architect", "version": "0.1.0", "path": "architect", "files": ["SKILL.md"]},
+        ],
+        "packages": [
+            {
+                "id": "core-governance",
+                "required": True,
+                "depends_on": [],
+                "skills": ["zenos-sync"],
+            },
+            {
+                "id": "marketing-module",
+                "required": False,
+                "depends_on": ["core-governance"],
+                "skills": ["marketing-intel"],
+            },
+        ],
+    }
+    (skills_root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    for path, version in [
+        ("zenos-sync", "1.0.0"),
+        ("workflows/marketing-intel", "0.1.0"),
+        ("architect", "0.1.0"),
+    ]:
+        d = skills_root / path
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "SKILL.md").write_text(f"---\nname: test\nversion: {version}\n---\n", encoding="utf-8")
+
+    out = tmp_path / "installed"
+    results = install_skills(skills_dir=out, source=str(tmp_path), packages=["marketing-module"])
+    installed = {r.name for r in results}
+    assert installed == {"zenos-sync", "marketing-intel"}
+    assert (out / "zenos-sync" / "SKILL.md").exists()
+    assert (out / "marketing-intel" / "SKILL.md").exists()
+    assert not (out / "architect").exists()

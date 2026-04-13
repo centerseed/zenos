@@ -10,6 +10,10 @@
     "trailingSlash": false,
     "rewrites": [
       {
+        "source": "/marketing",
+        "destination": "/marketing.html"
+      },
+      {
         "source": "/clients/deals/**",
         "destination": "/clients/deals/_.html"
       },

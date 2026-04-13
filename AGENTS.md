@@ -24,3 +24,12 @@ sync / 同步 / git 變更前讀：skills/workflows/knowledge-sync.md
 - /marketing（或說「扮演/你是 Marketing/行銷」）→ 讀：skills/release/marketing/SKILL.md
 - /debugger（或說「扮演/你是 Debugger/除錯者」）→ 讀：skills/release/debugger/SKILL.md
 - /challenger（或說「扮演/你是 Challenger/挑戰者」）→ 讀：skills/release/challenger/SKILL.md
+
+## Deployment Red Lines
+
+- 禁止手動部署 `firebase deploy`、`npx firebase-tools deploy`、或任何直接指定 Hosting project 的 deploy 指令。
+- 部署 ZenOS Dashboard 時，只能走 `scripts/deploy.sh`；不得繞過腳本。
+- `scripts/deploy.sh` 失敗時，禁止補做手動 deploy；必須先修腳本或修 build/deploy 問題。
+- Dashboard 的 Done Criteria 不接受「本地 build 過」；必須以正式站驗收。
+- 正式站驗收至少包含：`/`、`/tasks`、`/knowledge-map`、目標功能頁（例如 `/marketing`）。
+- 若部署後正式站任一路徑異常，先查 script / hosting / static export / rewrite；不要用 preview route 或繞過 auth 當 hotfix 結案。

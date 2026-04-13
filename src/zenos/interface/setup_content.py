@@ -33,6 +33,11 @@ _WORKFLOW_FILES: list[str] = [
     "feature.md",
     "debug.md",
     "triage.md",
+    "marketing-intel.md",
+    "marketing-plan.md",
+    "marketing-generate.md",
+    "marketing-adapt.md",
+    "marketing-publish.md",
 ]
 
 # agent skill 角色清單
@@ -50,7 +55,51 @@ _SLASH_COMMAND_SSOT: dict[str, str] = {
     "feature": "skills/workflows/feature.md",
     "debug": "skills/workflows/debug.md",
     "triage": "skills/workflows/triage.md",
+    "marketing-intel": "skills/workflows/marketing-intel.md",
+    "marketing-plan": "skills/workflows/marketing-plan.md",
+    "marketing-generate": "skills/workflows/marketing-generate.md",
+    "marketing-adapt": "skills/workflows/marketing-adapt.md",
+    "marketing-publish": "skills/workflows/marketing-publish.md",
 }
+
+_DEFAULT_PACKAGES: list[dict] = [
+    {
+        "id": "core-governance",
+        "display_name": "基礎治理",
+        "required": True,
+        "depends_on": [],
+        "skills": [
+            "zenos-setup",
+            "zenos-capture",
+            "zenos-sync",
+            "zenos-governance",
+            "brainstorm",
+            "challenger",
+            "triage",
+        ],
+    },
+    {
+        "id": "development-flow",
+        "display_name": "開發流程",
+        "required": False,
+        "depends_on": ["core-governance"],
+        "skills": ["architect", "designer", "developer", "pm", "qa", "debugger", "feature", "debug", "coach"],
+    },
+    {
+        "id": "marketing-module",
+        "display_name": "行銷模組",
+        "required": False,
+        "depends_on": ["core-governance"],
+        "skills": [
+            "marketing",
+            "marketing-intel",
+            "marketing-plan",
+            "marketing-generate",
+            "marketing-adapt",
+            "marketing-publish",
+        ],
+    },
+]
 
 
 def _is_valid_skills_root(path: Path) -> bool:
@@ -139,6 +188,8 @@ def _get_skill_files_cached(selection: str) -> dict[str, str]:
         result[f"skills/governance/{filename}"] = path.read_text(encoding="utf-8")
     for filename in _WORKFLOW_FILES:
         path = skills_root / "workflows" / filename
+        if not path.exists():
+            continue
         result[f"skills/workflows/{filename}"] = path.read_text(encoding="utf-8")
     for role in _AGENT_ROLES:
         path = skills_root / "release" / role / "SKILL.md"
@@ -178,3 +229,12 @@ def get_slash_commands() -> dict[str, str]:
         )
         result[f".claude/commands/{name}.md"] = content
     return result
+
+
+def get_packages() -> list[dict]:
+    """Return package definitions from manifest with backward-compatible fallback."""
+    manifest = get_manifest()
+    packages = manifest.get("packages")
+    if isinstance(packages, list) and packages:
+        return list(packages)
+    return list(_DEFAULT_PACKAGES)

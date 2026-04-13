@@ -43,30 +43,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(getAuthInstance(), async (user) => {
-      if (!user) {
-        setState({ user: null, partner: null, loading: false, error: null });
-        return;
-      }
+    try {
+      const unsubscribe = onAuthStateChanged(getAuthInstance(), async (user) => {
+        if (!user) {
+          setState({ user: null, partner: null, loading: false, error: null });
+          return;
+        }
 
-      try {
-        const token = await user.getIdToken(true);
-        const partner = await getPartnerMe(token);
-        setState({ user, partner, loading: false, error: null });
-      } catch (err) {
-        console.error("Failed to fetch partner:", err);
-        // If 404 or no partner found, set NO_PARTNER; otherwise generic failure
-        const message = err instanceof Error ? err.message : "";
-        const error = message.includes("404") ? "NO_PARTNER" : "FETCH_FAILED";
-        setState({ user, partner: null, loading: false, error });
-      }
-    });
+        try {
+          const token = await user.getIdToken(true);
+          const partner = await getPartnerMe(token);
+          setState({ user, partner, loading: false, error: null });
+        } catch (err) {
+          console.error("Failed to fetch partner:", err);
+          // If 404 or no partner found, set NO_PARTNER; otherwise generic failure
+          const message = err instanceof Error ? err.message : "";
+          const error = message.includes("404") ? "NO_PARTNER" : "FETCH_FAILED";
+          setState({ user, partner: null, loading: false, error });
+        }
+      });
 
-    return unsubscribe;
+      return unsubscribe;
+    } catch (err) {
+      console.error("Failed to bootstrap Firebase auth:", err);
+      const message = err instanceof Error ? err.message : "";
+      const error =
+        message === "FIREBASE_CONFIG_MISSING" || message === "FIREBASE_CONFIG_INVALID"
+          ? message
+          : "FIREBASE_CONFIG_INVALID";
+      setState({ user: null, partner: null, loading: false, error });
+      return;
+    }
   }, []);
 
   const refetchPartner = async () => {
-    const currentUser = getAuthInstance().currentUser;
+    let currentUser;
+    try {
+      currentUser = getAuthInstance().currentUser;
+    } catch (err) {
+      console.error("Failed to access Firebase auth during refetch:", err);
+      return;
+    }
     if (!currentUser) return;
     try {
       const token = await currentUser.getIdToken(true);
@@ -81,14 +98,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const provider = new GoogleAuthProvider();
     try {
       await signInWithPopup(getAuthInstance(), provider);
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message.startsWith("FIREBASE_CONFIG_")) {
+        setState((prev) => ({ ...prev, error: err.message, loading: false }));
+        return;
+      }
       // Popup blocked or failed — fallback to redirect
       await signInWithRedirect(getAuthInstance(), provider);
     }
   };
 
   const signOut = async () => {
-    await firebaseSignOut(getAuthInstance());
+    try {
+      await firebaseSignOut(getAuthInstance());
+    } catch (err) {
+      console.error("Failed to sign out from Firebase auth:", err);
+      setState({ user: null, partner: null, loading: false, error: null });
+    }
   };
 
   return (

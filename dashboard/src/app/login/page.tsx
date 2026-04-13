@@ -9,13 +9,16 @@ import { getAuthInstance } from "@/lib/firebase";
 const WORKSPACE_HOME = "/tasks";
 
 export default function LoginPage() {
-  const { user, partner, loading, signInWithGoogle } = useAuth();
+  const { user, partner, loading, error, signInWithGoogle } = useAuth();
   const router = useRouter();
   const emailLinkHandledRef = useRef(false);
   const [emailLinkLoading, setEmailLinkLoading] = useState(false);
   const [emailLinkError, setEmailLinkError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (error === "FIREBASE_CONFIG_MISSING" || error === "FIREBASE_CONFIG_INVALID") {
+      return;
+    }
     if (!loading && user && partner) {
       router.replace(WORKSPACE_HOME);
       return;
@@ -23,7 +26,14 @@ export default function LoginPage() {
 
     if (emailLinkHandledRef.current || emailLinkLoading) return;
 
-    const auth = getAuthInstance();
+    let auth;
+    try {
+      auth = getAuthInstance();
+    } catch (err) {
+      console.error("Failed to bootstrap Firebase auth on login page:", err);
+      setEmailLinkError("目前登入設定異常，請先修復 dashboard 部署設定。");
+      return;
+    }
     if (!isSignInWithEmailLink(auth, window.location.href)) return;
 
     emailLinkHandledRef.current = true;
@@ -55,7 +65,26 @@ export default function LoginPage() {
     };
 
     void completeEmailLink();
-  }, [emailLinkLoading, loading, partner, router, signInWithGoogle, user]);
+  }, [emailLinkLoading, error, loading, partner, router, signInWithGoogle, user]);
+
+  if (error === "FIREBASE_CONFIG_MISSING" || error === "FIREBASE_CONFIG_INVALID") {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="text-center max-w-md w-full p-8">
+          <h1 className="text-3xl font-bold text-white mb-2">ZenOS</h1>
+          <p className="text-muted-foreground mb-6">Dashboard deployment is misconfigured.</p>
+          <div className="rounded-2xl border border-border bg-card p-5 text-left">
+            <div className="text-sm font-medium text-foreground mb-2">Firebase public config 無法啟動</div>
+            <div className="text-sm text-muted-foreground">
+              {error === "FIREBASE_CONFIG_MISSING"
+                ? "build 階段缺少 NEXT_PUBLIC_FIREBASE_* 環境變數。"
+                : "build 階段注入的 NEXT_PUBLIC_FIREBASE_API_KEY 無效。"}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-background">

@@ -9,6 +9,7 @@ from __future__ import annotations
 from zenos.interface.setup_content import (
     get_bundle_version,
     get_manifest,
+    get_packages,
     get_slash_commands,
 )
 
@@ -165,6 +166,7 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
     """
     bundle_version = get_bundle_version()
     manifest = get_manifest()
+    packages = get_packages()
     slash_commands = get_slash_commands()
     claude_md_addition = _build_claude_md_addition(selection)
     raw_base = _build_github_raw_base(manifest)
@@ -175,9 +177,11 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
         "bundle_version": bundle_version,
         "skill_selection": selection,
         "manifest": manifest,
+        "packages": packages,
         "payload": {
             "slash_commands": slash_commands,
             "claude_md_addition": claude_md_addition,
+            "packages": packages,
         },
         "instructions": [
             (
@@ -201,15 +205,18 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
 def build_claude_web_payload(selection: str, skip_overview: bool) -> dict:
     """組裝 claude_web 平台的完整 install response。"""
     bundle_version = get_bundle_version()
+    packages = get_packages()
 
     response: dict = {
         "action": "install",
         "platform": "claude_web",
         "bundle_version": bundle_version,
         "skill_selection": selection,
+        "packages": packages,
         "payload": {
             "project_instructions": _CLAUDE_WEB_PROJECT_INSTRUCTIONS,
             "project_documents_tip": _PROJECT_DOCUMENTS_TIP,
+            "packages": packages,
         },
         "instructions": [
             "1. 開啟 claude.ai → 進入你的 Project 設定",
@@ -231,6 +238,7 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
     """
     bundle_version = get_bundle_version()
     manifest = get_manifest()
+    packages = get_packages()
     agents_md_addition = _build_agents_md_addition(selection)
     raw_base = _build_github_raw_base(manifest)
 
@@ -240,8 +248,10 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
         "bundle_version": bundle_version,
         "skill_selection": selection,
         "manifest": manifest,
+        "packages": packages,
         "payload": {
             "agents_md_addition": agents_md_addition,
+            "packages": packages,
         },
         "instructions": [
             (

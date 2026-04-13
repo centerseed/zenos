@@ -187,10 +187,10 @@ class TestGetSkillFiles:
 
 
 class TestGetSlashCommands:
-    def test_returns_4_commands(self):
+    def test_returns_all_registered_commands(self):
         from zenos.interface.setup_content import get_slash_commands
         cmds = get_slash_commands()
-        assert len(cmds) == 7  # 4 zenos-* + feature + debug + triage
+        assert len(cmds) == 12  # 4 zenos-* + 3 workflows + 5 marketing workflows
 
     def test_all_paths_under_claude_commands(self):
         from zenos.interface.setup_content import get_slash_commands
@@ -288,7 +288,7 @@ class TestSetupToolClaudeCode:
         from zenos.interface.mcp import setup
         result = await setup(platform="claude_code")
         assert "slash_commands" in result["payload"]
-        assert len(result["payload"]["slash_commands"]) == 7  # 4 zenos-* + feature + debug + triage
+        assert len(result["payload"]["slash_commands"]) == 12
 
     async def test_payload_has_claude_md_addition(self):
         from zenos.interface.mcp import setup

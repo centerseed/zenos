@@ -15,7 +15,7 @@ test.describe('Projects — List View', () => {
       () => !document.querySelector('[aria-label="Loading projects..."]'),
       { timeout: 20000 }
     );
-    await expect(page.locator('h1', { hasText: 'Projects' })).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('h1', { hasText: /Products|Projects/ })).toBeVisible({ timeout: 10000 });
   });
 
   test('PR-LIST-002: page renders main content area', async ({ page }) => {
@@ -39,7 +39,7 @@ test.describe('Projects — List View', () => {
     // Wait for content to load (either project cards or empty message)
     await page.waitForTimeout(3000);
 
-    const emptyMsg = page.locator('text=No projects yet.');
+    const emptyMsg = page.locator('text=No products yet.');
     const isEmpty = await emptyMsg.isVisible().catch(() => false);
 
     if (isEmpty) {
@@ -159,10 +159,10 @@ test.describe('Projects — Detail View', () => {
       test.info().annotations.push({ type: 'skip-reason', description: 'No projects in data' });
       return;
     }
-    const backLink = page.locator('a', { hasText: 'Back to projects' });
+    const backLink = page.locator('a', { hasText: /Back to products|Back to projects/ });
     await expect(backLink).toBeVisible({ timeout: 10000 });
     await backLink.click();
     await page.waitForURL('**/projects', { timeout: 10000 });
-    await expect(page.locator('h1', { hasText: 'Projects' })).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('h1', { hasText: /Products|Projects/ })).toBeVisible({ timeout: 10000 });
   });
 });

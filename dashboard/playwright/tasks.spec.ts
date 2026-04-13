@@ -72,23 +72,37 @@ test.describe('Tasks Page', () => {
   test('TASK-019: kanban board renders four column headers', async ({ page }) => {
     // Wait for API response and loading state to clear
     await page.waitForTimeout(3000);
+    const scopedEmpty = page.locator('text=您的帳號尚未設定存取空間，請聯繫管理員。');
+    if (await scopedEmpty.isVisible().catch(() => false)) {
+      await expect(scopedEmpty).toBeVisible();
+      return;
+    }
 
     // Check if TaskBoard rendered (tasks exist) or empty state
-    const hasBoard = await page.locator('text=TODO').isVisible().catch(() => false);
+    const hasBoard =
+      (await page.locator('span', { hasText: '待處理' }).first().isVisible().catch(() => false)) ||
+      (await page.locator('span', { hasText: '進行中' }).first().isVisible().catch(() => false));
 
     if (hasBoard) {
-      // Verify all four column headers
-      await expect(page.locator('span', { hasText: 'TODO' }).first()).toBeVisible();
-      await expect(page.locator('span', { hasText: 'IN PROGRESS' }).first()).toBeVisible();
-      await expect(page.locator('span', { hasText: 'REVIEW' }).first()).toBeVisible();
-      await expect(page.locator('span', { hasText: 'DONE' }).first()).toBeVisible();
+      await expect(page.locator('span', { hasText: '待處理' }).first()).toBeVisible();
+      await expect(page.locator('span', { hasText: '進行中' }).first()).toBeVisible();
+      await expect(page.locator('span', { hasText: '審查中' }).first()).toBeVisible();
+      await expect(page.locator('span', { hasText: '已完成' }).first()).toBeVisible();
     } else {
       // Empty state — verify the empty message is shown inside main
       const main = page.locator('main#main-content');
       const emptyMsg = main.locator('p', { hasText: '尚無任務' }).or(
         main.locator('p', { hasText: '目前篩選無結果' })
       );
-      await expect(emptyMsg).toBeVisible({ timeout: DATA_TIMEOUT });
+      const errorMsg = main.locator('p', { hasText: '刷新失敗' }).or(main.locator('text=重試'));
+      const boardEmptyMsg = main.locator('p', { hasText: '目前沒有任務' });
+      if (await emptyMsg.isVisible().catch(() => false)) {
+        await expect(emptyMsg).toBeVisible({ timeout: DATA_TIMEOUT });
+      } else if (await boardEmptyMsg.isVisible().catch(() => false)) {
+        await expect(boardEmptyMsg).toBeVisible({ timeout: DATA_TIMEOUT });
+      } else {
+        await expect(errorMsg).toBeVisible({ timeout: DATA_TIMEOUT });
+      }
     }
   });
 

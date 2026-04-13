@@ -32,6 +32,7 @@ if transport in ("dual", "sse", "http", "streamable-http"):
     from zenos.interface.dashboard_api import dashboard_routes
     from zenos.interface.ext_ingestion_api import app as ext_ingestion_app
     from zenos.interface.federation_api import routes as federation_routes
+    from zenos.interface.marketing_dashboard_api import marketing_dashboard_routes
 
     if transport == "dual":
         stream_http_app = mcp.http_app(
@@ -76,6 +77,7 @@ if transport in ("dual", "sse", "http", "streamable-http"):
             *[Route(r.path, r.endpoint, methods=r.methods) for r in admin_routes],
             *[Route(r.path, r.endpoint, methods=r.methods) for r in dashboard_routes],
             *[Route(r.path, r.endpoint, methods=r.methods) for r in crm_dashboard_routes],
+            *[Route(r.path, r.endpoint, methods=r.methods) for r in marketing_dashboard_routes],
             *[Route(r.path, r.endpoint, methods=r.methods) for r in federation_routes],
             Mount("/api/ext", app=ApiKeyMiddleware(ext_ingestion_app)),
             *mcp_routes,

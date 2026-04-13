@@ -43,17 +43,21 @@ test.describe('Knowledge Map', () => {
     await page.goto('/knowledge-map');
     await expect(page.locator('header')).toBeVisible({ timeout: AUTH_TIMEOUT });
 
-    // Hamburger menu button is visible on mobile
-    const menuBtn = page.locator('header button[aria-label="Open menu"]');
+    const menuBtn = page
+      .locator('header button[aria-label="Open menu"]')
+      .or(page.locator('header button[aria-label="開啟選單"]'))
+      .or(page.locator('button', { hasText: 'Menu' }).first());
     await expect(menuBtn).toBeVisible({ timeout: 10000 });
 
-    // Click to open
     await menuBtn.click();
-    await expect(page.locator('header button[aria-label="Close menu"]')).toBeVisible();
+    const closeBtn = page
+      .locator('header button[aria-label="Close menu"]')
+      .or(page.locator('header button[aria-label="關閉選單"]'))
+      .or(page.locator('button', { hasText: 'Close' }).first());
+    await expect(closeBtn).toBeVisible({ timeout: 10000 });
 
-    // Click again to close
-    await page.locator('header button[aria-label="Close menu"]').click();
-    await expect(page.locator('header button[aria-label="Open menu"]')).toBeVisible();
+    await closeBtn.click();
+    await expect(menuBtn).toBeVisible({ timeout: 10000 });
   });
 
   test('page title is ZenOS', async ({ page }) => {

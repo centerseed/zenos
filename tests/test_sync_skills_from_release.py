@@ -29,3 +29,8 @@ def test_sync_skills_preserves_local_md_and_installs_release_workflows(tmp_path:
     assert (target / "workflows" / "debug" / "SKILL.md").exists()
     assert (target / "workflows" / "triage" / "SKILL.md").exists()
     assert (target / "workflows" / "brainstorm" / "SKILL.md").exists()
+    assert (target / "workflows" / "marketing-intel" / "SKILL.md").exists()
+    assert (target / "workflows" / "marketing-plan" / "SKILL.md").exists()
+    assert (target / "workflows" / "marketing-generate" / "SKILL.md").exists()
+    assert (target / "workflows" / "marketing-adapt" / "SKILL.md").exists()
+    assert (target / "workflows" / "marketing-publish" / "SKILL.md").exists()

@@ -14,10 +14,13 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   const [activationError, setActivationError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (error === "FIREBASE_CONFIG_MISSING" || error === "FIREBASE_CONFIG_INVALID") {
+      return;
+    }
     if (!loading && !user) {
       router.replace("/login");
     }
-  }, [loading, user, router]);
+  }, [error, loading, user, router]);
 
   // Auto-activate invited partners
   useEffect(() => {
@@ -55,6 +58,24 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           <div className="text-muted-foreground/60 text-xs mt-2">
             auth: {user ? "有用戶" : "無用戶"} | partner: {partner ? "已載入" : "未載入"} | error: {error || "無"}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error === "FIREBASE_CONFIG_MISSING" || error === "FIREBASE_CONFIG_INVALID") {
+    const isMissing = error === "FIREBASE_CONFIG_MISSING";
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="max-w-lg rounded-2xl border border-border bg-card p-8 text-center shadow-sm">
+          <div className="text-4xl mb-4">&#x26A0;&#xFE0F;</div>
+          <h2 className="text-xl font-semibold text-foreground mb-2">Dashboard 部署設定錯誤</h2>
+          <p className="text-muted-foreground mb-3">
+            Firebase 公開設定在 build 階段沒有正確注入，所以登入模組無法啟動。
+          </p>
+          <p className="text-sm text-muted-foreground/80">
+            錯誤類型：{isMissing ? "缺少 NEXT_PUBLIC_FIREBASE_* 設定" : "NEXT_PUBLIC_FIREBASE_API_KEY 無效"}
+          </p>
         </div>
       </div>
     );

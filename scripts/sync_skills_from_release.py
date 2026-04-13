@@ -20,6 +20,11 @@ SKILLS = (
     "workflows/debug",
     "workflows/triage",
     "workflows/brainstorm",
+    "workflows/marketing-intel",
+    "workflows/marketing-plan",
+    "workflows/marketing-generate",
+    "workflows/marketing-adapt",
+    "workflows/marketing-publish",
     # Agent role skills
     "architect",
     "designer",
