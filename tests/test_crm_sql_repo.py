@@ -116,6 +116,7 @@ def _make_deal_row(overrides: dict) -> dict:
         "scope_description": None,
         "deliverables": [],
         "notes": None,
+        "zenos_entity_id": None,
         "is_closed_lost": False,
         "is_on_hold": False,
         "last_activity_at": None,
@@ -124,6 +125,36 @@ def _make_deal_row(overrides: dict) -> dict:
     }
     base.update(overrides)
     return base
+
+
+class TestRowToDealZenosEntityId:
+    """Unit tests for _row_to_deal zenos_entity_id mapping."""
+
+    def test_zenos_entity_id_mapped_when_present(self):
+        from zenos.infrastructure.crm_sql_repo import _row_to_deal
+
+        row = _make_deal_row({"zenos_entity_id": "entity-abc123"})
+        deal = _row_to_deal(row)
+
+        assert deal.zenos_entity_id == "entity-abc123"
+
+    def test_zenos_entity_id_is_none_when_null(self):
+        from zenos.infrastructure.crm_sql_repo import _row_to_deal
+
+        row = _make_deal_row({"zenos_entity_id": None})
+        deal = _row_to_deal(row)
+
+        assert deal.zenos_entity_id is None
+
+    def test_zenos_entity_id_is_none_when_key_missing(self):
+        """Row without zenos_entity_id (pre-migration rows) should not crash."""
+        from zenos.infrastructure.crm_sql_repo import _row_to_deal
+
+        row = _make_deal_row({})
+        row.pop("zenos_entity_id", None)  # key might not exist in old rows
+        deal = _row_to_deal(row)
+
+        assert deal.zenos_entity_id is None
 
 
 class TestRowToDealLastActivityAt:

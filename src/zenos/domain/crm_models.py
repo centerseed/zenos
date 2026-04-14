@@ -92,6 +92,7 @@ class Deal:
     scope_description: Optional[str] = None
     deliverables: list[str] = field(default_factory=list)
     notes: Optional[str] = None
+    zenos_entity_id: Optional[str] = None
     is_closed_lost: bool = False
     is_on_hold: bool = False
     last_activity_at: Optional[datetime] = None
@@ -111,4 +112,32 @@ class Activity:
     summary: str
     recorded_by: str
     is_system: bool = False
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+
+class InsightType(str, Enum):
+    BRIEFING   = "briefing"
+    DEBRIEF    = "debrief"
+    COMMITMENT = "commitment"
+
+
+class InsightStatus(str, Enum):
+    ACTIVE   = "active"
+    OPEN     = "open"
+    DONE     = "done"
+    ARCHIVED = "archived"
+
+
+@dataclass
+class AiInsight:
+    """A CRM AI insight (briefing/debrief/commitment) attached to a deal."""
+
+    id: str
+    partner_id: str
+    deal_id: str
+    insight_type: InsightType
+    content: str = ""
+    metadata: dict = field(default_factory=dict)
+    activity_id: Optional[str] = None
+    status: InsightStatus = InsightStatus.ACTIVE
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

@@ -8,8 +8,11 @@ import {
   createContact,
   getDealActivities,
   createActivity,
+  fetchDealAiEntries,
+  createAiInsight,
+  updateCommitmentStatus,
 } from "@/lib/crm-api";
-import type { Deal, Company, Activity } from "@/lib/crm-api";
+import type { Deal, Company, Activity, AiInsight, DealAiEntries } from "@/lib/crm-api";
 
 const FAKE_TOKEN = "fake-crm-token";
 const API_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app";
@@ -351,5 +354,198 @@ describe("createActivity", () => {
       summary: "電話確認需求",
       recorded_by: "partner-id",
     });
+  });
+});
+
+// ─── fetchDealAiEntries ───────────────────────────────────────────────────────
+
+const fakeDebrief: AiInsight = {
+  id: "ins-1",
+  dealId: "d-1",
+  activityId: "a-1",
+  insightType: "debrief",
+  content: "## 關鍵決策\n- 確認需求",
+  metadata: { key_decisions: ["確認需求"] },
+  status: "active",
+  createdAt: "2026-03-15T10:00:00Z",
+};
+
+const fakeCommitment: AiInsight = {
+  id: "ins-2",
+  dealId: "d-1",
+  activityId: "a-1",
+  insightType: "commitment",
+  content: "寄報價單",
+  metadata: { content: "寄報價單", owner: "us", deadline: "2026-03-20" },
+  status: "open",
+  createdAt: "2026-03-15T10:00:00Z",
+};
+
+describe("fetchDealAiEntries", () => {
+  it("calls GET /api/crm/deals/{dealId}/ai-entries", async () => {
+    const fakeFetch = mockFetch({ debriefs: [], commitments: [] });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await fetchDealAiEntries(FAKE_TOKEN, "d-1");
+
+    const [url] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${API_BASE}/api/crm/deals/d-1/ai-entries`);
+  });
+
+  it("returns debriefs and commitments from response", async () => {
+    const body: DealAiEntries = {
+      debriefs: [fakeDebrief],
+      commitments: [fakeCommitment],
+    };
+    vi.stubGlobal("fetch", mockFetch(body));
+
+    const result = await fetchDealAiEntries(FAKE_TOKEN, "d-1");
+    expect(result.debriefs).toHaveLength(1);
+    expect(result.debriefs[0].id).toBe("ins-1");
+    expect(result.commitments).toHaveLength(1);
+    expect(result.commitments[0].id).toBe("ins-2");
+  });
+
+  it("sends Authorization header with Bearer token", async () => {
+    const fakeFetch = mockFetch({ debriefs: [], commitments: [] });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await fetchDealAiEntries(FAKE_TOKEN, "d-1");
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect((options.headers as Record<string, string>)["Authorization"]).toBe(
+      `Bearer ${FAKE_TOKEN}`
+    );
+  });
+
+  it("throws when API returns non-ok status", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "Not Found" }, false, 404));
+    await expect(fetchDealAiEntries(FAKE_TOKEN, "d-missing")).rejects.toThrow("404");
+  });
+});
+
+// ─── createAiInsight ─────────────────────────────────────────────────────────
+
+describe("createAiInsight", () => {
+  it("calls POST /api/crm/deals/{dealId}/ai-insights", async () => {
+    const fakeFetch = mockFetch(fakeDebrief);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await createAiInsight(FAKE_TOKEN, "d-1", {
+      insightType: "debrief",
+      content: "## 關鍵決策\n- test",
+      metadata: { key_decisions: ["test"] },
+      activityId: "a-1",
+    });
+
+    const [url, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${API_BASE}/api/crm/deals/d-1/ai-insights`);
+    expect(options.method).toBe("POST");
+  });
+
+  it("converts camelCase fields to snake_case in body", async () => {
+    const fakeFetch = mockFetch(fakeDebrief);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await createAiInsight(FAKE_TOKEN, "d-1", {
+      insightType: "debrief",
+      content: "content text",
+      metadata: { key: "value" },
+      activityId: "a-1",
+    });
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+    expect(body).toHaveProperty("insight_type", "debrief");
+    expect(body).toHaveProperty("activity_id", "a-1");
+    expect(body).not.toHaveProperty("insightType");
+    expect(body).not.toHaveProperty("activityId");
+  });
+
+  it("omits activity_id when not provided", async () => {
+    const fakeFetch = mockFetch(fakeDebrief);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await createAiInsight(FAKE_TOKEN, "d-1", {
+      insightType: "debrief",
+      content: "content text",
+      metadata: {},
+    });
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    const body = JSON.parse(options.body as string);
+    expect(body).not.toHaveProperty("activity_id");
+  });
+
+  it("returns saved insight from response", async () => {
+    vi.stubGlobal("fetch", mockFetch(fakeDebrief));
+
+    const result = await createAiInsight(FAKE_TOKEN, "d-1", {
+      insightType: "debrief",
+      content: "content",
+      metadata: {},
+    });
+    expect(result.id).toBe("ins-1");
+    expect(result.insightType).toBe("debrief");
+  });
+
+  it("throws when API returns non-ok status", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "Validation Error" }, false, 422));
+    await expect(
+      createAiInsight(FAKE_TOKEN, "d-1", {
+        insightType: "debrief",
+        content: "",
+        metadata: {},
+      })
+    ).rejects.toThrow("422");
+  });
+});
+
+// ─── updateCommitmentStatus ───────────────────────────────────────────────────
+
+describe("updateCommitmentStatus", () => {
+  it("calls PATCH /api/crm/commitments/{insightId}", async () => {
+    const fakeFetch = mockFetch({ ...fakeCommitment, status: "done" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await updateCommitmentStatus(FAKE_TOKEN, "ins-2", "done");
+
+    const [url, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${API_BASE}/api/crm/commitments/ins-2`);
+    expect(options.method).toBe("PATCH");
+  });
+
+  it("sends status in body", async () => {
+    const fakeFetch = mockFetch({ ...fakeCommitment, status: "done" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await updateCommitmentStatus(FAKE_TOKEN, "ins-2", "done");
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({ status: "done" });
+  });
+
+  it("can mark a commitment as open", async () => {
+    const fakeFetch = mockFetch({ ...fakeCommitment, status: "open" });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await updateCommitmentStatus(FAKE_TOKEN, "ins-2", "open");
+
+    const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(options.body as string)).toEqual({ status: "open" });
+  });
+
+  it("returns updated insight with new status", async () => {
+    vi.stubGlobal("fetch", mockFetch({ ...fakeCommitment, status: "done" }));
+
+    const result = await updateCommitmentStatus(FAKE_TOKEN, "ins-2", "done");
+    expect(result.status).toBe("done");
+  });
+
+  it("throws when API returns non-ok status", async () => {
+    vi.stubGlobal("fetch", mockFetch({ detail: "Not Found" }, false, 404));
+    await expect(
+      updateCommitmentStatus(FAKE_TOKEN, "missing", "done")
+    ).rejects.toThrow("404");
   });
 });

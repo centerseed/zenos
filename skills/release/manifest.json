@@ -37,7 +37,7 @@
     },
     {
       "name": "architect",
-      "version": "0.9.0",
+      "version": "0.10.0",
       "path": "architect",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -65,7 +65,7 @@
     },
     {
       "name": "pm",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "path": "pm",
       "files": ["SKILL.md"],
       "owner": "Barry"

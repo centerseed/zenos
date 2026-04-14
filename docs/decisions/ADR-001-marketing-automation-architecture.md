@@ -1,15 +1,16 @@
 ---
 type: ADR
 id: ADR-001-marketing-automation-architecture
-status: Approved
+status: Superseded
 ontology_entity: marketing-automation
 created: 2026-03-21
-updated: 2026-03-26
+updated: 2026-04-13
+superseded_by: ADR-033
 ---
 
 # ADR-001：行銷自動化技術架構
 
-**狀態**：Accepted
+**狀態**：Superseded（由 ADR-033 取代）
 **日期**：2026-03-20
 
 ---

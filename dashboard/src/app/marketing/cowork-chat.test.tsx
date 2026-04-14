@@ -76,7 +76,7 @@ describe("CoworkChatSheet", () => {
     renderSheet();
     expect(screen.getByText(/像用 Claude Code 一樣直接聊/)).toBeInTheDocument();
     expect(screen.getByText(/已載入 策略設定 背景/)).toBeInTheDocument();
-    expect(screen.getByText("這輪會送出的 prompt / context")).toBeInTheDocument();
+    expect(screen.getByText("查看這輪帶入的 prompt / context")).toBeInTheDocument();
   });
 
   it("opens as a drawer dialog on mobile-sized interaction entry", async () => {

@@ -156,6 +156,7 @@ class TestDeal:
         assert deal.is_closed_lost is False
         assert deal.is_on_hold is False
         assert deal.deliverables == []
+        assert deal.zenos_entity_id is None  # default: bridge not yet created
 
     def test_with_stage(self):
         deal = Deal(
@@ -221,6 +222,10 @@ class TestEntityTypeExtension:
         from zenos.domain.knowledge import EntityType
         assert EntityType.COMPANY == "company"
         assert EntityType.PERSON == "person"
+
+    def test_deal_in_entity_type(self):
+        from zenos.domain.knowledge import EntityType
+        assert EntityType.DEAL == "deal"
 
     def test_original_types_still_present(self):
         from zenos.domain.knowledge import EntityType

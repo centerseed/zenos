@@ -332,6 +332,52 @@ export async function patchDealStage(
   });
 }
 
+// ─── Insights ────────────────────────────────────────────────────────────────
+
+export interface StaleWarning {
+  type: "stale_warning";
+  deal_id: string;
+  deal_title: string;
+  company_name: string | null;
+  days_stale: number;
+  stage: string;
+  threshold_days: number;
+  suggestion: string;
+}
+
+export interface PipelineSummary {
+  active_deals: number;
+  estimated_monthly_close_twd: number;
+  deals_needing_attention: number;
+}
+
+export interface CrmInsights {
+  insights: StaleWarning[];
+  pipeline_summary: PipelineSummary;
+}
+
+export async function fetchInsights(token: string): Promise<CrmInsights> {
+  return apiFetch<CrmInsights>("/api/crm/insights", token);
+}
+
+// ─── Stale Thresholds ─────────────────────────────────────────────────────────
+
+export type StaleThresholds = Record<string, number>;
+
+export async function fetchStaleThresholds(token: string): Promise<StaleThresholds> {
+  return apiFetch<StaleThresholds>("/api/crm/settings/stale-thresholds", token);
+}
+
+export async function updateStaleThresholds(
+  token: string,
+  thresholds: StaleThresholds
+): Promise<StaleThresholds> {
+  return apiFetch<StaleThresholds>("/api/crm/settings/stale-thresholds", token, {
+    method: "PUT",
+    body: JSON.stringify(thresholds),
+  });
+}
+
 // ─── Activity ─────────────────────────────────────────────────────────────────
 
 export async function getDealActivities(
@@ -353,5 +399,77 @@ export async function createActivity(
   return apiFetch<Activity>(`/api/crm/deals/${dealId}/activities`, token, {
     method: "POST",
     body: serializeBody(normalizeActivityInput(data as Record<string, unknown>)),
+  });
+}
+
+// ─── AI Insights ──────────────────────────────────────────────────────────────
+
+export interface AiInsight {
+  id: string;
+  dealId: string;
+  activityId: string | null;
+  insightType: "briefing" | "debrief" | "commitment";
+  content: string;
+  metadata: Record<string, unknown>;
+  status: string;
+  createdAt: string;
+}
+
+export interface DealAiEntries {
+  debriefs: AiInsight[];
+  commitments: AiInsight[];
+}
+
+/**
+ * Fetch all AI entries (debriefs + commitments) for a deal.
+ * GET /api/crm/deals/{dealId}/ai-entries
+ * Response is already camelCase.
+ */
+export async function fetchDealAiEntries(
+  token: string,
+  dealId: string
+): Promise<DealAiEntries> {
+  return apiFetch<DealAiEntries>(`/api/crm/deals/${dealId}/ai-entries`, token);
+}
+
+/**
+ * Save a new AI insight (debrief or commitment) for a deal.
+ * POST /api/crm/deals/{dealId}/ai-insights
+ * Body is snake_case (consistent with createDeal / createActivity pattern).
+ */
+export async function createAiInsight(
+  token: string,
+  dealId: string,
+  data: {
+    insightType: string;
+    content: string;
+    metadata: Record<string, unknown>;
+    activityId?: string;
+  }
+): Promise<AiInsight> {
+  const body = {
+    insight_type: data.insightType,
+    content: data.content,
+    metadata: data.metadata,
+    ...(data.activityId !== undefined ? { activity_id: data.activityId } : {}),
+  };
+  return apiFetch<AiInsight>(`/api/crm/deals/${dealId}/ai-insights`, token, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Update commitment status (open → done or vice-versa).
+ * PATCH /api/crm/commitments/{insightId}
+ */
+export async function updateCommitmentStatus(
+  token: string,
+  insightId: string,
+  status: "open" | "done"
+): Promise<AiInsight> {
+  return apiFetch<AiInsight>(`/api/crm/commitments/${insightId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
   });
 }

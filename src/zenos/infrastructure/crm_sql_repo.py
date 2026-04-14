@@ -6,6 +6,7 @@ All tables live under the ``crm`` schema. Every method receives
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any
@@ -15,12 +16,15 @@ import asyncpg  # type: ignore[import-untyped]
 from zenos.domain.crm_models import (
     Activity,
     ActivityType,
+    AiInsight,
     Company,
     Contact,
     Deal,
     DealSource,
     DealType,
     FunnelStage,
+    InsightStatus,
+    InsightType,
 )
 
 CRM_SCHEMA = "crm"
@@ -120,6 +124,7 @@ def _row_to_deal(row: asyncpg.Record) -> Deal:
         scope_description=row["scope_description"],
         deliverables=list(row["deliverables"] or []),
         notes=row["notes"],
+        zenos_entity_id=row.get("zenos_entity_id"),
         is_closed_lost=row["is_closed_lost"],
         is_on_hold=row["is_on_hold"],
         last_activity_at=_to_dt(row.get("last_activity_at")),
@@ -288,9 +293,9 @@ class CrmSqlRepository:
                   (id, partner_id, title, company_id, owner_partner_id,
                    funnel_stage, amount_twd, deal_type, source_type, referrer,
                    expected_close_date, signed_date, scope_description,
-                   deliverables, notes, is_closed_lost, is_on_hold,
-                   created_at, updated_at)
-                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                   deliverables, notes, zenos_entity_id,
+                   is_closed_lost, is_on_hold, created_at, updated_at)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
                 """,
                 deal.id, deal.partner_id, deal.title, deal.company_id,
                 deal.owner_partner_id, deal.funnel_stage.value,
@@ -299,6 +304,7 @@ class CrmSqlRepository:
                 deal.source_type.value if deal.source_type else None,
                 deal.referrer, deal.expected_close_date, deal.signed_date,
                 deal.scope_description, deal.deliverables, deal.notes,
+                deal.zenos_entity_id,
                 deal.is_closed_lost, deal.is_on_hold,
                 deal.created_at, deal.updated_at,
             )
@@ -321,14 +327,16 @@ class CrmSqlRepository:
                 SET title=$1, funnel_stage=$2, amount_twd=$3, deal_type=$4,
                     source_type=$5, referrer=$6, expected_close_date=$7,
                     signed_date=$8, scope_description=$9, deliverables=$10,
-                    notes=$11, is_closed_lost=$12, is_on_hold=$13, updated_at=$14
-                WHERE id=$15 AND partner_id=$16
+                    notes=$11, zenos_entity_id=$12,
+                    is_closed_lost=$13, is_on_hold=$14, updated_at=$15
+                WHERE id=$16 AND partner_id=$17
                 """,
                 deal.title, deal.funnel_stage.value, deal.amount_twd,
                 deal.deal_type.value if deal.deal_type else None,
                 deal.source_type.value if deal.source_type else None,
                 deal.referrer, deal.expected_close_date, deal.signed_date,
                 deal.scope_description, deal.deliverables, deal.notes,
+                deal.zenos_entity_id,
                 deal.is_closed_lost, deal.is_on_hold, deal.updated_at,
                 deal.id, deal.partner_id,
             )
@@ -396,3 +404,108 @@ class CrmSqlRepository:
                 partner_id, deal_id,
             )
         return [_row_to_activity(r) for r in rows]
+
+    # ── Settings ───────────────────────────────────────────────────────
+
+    async def get_setting(self, partner_id: str, key: str) -> dict | None:
+        """Return a stored JSON setting value for the given key, or None if unset."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT value FROM {CRM_SCHEMA}.settings WHERE partner_id=$1 AND key=$2",
+                partner_id, key,
+            )
+        if row is None:
+            return None
+        val = row["value"]
+        if isinstance(val, str):
+            return json.loads(val)
+        return dict(val) if val else None
+
+    async def upsert_setting(self, partner_id: str, key: str, value: dict) -> None:
+        """Insert or update a JSON setting for the given partner and key."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {CRM_SCHEMA}.settings (partner_id, key, value, updated_at)
+                VALUES ($1, $2, $3::jsonb, now())
+                ON CONFLICT (partner_id, key) DO UPDATE
+                  SET value = excluded.value, updated_at = now()
+                """,
+                partner_id, key, json.dumps(value),
+            )
+
+    # ── AI Insights ────────────────────────────────────────────────────
+
+    def _row_to_ai_insight(self, row: Any) -> AiInsight:
+        """Convert a DB row to an AiInsight dataclass."""
+        raw_metadata = row["metadata"]
+        if isinstance(raw_metadata, str):
+            metadata = json.loads(raw_metadata)
+        elif raw_metadata is None:
+            metadata = {}
+        else:
+            metadata = dict(raw_metadata)
+
+        return AiInsight(
+            id=row["id"],
+            partner_id=row["partner_id"],
+            deal_id=row["deal_id"],
+            activity_id=row["activity_id"],
+            insight_type=InsightType(row["insight_type"]),
+            content=row["content"],
+            metadata=metadata,
+            status=InsightStatus(row["status"]),
+            created_at=_to_dt(row["created_at"]) or _now(),
+        )
+
+    async def create_ai_insight(self, insight: AiInsight) -> AiInsight:
+        """Insert a new ai_insight row."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""
+                INSERT INTO {CRM_SCHEMA}.ai_insights
+                  (id, partner_id, deal_id, activity_id, insight_type,
+                   content, metadata, status, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9)
+                """,
+                insight.id, insight.partner_id, insight.deal_id,
+                insight.activity_id, insight.insight_type.value,
+                insight.content, json.dumps(insight.metadata),
+                insight.status.value, insight.created_at,
+            )
+        return insight
+
+    async def list_ai_insights_by_deal(
+        self, partner_id: str, deal_id: str, insight_type: str | None = None
+    ) -> list[AiInsight]:
+        """List AI insights for a deal, optionally filtered by type, newest first."""
+        async with self._pool.acquire() as conn:
+            if insight_type is not None:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {CRM_SCHEMA}.ai_insights
+                        WHERE partner_id=$1 AND deal_id=$2 AND insight_type=$3
+                        ORDER BY created_at DESC""",
+                    partner_id, deal_id, insight_type,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {CRM_SCHEMA}.ai_insights
+                        WHERE partner_id=$1 AND deal_id=$2
+                        ORDER BY created_at DESC""",
+                    partner_id, deal_id,
+                )
+        return [self._row_to_ai_insight(r) for r in rows]
+
+    async def update_ai_insight_status(
+        self, partner_id: str, insight_id: str, status: str
+    ) -> AiInsight | None:
+        """Update status for an AI insight. Returns updated insight or None if not found."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""UPDATE {CRM_SCHEMA}.ai_insights
+                    SET status=$3
+                    WHERE partner_id=$1 AND id=$2
+                    RETURNING *""",
+                partner_id, insight_id, status,
+            )
+        return self._row_to_ai_insight(row) if row else None

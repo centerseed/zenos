@@ -322,7 +322,7 @@ Dashboard 行銷總覽（按產品分組，可展開收合）
   - Given helper 收到跨來源請求，When Origin 或本機配對 token 不符，Then 拒絕請求且不執行 Claude CLI
   - Given 使用者要求停止生成，When Web 送出 cancel，Then helper 可中止當前 CLI process
   - **Context 注入（兩層模型）**：
-  - Given helper 啟動 Claude CLI，When 初始化 session，Then 必須自動帶入：(1) `--mcp-config` 指向 ZenOS MCP 設定 (2) `cwd` 指向含 CLAUDE.md 的專案目錄（預載 marketing skill 定義）(3) `.claude/settings.json` 的 allowedTools 白名單
+  - Given helper 啟動 Claude CLI，When 初始化 session，Then 必須自動帶入：(1) `--mcp-config` 指向 ZenOS MCP 設定 (2) `cwd` 指向含 CLAUDE.md 和 `.claude/settings.json` 的專案目錄（預載 marketing skill 定義 + allowedTools 白名單）。權限白名單唯一來源為 `.claude/settings.json`，helper 不另外傳 CLI `--allowedTools` 參數
   - Given helper 已正確載入設定，When AI 收到第一則訊息，Then AI 已具備 ZenOS 讀寫能力和所有 `/marketing-*` skill，使用者無需手動指定
   - **Capability 檢查與降級**：
   - Given helper 啟動 Claude CLI session，When session 初始化完成，Then helper 必須執行 capability probe：嘗試呼叫 `mcp__zenos__search(query="health-check", limit=1)` 驗證 MCP 連線，並在 SSE 串流中回傳 `capability_check` 事件（含 `mcp_ok: boolean`、`skills_loaded: string[]`）

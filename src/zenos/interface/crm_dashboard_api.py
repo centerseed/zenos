@@ -16,6 +16,9 @@ Endpoints:
   PATCH /api/crm/deals/{id}/stage              — update funnel stage
   GET  /api/crm/deals/{id}/activities          — list activities
   POST /api/crm/deals/{id}/activities          — create activity
+  GET  /api/crm/insights                       — deal health insights (stale warnings + pipeline summary)
+  GET  /api/crm/settings/stale-thresholds      — get stale threshold config per funnel stage
+  PUT  /api/crm/settings/stale-thresholds      — update stale threshold config
 
 Auth: Firebase ID token → email → SQL partners table → partner scope.
 """
@@ -28,7 +31,7 @@ from datetime import date, datetime
 from starlette.requests import Request
 from starlette.routing import Route
 
-from zenos.domain.crm_models import Activity, Company, Contact, Deal
+from zenos.domain.crm_models import Activity, AiInsight, Company, Contact, Deal
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.knowledge import SqlEntityRepository, SqlRelationshipRepository
 from zenos.infrastructure.sql_common import get_pool
@@ -48,13 +51,15 @@ logger = logging.getLogger(__name__)
 
 _crm_repos_ready = False
 _crm_service = None
+_crm_insights_service = None
 
 
 async def _ensure_crm_service():
-    global _crm_repos_ready, _crm_service
+    global _crm_repos_ready, _crm_service, _crm_insights_service
     if _crm_repos_ready:
         return _crm_service
 
+    from zenos.application.crm.crm_insights_service import CrmInsightsService
     from zenos.application.crm.crm_service import CrmService
     from zenos.infrastructure.crm_sql_repo import CrmSqlRepository
 
@@ -63,8 +68,14 @@ async def _ensure_crm_service():
     entity_repo = SqlEntityRepository(pool)
     relationship_repo = SqlRelationshipRepository(pool)
     _crm_service = CrmService(crm_repo, entity_repo, relationship_repo)
+    _crm_insights_service = CrmInsightsService(crm_repo)
     _crm_repos_ready = True
     return _crm_service
+
+
+async def _ensure_insights_service():
+    await _ensure_crm_service()
+    return _crm_insights_service
 
 
 # ── Serialization helpers ──────────────────────────────────────────────
@@ -149,6 +160,20 @@ def _activity_to_dict(a: Activity) -> dict:
         "isSystem": a.is_system,
         "createdAt": a.created_at,
     })
+
+
+def _ai_insight_to_dict(i: AiInsight) -> dict:
+    return {
+        "id": i.id,
+        "partnerId": i.partner_id,
+        "dealId": i.deal_id,
+        "activityId": i.activity_id,
+        "insightType": i.insight_type.value,
+        "content": i.content,
+        "metadata": i.metadata,
+        "status": i.status.value,
+        "createdAt": i.created_at.isoformat() if i.created_at else None,
+    }
 
 
 # ── Auth helper ────────────────────────────────────────────────────────
@@ -538,6 +563,180 @@ async def create_deal_activity(request: Request):
         current_partner_id.reset(token)
 
 
+# ── AI Insights endpoints ──────────────────────────────────────────────
+
+
+async def get_deal_ai_entries(request: Request):
+    """GET /api/crm/deals/{id}/ai-entries — list debriefs and commitments for a deal."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        deal_id = request.path_params["id"]
+        svc = await _ensure_crm_service()
+        entries = await svc.get_deal_ai_entries(effective_id, deal_id)
+        return _json_response(
+            {
+                "debriefs": [_ai_insight_to_dict(i) for i in entries["debriefs"]],
+                "commitments": [_ai_insight_to_dict(i) for i in entries["commitments"]],
+            },
+            request=request,
+        )
+    except Exception as exc:
+        return _internal_error_response(request, "get_deal_ai_entries", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def create_deal_ai_insight(request: Request):
+    """POST /api/crm/deals/{id}/ai-insights — create a new AI insight for a deal."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        deal_id = request.path_params["id"]
+        body = await request.json()
+        if not body.get("insight_type"):
+            return _error_response("BAD_REQUEST", "insight_type is required", 400, request=request)
+        body["deal_id"] = deal_id
+
+        svc = await _ensure_crm_service()
+        insight = await svc.create_ai_insight(effective_id, body)
+        return _json_response(_ai_insight_to_dict(insight), status_code=201, request=request)
+    except ValueError as exc:
+        return _error_response("BAD_REQUEST", str(exc), 400, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "create_deal_ai_insight", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def patch_commitment_status(request: Request):
+    """PATCH /api/crm/commitments/{id} — update status of a commitment insight."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        insight_id = request.path_params["id"]
+        body = await request.json()
+        status = body.get("status")
+        if not status:
+            return _error_response("BAD_REQUEST", "status is required", 400, request=request)
+
+        svc = await _ensure_crm_service()
+        insight = await svc.update_commitment_status(effective_id, insight_id, status)
+        if insight is None:
+            return _error_response("NOT_FOUND", "Commitment not found", 404, request=request)
+        return _json_response(_ai_insight_to_dict(insight), request=request)
+    except ValueError as exc:
+        return _error_response("BAD_REQUEST", str(exc), 400, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "patch_commitment_status", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+# ── CRM Insights endpoint (deal health) ───────────────────────────────
+
+
+async def get_insights(request: Request):
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        svc = await _ensure_insights_service()
+        result = await svc.compute_insights(effective_id)
+        return _json_response(result, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "get_insights", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+# ── Stale-thresholds settings endpoints ───────────────────────────────
+
+
+async def get_stale_thresholds(request: Request):
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        svc = await _ensure_insights_service()
+        thresholds = await svc.get_stale_thresholds(effective_id)
+        return _json_response(thresholds, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "get_stale_thresholds", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def put_stale_thresholds(request: Request):
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        body = await request.json()
+        if not isinstance(body, dict):
+            return _error_response("BAD_REQUEST", "body must be a JSON object", 400, request=request)
+
+        # Validate: all values must be positive integers
+        for stage, days in body.items():
+            if not isinstance(days, int) or days <= 0:
+                return _error_response(
+                    "BAD_REQUEST",
+                    f"threshold for '{stage}' must be a positive integer",
+                    400,
+                    request=request,
+                )
+
+        svc = await _ensure_insights_service()
+        await svc.save_stale_thresholds(effective_id, body)
+        thresholds = await svc.get_stale_thresholds(effective_id)
+        return _json_response(thresholds, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "put_stale_thresholds", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def stale_thresholds_handler(request: Request):
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+    if request.method == "PUT":
+        return await put_stale_thresholds(request)
+    return await get_stale_thresholds(request)
+
+
 # ── Combined handlers (dispatch on method) ────────────────────────────
 
 
@@ -600,4 +799,9 @@ crm_dashboard_routes = [
     Route("/api/crm/deals/{id}",                  get_deal,                   methods=["GET", "OPTIONS"]),
     Route("/api/crm/deals/{id}/stage",            patch_deal_stage,           methods=["PATCH", "OPTIONS"]),
     Route("/api/crm/deals/{id}/activities",       deal_activities_collection, methods=["GET", "POST", "OPTIONS"]),
+    Route("/api/crm/deals/{id}/ai-entries",       get_deal_ai_entries,        methods=["GET", "OPTIONS"]),
+    Route("/api/crm/deals/{id}/ai-insights",      create_deal_ai_insight,     methods=["POST", "OPTIONS"]),
+    Route("/api/crm/commitments/{id}",            patch_commitment_status,    methods=["PATCH", "OPTIONS"]),
+    Route("/api/crm/insights",                    get_insights,               methods=["GET", "OPTIONS"]),
+    Route("/api/crm/settings/stale-thresholds",   stale_thresholds_handler,   methods=["GET", "PUT", "OPTIONS"]),
 ]

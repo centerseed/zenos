@@ -202,6 +202,140 @@ class TestCreateContact:
         mock_rel_repo.add.assert_not_called()
 
 
+# ── create_deal ────────────────────────────────────────────────────────
+
+class TestCreateDeal:
+    @pytest.mark.asyncio
+    async def test_calls_crm_repo_create(self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo):
+        deal = _make_deal()
+        entity = _make_entity(id="deal-entity-1", type="deal", name="AI 導入案")
+        company = _make_company(zenos_entity_id="company-entity-1")
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        await svc.create_deal("p1", {"title": "AI 導入案", "company_id": "c1"})
+
+        mock_crm_repo.create_deal.assert_called_once()
+        created_deal = mock_crm_repo.create_deal.call_args[0][0]
+        assert created_deal.title == "AI 導入案"
+        assert created_deal.partner_id == "p1"
+
+    @pytest.mark.asyncio
+    async def test_triggers_entity_upsert_with_type_deal(
+        self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo
+    ):
+        deal = _make_deal()
+        entity = _make_entity(id="deal-entity-1", type="deal", name="AI 導入案")
+        company = _make_company(zenos_entity_id="company-entity-1")
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        await svc.create_deal("p1", {"title": "AI 導入案", "company_id": "c1"})
+
+        mock_entity_repo.upsert.assert_called_once()
+        upserted = mock_entity_repo.upsert.call_args[0][0]
+        assert upserted.type == "deal"
+        assert upserted.name == "AI 導入案"
+        assert upserted.level == 1
+
+    @pytest.mark.asyncio
+    async def test_triggers_relationship_part_of_to_company(
+        self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo
+    ):
+        deal = _make_deal()
+        entity = _make_entity(id="deal-entity-1", type="deal")
+        company = _make_company(zenos_entity_id="company-entity-1")
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        await svc.create_deal("p1", {"title": "AI 導入案", "company_id": "c1"})
+
+        mock_rel_repo.add.assert_called_once()
+        relationship = mock_rel_repo.add.call_args[0][0]
+        assert relationship.source_entity_id == "deal-entity-1"
+        assert relationship.target_id == "company-entity-1"
+        assert relationship.type == "part_of"
+
+    @pytest.mark.asyncio
+    async def test_no_relationship_when_company_has_no_entity(
+        self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo
+    ):
+        deal = _make_deal()
+        entity = _make_entity(id="deal-entity-1", type="deal")
+        company = _make_company(zenos_entity_id=None)  # no entity bridge
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        await svc.create_deal("p1", {"title": "AI 導入案", "company_id": "c1"})
+
+        mock_rel_repo.add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_backfills_zenos_entity_id(
+        self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo
+    ):
+        deal = _make_deal()
+        entity = _make_entity(id="deal-entity-xyz", type="deal")
+        company = _make_company(zenos_entity_id="company-entity-1")
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        result = await svc.create_deal("p1", {"title": "AI 導入案", "company_id": "c1"})
+
+        mock_crm_repo.update_deal.assert_called_once()
+        updated = mock_crm_repo.update_deal.call_args[0][0]
+        assert updated.zenos_entity_id == "deal-entity-xyz"
+
+    @pytest.mark.asyncio
+    async def test_entity_summary_includes_stage_and_amount(
+        self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo
+    ):
+        deal = _make_deal(funnel_stage=FunnelStage.PROPOSAL, amount_twd=500000)
+        entity = _make_entity(id="deal-entity-1", type="deal")
+        company = _make_company(zenos_entity_id="company-entity-1")
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        await svc.create_deal(
+            "p1",
+            {"title": "AI 導入案", "company_id": "c1",
+             "funnel_stage": "提案報價", "amount_twd": 500000},
+        )
+
+        upserted = mock_entity_repo.upsert.call_args[0][0]
+        assert "提案報價" in upserted.summary
+        assert "500,000" in upserted.summary
+
+    @pytest.mark.asyncio
+    async def test_entity_summary_handles_no_amount(
+        self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo
+    ):
+        deal = _make_deal(amount_twd=None)
+        entity = _make_entity(id="deal-entity-1", type="deal")
+        company = _make_company(zenos_entity_id="company-entity-1")
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        await svc.create_deal("p1", {"title": "AI 導入案", "company_id": "c1"})
+
+        upserted = mock_entity_repo.upsert.call_args[0][0]
+        assert "金額未定" in upserted.summary
+
+
 # ── update_deal_stage ──────────────────────────────────────────────────
 
 class TestUpdateDealStage:

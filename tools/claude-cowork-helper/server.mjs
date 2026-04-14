@@ -33,6 +33,10 @@ const EXPECTED_MARKETING_SKILLS = [
   "/marketing-adapt",
   "/marketing-publish",
 ];
+const EXPECTED_CRM_SKILLS = [
+  "/crm-briefing",
+  "/crm-debrief",
+];
 const REDACTION_RULES_VERSION = process.env.REDACTION_RULES_VERSION || "2026-04-14";
 
 /** @type {Map<string, { sessionId: string, sessionName: string, cwd: string, updatedAt: string }>} */
@@ -206,9 +210,9 @@ function loadAllowedTools(cwd) {
   return allowed.map((item) => String(item || "").trim()).filter(Boolean);
 }
 
-function loadMarketingSkills(cwd) {
+function loadSkills(cwd, expectedSkills) {
   const baseDir = path.join(cwd, "skills", "release", "workflows");
-  return EXPECTED_MARKETING_SKILLS.filter((skillName) => {
+  return expectedSkills.filter((skillName) => {
     const folderName = skillName.replace(/^\//, "");
     return existsSync(path.join(baseDir, folderName, "SKILL.md"));
   });
@@ -229,8 +233,9 @@ function isAllowedTool(toolName, allowedTools) {
 
 function buildCapabilitySnapshot(cwd) {
   const allowedTools = loadAllowedTools(cwd);
-  const skillsLoaded = loadMarketingSkills(cwd);
-  const missingSkills = EXPECTED_MARKETING_SKILLS.filter((skill) => !skillsLoaded.includes(skill));
+  const allExpected = [...EXPECTED_MARKETING_SKILLS, ...EXPECTED_CRM_SKILLS];
+  const skillsLoaded = loadSkills(cwd, allExpected);
+  const missingSkills = allExpected.filter((skill) => !skillsLoaded.includes(skill));
   const mcpOk = allowedTools.some((tool) => tool.startsWith("mcp__zenos__"));
   return {
     mcp_ok: mcpOk,

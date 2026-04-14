@@ -13,10 +13,13 @@ from datetime import datetime, timezone
 from zenos.domain.crm_models import (
     Activity,
     ActivityType,
+    AiInsight,
     Company,
     Contact,
     Deal,
     FunnelStage,
+    InsightStatus,
+    InsightType,
 )
 from zenos.domain.knowledge import Entity, Relationship, Tags
 from zenos.domain.knowledge import EntityRepository, RelationshipRepository
@@ -186,7 +189,7 @@ class CrmService:
     # ── Deals ──────────────────────────────────────────────────────────
 
     async def create_deal(self, partner_id: str, data: dict) -> Deal:
-        """Create a deal (pure CRM, no entity bridge)."""
+        """Create a deal and bridge it to a ZenOS L1 entity (type=deal)."""
         from zenos.domain.crm_models import DealType, DealSource
 
         raw_stage = data.get("funnel_stage", FunnelStage.PROSPECT.value)
@@ -223,7 +226,36 @@ class CrmService:
                 val if isinstance(val, date) else date.fromisoformat(str(val))
             )
 
-        return await self._crm.create_deal(deal)
+        deal = await self._crm.create_deal(deal)
+
+        # Bridge: create ZenOS L1 entity (type=deal)
+        amount_str = f"NT${deal.amount_twd:,}" if deal.amount_twd else "金額未定"
+        summary = f"{deal.funnel_stage.value} · {amount_str}"
+        entity = await self._entities.upsert(Entity(
+            id=_new_id(),
+            name=deal.title,
+            type="deal",
+            level=1,
+            summary=summary,
+            tags=Tags(what=["deal"], why="CRM 商機", how="crm", who=["業務"]),
+            confirmed_by_user=True,
+        ))
+
+        # Link deal entity → company entity via PART_OF relationship
+        company = await self._crm.get_company(partner_id, deal.company_id)
+        if company and company.zenos_entity_id:
+            await self._relationships.add(Relationship(
+                id=_new_id(),
+                source_entity_id=entity.id,
+                target_id=company.zenos_entity_id,
+                type="part_of",
+                description=f"{deal.title} 屬於公司商機",
+            ))
+
+        # Back-fill zenos_entity_id
+        deal.zenos_entity_id = entity.id
+        await self._crm.update_deal(deal)
+        return deal
 
     async def update_deal_stage(
         self, partner_id: str, deal_id: str, new_stage: str, actor_partner_id: str
@@ -289,3 +321,35 @@ class CrmService:
 
     async def list_activities(self, partner_id: str, deal_id: str) -> list[Activity]:
         return await self._crm.list_activities(partner_id, deal_id)
+
+    # ── AI Insights ────────────────────────────────────────────────────
+
+    async def get_deal_ai_entries(self, partner_id: str, deal_id: str) -> dict:
+        """Return AI insights for a deal, categorised into debriefs and commitments."""
+        insights = await self._crm.list_ai_insights_by_deal(partner_id, deal_id)
+        debriefs = [i for i in insights if i.insight_type == InsightType.DEBRIEF]
+        commitments = [i for i in insights if i.insight_type == InsightType.COMMITMENT]
+        return {"debriefs": debriefs, "commitments": commitments}
+
+    async def create_ai_insight(self, partner_id: str, data: dict) -> AiInsight:
+        """Create an AI insight from a data dict."""
+        raw_type = data["insight_type"]
+        insight = AiInsight(
+            id=_new_id(),
+            partner_id=partner_id,
+            deal_id=data["deal_id"],
+            insight_type=InsightType(raw_type),
+            content=data.get("content", ""),
+            metadata=data.get("metadata", {}),
+            activity_id=data.get("activity_id"),
+            status=InsightStatus.ACTIVE,
+        )
+        return await self._crm.create_ai_insight(insight)
+
+    async def update_commitment_status(
+        self, partner_id: str, insight_id: str, status: str
+    ) -> AiInsight | None:
+        """Update commitment status. Only 'open' and 'done' are allowed."""
+        if status not in ("open", "done"):
+            raise ValueError(f"Invalid status '{status}': only 'open' and 'done' are allowed")
+        return await self._crm.update_ai_insight_status(partner_id, insight_id, status)

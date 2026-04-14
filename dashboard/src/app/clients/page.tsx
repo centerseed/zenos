@@ -14,8 +14,11 @@ import {
   getCompanies,
   createDeal,
   createCompany,
+  fetchInsights,
+  fetchStaleThresholds,
+  updateStaleThresholds,
 } from "@/lib/crm-api";
-import type { Deal, FunnelStage, Company } from "@/lib/crm-api";
+import type { Deal, FunnelStage, Company, CrmInsights, StaleThresholds } from "@/lib/crm-api";
 import {
   DndContext,
   DragEndEvent,
@@ -164,6 +167,219 @@ function KanbanColumn({ stage, deals, companiesMap, lastActivityMap }: KanbanCol
           </p>
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── StaleThresholdsModal ─────────────────────────────────────────────────────
+
+const THRESHOLD_STAGES = ["潛在客戶", "需求訪談", "提案報價", "合約議價", "導入中"] as const;
+
+interface StaleThresholdsModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  user: any;
+  onSaved: () => void;
+}
+
+function StaleThresholdsModal({ isOpen, onClose, user, onSaved }: StaleThresholdsModalProps) {
+  const [thresholds, setThresholds] = useState<StaleThresholds>({});
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isOpen || !user) return;
+    setLoading(true);
+    setError(null);
+    user.getIdToken().then((token: string) =>
+      fetchStaleThresholds(token)
+        .then(setThresholds)
+        .catch((err: unknown) =>
+          setError(err instanceof Error ? err.message : "無法載入設定")
+        )
+        .finally(() => setLoading(false))
+    );
+  }, [isOpen, user]);
+
+  async function handleSave() {
+    if (!user) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      await updateStaleThresholds(token, thresholds);
+      onSaved();
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "儲存失敗");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className="p-4 border-b border-border flex items-center justify-between">
+          <h3 className="font-semibold text-foreground">停滯提醒天數設定</h3>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="p-4 space-y-3">
+          {error && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
+              {error}
+            </div>
+          )}
+          {loading ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">載入中...</div>
+          ) : (
+            THRESHOLD_STAGES.map((stage) => (
+              <div key={stage} className="flex items-center justify-between gap-4">
+                <label className="text-sm text-foreground w-24 shrink-0">{stage}</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    value={thresholds[stage] ?? ""}
+                    onChange={(e) =>
+                      setThresholds((prev) => ({
+                        ...prev,
+                        [stage]: parseInt(e.target.value, 10) || 0,
+                      }))
+                    }
+                    className="w-20 bg-secondary border border-border rounded px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
+                  />
+                  <span className="text-sm text-muted-foreground">天</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="p-4 border-t border-border flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 text-sm text-foreground hover:bg-secondary rounded transition-colors disabled:opacity-50"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={saving || loading}
+            className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
+          >
+            {saving ? "儲存中..." : "儲存"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DealHealthInsights ───────────────────────────────────────────────────────
+
+interface DealHealthInsightsProps {
+  user: any;
+  refreshKey: number;
+}
+
+function DealHealthInsights({ user, refreshKey }: DealHealthInsightsProps) {
+  const [data, setData] = useState<CrmInsights | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    user.getIdToken().then((token: string) =>
+      fetchInsights(token)
+        .then(setData)
+        .catch((err: unknown) =>
+          setError(err instanceof Error ? err.message : "無法載入洞察")
+        )
+        .finally(() => setLoading(false))
+    );
+  }, [user, refreshKey]);
+
+  if (loading) {
+    return (
+      <div className="mb-6 space-y-2">
+        <div className="h-4 w-32 bg-secondary rounded animate-pulse" />
+        <div className="h-16 bg-secondary rounded-lg animate-pulse" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="mb-6 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-xs text-red-400">
+        AI 洞察載入失敗：{error}
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { insights, pipeline_summary } = data;
+
+  return (
+    <div className="mb-6">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+        Deal Health AI 洞察
+      </p>
+      {insights.length === 0 ? (
+        <div className="bg-card border border-border rounded-lg p-3 border-l-4 border-l-green-400 flex items-center gap-3">
+          <span className="text-base">✅</span>
+          <div>
+            <p className="text-sm font-medium text-foreground">目前一切正常</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              進行中 {pipeline_summary.active_deals} 案
+              {pipeline_summary.estimated_monthly_close_twd > 0 &&
+                ` · 本月預計 $${pipeline_summary.estimated_monthly_close_twd.toLocaleString()}`}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {insights.map((insight) => (
+            <a
+              key={insight.deal_id}
+              href={`/clients/deals/${insight.deal_id}`}
+              className="block bg-card border border-border rounded-lg p-3 border-l-4 border-l-orange-400 hover:bg-secondary/30 transition-colors"
+            >
+              <div className="flex items-start gap-2">
+                <span className="text-base mt-0.5">⚠️</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground truncate">
+                    {insight.deal_title}
+                    {insight.company_name && (
+                      <span className="font-normal text-muted-foreground ml-1">
+                        · {insight.company_name}
+                      </span>
+                    )}
+                  </p>
+                  <p className="text-xs text-orange-400 mt-0.5">
+                    停滯 {insight.days_stale} 天（{insight.stage}，門檻 {insight.threshold_days} 天）
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{insight.suggestion}</p>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -415,6 +631,8 @@ function ClientsPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [insightsRefreshKey, setInsightsRefreshKey] = useState(0);
 
   // Route guard: shared-workspace users cannot access the CRM page
   useEffect(() => {
@@ -536,6 +754,13 @@ function ClientsPage() {
             >
               公司列表
             </Link>
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="px-3 py-1.5 text-sm rounded bg-secondary text-foreground hover:bg-secondary/80 transition-colors"
+              title="停滯天數設定"
+            >
+              ⚙️
+            </button>
             <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer">
               <input
                 type="checkbox"
@@ -568,6 +793,11 @@ function ClientsPage() {
               <p className="text-xs text-muted-foreground mt-0.5">成交案值</p>
             </div>
           </div>
+        )}
+
+        {/* AI Insights */}
+        {!loading && (
+          <DealHealthInsights user={user} refreshKey={insightsRefreshKey} />
         )}
 
         {/* Kanban */}
@@ -605,7 +835,7 @@ function ClientsPage() {
           </DndContext>
         )}
 
-        {/* Modal */}
+        {/* New Deal Modal */}
         <NewDealModal
           isOpen={isModalOpen}
           onClose={() => setIsModalOpen(false)}
@@ -618,6 +848,14 @@ function ClientsPage() {
           }}
           user={user}
           userId={partner?.id ?? ""}
+        />
+
+        {/* Settings Modal */}
+        <StaleThresholdsModal
+          isOpen={isSettingsOpen}
+          onClose={() => setIsSettingsOpen(false)}
+          user={user}
+          onSaved={() => setInsightsRefreshKey((k) => k + 1)}
         />
       </main>
     </div>

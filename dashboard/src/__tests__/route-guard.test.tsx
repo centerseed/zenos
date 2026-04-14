@@ -71,6 +71,11 @@ vi.mock("@/lib/crm-api", () => ({
   patchDealStage: vi.fn(),
   createDeal: vi.fn(),
   createCompany: vi.fn(),
+  // Regression: route-guard test omitted S04 exports — caused Vitest unhandled rejection
+  // Found by QA on 2026-04-14
+  fetchInsights: vi.fn().mockResolvedValue({ insights: [], pipeline_summary: { active_deals: 0, estimated_monthly_close_twd: 0, deals_needing_attention: 0 } }),
+  fetchStaleThresholds: vi.fn().mockResolvedValue({}),
+  updateStaleThresholds: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock("@dnd-kit/core", () => ({

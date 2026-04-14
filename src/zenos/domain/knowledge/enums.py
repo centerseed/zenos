@@ -14,6 +14,7 @@ class EntityType(str, Enum):
     DOCUMENT = "document"
     COMPANY = "company"
     PERSON = "person"
+    DEAL = "deal"
 
 
 class EntityStatus(str, Enum):
