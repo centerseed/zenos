@@ -163,10 +163,10 @@ export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; on
         {groups.map((group) => (
           <div key={group.product.id || group.product.name} className="space-y-3">
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className="text-[0.65rem]">
+              <Badge variant="outline" className="text-[0.65rem] tracking-[0.01em]">
                 {group.product.name}
               </Badge>
-              <span className="text-[11px] text-muted-foreground">{group.projects.length} 個項目</span>
+              <span className="text-[11px] font-medium text-[#c5d8ea]">{group.projects.length} 個項目</span>
             </div>
             <div className="space-y-3">
               {group.projects.map((campaign) => {
@@ -175,7 +175,7 @@ export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; on
                 return (
                   <div
                     key={campaign.id}
-                    className="group cursor-pointer rounded-xl border border-border/50 bg-card/70 transition-all hover:border-border hover:bg-card"
+                    className="group cursor-pointer rounded-xl border border-border/60 bg-card/80 shadow-[0_14px_34px_rgba(0,0,0,0.18)] transition-all hover:border-primary/20 hover:bg-card hover:shadow-[0_18px_40px_rgba(0,0,0,0.24)]"
                     onClick={() => onSelect(campaign.id)}
                   >
                     <div className="space-y-3 p-4">
@@ -191,7 +191,7 @@ export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; on
                               {campaign.projectType === "long_term" ? "長期經營" : "短期活動"}
                             </Badge>
                           </div>
-                          <p className="ml-4 mt-0.5 text-xs text-muted-foreground">{campaign.description}</p>
+                          <p className="ml-4 mt-1 text-xs leading-5 text-[#c4d8e9]">{campaign.description}</p>
                         </div>
                         {reviewCount > 0 && (
                           <Badge className="shrink-0 border-amber-400/30 bg-amber-400/10 text-[0.6rem] text-amber-400">
@@ -209,15 +209,15 @@ export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; on
                         <div className="ml-4 flex items-center gap-6">
                           <div>
                             <div className="text-sm font-semibold text-foreground">{campaign.stats.followers}</div>
-                            <div className="text-[0.55rem] text-muted-foreground">追蹤者</div>
+                            <div className="text-[0.55rem] font-medium uppercase tracking-[0.08em] text-[#abc3d8]">追蹤者</div>
                           </div>
                           <div>
                             <div className="text-sm font-semibold text-foreground">{campaign.stats.avgEngagement}</div>
-                            <div className="text-[0.55rem] text-muted-foreground">平均互動率</div>
+                            <div className="text-[0.55rem] font-medium uppercase tracking-[0.08em] text-[#abc3d8]">平均互動率</div>
                           </div>
                           <div>
                             <div className="text-sm font-semibold text-foreground">{campaign.stats.postsThisMonth}</div>
-                            <div className="text-[0.55rem] text-muted-foreground">本月發文</div>
+                            <div className="text-[0.55rem] font-medium uppercase tracking-[0.08em] text-[#abc3d8]">本月發文</div>
                           </div>
                         </div>
                       )}
@@ -261,7 +261,7 @@ export function CampaignStarter({
     (projectType === "long_term" || (dateStart && dateEnd));
 
   return (
-    <div className="rounded-xl border border-border/40 bg-card/70 p-4">
+    <div className="rounded-xl border border-border/60 bg-card/80 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.18)]">
       <div className="mb-3">
         <h3 className="text-sm font-medium text-foreground">建立行銷項目</h3>
         <p className="mt-1 text-xs text-muted-foreground">先選產品，再建立長期經營或短期活動項目。</p>
@@ -1047,7 +1047,7 @@ export function PromptManagerSheet({
         </SheetHeader>
         <div className="space-y-4 p-4">
           {loading ? (
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3 text-xs text-muted-foreground">載入中...</div>
+          <div className="rounded-lg border border-border/60 bg-card/80 p-3 text-xs text-muted-foreground">載入中...</div>
           ) : activePrompt ? (
             <>
               <div className="flex flex-wrap gap-2">
@@ -1622,7 +1622,7 @@ export function CoworkChatSheet({
           </SheetHeader>
 
           <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="border-b border-border/30 px-4 py-3">
+            <div className="border-b border-border/30 bg-muted/10 px-4 py-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
                   <span>會話 ID：{conversationId}</span>
@@ -1702,8 +1702,8 @@ export function CoworkChatSheet({
                 </div>
               )}
 
-              <details className="mt-3 rounded-xl border border-border/40 bg-card/60 p-3">
-                <summary className="cursor-pointer text-xs font-medium text-foreground">這輪會送出的 prompt / context</summary>
+              <details className="mt-3 rounded-xl border border-border/30 bg-background/70 p-3">
+                <summary className="cursor-pointer text-xs font-medium text-foreground">查看這輪帶入的 prompt / context</summary>
                 <div className="mt-3 grid gap-3">
                   {contextPack && (
                     <div className="rounded-lg border border-border/30 bg-background/70 p-3">
@@ -1839,13 +1839,22 @@ export function CoworkChatSheet({
             </div>
 
             <div className="flex-1 overflow-hidden px-4 py-4">
+              <div className="mb-3 flex items-center justify-between">
+                <div>
+                  <div className="text-sm font-medium text-foreground">對話紀錄</div>
+                  <div className="text-xs text-muted-foreground">這裡才是主要聊天區，Claude 的回覆會持續往下串流。</div>
+                </div>
+                <Badge variant="outline" className="text-[10px]">
+                  {running ? "串流中" : "待輸入"}
+                </Badge>
+              </div>
               <div
                 ref={chatViewportRef}
-                className="flex h-full min-h-[420px] flex-col gap-3 overflow-y-auto rounded-2xl border border-border/40 bg-card/60 p-4"
+                className="flex h-full min-h-[420px] flex-col gap-3 overflow-y-auto rounded-3xl border border-white/10 bg-black/20 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
               >
                 {logLines.length === 0 ? (
                   <div className="m-auto max-w-md text-center">
-                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-border/40 bg-background/70">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
                       <Bot className="h-5 w-5 text-foreground" />
                     </div>
                     <div className="text-sm font-medium text-foreground">直接開始聊，不用先填設定</div>
@@ -1863,12 +1872,12 @@ export function CoworkChatSheet({
                     return (
                       <div key={`${index}-${line.slice(0, 20)}`} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                         <div
-                          className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm ${
+                          className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm shadow-sm ${
                             isUser
-                              ? "bg-primary/20 text-primary-foreground"
+                              ? "border border-primary/25 bg-primary/15 text-primary-foreground"
                               : isAssistant
-                                ? "bg-emerald-500/10 text-foreground"
-                                : "bg-muted/30 text-muted-foreground"
+                                ? "border border-emerald-500/15 bg-emerald-500/8 text-foreground"
+                                : "border border-white/8 bg-white/5 text-muted-foreground"
                           }`}
                         >
                           {content}
@@ -1879,7 +1888,7 @@ export function CoworkChatSheet({
                 )}
                 {running && streamingOutput && (
                   <div className="flex justify-start">
-                    <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl bg-emerald-500/10 px-4 py-3 text-sm text-foreground">
+                    <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl border border-emerald-500/15 bg-emerald-500/8 px-4 py-3 text-sm text-foreground">
                       {streamingOutput}
                       <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded bg-foreground/60 align-middle" />
                     </div>
@@ -1888,7 +1897,11 @@ export function CoworkChatSheet({
               </div>
             </div>
 
-            <div className="border-t border-border/30 px-4 py-4">
+            <div className="border-t border-border/30 bg-background px-4 py-4">
+              <div className="mb-3">
+                <div className="text-sm font-medium text-foreground">輸入區</div>
+                <div className="text-xs text-muted-foreground">把你想調整的方向直接打在下面，再送出。</div>
+              </div>
               {missingApplyKeys.length > 0 && (
                 <div className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
                   結構化結果缺少鍵：{missingApplyKeys.join(", ")}
@@ -1956,7 +1969,7 @@ export function CoworkChatSheet({
                     ? `直接說你想怎麼改 ${fieldContext.fieldLabel}；背景已自動帶入`
                     : "直接輸入你想跟 AI 討論的內容"
                 }
-                className="min-h-[120px] w-full rounded-2xl border border-border/50 bg-background px-4 py-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                className="min-h-[120px] w-full rounded-3xl border border-border/50 bg-card/80 px-4 py-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
               />
 
               <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -3166,12 +3179,12 @@ export default function MarketingPage() {
       <div className="min-h-screen bg-background text-foreground">
         <AppNav />
         <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <h1 className="text-xl font-semibold tracking-tight text-foreground">行銷主控台</h1>
-              <p className="text-sm text-muted-foreground">Paceriz</p>
+              <h1 className="text-[1.65rem] font-semibold tracking-[-0.03em] text-foreground">行銷主控台</h1>
+              <p className="mt-1 text-sm font-medium text-[#bcd3e7]">Paceriz</p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-card/70 p-1.5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]">
               <CoworkChatSheet
                 campaignId={selectedId}
                 onError={setError}

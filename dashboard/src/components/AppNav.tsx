@@ -52,7 +52,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
     return (
       <span
         data-testid="workspace-entry-single"
-        className="hidden sm:inline-flex items-center rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1 text-xs font-medium text-muted-foreground"
+        className="hidden sm:inline-flex items-center rounded-md border border-border/70 bg-card/80 px-2.5 py-1 text-xs font-medium text-[#d9ebfa] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
       >
         我的工作區
       </span>
@@ -65,7 +65,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
     <div className="relative hidden sm:block" data-testid="workspace-entry-picker">
       <button
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-secondary/30 px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:border-primary/30 hover:text-foreground"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-card/80 px-2.5 py-1 text-xs font-medium text-[#d9ebfa] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-primary/35 hover:bg-secondary/70 hover:text-foreground"
         aria-expanded={open}
         aria-haspopup="listbox"
       >
@@ -78,7 +78,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
         <ul
           role="listbox"
           aria-label="切換工作區"
-          className="absolute left-0 top-full z-50 mt-1 min-w-[160px] overflow-hidden rounded-md border border-border bg-card shadow-lg"
+          className="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-md border border-border/80 bg-card/95 shadow-[0_18px_40px_rgba(0,0,0,0.32)]"
         >
           {availableWorkspaces.map((ws) => {
             const isActive = ws.id === active.id;
@@ -89,7 +89,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
                     onSwitch?.(ws.id);
                     setOpen(false);
                   }}
-                  className={`flex w-full items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-secondary/60 ${isActive ? "text-primary" : "text-foreground"}`}
+                  className={`flex w-full items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-secondary/70 ${isActive ? "bg-primary/10 text-primary" : "text-[#e6f4ff]"}`}
                 >
                   <span>{ws.name}</span>
                   {ws.hasUpdate && !isActive && (
@@ -144,7 +144,7 @@ export function AppNav() {
   if (!partner) return null;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/80 bg-background/72 backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b border-border/90 bg-[rgba(8,19,31,0.9)] shadow-[0_10px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-3 sm:gap-6">
           <Link
@@ -174,17 +174,17 @@ export function AppNav() {
               void refetchPartner();
             }}
           />
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden md:flex items-center gap-1.5">
             {navItems.map(({ href, label }) => {
               const isActive = pathname.startsWith(href);
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`rounded-md px-3 py-1.5 text-sm transition-all ${
+                  className={`rounded-md border px-3 py-1.5 text-sm transition-all ${
                     isActive
-                      ? "bg-primary/18 text-primary shadow-[inset_0_0_0_1px_rgba(54,225,202,0.2)]"
-                      : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
+                      ? "border-primary/35 bg-primary/18 text-[#d5fff8] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_0_0_1px_rgba(71,229,210,0.12)]"
+                      : "border-transparent text-[#c3d8eb] hover:border-border/70 hover:bg-secondary/70 hover:text-foreground"
                   }`}
                 >
                   {label}
@@ -194,18 +194,18 @@ export function AppNav() {
           </nav>
         </div>
         <div className="flex items-center gap-4">
-          <span className="hidden sm:inline text-sm text-muted-foreground">
+          <span className="hidden sm:inline text-sm text-[#d3e5f4]">
             {partner.displayName}
           </span>
           <button
             onClick={signOut}
-            className="hidden cursor-pointer text-sm text-muted-foreground transition-transform active:scale-95 hover:text-primary sm:inline"
+            className="hidden cursor-pointer text-sm text-[#c3d8eb] transition-transform active:scale-95 hover:text-primary sm:inline"
           >
             {APP_COPY.signOut}
           </button>
           <button
             onClick={() => setMobileOpen((prev) => !prev)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-card/70 text-muted-foreground transition-all active:scale-95 hover:border-primary/30 hover:text-foreground hover:bg-secondary/60 md:hidden"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border/70 bg-card/80 text-[#d3e5f4] transition-all active:scale-95 hover:border-primary/35 hover:text-foreground hover:bg-secondary/70 md:hidden"
             aria-label={mobileOpen ? "關閉選單" : "開啟選單"}
             aria-expanded={mobileOpen}
           >
@@ -214,7 +214,7 @@ export function AppNav() {
         </div>
       </div>
       {mobileOpen && (
-        <div className="border-t border-border bg-card/95 md:hidden">
+        <div className="border-t border-border/80 bg-card/95 md:hidden">
           <nav className="flex flex-col px-4 py-2">
             {navItems.map(({ href, label }) => {
               const isActive = pathname.startsWith(href);
@@ -223,21 +223,21 @@ export function AppNav() {
                   key={href}
                   href={href}
                   onClick={() => setMobileOpen(false)}
-                  className={`rounded-md px-3 py-2 text-sm transition-all ${
+                  className={`rounded-md border px-3 py-2 text-sm transition-all ${
                     isActive
-                      ? "bg-primary/18 text-primary shadow-[inset_0_0_0_1px_rgba(54,225,202,0.2)]"
-                      : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground"
+                      ? "border-primary/35 bg-primary/18 text-[#d5fff8] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                      : "border-transparent text-[#c3d8eb] hover:border-border/70 hover:bg-secondary/70 hover:text-foreground"
                   }`}
                 >
                   {label}
                 </Link>
               );
             })}
-            <div className="mt-2 flex items-center justify-between border-t border-border pt-2">
-              <span className="text-sm text-muted-foreground">{partner.displayName}</span>
+            <div className="mt-2 flex items-center justify-between border-t border-border/80 pt-2">
+              <span className="text-sm text-[#d3e5f4]">{partner.displayName}</span>
               <button
                 onClick={signOut}
-                className="cursor-pointer text-sm text-muted-foreground transition-transform active:scale-95 hover:text-primary"
+                className="cursor-pointer text-sm text-[#c3d8eb] transition-transform active:scale-95 hover:text-primary"
               >
                 {APP_COPY.signOut}
               </button>
