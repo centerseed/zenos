@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MarketingStyleBuckets } from "@/lib/marketing-api";
+import type { MarketingProject, MarketingStyleBuckets } from "@/lib/marketing-api";
 import {
   CampaignDetail,
   CampaignList,
@@ -25,7 +25,7 @@ beforeEach(() => {
 
 const emptyStyles: MarketingStyleBuckets = { product: [], platform: [], project: [] };
 
-function makeCampaign(overrides: Record<string, unknown> = {}) {
+function makeCampaign(overrides: Partial<MarketingProject> = {}): MarketingProject {
   return {
     id: "proj-1",
     name: "官網 Blog",
@@ -85,6 +85,8 @@ describe("CampaignDetail", () => {
         onBack={vi.fn()}
         onReview={vi.fn()}
         reviewingPostId={null}
+        onSaveContentPlan={vi.fn(async () => {})}
+        savingPlan={false}
         onCreateTopic={vi.fn(async () => {})}
         creatingTopic={false}
         onSaveStrategy={vi.fn(async () => {})}
@@ -249,6 +251,8 @@ describe("CampaignDetail", () => {
         onBack={vi.fn()}
         onReview={vi.fn()}
         reviewingPostId={null}
+        onSaveContentPlan={vi.fn(async () => {})}
+        savingPlan={false}
         onCreateTopic={vi.fn(async () => {})}
         creatingTopic={false}
         onSaveStrategy={vi.fn(async () => {})}
@@ -295,6 +299,8 @@ describe("CampaignDetail", () => {
         onBack={vi.fn()}
         onReview={vi.fn()}
         reviewingPostId={null}
+        onSaveContentPlan={vi.fn(async () => {})}
+        savingPlan={false}
         onCreateTopic={vi.fn(async () => {})}
         creatingTopic={false}
         onSaveStrategy={vi.fn(async () => {})}

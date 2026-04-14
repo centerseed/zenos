@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MarketingStyleBuckets } from "@/lib/marketing-api";
+import type { MarketingProject, MarketingStyleBuckets } from "@/lib/marketing-api";
 
 const mockStreamCoworkChat = vi.fn();
 
@@ -36,7 +36,7 @@ beforeEach(() => {
   });
 });
 
-const campaign = {
+const campaign: MarketingProject = {
   id: "proj-1",
   name: "官網 Blog",
   description: "Paceriz 長期經營",
