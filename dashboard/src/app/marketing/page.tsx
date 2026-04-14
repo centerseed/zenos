@@ -352,17 +352,21 @@ export function CampaignStarter({
 }
 
 export function StrategyAndPlan({
+  campaign,
   strategy,
   contentPlan,
   posts = [],
   onSavePlan,
   savingPlan = false,
+  onError,
 }: {
+  campaign: Campaign;
   strategy: Strategy;
   contentPlan?: WeekPlan[];
   posts?: Post[];
   onSavePlan?: (contentPlan: WeekPlan[]) => Promise<void>;
   savingPlan?: boolean;
+  onError: (message: string) => void;
 }) {
   const [showStrategy, setShowStrategy] = useState(false);
   const [editingPlan, setEditingPlan] = useState(false);
@@ -425,6 +429,15 @@ export function StrategyAndPlan({
       )
     );
   };
+
+  const scheduleRows = (contentPlan || []).flatMap((week) =>
+    week.days.map((day) => ({
+      date: day.day,
+      platform: day.platform,
+      topic: day.topic,
+      reason: week.aiNote || "",
+    }))
+  );
 
   return (
     <div className="space-y-3">
@@ -499,6 +512,46 @@ export function StrategyAndPlan({
             </div>
             {onSavePlan && (
               <div className="flex items-center gap-2">
+                <CoworkChatSheet
+                  campaignId={campaign.id}
+                  launcherLabel="討論這段"
+                  onError={onError}
+                  fieldContext={{
+                    fieldId: "schedule",
+                    fieldLabel: "排程設定",
+                    currentPhase: "schedule",
+                    suggestedSkill: "/marketing-plan",
+                    projectSummary: buildProjectSummary(campaign),
+                    fieldValue: scheduleRows,
+                    relatedContext: strategy.summaryEntry || strategy.coreMessage,
+                    onApply: async (payload) => {
+                      if (payload.targetField !== "schedule" || !Array.isArray(payload.value)) {
+                        throw new Error("AI 輸出的排程格式不正確");
+                      }
+                      const nextPlan: WeekPlan[] = [
+                        {
+                          weekLabel: "AI 建議排程",
+                          isCurrent: true,
+                          days: payload.value.map((item) => {
+                            const row = item as Record<string, unknown>;
+                            return {
+                              day: String(row.date || row.day || "").trim() || "待定",
+                              platform: String(row.platform || "Threads").trim(),
+                              topic: String(row.topic || "").trim(),
+                              status: "suggested" as const,
+                            };
+                          }),
+                          aiNote: payload.value
+                            .map((item) => String((item as Record<string, unknown>).reason || "").trim())
+                            .filter(Boolean)
+                            .join(" / "),
+                        },
+                      ];
+                      setDraftPlan(nextPlan);
+                      await onSavePlan(nextPlan);
+                    },
+                  }}
+                />
                 {editingPlan && (
                   <Button
                     size="sm"
@@ -594,16 +647,21 @@ export function StrategyAndPlan({
 }
 
 function PostCard({
+  campaignId,
   post,
   onReview,
   isReviewing,
+  onError,
 }: {
+  campaignId: string;
   post: Post;
   onReview: (postId: string, action: "approve" | "request_changes" | "reject") => void;
   isReviewing: boolean;
+  onError: (message: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [copiedAction, setCopiedAction] = useState<"" | "adapt" | "publish">("");
+  const [reviewSuggestion, setReviewSuggestion] = useState("");
   const sc = statusConfig(post.status);
   const isReview = requiresReview(post.status);
   const isPlanned = isPlannedStatus(post.status);
@@ -656,42 +714,73 @@ function PostCard({
           )}
 
           {isReview && (
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                disabled={isReviewing}
-                className="h-8 gap-1.5 border border-primary/30 bg-primary/10 text-xs text-primary hover:bg-primary/20"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReview(post.id, "approve");
-                }}
-              >
-                <CheckCircle2 className="h-3.5 w-3.5" />核准文案
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={isReviewing}
-                className="h-8 gap-1.5 text-xs text-muted-foreground"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReview(post.id, "request_changes");
-                }}
-              >
-                <Pencil className="h-3.5 w-3.5" />要求修改
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={isReviewing}
-                className="h-8 gap-1.5 text-xs text-destructive/70"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onReview(post.id, "reject");
-                }}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />退回重做
-              </Button>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <CoworkChatSheet
+                  campaignId={campaignId}
+                  launcherLabel="討論這段"
+                  onError={onError}
+                  onUseOutput={(output) => setReviewSuggestion(output)}
+                  fieldContext={{
+                    fieldId: "review",
+                    fieldLabel: "審核建議",
+                    currentPhase: post.status === "platform_adapted" ? "adapt" : "generate",
+                    suggestedSkill: post.status === "platform_adapted" ? "/marketing-adapt" : "/marketing-generate",
+                    projectSummary: `${post.platform} / ${post.title}`,
+                    fieldValue: {
+                      title: post.title,
+                      preview: post.preview,
+                      platform: post.platform,
+                      ai_reason: post.aiReason || "",
+                    },
+                    relatedContext: "請幫我判斷這版文案該直接核准、要求修改，或退回重做，並說明理由。",
+                  }}
+                />
+                <div className="text-xs text-muted-foreground">可以先跟 AI 討論，再決定核准或退回。</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  disabled={isReviewing}
+                  className="h-8 gap-1.5 border border-primary/30 bg-primary/10 text-xs text-primary hover:bg-primary/20"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReview(post.id, "approve");
+                  }}
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />核准文案
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isReviewing}
+                  className="h-8 gap-1.5 text-xs text-muted-foreground"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReview(post.id, "request_changes");
+                  }}
+                >
+                  <Pencil className="h-3.5 w-3.5" />要求修改
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={isReviewing}
+                  className="h-8 gap-1.5 text-xs text-destructive/70"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onReview(post.id, "reject");
+                  }}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />退回重做
+                </Button>
+              </div>
+              {reviewSuggestion && (
+                <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+                  <div className="mb-1 font-medium text-foreground">AI 審核建議</div>
+                  <div className="whitespace-pre-wrap">{reviewSuggestion}</div>
+                </div>
+              )}
             </div>
           )}
 
@@ -1053,6 +1142,92 @@ export function PromptManagerSheet({
   );
 }
 
+function previewText(value: unknown): string {
+  if (value == null) return "尚未設定";
+  if (typeof value === "string") return value.trim() || "尚未設定";
+  if (Array.isArray(value)) {
+    return value.length === 0 ? "尚未設定" : value.map((item) => previewText(item)).join("\n");
+  }
+  if (typeof value === "object") {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function fieldValueFromRecord(record: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in record) return record[key];
+  }
+  return undefined;
+}
+
+function buildApplyChangePreview(field: FieldDiscussionConfig | undefined, payload: StructuredApplyPayload | null): Array<{ label: string; before: string; after: string }> {
+  if (!field || !payload) return [];
+  const current = field.fieldValue;
+  const next = payload.value;
+
+  if (payload.targetField === "strategy" && typeof current === "object" && current && typeof next === "object" && next) {
+    const currentRecord = current as Record<string, unknown>;
+    const nextRecord = next as Record<string, unknown>;
+    const items = [
+      { label: "目標受眾", before: previewText(fieldValueFromRecord(currentRecord, "audience")), after: previewText(fieldValueFromRecord(nextRecord, "audience")) },
+      { label: "語氣", before: previewText(fieldValueFromRecord(currentRecord, "tone")), after: previewText(fieldValueFromRecord(nextRecord, "tone")) },
+      { label: "核心訊息", before: previewText(fieldValueFromRecord(currentRecord, "core_message", "coreMessage")), after: previewText(fieldValueFromRecord(nextRecord, "core_message", "coreMessage")) },
+      { label: "平台", before: previewText(fieldValueFromRecord(currentRecord, "platforms")), after: previewText(fieldValueFromRecord(nextRecord, "platforms")) },
+      { label: "發文頻率", before: previewText(fieldValueFromRecord(currentRecord, "frequency")), after: previewText(fieldValueFromRecord(nextRecord, "frequency")) },
+      { label: "內容比例", before: previewText(fieldValueFromRecord(currentRecord, "content_mix", "contentMix")), after: previewText(fieldValueFromRecord(nextRecord, "content_mix", "contentMix")) },
+      { label: "活動目標", before: previewText(fieldValueFromRecord(currentRecord, "campaign_goal", "campaignGoal")), after: previewText(fieldValueFromRecord(nextRecord, "campaign_goal", "campaignGoal")) },
+      { label: "CTA 策略", before: previewText(fieldValueFromRecord(currentRecord, "cta_strategy", "ctaStrategy")), after: previewText(fieldValueFromRecord(nextRecord, "cta_strategy", "ctaStrategy")) },
+    ];
+    return items.filter((item) => item.before !== item.after);
+  }
+
+  if (payload.targetField === "topic" && typeof current === "object" && current && typeof next === "object" && next) {
+    const currentRecord = current as Record<string, unknown>;
+    const nextRecord = next as Record<string, unknown>;
+    const items = [
+      { label: "主題名稱", before: previewText(fieldValueFromRecord(currentRecord, "title")), after: previewText(fieldValueFromRecord(nextRecord, "title")) },
+      { label: "主題描述", before: previewText(fieldValueFromRecord(currentRecord, "brief")), after: previewText(fieldValueFromRecord(nextRecord, "brief")) },
+      { label: "平台", before: previewText(fieldValueFromRecord(currentRecord, "platform")), after: previewText(fieldValueFromRecord(nextRecord, "platform")) },
+    ];
+    return items.filter((item) => item.before !== item.after);
+  }
+
+  if (payload.targetField === "style" && typeof next === "object" && next) {
+    const currentRecord = typeof current === "object" && current && !Array.isArray(current) ? (current as Record<string, unknown>) : {};
+    const nextRecord = next as Record<string, unknown>;
+    const items = [
+      { label: "文風標題", before: previewText(fieldValueFromRecord(currentRecord, "title")), after: previewText(fieldValueFromRecord(nextRecord, "title")) },
+      { label: "層級", before: previewText(fieldValueFromRecord(currentRecord, "level")), after: previewText(fieldValueFromRecord(nextRecord, "level")) },
+      { label: "平台", before: previewText(fieldValueFromRecord(currentRecord, "platform")), after: previewText(fieldValueFromRecord(nextRecord, "platform")) },
+      { label: "文風內容", before: previewText(fieldValueFromRecord(currentRecord, "content")), after: previewText(fieldValueFromRecord(nextRecord, "content")) },
+    ];
+    return items.filter((item) => item.before !== item.after);
+  }
+
+  if (payload.targetField === "schedule") {
+    return [
+      {
+        label: "排程內容",
+        before: previewText(current),
+        after: previewText(next),
+      },
+    ];
+  }
+
+  return [
+    {
+      label: field.fieldLabel,
+      before: previewText(current),
+      after: previewText(next),
+    },
+  ].filter((item) => item.before !== item.after);
+}
+
 export function CoworkChatSheet({
   campaignId,
   onUseOutput,
@@ -1096,6 +1271,8 @@ export function CoworkChatSheet({
   const [hasStartedConversation, setHasStartedConversation] = useState(false);
   const [copiedInstall, setCopiedInstall] = useState(false);
   const [copiedSecureStart, setCopiedSecureStart] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const baselineConflictVersionRef = useRef<string | null>(null);
 
@@ -1122,6 +1299,11 @@ export function CoworkChatSheet({
     baselineConflictVersionRef.current = fieldContext?.conflictVersion || null;
   }, [effectiveCampaignId, conversationScope]);
 
+  useEffect(() => {
+    if (!open || healthText !== "未檢查") return;
+    void runHealthCheck();
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const conversationId = `marketing-${effectiveCampaignId}-${conversationScope}`;
   const contextPack = useMemo(
     () =>
@@ -1137,6 +1319,12 @@ export function CoworkChatSheet({
         : null,
     [fieldContext]
   );
+  const promptPreview = useMemo(() => {
+    if (fieldContext) {
+      return buildDiscussionPrompt(fieldContext, prompt.trim());
+    }
+    return prompt.trim() || "尚未輸入訊息";
+  }, [fieldContext, prompt]);
   const statusText = {
     idle: "等待輸入",
     loading: "初始化中",
@@ -1169,6 +1357,12 @@ export function CoworkChatSheet({
     setCheckingHealth(true);
     persistHelperSettings();
     const health = await checkCoworkHelperHealth(helperBaseUrl, helperToken);
+    if (!health) {
+      setCapability(null);
+      setHealthText("不可用：helper unavailable");
+      setCheckingHealth(false);
+      return;
+    }
     setCapability(health.capability || null);
     setHealthText(health.ok ? "可連線" : `不可用：${health.message || health.status}`);
     setCheckingHealth(false);
@@ -1364,6 +1558,19 @@ export function CoworkChatSheet({
   };
 
   const helperUnavailable = healthText.startsWith("不可用");
+  const helperStatusTone = helperUnavailable
+    ? "border-destructive/30 bg-destructive/10 text-destructive"
+    : healthText === "可連線"
+      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+      : "border-border/40 bg-background/70 text-muted-foreground";
+  const statusTone =
+    chatStatus === "error"
+      ? "border-destructive/30 bg-destructive/10 text-destructive"
+      : chatStatus === "apply-ready"
+        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
+        : "border-border/40 bg-background/70 text-muted-foreground";
+  const changePreview = useMemo(() => buildApplyChangePreview(fieldContext, applyPayload), [fieldContext, applyPayload]);
+  const canSummarize = !running && (logLines.length > 0 || hasStartedConversation);
 
   return (
     <Sheet
@@ -1390,290 +1597,412 @@ export function CoworkChatSheet({
           </Button>
         }
       />
-      <SheetContent side="right" className="overflow-y-auto p-0 sm:max-w-xl">
-        <SheetHeader className="border-b border-border/40">
-          <SheetTitle>{fieldContext ? `討論這段：${fieldContext.fieldLabel}` : "直接在 Web 跟 Claude Code CLI 討論"}</SheetTitle>
-          <SheetDescription>
-            {fieldContext ? "已預載欄位上下文，不需要再手動補背景。" : "走本機 helper，不需輸入 API key。"}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="space-y-3 p-4">
-          <div className="flex items-center justify-between rounded-lg border border-border/40 bg-background/70 px-3 py-2">
-            <div className="text-[11px] text-muted-foreground">
-              對話狀態：<span className="text-foreground">{statusText[chatStatus]}</span>
-            </div>
-            <Badge variant="outline" className="text-[10px]">
-              rules {REDACTION_RULES_VERSION}
-            </Badge>
-          </div>
-
-          <div className="rounded-lg border border-border/40 bg-background/70 p-2.5">
-            <div className="mb-2 text-[11px] font-medium text-foreground">首次使用（2 步）</div>
-            <div className="space-y-2 text-[11px]">
-              <div className="rounded border border-border/30 bg-card/60 p-2">
-                <div className="mb-1 text-muted-foreground">1. 一鍵安裝 helper</div>
-                <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperInstallCommand}</code>
-                <div className="mt-2 flex justify-end">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 px-2 text-[10px]"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(helperInstallCommand);
-                      setCopiedInstall(true);
-                      setTimeout(() => setCopiedInstall(false), 1200);
-                    }}
-                  >
-                    {copiedInstall ? "已複製" : "複製安裝指令"}
-                  </Button>
-                </div>
+      <SheetContent side="right" className="w-full p-0 sm:max-w-3xl">
+        <div className="flex h-full flex-col bg-background">
+          <SheetHeader className="border-b border-border/40 px-4 py-4">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <SheetTitle>{fieldContext ? `討論這段：${fieldContext.fieldLabel}` : "直接在 Web 跟 Claude Code CLI 討論"}</SheetTitle>
+                <SheetDescription>
+                  {fieldContext ? "像用 Claude Code 一樣直接聊；欄位背景已自動帶入。" : "主體就是對話，設定只在需要時再展開。"}
+                </SheetDescription>
               </div>
-              <div className="rounded border border-border/30 bg-card/60 p-2">
-                <div className="mb-1 text-muted-foreground">2. 設定 token 並啟動 helper（推薦）</div>
-                <input
-                  value={helperToken}
-                  onChange={(e) => setHelperTokenState(e.target.value)}
-                  placeholder="貼一組 token（例如公司提供給你的）"
-                  className="mb-2 h-8 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-                />
-                <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperSecureStartCommand}</code>
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  token 就是這頁和你本機 helper 的配對碼，任意字串即可。
-                </p>
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  安全預設：只綁定 127.0.0.1、限制本站網域、且禁用 Claude 工具（只做文字討論）。
-                </p>
-                <div className="mt-2 flex justify-end gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className={`text-[10px] ${statusTone}`}>
+                  Claude Code：{statusText[chatStatus]}
+                </Badge>
+                <Badge variant="outline" className={`text-[10px] ${helperStatusTone}`}>
+                  helper：{healthText}
+                </Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  rules {REDACTION_RULES_VERSION}
+                </Badge>
+              </div>
+            </div>
+          </SheetHeader>
+
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <div className="border-b border-border/30 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                  <span>會話 ID：{conversationId}</span>
+                  {fieldContext && (
+                    <Badge variant="outline" className="text-[10px]">
+                      已載入 {fieldContext.fieldLabel} 背景
+                    </Badge>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-6 px-2 text-[10px]"
-                    onClick={async () => {
-                      setHelperTokenState(generateHelperToken());
-                    }}
+                    className="h-7 text-[11px]"
+                    disabled={checkingHealth}
+                    onClick={runHealthCheck}
                   >
-                    產生新 token
+                    {checkingHealth ? "檢查中..." : "檢查 helper"}
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-6 px-2 text-[10px]"
-                    onClick={async () => {
-                      await navigator.clipboard.writeText(helperSecureStartCommand);
-                      setCopiedSecureStart(true);
-                      setTimeout(() => setCopiedSecureStart(false), 1200);
-                    }}
+                    className="h-7 text-[11px]"
+                    onClick={() => setShowDiagnostics((v) => !v)}
                   >
-                    {copiedSecureStart ? "已複製" : "複製啟動指令"}
+                    {showDiagnostics ? "收起診斷" : "診斷與設定"}
                   </Button>
                 </div>
               </div>
-              <div className="flex items-center justify-between rounded border border-border/30 bg-card/60 px-2 py-1.5">
-                <span className="text-muted-foreground">進階設定（URL / CWD）</span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-6 px-2 text-[10px]"
-                  onClick={() => setShowAdvancedSettings((v) => !v)}
-                >
-                  {showAdvancedSettings ? "收起" : "展開"}
-                </Button>
-              </div>
-            </div>
-          </div>
 
-          <div className="grid gap-2">
-            <div className="flex items-center justify-between rounded border border-border/30 bg-card/60 px-2 py-1.5">
-              <span className="text-[11px] text-muted-foreground">模型</span>
-              <select
-                value={helperModel}
-                onChange={(e) => setHelperModelState(e.target.value)}
-                className="h-7 min-w-[140px] rounded-md border border-border/50 bg-background px-2 text-[11px] text-foreground outline-none focus:border-primary/50"
-              >
-                <option value="sonnet">Sonnet（預設）</option>
-                <option value="opus">Opus</option>
-                <option value="haiku">Haiku</option>
-              </select>
-            </div>
-            {showAdvancedSettings && (
-              <>
-                <input
-                  value={helperBaseUrl}
-                  onChange={(e) => setHelperBaseUrlState(e.target.value)}
-                  placeholder="Helper URL（預設 http://127.0.0.1:4317）"
-                  className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-                />
-                <input
-                  value={helperCwd}
-                  onChange={(e) => setHelperCwdState(e.target.value)}
-                  placeholder="專案路徑 cwd（選填）"
-                  className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-                />
-              </>
-            )}
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground">狀態：{healthText}</span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 text-[11px]"
-                disabled={checkingHealth}
-                onClick={runHealthCheck}
-              >
-                {checkingHealth ? "檢查中..." : "檢查 helper"}
-              </Button>
-            </div>
-          </div>
-
-          {helperUnavailable && (
-            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-              helper 目前不可用。先啟動本機 helper，再按「檢查 helper」確認連線。
-            </div>
-          )}
-
-          {capability && (
-            <div className="space-y-2 rounded-lg border border-border/40 bg-background/70 p-3">
-              {!capability.mcpOk && (
-                <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-                  ZenOS 連線失敗：AI 仍可對話，但無法讀寫資料。
-                </div>
-              )}
-              {capability.missingSkills && capability.missingSkills.length > 0 && (
-                <div className="rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-200">
-                  部分 skill 未載入：{capability.missingSkills.join(", ")}
-                </div>
-              )}
-              <div className="text-[11px] text-muted-foreground">
-                已載入 skill：{capability.skillsLoaded.length > 0 ? capability.skillsLoaded.join(", ") : "未偵測到"}
-              </div>
-            </div>
-          )}
-
-          {contextPack && (
-            <details className="rounded-lg border border-border/40 bg-background/70 p-3">
-              <summary className="cursor-pointer text-[11px] font-medium text-foreground">已載入上下文清單</summary>
-              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                {JSON.stringify(contextPack, null, 2)}
-              </pre>
-            </details>
-          )}
-
-          <div className="rounded-lg border border-border/40 bg-background/70 p-2.5">
-            <div className="mb-2 text-[11px] text-muted-foreground">會話 ID：{conversationId}</div>
-            <div ref={chatViewportRef} className="max-h-[280px] space-y-2 overflow-y-auto rounded border border-border/30 bg-card/50 p-2 text-xs">
-              {logLines.length === 0 ? (
-                <p className="text-muted-foreground">尚無對話。輸入後會在這裡串流顯示。</p>
-              ) : (
-                logLines.map((line, index) => {
-                  const isUser = line.startsWith("你：");
-                  const isAssistant = line.startsWith("Claude：");
-                  const content = line.replace(/^(你|Claude|系統)：\s*/, "");
-                  return (
-                    <div key={`${index}-${line.slice(0, 20)}`} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                      <div
-                        className={`max-w-[86%] whitespace-pre-wrap rounded-lg px-3 py-2 ${
-                          isUser
-                            ? "bg-primary/20 text-primary-foreground"
-                            : isAssistant
-                              ? "bg-emerald-500/10 text-foreground"
-                              : "bg-muted/30 text-muted-foreground"
-                        }`}
-                      >
-                        {content}
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-              {running && streamingOutput && (
-                <div className="flex justify-start">
-                  <div className="max-w-[86%] whitespace-pre-wrap rounded-lg bg-emerald-500/10 px-3 py-2 text-foreground">
-                    {streamingOutput}
-                    <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded bg-foreground/60 align-middle" />
+              {helperUnavailable && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+                  <span>helper 目前不可用。先啟動本機 helper，再回來繼續聊天。</span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(helperSecureStartCommand);
+                        setCopiedSecureStart(true);
+                        setTimeout(() => setCopiedSecureStart(false), 1200);
+                      }}
+                    >
+                      {copiedSecureStart ? "已複製啟動指令" : "啟動 helper"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-[11px]"
+                      onClick={() => {
+                        setShowSetupGuide(true);
+                        setShowDiagnostics(true);
+                      }}
+                    >
+                      看設定
+                    </Button>
                   </div>
                 </div>
               )}
-            </div>
-          </div>
 
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={
-              fieldContext
-                ? `可補充你想調整的方向；直接送出也可以，系統已帶入 ${fieldContext.fieldLabel} 背景`
-                : "輸入你想跟 AI 討論的策略問題"
-            }
-            className="min-h-[92px] w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-          />
-
-          {missingApplyKeys.length > 0 && (
-            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              結構化結果缺少鍵：{missingApplyKeys.join(", ")}
-            </div>
-          )}
-
-          {chatStatus === "error" && (
-            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-              對話中斷或寫回失敗。可先修復 helper / 連線後，再重試上一輪。
-            </div>
-          )}
-
-          {applyPayload && chatStatus === "apply-ready" && (
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-              <div className="mb-2 text-xs font-medium text-foreground">可套用變更：{applyPayload.targetField}</div>
-              <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                {typeof applyPayload.value === "string" ? applyPayload.value : JSON.stringify(applyPayload.value, null, 2)}
-              </pre>
-            </div>
-          )}
-
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            {fieldContext?.onApply ? (
-              <div className="text-xs text-muted-foreground">AI 輸出結構化結果後，可直接套用到欄位。</div>
-            ) : onUseOutput ? (
-              <div className="text-xs text-muted-foreground">回覆完成後會自動帶回呼叫端。</div>
-            ) : (
-              <div className="text-xs text-muted-foreground">提示：進入活動後可把回覆直接帶回策略欄位。</div>
-            )}
-            <div className="flex items-center gap-2">
-              {chatStatus === "error" && canRetry && (
-                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void sendMessage(lastSubmittedPrompt)}>
-                  重試上一輪
-                </Button>
+              {capability && (
+                <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+                  {!capability.mcpOk && (
+                    <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+                      ZenOS 連線失敗，這輪只能對話不能寫回
+                    </div>
+                  )}
+                  {capability.missingSkills && capability.missingSkills.length > 0 && (
+                    <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+                      缺 skill：{capability.missingSkills.join(", ")}
+                    </div>
+                  )}
+                  <div className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1 text-muted-foreground">
+                    已載入 skill：{capability.skillsLoaded.length > 0 ? capability.skillsLoaded.join(", ") : "未偵測到"}
+                  </div>
+                </div>
               )}
-              {applyPayload && chatStatus === "apply-ready" && (
-                <Button size="sm" className="h-8 text-xs" onClick={handleApply}>
-                  套用到欄位
-                </Button>
+
+              <details className="mt-3 rounded-xl border border-border/40 bg-card/60 p-3">
+                <summary className="cursor-pointer text-xs font-medium text-foreground">這輪會送出的 prompt / context</summary>
+                <div className="mt-3 grid gap-3">
+                  {contextPack && (
+                    <div className="rounded-lg border border-border/30 bg-background/70 p-3">
+                      <div className="mb-2 text-[11px] font-medium text-foreground">已載入上下文清單</div>
+                      <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                        {JSON.stringify(contextPack, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  <div className="rounded-lg border border-border/30 bg-background/70 p-3">
+                    <div className="mb-2 text-[11px] font-medium text-foreground">Prompt 預覽</div>
+                    <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{promptPreview}</pre>
+                  </div>
+                </div>
+              </details>
+
+              {showDiagnostics && (
+                <div className="mt-3 space-y-3 rounded-xl border border-border/40 bg-card/60 p-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-medium text-foreground">診斷與設定</div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[10px]"
+                      onClick={() => setShowSetupGuide((v) => !v)}
+                    >
+                      {showSetupGuide ? "收起首次設定" : "首次設定"}
+                    </Button>
+                  </div>
+
+                  {showSetupGuide && (
+                    <div className="space-y-2 text-[11px]">
+                      <div className="rounded border border-border/30 bg-background/70 p-2">
+                        <div className="mb-1 text-muted-foreground">1. 一鍵安裝 helper</div>
+                        <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperInstallCommand}</code>
+                        <div className="mt-2 flex justify-end">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2 text-[10px]"
+                            onClick={async () => {
+                              await navigator.clipboard.writeText(helperInstallCommand);
+                              setCopiedInstall(true);
+                              setTimeout(() => setCopiedInstall(false), 1200);
+                            }}
+                          >
+                            {copiedInstall ? "已複製" : "複製安裝指令"}
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="rounded border border-border/30 bg-background/70 p-2">
+                        <div className="mb-1 text-muted-foreground">2. 設定 token 並啟動 helper</div>
+                        <input
+                          value={helperToken}
+                          onChange={(e) => setHelperTokenState(e.target.value)}
+                          placeholder="貼一組 token（例如公司提供給你的）"
+                          className="mb-2 h-8 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                        />
+                        <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperSecureStartCommand}</code>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          token 是這頁和你本機 helper 的配對碼；如果公司有預設值，直接貼上即可。
+                        </p>
+                        <div className="mt-2 flex justify-end gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2 text-[10px]"
+                            onClick={() => setHelperTokenState(generateHelperToken())}
+                          >
+                            產生新 token
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 px-2 text-[10px]"
+                            onClick={async () => {
+                              await navigator.clipboard.writeText(helperSecureStartCommand);
+                              setCopiedSecureStart(true);
+                              setTimeout(() => setCopiedSecureStart(false), 1200);
+                            }}
+                          >
+                            {copiedSecureStart ? "已複製" : "複製啟動指令"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+                    <label className="text-[11px] text-muted-foreground">模型</label>
+                    <select
+                      value={helperModel}
+                      onChange={(e) => setHelperModelState(e.target.value)}
+                      className="h-8 rounded-md border border-border/50 bg-background px-2 text-[11px] text-foreground outline-none focus:border-primary/50"
+                    >
+                      <option value="sonnet">Sonnet（預設）</option>
+                      <option value="opus">Opus</option>
+                      <option value="haiku">Haiku</option>
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded border border-border/30 bg-background/70 px-2 py-1.5">
+                    <span className="text-[11px] text-muted-foreground">進階設定（URL / CWD）</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[10px]"
+                      onClick={() => setShowAdvancedSettings((v) => !v)}
+                    >
+                      {showAdvancedSettings ? "收起" : "展開"}
+                    </Button>
+                  </div>
+
+                  {showAdvancedSettings && (
+                    <div className="grid gap-2">
+                      <input
+                        value={helperBaseUrl}
+                        onChange={(e) => setHelperBaseUrlState(e.target.value)}
+                        placeholder="Helper URL（預設 http://127.0.0.1:4317）"
+                        className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                      />
+                      <input
+                        value={helperCwd}
+                        onChange={(e) => setHelperCwdState(e.target.value)}
+                        placeholder="專案路徑 cwd（選填）"
+                        className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                      />
+                    </div>
+                  )}
+
+                </div>
               )}
-              {helperUnavailable && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-xs"
-                  onClick={async () => {
-                    await navigator.clipboard.writeText(helperSecureStartCommand);
-                    setCopiedSecureStart(true);
-                    setTimeout(() => setCopiedSecureStart(false), 1200);
-                  }}
-                >
-                  {copiedSecureStart ? "已複製啟動指令" : "啟動 helper"}
-                </Button>
-              )}
-              {running && (
-                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleCancel}>
-                  停止
-                </Button>
-              )}
-              <Button
-                size="sm"
-                className="h-8 text-xs"
-                disabled={running || chatStatus === "applying" || (!fieldContext && !prompt.trim())}
-                onClick={() => void sendMessage()}
+            </div>
+
+            <div className="flex-1 overflow-hidden px-4 py-4">
+              <div
+                ref={chatViewportRef}
+                className="flex h-full min-h-[420px] flex-col gap-3 overflow-y-auto rounded-2xl border border-border/40 bg-card/60 p-4"
               >
-                {running ? "執行中..." : fieldContext ? "開始討論" : "送出"}
-              </Button>
+                {logLines.length === 0 ? (
+                  <div className="m-auto max-w-md text-center">
+                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-border/40 bg-background/70">
+                      <Bot className="h-5 w-5 text-foreground" />
+                    </div>
+                    <div className="text-sm font-medium text-foreground">直接開始聊，不用先填設定</div>
+                    <p className="mt-2 text-sm text-muted-foreground">
+                      {fieldContext
+                        ? `已自動帶入 ${fieldContext.fieldLabel} 背景。你只要描述想改成什麼樣子。`
+                        : "把你的需求直接打進來，這裡會像 Claude Code 一樣串流回覆。"}
+                    </p>
+                  </div>
+                ) : (
+                  logLines.map((line, index) => {
+                    const isUser = line.startsWith("你：");
+                    const isAssistant = line.startsWith("Claude：");
+                    const content = line.replace(/^(你|Claude|系統)：\s*/, "");
+                    return (
+                      <div key={`${index}-${line.slice(0, 20)}`} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
+                        <div
+                          className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm ${
+                            isUser
+                              ? "bg-primary/20 text-primary-foreground"
+                              : isAssistant
+                                ? "bg-emerald-500/10 text-foreground"
+                                : "bg-muted/30 text-muted-foreground"
+                          }`}
+                        >
+                          {content}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+                {running && streamingOutput && (
+                  <div className="flex justify-start">
+                    <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl bg-emerald-500/10 px-4 py-3 text-sm text-foreground">
+                      {streamingOutput}
+                      <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded bg-foreground/60 align-middle" />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-border/30 px-4 py-4">
+              {missingApplyKeys.length > 0 && (
+                <div className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  結構化結果缺少鍵：{missingApplyKeys.join(", ")}
+                </div>
+              )}
+
+              {chatStatus === "error" && (
+                <div className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                  對話中斷或寫回失敗。可先修復 helper / 連線後，再重試上一輪。
+                </div>
+              )}
+
+              {applyPayload && chatStatus === "apply-ready" && (
+                <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
+                  <div className="mb-2 text-xs font-medium text-foreground">可套用變更：{applyPayload.targetField}</div>
+                  {changePreview.length > 0 && (
+                    <div className="mb-3 grid gap-2">
+                      {changePreview.map((item) => (
+                        <div key={item.label} className="rounded-md border border-border/30 bg-background/70 p-2">
+                          <div className="mb-2 text-[11px] font-medium text-foreground">{item.label}</div>
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <div>
+                              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">目前</div>
+                              <div className="whitespace-pre-wrap rounded border border-border/20 bg-card/50 px-2 py-1.5 text-[11px] text-muted-foreground">
+                                {item.before}
+                              </div>
+                            </div>
+                            <div>
+                              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">套用後</div>
+                              <div className="whitespace-pre-wrap rounded border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-[11px] text-foreground">
+                                {item.after}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                    {typeof applyPayload.value === "string" ? applyPayload.value : JSON.stringify(applyPayload.value, null, 2)}
+                  </pre>
+                </div>
+              )}
+
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                {fieldContext?.onApply ? (
+                  <div className="text-xs text-muted-foreground">AI 輸出結構化結果後，可直接套用到欄位。</div>
+                ) : onUseOutput ? (
+                  <div className="text-xs text-muted-foreground">回覆完成後會自動帶回呼叫端。</div>
+                ) : (
+                  <div className="text-xs text-muted-foreground">提示：進入活動後可把回覆直接帶回策略欄位。</div>
+                )}
+                <div className="text-xs text-muted-foreground">
+                  {fieldContext
+                    ? `現在在聊：${fieldContext.fieldLabel}`
+                    : "自由對話模式"}
+                </div>
+              </div>
+
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={
+                  fieldContext
+                    ? `直接說你想怎麼改 ${fieldContext.fieldLabel}；背景已自動帶入`
+                    : "直接輸入你想跟 AI 討論的內容"
+                }
+                className="min-h-[120px] w-full rounded-2xl border border-border/50 bg-background px-4 py-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+              />
+
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs text-muted-foreground">
+                  {running ? "Claude 正在串流回覆" : "Enter 換行，按按鈕送出"}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {canSummarize && fieldContext && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() =>
+                        void sendMessage(
+                          `請根據目前對話整理成可直接套用到 ${fieldContext.fieldLabel} 的結構化結果。請先簡短總結，再輸出符合 target_field/value 契約的 JSON。`
+                        )
+                      }
+                    >
+                      整理結果
+                    </Button>
+                  )}
+                  {chatStatus === "error" && canRetry && (
+                    <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void sendMessage(lastSubmittedPrompt)}>
+                      重試上一輪
+                    </Button>
+                  )}
+                  {applyPayload && chatStatus === "apply-ready" && (
+                    <Button size="sm" className="h-8 text-xs" onClick={handleApply}>
+                      套用到欄位
+                    </Button>
+                  )}
+                  {running && (
+                    <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleCancel}>
+                      停止
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    className="h-8 text-xs"
+                    disabled={running || chatStatus === "applying" || (!fieldContext && !prompt.trim())}
+                    onClick={() => void sendMessage()}
+                  >
+                    {running ? "執行中..." : fieldContext ? "開始討論" : "送出"}
+                  </Button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -2468,11 +2797,13 @@ export function CampaignDetail({
           />
           {campaign.strategy && (
             <StrategyAndPlan
+              campaign={campaign}
               strategy={campaign.strategy}
               contentPlan={campaign.contentPlan}
               posts={campaign.posts}
               onSavePlan={onSaveContentPlan}
               savingPlan={savingPlan}
+              onError={onError}
             />
           )}
           {unlockedTopicStarter ? (
@@ -2489,9 +2820,11 @@ export function CampaignDetail({
               {review.map((post) => (
                 <PostCard
                   key={post.id}
+                  campaignId={campaign.id}
                   post={post}
                   onReview={onReview}
                   isReviewing={reviewingPostId === post.id}
+                  onError={onError}
                 />
               ))}
             </section>
@@ -2501,7 +2834,14 @@ export function CampaignDetail({
             <section className="space-y-2">
               <h3 className="text-xs font-medium uppercase tracking-wide text-primary">規劃中</h3>
               {planned.map((post) => (
-                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+                <PostCard
+                  key={post.id}
+                  campaignId={campaign.id}
+                  post={post}
+                  onReview={onReview}
+                  isReviewing={reviewingPostId === post.id}
+                  onError={onError}
+                />
               ))}
             </section>
           )}
@@ -2510,7 +2850,14 @@ export function CampaignDetail({
             <section className="space-y-2">
               <h3 className="text-xs font-medium uppercase tracking-wide text-primary">已確認</h3>
               {confirmed.map((post) => (
-                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+                <PostCard
+                  key={post.id}
+                  campaignId={campaign.id}
+                  post={post}
+                  onReview={onReview}
+                  isReviewing={reviewingPostId === post.id}
+                  onError={onError}
+                />
               ))}
             </section>
           )}
@@ -2519,7 +2866,14 @@ export function CampaignDetail({
             <section className="space-y-2">
               <h3 className="text-xs font-medium uppercase tracking-wide text-chart-2">已排程</h3>
               {scheduled.map((post) => (
-                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+                <PostCard
+                  key={post.id}
+                  campaignId={campaign.id}
+                  post={post}
+                  onReview={onReview}
+                  isReviewing={reviewingPostId === post.id}
+                  onError={onError}
+                />
               ))}
             </section>
           )}
@@ -2528,7 +2882,14 @@ export function CampaignDetail({
             <section className="space-y-2">
               <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">已發佈</h3>
               {published.map((post) => (
-                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+                <PostCard
+                  key={post.id}
+                  campaignId={campaign.id}
+                  post={post}
+                  onReview={onReview}
+                  isReviewing={reviewingPostId === post.id}
+                  onError={onError}
+                />
               ))}
             </section>
           )}

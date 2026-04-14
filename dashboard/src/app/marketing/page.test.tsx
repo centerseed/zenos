@@ -325,6 +325,7 @@ describe("StrategyAndPlan", () => {
     const onSavePlan = vi.fn(async () => {});
     render(
       <StrategyAndPlan
+        campaign={makeCampaign()}
         strategy={{
           documentId: "doc-1",
           audience: ["跑步新手"],
@@ -348,6 +349,7 @@ describe("StrategyAndPlan", () => {
         posts={[]}
         onSavePlan={onSavePlan}
         savingPlan={false}
+        onError={vi.fn()}
       />
     );
 
@@ -371,6 +373,7 @@ describe("StrategyAndPlan", () => {
     const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
     render(
       <StrategyAndPlan
+        campaign={makeCampaign()}
         strategy={{
           documentId: "doc-1",
           audience: ["跑步新手"],
@@ -394,6 +397,7 @@ describe("StrategyAndPlan", () => {
         posts={[{ id: "p1", platform: "Threads", status: "draft_generated", title: "主題 A", preview: "copy" }]}
         onSavePlan={vi.fn(async () => {})}
         savingPlan={false}
+        onError={vi.fn()}
       />
     );
 
@@ -401,5 +405,39 @@ describe("StrategyAndPlan", () => {
     fireEvent.click(screen.getByText("刪除"));
 
     expect(alertSpy).toHaveBeenCalledWith("這個主題已進入內容生成流程，不能直接刪除；請先處理進行中的貼文。");
+  });
+
+  it("offers field-level discussion for schedule planning", () => {
+    render(
+      <StrategyAndPlan
+        campaign={makeCampaign()}
+        strategy={{
+          documentId: "doc-1",
+          audience: ["跑步新手"],
+          tone: "直接",
+          coreMessage: "先建立習慣",
+          platforms: ["Threads"],
+          frequency: "每週 2 篇",
+          contentMix: { education: 70, product: 30 },
+          campaignGoal: "",
+          ctaStrategy: "",
+          referenceMaterials: [],
+        }}
+        contentPlan={[
+          {
+            weekLabel: "Week 1",
+            isCurrent: true,
+            days: [{ day: "Mon", platform: "Threads", topic: "主題 A", status: "suggested" }],
+            aiNote: "先從暖身切入",
+          },
+        ]}
+        posts={[]}
+        onSavePlan={vi.fn(async () => {})}
+        savingPlan={false}
+        onError={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("討論這段")).toBeInTheDocument();
   });
 });
