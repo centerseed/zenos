@@ -32,6 +32,9 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["src"]
+markers = [
+    "spec(id): marketing/spec compliance acceptance criterion",
+]
 
 [tool.importlinter]
 root_packages = ["zenos"]

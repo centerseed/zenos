@@ -4,10 +4,7 @@ import { AppNav } from "@/components/AppNav";
 import { AuthGuard } from "@/components/AuthGuard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  REDACTION_RULES_VERSION,
-  serializeSanitizedContextValue,
-} from "@/config/ai-redaction-rules";
+import { REDACTION_RULES_VERSION } from "@/config/ai-redaction-rules";
 import {
   Sheet,
   SheetContent,
@@ -50,10 +47,38 @@ import {
   getMarketingPrompts,
   publishMarketingPrompt,
   reviewMarketingPost,
+  updateMarketingProjectContentPlan,
   updateMarketingProjectStrategy,
   updateMarketingPromptDraft,
   updateMarketingStyle,
 } from "@/lib/marketing-api";
+import {
+  buildContextPack,
+  buildDiscussionPrompt,
+  buildProjectSummary,
+  campaignStatusConfig,
+  ChatStatus,
+  composeStyleMarkdown,
+  deriveProjectStage,
+  DiscussionFieldId,
+  DiscussionPhase,
+  FieldDiscussionConfig,
+  formatContentMix,
+  formatCsv,
+  isConfirmedStatus,
+  isPlannedStatus,
+  nextChatStatus,
+  parseContentMix,
+  parseCoworkStreamLine,
+  parseCsv,
+  parseStructuredApplyPayload,
+  postNextStepHint,
+  primaryCtaForProject,
+  requiresReview,
+  statusConfig,
+  stylePreviewPrompt,
+  StructuredApplyPayload,
+} from "@/app/marketing/logic";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -83,44 +108,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type Campaign = MarketingProject;
 type CampaignGroup = MarketingProjectGroup;
-type DiscussionFieldId = "strategy" | "topic" | "style" | "schedule" | "review";
-type DiscussionPhase = "strategy" | "schedule" | "intel" | "generate" | "adapt" | "publish";
-type ChatStatus =
-  | "idle"
-  | "loading"
-  | "streaming"
-  | "awaiting-local-approval"
-  | "apply-ready"
-  | "applying"
-  | "error";
-
-interface ContextPack {
-  field_id: DiscussionFieldId;
-  field_value: string | null;
-  project_summary: string;
-  current_phase: DiscussionPhase;
-  suggested_skill: string;
-  related_context?: string;
-}
-
-interface StructuredApplyPayload {
-  targetField: DiscussionFieldId;
-  value: unknown;
-}
-
-interface FieldDiscussionConfig {
-  fieldId: DiscussionFieldId;
-  fieldLabel: string;
-  currentPhase: DiscussionPhase;
-  suggestedSkill: string;
-  projectSummary: string;
-  fieldValue: unknown;
-  relatedContext?: string;
-  launcherLabel?: string;
-  conflictVersion?: string | null;
-  conflictLabel?: string;
-  onApply?: (payload: StructuredApplyPayload) => void | Promise<void>;
-}
 
 const platformIcon: Record<string, string> = {
   Threads: "T",
@@ -136,239 +123,6 @@ const platformColor: Record<string, string> = {
   FB: "bg-blue-500/10 text-blue-400",
 };
 
-function formatCsv(values: string[] | undefined): string {
-  return (values || []).join(", ");
-}
-
-function parseCsv(value: string): string[] {
-  return value
-    .split(/[,，\n]/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function formatContentMix(contentMix: Record<string, number> | undefined): string {
-  if (!contentMix || Object.keys(contentMix).length === 0) return "";
-  return Object.entries(contentMix)
-    .map(([key, value]) => `${key}:${value}`)
-    .join(", ");
-}
-
-function parseContentMix(value: string): Record<string, number> {
-  const trimmed = value.trim();
-  if (!trimmed) return {};
-  try {
-    const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    const result: Record<string, number> = {};
-    for (const [key, raw] of Object.entries(parsed)) {
-      const num = Number(raw);
-      if (key.trim() && Number.isFinite(num)) result[key.trim()] = num;
-    }
-    if (Object.keys(result).length > 0) return result;
-  } catch {}
-
-  const result: Record<string, number> = {};
-  for (const chunk of trimmed.split(/[,，\n]/)) {
-    const [rawKey, rawValue] = chunk.split(/[:：]/);
-    const key = rawKey?.trim();
-    const num = Number(rawValue?.trim());
-    if (key && Number.isFinite(num)) result[key] = num;
-  }
-  return result;
-}
-
-function truncateText(value: string, maxLength: number): string {
-  if (value.length <= maxLength) return value;
-  return `${value.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
-}
-
-function buildProjectSummary(campaign: Campaign): string {
-  const parts = [
-    campaign.name,
-    campaign.projectType === "long_term" ? "長期經營" : "短期活動",
-    campaign.description,
-  ].filter(Boolean);
-  if (campaign.strategy?.coreMessage) {
-    parts.push(`核心訊息：${campaign.strategy.coreMessage}`);
-  }
-  if (campaign.strategy?.platforms?.length) {
-    parts.push(`平台：${campaign.strategy.platforms.join(" / ")}`);
-  }
-  return truncateText(parts.join(" / "), 500);
-}
-
-function buildContextPack(input: {
-  fieldId: DiscussionFieldId;
-  currentPhase: DiscussionPhase;
-  suggestedSkill: string;
-  projectSummary: string;
-  fieldValue: unknown;
-  relatedContext?: string;
-}): ContextPack {
-  const sanitizedFieldValue = serializeSanitizedContextValue(input.fieldValue);
-  const sanitizedProjectSummary = truncateText(input.projectSummary.trim(), 500);
-  const sanitizedRelatedContext = input.relatedContext
-    ? truncateText(String(serializeSanitizedContextValue(input.relatedContext) || ""), 1000)
-    : undefined;
-  let fieldValue = sanitizedFieldValue ? truncateText(sanitizedFieldValue, 1200) : null;
-  let relatedContext = sanitizedRelatedContext;
-  let totalLength =
-    (fieldValue?.length || 0) +
-    sanitizedProjectSummary.length +
-    (relatedContext?.length || 0);
-  if (totalLength > 2000 && relatedContext) {
-    relatedContext = truncateText(relatedContext, Math.max(0, relatedContext.length - (totalLength - 2000)));
-    totalLength =
-      (fieldValue?.length || 0) +
-      sanitizedProjectSummary.length +
-      (relatedContext?.length || 0);
-  }
-  if (totalLength > 2000 && fieldValue) {
-    fieldValue = truncateText(fieldValue, Math.max(0, fieldValue.length - (totalLength - 2000)));
-  }
-  return {
-    field_id: input.fieldId,
-    field_value: fieldValue,
-    project_summary: sanitizedProjectSummary,
-    current_phase: input.currentPhase,
-    suggested_skill: input.suggestedSkill,
-    related_context: relatedContext,
-  };
-}
-
-function buildDiscussionPrompt(field: FieldDiscussionConfig, userPrompt: string): string {
-  const contextPack = buildContextPack({
-    fieldId: field.fieldId,
-    currentPhase: field.currentPhase,
-    suggestedSkill: field.suggestedSkill,
-    projectSummary: field.projectSummary,
-    fieldValue: field.fieldValue,
-    relatedContext: field.relatedContext,
-  });
-  const schemaExamples: Record<DiscussionFieldId, string> = {
-    strategy: '{"target_field":"strategy","value":{"audience":["跑步新手"],"tone":"專業但親切","core_message":"先建立習慣再談進階裝備","platforms":["Threads","Blog"]}}',
-    topic: '{"target_field":"topic","value":{"title":"跑步新手 7 天挑戰","brief":"聚焦新手容易卡關的三個理由","platform":"Threads"}}',
-    style: '{"target_field":"style","value":{"title":"Threads 親切教練風","content":"# 語氣\\n- 親切\\n- 直接\\n","platform":"Threads"}}',
-    schedule: '{"target_field":"schedule","value":[{"date":"2026-04-20","platform":"Threads","topic":"跑步新手暖身","reason":"銜接前一篇 FAQ"}]}',
-    review: '{"target_field":"review","value":{"summary":"指出 CTA 過弱","suggestion":"把 CTA 改成具體下載動作"}}',
-  };
-  const baseInstruction = contextPack.field_value
-    ? `以下是目前的${field.fieldLabel}，請先給修改建議，再整理成結構化結果。`
-    : `請幫我設定這個項目的${field.fieldLabel}，先用白話說明你的建議，再整理成結構化結果。`;
-  const userLine = userPrompt.trim() ? `使用者補充：${userPrompt.trim()}` : "使用者補充：若資訊不足，先提出最多 3 個澄清問題，再給暫定方案。";
-  return [
-    "你是 ZenOS 行銷協作助手。",
-    baseInstruction,
-    "回覆格式：先用白話分析，再輸出一段 ```json```。",
-    "JSON 必須符合回寫契約：包含 target_field 與 value。",
-    `請使用這個 target_field：${field.fieldId}`,
-    `最小範例：${schemaExamples[field.fieldId]}`,
-    `建議 skill：${field.suggestedSkill}`,
-    `context_pack=${JSON.stringify(contextPack, null, 2)}`,
-    userLine,
-  ].join("\n");
-}
-
-function validateStructuredValue(targetField: DiscussionFieldId, value: unknown): string[] {
-  if (value == null) return ["value"];
-  if (targetField === "strategy") {
-    const record = value as Record<string, unknown>;
-    return ["audience", "tone", "core_message", "platforms"].filter((key) => !(key in record) && !(key.replace("_", "") in record));
-  }
-  if (targetField === "topic") {
-    const record = value as Record<string, unknown>;
-    return ["title", "brief"].filter((key) => !(key in record));
-  }
-  if (targetField === "style") {
-    const record = value as Record<string, unknown>;
-    return ["content"].filter((key) => !(key in record));
-  }
-  if (targetField === "schedule") {
-    if (!Array.isArray(value) || value.length === 0) return ["date", "platform", "topic", "reason"];
-    return ["date", "platform", "topic", "reason"].filter((key) => !(key in (value[0] as Record<string, unknown>)));
-  }
-  return [];
-}
-
-function parseStructuredApplyPayload(raw: string, expectedFieldId?: DiscussionFieldId): { payload: StructuredApplyPayload | null; missingKeys: string[] } {
-  const candidates: string[] = [];
-  const trimmed = raw.trim();
-  if (trimmed) candidates.push(trimmed);
-  const fenced = raw.match(/```json\s*([\s\S]*?)```/i) || raw.match(/```\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) candidates.push(fenced[1].trim());
-  const firstBrace = raw.indexOf("{");
-  const lastBrace = raw.lastIndexOf("}");
-  if (firstBrace >= 0 && lastBrace > firstBrace) {
-    candidates.push(raw.slice(firstBrace, lastBrace + 1).trim());
-  }
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate) as Record<string, unknown>;
-      let targetField = parsed.target_field as DiscussionFieldId | undefined;
-      let value = parsed.value;
-      if (!targetField && expectedFieldId) {
-        targetField = expectedFieldId;
-        value = parsed;
-      }
-      if (!targetField || !["strategy", "topic", "style", "schedule", "review"].includes(targetField)) continue;
-      const missingKeys = validateStructuredValue(targetField, value);
-      return {
-        payload: missingKeys.length === 0 ? { targetField, value } : null,
-        missingKeys,
-      };
-    } catch {
-      continue;
-    }
-  }
-  return { payload: null, missingKeys: [] };
-}
-
-function statusConfig(status: Post["status"]) {
-  switch (status) {
-    case "topic_planned":
-      return { label: "主題已規劃", class: "border-primary/30 bg-primary/10 text-primary" };
-    case "intel_ready":
-      return { label: "情報已就緒", class: "border-primary/30 bg-primary/10 text-primary" };
-    case "draft_generated":
-      return { label: "主文案待確認", class: "border-amber-400/30 bg-amber-400/10 text-amber-400" };
-    case "draft_confirmed":
-      return { label: "主文案已確認", class: "border-primary/30 bg-primary/10 text-primary" };
-    case "platform_adapted":
-      return { label: "平台版本待確認", class: "border-amber-400/30 bg-amber-400/10 text-amber-400" };
-    case "platform_confirmed":
-      return { label: "平台版本已確認", class: "border-primary/30 bg-primary/10 text-primary" };
-    case "scheduled":
-      return { label: "已排程", class: "border-chart-2/30 bg-chart-2/10 text-chart-2" };
-    case "published":
-      return { label: "已發佈", class: "border-border/40 bg-muted/20 text-muted-foreground" };
-    case "failed":
-      return { label: "流程失敗", class: "border-destructive/30 bg-destructive/10 text-destructive" };
-  }
-}
-
-function requiresReview(status: Post["status"]) {
-  return status === "draft_generated" || status === "platform_adapted";
-}
-
-function isPlannedStatus(status: Post["status"]) {
-  return status === "topic_planned" || status === "intel_ready";
-}
-
-function isConfirmedStatus(status: Post["status"]) {
-  return status === "draft_confirmed" || status === "platform_confirmed";
-}
-
-function campaignStatusConfig(status: Campaign["status"]) {
-  switch (status) {
-    case "active":
-      return { dot: "bg-primary", badge: "border-primary/30 bg-primary/10 text-primary", label: "進行中" };
-    case "blocked":
-      return { dot: "bg-destructive", badge: "border-destructive/30 bg-destructive/10 text-destructive", label: "暫停" };
-    case "completed":
-      return { dot: "bg-muted-foreground", badge: "border-border/40 bg-muted/20 text-muted-foreground", label: "已結束" };
-  }
-}
-
 function MetricPill({ icon: Icon, value }: { icon: typeof Heart; value: number | undefined }) {
   if (!value) return null;
   return (
@@ -379,7 +133,7 @@ function MetricPill({ icon: Icon, value }: { icon: typeof Heart; value: number |
   );
 }
 
-function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; onSelect: (id: string) => void }) {
+export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; onSelect: (id: string) => void }) {
   const totalReview = groups.reduce(
     (n, group) =>
       n + group.projects.reduce((acc, project) => acc + project.posts.filter((p) => requiresReview(p.status)).length, 0),
@@ -479,7 +233,7 @@ function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; onSelect:
   );
 }
 
-function CampaignStarter({
+export function CampaignStarter({
   productOptions,
   onCreateCampaign,
   creatingCampaign,
@@ -597,14 +351,80 @@ function CampaignStarter({
   );
 }
 
-function StrategyAndPlan({ strategy, contentPlan }: { strategy: Strategy; contentPlan?: WeekPlan[] }) {
+export function StrategyAndPlan({
+  strategy,
+  contentPlan,
+  posts = [],
+  onSavePlan,
+  savingPlan = false,
+}: {
+  strategy: Strategy;
+  contentPlan?: WeekPlan[];
+  posts?: Post[];
+  onSavePlan?: (contentPlan: WeekPlan[]) => Promise<void>;
+  savingPlan?: boolean;
+}) {
   const [showStrategy, setShowStrategy] = useState(false);
+  const [editingPlan, setEditingPlan] = useState(false);
+  const [draftPlan, setDraftPlan] = useState<WeekPlan[]>(contentPlan || []);
+
+  useEffect(() => {
+    setDraftPlan(contentPlan || []);
+  }, [contentPlan]);
 
   const planStatusDot = {
     published: "bg-muted-foreground/40",
     confirmed: "bg-primary",
     suggested: "bg-amber-400",
   } as const;
+
+  const planRows = editingPlan ? draftPlan : contentPlan || [];
+
+  const updateDayField = (weekIndex: number, dayIndex: number, field: "day" | "platform" | "topic", value: string) => {
+    setDraftPlan((prev) =>
+      prev.map((week, wi) =>
+        wi !== weekIndex
+          ? week
+          : {
+              ...week,
+              days: week.days.map((day, di) => (di !== dayIndex ? day : { ...day, [field]: value })),
+            }
+      )
+    );
+  };
+
+  const removeDay = (weekIndex: number, dayIndex: number) => {
+    const target = draftPlan[weekIndex]?.days?.[dayIndex];
+    if (!target) return;
+    const linkedPost = posts.find((post) => post.title === target.topic);
+    if (linkedPost && !["topic_planned", "published", "failed"].includes(linkedPost.status)) {
+      window.alert("這個主題已進入內容生成流程，不能直接刪除；請先處理進行中的貼文。");
+      return;
+    }
+    setDraftPlan((prev) =>
+      prev.map((week, wi) =>
+        wi !== weekIndex
+          ? week
+          : {
+              ...week,
+              days: week.days.filter((_, di) => di !== dayIndex),
+            }
+      )
+    );
+  };
+
+  const addDay = (weekIndex: number) => {
+    setDraftPlan((prev) =>
+      prev.map((week, wi) =>
+        wi !== weekIndex
+          ? week
+          : {
+              ...week,
+              days: [...week.days, { day: "Fri", platform: "Threads", topic: "新增主題", status: "suggested" }],
+            }
+      )
+    );
+  };
 
   return (
     <div className="space-y-3">
@@ -672,28 +492,92 @@ function StrategyAndPlan({ strategy, contentPlan }: { strategy: Strategy; conten
 
       {contentPlan && contentPlan.length > 0 && (
         <div className="rounded-xl border border-border/40 bg-card/60">
-          <div className="flex items-center gap-3 border-b border-border/30 px-4 py-3">
-            <Calendar className="h-4 w-4 shrink-0 text-primary" />
-            <span className="text-sm font-medium text-foreground">內容排程</span>
+          <div className="flex items-center justify-between gap-3 border-b border-border/30 px-4 py-3">
+            <div className="flex items-center gap-3">
+              <Calendar className="h-4 w-4 shrink-0 text-primary" />
+              <span className="text-sm font-medium text-foreground">內容排程</span>
+            </div>
+            {onSavePlan && (
+              <div className="flex items-center gap-2">
+                {editingPlan && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 text-[11px]"
+                    onClick={() => {
+                      setDraftPlan(contentPlan || []);
+                      setEditingPlan(false);
+                    }}
+                  >
+                    取消
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-[11px]"
+                  onClick={async () => {
+                    if (!editingPlan) {
+                      setEditingPlan(true);
+                      return;
+                    }
+                    await onSavePlan(draftPlan);
+                    setEditingPlan(false);
+                  }}
+                >
+                  {editingPlan ? (savingPlan ? "儲存中..." : "儲存排程") : "調整排程"}
+                </Button>
+              </div>
+            )}
           </div>
           <div className="divide-y divide-border/20">
-            {contentPlan.map((week) => (
+            {planRows.map((week, weekIndex) => (
               <div key={week.weekLabel} className="px-4 py-3">
                 <div className="mb-2 flex items-center gap-2">
                   <span className={`text-xs font-medium ${week.isCurrent ? "text-foreground" : "text-muted-foreground"}`}>{week.weekLabel}</span>
                 </div>
                 <div className="space-y-1.5">
-                  {week.days.map((day, i) => (
-                    <div key={`${day.day}-${day.platform}-${i}`} className="flex items-center gap-3 text-xs">
-                      <span className="w-8 shrink-0 text-muted-foreground">{day.day}</span>
-                      <span className={`w-7 shrink-0 rounded px-1 py-0.5 text-center text-[0.55rem] font-medium ${platformColor[day.platform] || "bg-muted/20 text-muted-foreground"}`}>
-                        {platformIcon[day.platform] || day.platform}
-                      </span>
-                      <span className="flex-1 text-foreground/85">{day.topic}</span>
-                      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${planStatusDot[day.status]}`} />
-                    </div>
-                  ))}
+                  {week.days.map((day, i) =>
+                    editingPlan ? (
+                      <div key={`${day.day}-${day.platform}-${i}`} className="grid gap-2 rounded-md border border-border/20 bg-background/50 p-2 text-xs sm:grid-cols-[64px_100px_1fr_72px]">
+                        <input
+                          value={day.day}
+                          onChange={(e) => updateDayField(weekIndex, i, "day", e.target.value)}
+                          className="h-8 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                        />
+                        <input
+                          value={day.platform}
+                          onChange={(e) => updateDayField(weekIndex, i, "platform", e.target.value)}
+                          className="h-8 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                        />
+                        <input
+                          value={day.topic}
+                          onChange={(e) => updateDayField(weekIndex, i, "topic", e.target.value)}
+                          className="h-8 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                        />
+                        <Button size="sm" variant="outline" className="h-8 text-[11px]" onClick={() => removeDay(weekIndex, i)}>
+                          刪除
+                        </Button>
+                      </div>
+                    ) : (
+                      <div key={`${day.day}-${day.platform}-${i}`} className="flex items-center gap-3 text-xs">
+                        <span className="w-8 shrink-0 text-muted-foreground">{day.day}</span>
+                        <span className={`w-7 shrink-0 rounded px-1 py-0.5 text-center text-[0.55rem] font-medium ${platformColor[day.platform] || "bg-muted/20 text-muted-foreground"}`}>
+                          {platformIcon[day.platform] || day.platform}
+                        </span>
+                        <span className="flex-1 text-foreground/85">{day.topic}</span>
+                        <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${planStatusDot[day.status]}`} />
+                      </div>
+                    )
+                  )}
                 </div>
+                {editingPlan && (
+                  <div className="mt-2">
+                    <Button size="sm" variant="outline" className="h-7 text-[11px]" onClick={() => addDay(weekIndex)}>
+                      新增一筆
+                    </Button>
+                  </div>
+                )}
                 {week.aiNote && (
                   <div className="mt-2 flex items-start gap-1.5 text-[0.6rem] text-muted-foreground">
                     <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
@@ -811,22 +695,18 @@ function PostCard({
             </div>
           )}
 
-          {isPlanned && (
+          {isPlanned && postNextStepHint(post) && (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Zap className="h-3.5 w-3.5 text-primary" />
-              {post.status === "topic_planned"
-                ? <>下一步先執行 <code>/marketing-intel</code> 補齊情報，再進入文案生成。</>
-                : <>下一步到 Claude cowork 執行 <code>/marketing-generate</code> 產生正式文案。</>}
+              {postNextStepHint(post)}
             </div>
           )}
 
-          {isConfirmed && (
+          {isConfirmed && postNextStepHint(post) && (
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <Zap className="h-3.5 w-3.5 text-primary" />
-                {isMasterConfirmed
-                  ? "主文案已確認，下一步直接複製平台適配指令。"
-                  : "平台版本已確認，下一步直接複製發佈指令。"}
+                {postNextStepHint(post)}
               </div>
               <div className="flex flex-wrap gap-2">
                 {isMasterConfirmed && (
@@ -908,7 +788,7 @@ function CommandRow({
   );
 }
 
-function FlowGuideSheet({ campaignId }: { campaignId: string | null }) {
+export function FlowGuideSheet({ campaignId }: { campaignId: string | null }) {
   const cid = campaignId || "<project_id>";
   return (
     <Sheet>
@@ -977,7 +857,7 @@ function FlowGuideSheet({ campaignId }: { campaignId: string | null }) {
   );
 }
 
-function PromptManagerSheet({
+export function PromptManagerSheet({
   user,
   onError,
 }: {
@@ -1173,48 +1053,7 @@ function PromptManagerSheet({
   );
 }
 
-function parseCoworkStreamLine(line: string): { delta: string; debug: string } {
-  const raw = line.trim();
-  if (!raw) return { delta: "", debug: "" };
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const type = typeof parsed.type === "string" ? parsed.type : "";
-    const candidates: unknown[] = [
-      (parsed.delta as Record<string, unknown> | undefined)?.text,
-      (parsed.content_block_delta as Record<string, unknown> | undefined)?.text,
-      parsed.text,
-      (parsed.content_block as Record<string, unknown> | undefined)?.text,
-      (parsed.message as Record<string, unknown> | undefined)?.text,
-    ];
-    const messageObj = parsed.message as Record<string, unknown> | undefined;
-    const messageContent = Array.isArray(messageObj?.content) ? messageObj?.content : null;
-    if (messageContent && messageContent.length > 0) {
-      const first = messageContent[0] as Record<string, unknown>;
-      candidates.push(first?.text);
-      const nested = first?.content as Record<string, unknown> | undefined;
-      candidates.push(nested?.text);
-    }
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.trim().length > 0) {
-        return { delta: candidate, debug: "" };
-      }
-    }
-    if (type) {
-      if (type.includes("delta")) return { delta: "", debug: "" };
-      const blockType =
-        (parsed.content_block as Record<string, unknown> | undefined)?.type ||
-        (parsed.delta as Record<string, unknown> | undefined)?.type ||
-        "";
-      const suffix = typeof blockType === "string" && blockType ? ` (${blockType})` : "";
-      return { delta: "", debug: `事件：${type}${suffix}` };
-    }
-    return { delta: "", debug: "" };
-  } catch {
-    return { delta: "", debug: raw };
-  }
-}
-
-function CoworkChatSheet({
+export function CoworkChatSheet({
   campaignId,
   onUseOutput,
   onError,
@@ -1251,6 +1090,8 @@ function CoworkChatSheet({
   const [capability, setCapability] = useState<CoworkCapabilityCheck | null>(null);
   const [applyPayload, setApplyPayload] = useState<StructuredApplyPayload | null>(null);
   const [missingApplyKeys, setMissingApplyKeys] = useState<string[]>([]);
+  const [lastSubmittedPrompt, setLastSubmittedPrompt] = useState("");
+  const [canRetry, setCanRetry] = useState(false);
   const chatViewportRef = useRef<HTMLDivElement | null>(null);
   const [hasStartedConversation, setHasStartedConversation] = useState(false);
   const [copiedInstall, setCopiedInstall] = useState(false);
@@ -1271,17 +1112,14 @@ function CoworkChatSheet({
   }, [logLines, streamingOutput]);
 
   useEffect(() => {
-    if (!open) return;
-    baselineConflictVersionRef.current = fieldContext?.conflictVersion || null;
-  }, [open, fieldContext?.conflictVersion]);
-
-  useEffect(() => {
     setLogLines([]);
     setStreamingOutput("");
     setApplyPayload(null);
     setMissingApplyKeys([]);
     setChatStatus("idle");
     setRequestId(null);
+    setCanRetry(false);
+    baselineConflictVersionRef.current = fieldContext?.conflictVersion || null;
   }, [effectiveCampaignId, conversationScope]);
 
   const conversationId = `marketing-${effectiveCampaignId}-${conversationScope}`;
@@ -1336,14 +1174,17 @@ function CoworkChatSheet({
     setCheckingHealth(false);
   };
 
-  const sendMessage = async () => {
-    const userPrompt = prompt.trim();
+  const sendMessage = async (promptOverride?: string) => {
+    const promptInput = typeof promptOverride === "string" ? promptOverride : prompt;
+    const userPrompt = promptInput.trim();
     if (running || (!userPrompt && !fieldContext)) return;
     const effectivePrompt = fieldContext ? buildDiscussionPrompt(fieldContext, userPrompt) : userPrompt;
     persistHelperSettings();
     setPrompt("");
+    setLastSubmittedPrompt(userPrompt);
+    setCanRetry(true);
     setRunning(true);
-    setChatStatus("loading");
+    setChatStatus((prev) => nextChatStatus(prev, "send"));
     setRequestId(null);
     setStreamingOutput("");
     setApplyPayload(null);
@@ -1377,13 +1218,13 @@ function CoworkChatSheet({
             return;
           }
           if (event.type === "permission_request") {
-            setChatStatus("awaiting-local-approval");
+            setChatStatus((prev) => nextChatStatus(prev, "permission_request"));
             setLogLines((prev) => [...prev, `系統：等待本機 terminal 確認 ${event.request.toolName}（${event.request.timeoutSeconds} 秒）`]);
             return;
           }
           if (event.type === "permission_result") {
             setLogLines((prev) => [...prev, `系統：${event.result.toolName} ${event.result.approved ? "已核准" : `已拒絕（${event.result.reason || "unknown"}）`}`]);
-            setChatStatus("streaming");
+            setChatStatus((prev) => nextChatStatus(prev, "permission_result"));
             return;
           }
           if (event.type === "stderr") {
@@ -1395,7 +1236,7 @@ function CoworkChatSheet({
             return;
           }
           if (event.type === "message") {
-            setChatStatus("streaming");
+            setChatStatus((prev) => nextChatStatus(prev, "message"));
             const parsed = parseCoworkStreamLine(event.line);
             if (parsed.delta) {
               collected += parsed.delta;
@@ -1416,9 +1257,9 @@ function CoworkChatSheet({
               const { payload, missingKeys } = parseStructuredApplyPayload(collected.trim(), fieldContext?.fieldId);
               if (payload && fieldContext?.onApply) {
                 setApplyPayload(payload);
-                setChatStatus("apply-ready");
+                setChatStatus((prev) => nextChatStatus(prev, "apply_available"));
               } else {
-                setChatStatus("idle");
+                setChatStatus((prev) => nextChatStatus(prev, "reset"));
               }
               if (missingKeys.length > 0) {
                 setMissingApplyKeys(missingKeys);
@@ -1428,11 +1269,11 @@ function CoworkChatSheet({
                 onUseOutput?.(collected.trim());
               }
             } else if (chatStatus !== "error") {
-              setChatStatus("idle");
+              setChatStatus((prev) => nextChatStatus(prev, "reset"));
             }
           }
           if (event.type === "error") {
-            setChatStatus("error");
+            setChatStatus((prev) => nextChatStatus(prev, "error"));
             setLogLines((prev) => [...prev, `系統：${event.message}`]);
           }
         },
@@ -1463,7 +1304,7 @@ function CoworkChatSheet({
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "呼叫 Claude Code CLI 失敗";
-       setChatStatus("error");
+       setChatStatus((prev) => nextChatStatus(prev, "error"));
       setLogLines((prev) => [...prev, `系統：${msg}`]);
       onError(msg);
     } finally {
@@ -1482,11 +1323,11 @@ function CoworkChatSheet({
         requestId,
       });
       setLogLines((prev) => [...prev, "系統：已送出取消請求"]);
-      setChatStatus("idle");
+      setChatStatus((prev) => nextChatStatus(prev, "cancel"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "取消失敗";
       setLogLines((prev) => [...prev, `系統：${msg}`]);
-      setChatStatus("error");
+      setChatStatus((prev) => nextChatStatus(prev, "error"));
       onError(msg);
     }
   };
@@ -1502,25 +1343,27 @@ function CoworkChatSheet({
         );
         if (!shouldOverwrite) {
           setLogLines((prev) => [...prev, `系統：已放棄套用，因為 ${fieldContext.fieldLabel} 發生衝突。`]);
-          setChatStatus("idle");
+          setChatStatus((prev) => nextChatStatus(prev, "cancel"));
           setApplyPayload(null);
           return;
         }
       }
-      setChatStatus("applying");
+      setChatStatus((prev) => nextChatStatus(prev, "apply_start"));
       await fieldContext.onApply(applyPayload);
       setLogLines((prev) => [...prev, `系統：已套用到 ${applyPayload.targetField}`]);
       setApplyPayload(null);
       setMissingApplyKeys([]);
       baselineConflictVersionRef.current = fieldContext.conflictVersion || baselineConflictVersionRef.current;
-      setChatStatus("idle");
+      setChatStatus((prev) => nextChatStatus(prev, "apply_done"));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "套用失敗";
       setLogLines((prev) => [...prev, `系統：${msg}`]);
-      setChatStatus("error");
+      setChatStatus((prev) => nextChatStatus(prev, "error"));
       onError(msg);
     }
   };
+
+  const helperUnavailable = healthText.startsWith("不可用");
 
   return (
     <Sheet
@@ -1530,11 +1373,12 @@ function CoworkChatSheet({
         if (nextOpen) {
           baselineConflictVersionRef.current = fieldContext?.conflictVersion || null;
         } else {
-          setChatStatus("idle");
+          setChatStatus((prev) => nextChatStatus(prev, "reset"));
           setApplyPayload(null);
           setMissingApplyKeys([]);
           setPrompt("");
           setStreamingOutput("");
+          setCanRetry(false);
         }
       }}
     >
@@ -1681,6 +1525,12 @@ function CoworkChatSheet({
             </div>
           </div>
 
+          {helperUnavailable && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+              helper 目前不可用。先啟動本機 helper，再按「檢查 helper」確認連線。
+            </div>
+          )}
+
           {capability && (
             <div className="space-y-2 rounded-lg border border-border/40 bg-background/70 p-3">
               {!capability.mcpOk && (
@@ -1763,6 +1613,12 @@ function CoworkChatSheet({
             </div>
           )}
 
+          {chatStatus === "error" && (
+            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+              對話中斷或寫回失敗。可先修復 helper / 連線後，再重試上一輪。
+            </div>
+          )}
+
           {applyPayload && chatStatus === "apply-ready" && (
             <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
               <div className="mb-2 text-xs font-medium text-foreground">可套用變更：{applyPayload.targetField}</div>
@@ -1781,9 +1637,28 @@ function CoworkChatSheet({
               <div className="text-xs text-muted-foreground">提示：進入活動後可把回覆直接帶回策略欄位。</div>
             )}
             <div className="flex items-center gap-2">
+              {chatStatus === "error" && canRetry && (
+                <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void sendMessage(lastSubmittedPrompt)}>
+                  重試上一輪
+                </Button>
+              )}
               {applyPayload && chatStatus === "apply-ready" && (
                 <Button size="sm" className="h-8 text-xs" onClick={handleApply}>
                   套用到欄位
+                </Button>
+              )}
+              {helperUnavailable && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 text-xs"
+                  onClick={async () => {
+                    await navigator.clipboard.writeText(helperSecureStartCommand);
+                    setCopiedSecureStart(true);
+                    setTimeout(() => setCopiedSecureStart(false), 1200);
+                  }}
+                >
+                  {copiedSecureStart ? "已複製啟動指令" : "啟動 helper"}
                 </Button>
               )}
               {running && (
@@ -1795,7 +1670,7 @@ function CoworkChatSheet({
                 size="sm"
                 className="h-8 text-xs"
                 disabled={running || chatStatus === "applying" || (!fieldContext && !prompt.trim())}
-                onClick={sendMessage}
+                onClick={() => void sendMessage()}
               >
                 {running ? "執行中..." : fieldContext ? "開始討論" : "送出"}
               </Button>
@@ -1807,7 +1682,7 @@ function CoworkChatSheet({
   );
 }
 
-function StrategyPlanner({
+export function StrategyPlanner({
   campaign,
   strategy,
   onSave,
@@ -2045,7 +1920,7 @@ function StrategyPlanner({
   );
 }
 
-function StyleManager({
+export function StyleManager({
   campaign,
   styles,
   onSaveStyle,
@@ -2069,8 +1944,40 @@ function StyleManager({
   const [platform, setPlatform] = useState("threads");
   const [content, setContent] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [previewTopic, setPreviewTopic] = useState(campaign.contentPlan?.[0]?.days?.[0]?.topic || campaign.posts[0]?.title || "範例主題");
+  const [previewOutput, setPreviewOutput] = useState("");
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewing, setPreviewing] = useState(false);
 
   const allStyles = [...styles.product, ...styles.platform, ...styles.project];
+  const previewStyles = useMemo(() => {
+    const nextStyles: MarketingStyleBuckets = {
+      product: [...styles.product],
+      platform: [...styles.platform],
+      project: [...styles.project],
+    };
+    const trimmedTitle = title.trim();
+    const trimmedContent = content.trim();
+    if (trimmedTitle.length < 2 || trimmedContent.length < 10) {
+      return nextStyles;
+    }
+    const draftStyle: MarketingStyle = {
+      id: editingId || "__draft__",
+      title: trimmedTitle,
+      level,
+      platform: level === "platform" ? platform.trim() || "threads" : null,
+      projectId: level === "project" ? campaign.id : null,
+      content: trimmedContent,
+    };
+    const bucket = nextStyles[level];
+    const existingIndex = bucket.findIndex((style) => style.id === draftStyle.id);
+    if (existingIndex >= 0) {
+      bucket[existingIndex] = draftStyle;
+    } else {
+      bucket.unshift(draftStyle);
+    }
+    return nextStyles;
+  }, [campaign.id, content, editingId, level, platform, styles.platform, styles.product, styles.project, title]);
 
   const beginEdit = (style: MarketingStyle) => {
     setEditingId(style.id);
@@ -2080,12 +1987,64 @@ function StyleManager({
     setContent(style.content);
   };
 
+  const runPreview = async () => {
+    setPreviewing(true);
+    setPreviewError(null);
+    setPreviewOutput("");
+    const previewPrompt = stylePreviewPrompt({
+      styles: previewStyles,
+      topic: previewTopic.trim() || "範例主題",
+      platform: level === "platform" ? platform.trim() || undefined : campaign.strategy?.platforms?.[0],
+      projectName: campaign.name,
+    });
+    let collected = "";
+    try {
+      await streamCoworkChat({
+        baseUrl: getDefaultHelperBaseUrl(),
+        token: getDefaultHelperToken() || "",
+        mode: "start",
+        conversationId: `marketing-style-preview-${campaign.id}`,
+        prompt: previewPrompt,
+        model: getDefaultHelperModel(),
+        cwd: getDefaultHelperCwd(),
+        maxTurns: 4,
+        onEvent: (event: CoworkStreamEvent) => {
+          if (event.type === "message") {
+            const parsed = parseCoworkStreamLine(event.line);
+            if (parsed.delta) {
+              collected += parsed.delta;
+              setPreviewOutput(collected);
+              return;
+            }
+            if (!parsed.debug && event.line.trim()) {
+              collected += `${collected ? "\n" : ""}${event.line.trim()}`;
+              setPreviewOutput(collected);
+            }
+            return;
+          }
+          if (event.type === "error") {
+            throw new Error(event.message);
+          }
+        },
+      });
+      if (!collected.trim()) {
+        throw new Error("helper 沒有回傳預覽內容");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "文風預覽失敗";
+      setPreviewError(msg);
+      onError(msg);
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-border/40 bg-card/70 p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">文風管理</h3>
-          <p className="mt-1 text-xs text-muted-foreground">先交付三層 style CRUD；預覽測試會在下一階段接 helper。</p>
+          <p className="mt-1 text-xs text-muted-foreground">三層 style 可直接 CRUD；預覽測試會直連本機 helper 產出測試文案。</p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-[0.6rem]">
@@ -2195,8 +2154,47 @@ function StyleManager({
         placeholder="輸入 markdown 文風內容"
         className="mt-2 min-h-[96px] w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
       />
-      <div className="mt-3 flex items-center justify-between">
-        <div className="text-xs text-muted-foreground">預覽測試入口保留，會在 helper deep integration 補上。</div>
+      <div className="mt-3 grid gap-2 rounded-lg border border-border/30 bg-background/60 p-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-xs font-medium text-foreground">預覽測試</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              直接走本機 helper，不經後端；會套用目前三層 style 組合。
+            </div>
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            {composeStyleMarkdown(previewStyles, level === "platform" ? platform : undefined) ? "已載入 style 組合" : "尚無 style，會用中性語氣"}
+          </div>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-[1fr_120px]">
+          <input
+            value={previewTopic}
+            onChange={(e) => setPreviewTopic(e.target.value)}
+            placeholder="輸入範例主題"
+            className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+          />
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={previewing}
+            onClick={() => {
+              void runPreview();
+            }}
+          >
+            {previewing ? "預覽中..." : "預覽測試"}
+          </Button>
+        </div>
+        {previewError && (
+          <div className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+            {previewError}
+          </div>
+        )}
+        <div className="rounded-md border border-border/30 bg-card/60 px-3 py-2 text-xs text-muted-foreground">
+          {previewOutput || "尚未生成預覽文案。"}
+        </div>
+      </div>
+
+      <div className="mt-3 flex items-center justify-end">
         <Button
           size="sm"
           disabled={saving || title.trim().length < 2 || content.trim().length < 10}
@@ -2222,7 +2220,7 @@ function StyleManager({
   );
 }
 
-function TopicStarter({
+export function TopicStarter({
   campaign,
   onCreateTopic,
   onError,
@@ -2244,7 +2242,9 @@ function TopicStarter({
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">建立行銷主題</h3>
-          <p className="mt-1 text-xs text-muted-foreground">建立後會進入草稿；下一步請到 Claude cowork 執行 <code>/marketing-generate</code>。</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            建立後會先進入主題規劃；下一步先做 <code>/marketing-intel</code>，也可直接跑 <code>/marketing-generate</code>。
+          </p>
         </div>
         <CoworkChatSheet
           campaignId={campaign.id}
@@ -2323,11 +2323,13 @@ function TopicStarter({
   );
 }
 
-function CampaignDetail({
+export function CampaignDetail({
   campaign,
   onBack,
   onReview,
   reviewingPostId,
+  onSaveContentPlan,
+  savingPlan,
   onCreateTopic,
   creatingTopic,
   onSaveStrategy,
@@ -2341,6 +2343,8 @@ function CampaignDetail({
   onBack: () => void;
   onReview: (postId: string, action: "approve" | "request_changes" | "reject") => void;
   reviewingPostId: string | null;
+  onSaveContentPlan: (contentPlan: WeekPlan[]) => Promise<void>;
+  savingPlan: boolean;
   onCreateTopic: (input: { topic: string; platform: string; brief: string }) => Promise<void>;
   creatingTopic: boolean;
   onSaveStrategy: (input: {
@@ -2371,6 +2375,18 @@ function CampaignDetail({
   const confirmed = campaign.posts.filter((p) => isConfirmedStatus(p.status));
   const scheduled = campaign.posts.filter((p) => p.status === "scheduled");
   const published = campaign.posts.filter((p) => p.status === "published");
+  const currentStage = deriveProjectStage(campaign);
+  const primaryCta = primaryCtaForProject(campaign);
+  const phaseLabels = [
+    { key: "strategy", label: "策略" },
+    { key: "schedule", label: "排程" },
+    { key: "intel", label: "情報" },
+    { key: "generate", label: "生成" },
+    { key: "review", label: "確認" },
+    { key: "publish", label: "發佈" },
+  ] as const;
+  const unlockedTopicStarter = Boolean(campaign.strategy?.documentId);
+  const anyFailedPost = campaign.posts.find((post) => post.status === "failed");
 
   return (
     <div className="space-y-5">
@@ -2387,6 +2403,38 @@ function CampaignDetail({
         </div>
       </div>
 
+      <div className="rounded-xl border border-border/40 bg-card/70 p-4">
+        <div className="flex flex-wrap items-center gap-2">
+          {phaseLabels.map((phase, index) => {
+            const isCurrent = phase.key === currentStage;
+            const isDone = index < phaseLabels.findIndex((item) => item.key === currentStage);
+            return (
+              <div
+                key={phase.key}
+                className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                  isCurrent
+                    ? "border-primary/40 bg-primary/10 text-primary"
+                    : isDone
+                      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                      : "border-border/40 bg-background/60 text-muted-foreground"
+                }`}
+              >
+                {phase.label}
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
+          <div>
+            <div className="text-sm font-medium text-foreground">{primaryCta.label}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{primaryCta.hint}</div>
+          </div>
+          <Badge variant="outline" className="text-[0.65rem]">
+            目前階段：{phaseLabels.find((item) => item.key === currentStage)?.label}
+          </Badge>
+        </div>
+      </div>
+
       {campaign.blockReason && (
         <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
@@ -2397,66 +2445,99 @@ function CampaignDetail({
         </div>
       )}
 
-      <StrategyPlanner
-        campaign={campaign}
-        strategy={campaign.strategy}
-        onSave={onSaveStrategy}
-        onError={onError}
-        saving={savingStrategy}
-      />
-      <StyleManager campaign={campaign} styles={styles} onSaveStyle={onSaveStyle} onError={onError} saving={savingStyle} />
-      {campaign.strategy && <StrategyAndPlan strategy={campaign.strategy} contentPlan={campaign.contentPlan} />}
-      <TopicStarter campaign={campaign} onCreateTopic={onCreateTopic} onError={onError} creatingTopic={creatingTopic} />
+      {anyFailedPost && (
+        <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div>
+            <div className="text-sm font-medium text-foreground">AI 流程中斷</div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {anyFailedPost.aiReason || "請先檢查 helper / 重新執行上一階段，再繼續後續流程。"}
+            </p>
+          </div>
+        </div>
+      )}
 
-      {review.length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-medium uppercase tracking-wide text-amber-400">待你確認</h3>
-          {review.map((post) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              onReview={onReview}
-              isReviewing={reviewingPostId === post.id}
+      <div data-testid="campaign-detail-layout" className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_340px] xl:items-start">
+        <div className="space-y-5">
+          <StrategyPlanner
+            campaign={campaign}
+            strategy={campaign.strategy}
+            onSave={onSaveStrategy}
+            onError={onError}
+            saving={savingStrategy}
+          />
+          {campaign.strategy && (
+            <StrategyAndPlan
+              strategy={campaign.strategy}
+              contentPlan={campaign.contentPlan}
+              posts={campaign.posts}
+              onSavePlan={onSaveContentPlan}
+              savingPlan={savingPlan}
             />
-          ))}
-        </section>
-      )}
+          )}
+          {unlockedTopicStarter ? (
+            <TopicStarter campaign={campaign} onCreateTopic={onCreateTopic} onError={onError} creatingTopic={creatingTopic} />
+          ) : (
+            <div className="rounded-xl border border-border/40 bg-card/70 p-4 text-xs text-muted-foreground">
+              先完成策略設定，再建立主題與排程；不要同時跳兩步。
+            </div>
+          )}
 
-      {planned.length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-medium uppercase tracking-wide text-primary">規劃中</h3>
-          {planned.map((post) => (
-            <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
-          ))}
-        </section>
-      )}
+          {review.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-amber-400">待你確認</h3>
+              {review.map((post) => (
+                <PostCard
+                  key={post.id}
+                  post={post}
+                  onReview={onReview}
+                  isReviewing={reviewingPostId === post.id}
+                />
+              ))}
+            </section>
+          )}
 
-      {confirmed.length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-medium uppercase tracking-wide text-primary">已確認</h3>
-          {confirmed.map((post) => (
-            <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
-          ))}
-        </section>
-      )}
+          {planned.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-primary">規劃中</h3>
+              {planned.map((post) => (
+                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+              ))}
+            </section>
+          )}
 
-      {scheduled.length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-medium uppercase tracking-wide text-chart-2">已排程</h3>
-          {scheduled.map((post) => (
-            <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
-          ))}
-        </section>
-      )}
+          {confirmed.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-primary">已確認</h3>
+              {confirmed.map((post) => (
+                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+              ))}
+            </section>
+          )}
 
-      {published.length > 0 && (
-        <section className="space-y-2">
-          <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">已發佈</h3>
-          {published.map((post) => (
-            <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
-          ))}
-        </section>
-      )}
+          {scheduled.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-chart-2">已排程</h3>
+              {scheduled.map((post) => (
+                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+              ))}
+            </section>
+          )}
+
+          {published.length > 0 && (
+            <section className="space-y-2">
+              <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">已發佈</h3>
+              {published.map((post) => (
+                <PostCard key={post.id} post={post} onReview={onReview} isReviewing={reviewingPostId === post.id} />
+              ))}
+            </section>
+          )}
+        </div>
+
+        <aside className="space-y-5 xl:sticky xl:top-24">
+          <StyleManager campaign={campaign} styles={styles} onSaveStyle={onSaveStyle} onError={onError} saving={savingStyle} />
+        </aside>
+      </div>
     </div>
   );
 }
@@ -2473,6 +2554,7 @@ export default function MarketingPage() {
   const [creatingTopic, setCreatingTopic] = useState(false);
   const [creatingCampaign, setCreatingCampaign] = useState(false);
   const [savingStrategy, setSavingStrategy] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
   const [savingStyle, setSavingStyle] = useState(false);
 
   const loadCampaigns = useCallback(async () => {
@@ -2653,6 +2735,29 @@ export default function MarketingPage() {
     [user, selectedId, selectedCampaign?.strategy?.updatedAt]
   );
 
+  const handleSaveContentPlan = useCallback(
+    async (contentPlan: WeekPlan[]) => {
+      if (!user || !selectedId) return;
+      setSavingPlan(true);
+      setError(null);
+      try {
+        const token = await user.getIdToken();
+        await updateMarketingProjectContentPlan(token, selectedId, contentPlan);
+        const [list, detail] = await Promise.all([
+          getMarketingProjectGroups(token),
+          getMarketingProjectDetail(token, selectedId),
+        ]);
+        setCampaignGroups(list);
+        setSelectedCampaign(detail);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "儲存排程失敗");
+      } finally {
+        setSavingPlan(false);
+      }
+    },
+    [user, selectedId]
+  );
+
   const handleSaveStyle = useCallback(
     async (input: { id?: string; title: string; level: MarketingStyle["level"]; content: string; platform?: string }) => {
       if (!user || !selectedCampaign) return;
@@ -2699,7 +2804,7 @@ export default function MarketingPage() {
     <AuthGuard>
       <div className="min-h-screen bg-background text-foreground">
         <AppNav />
-        <main className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
+        <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h1 className="text-xl font-semibold tracking-tight text-foreground">行銷主控台</h1>
@@ -2742,6 +2847,8 @@ export default function MarketingPage() {
               onBack={() => setSelectedId(null)}
               onReview={handleReview}
               reviewingPostId={reviewingPostId}
+              onSaveContentPlan={handleSaveContentPlan}
+              savingPlan={savingPlan}
               onCreateTopic={handleCreateTopic}
               creatingTopic={creatingTopic}
               onSaveStrategy={handleSaveStrategy}

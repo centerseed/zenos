@@ -503,6 +503,61 @@ class TestProjects:
         assert len(body["styles"]["platform"]) == 1
         assert len(body["styles"]["project"]) == 1
 
+    async def test_update_project_content_plan_persists_schedule(self):
+        from zenos.interface.marketing_dashboard_api import update_project_content_plan
+
+        request = _make_request(
+            method="PUT",
+            headers={"authorization": "Bearer token"},
+            path_params={"projectId": "proj-1"},
+            json_body={
+                "contentPlan": [
+                    {
+                        "weekLabel": "Week 1",
+                        "isCurrent": True,
+                        "days": [
+                            {
+                                "day": "Mon",
+                                "platform": "Threads",
+                                "topic": "主題 A",
+                                "status": "suggested",
+                            }
+                        ],
+                        "aiNote": "先從暖身切入",
+                    }
+                ]
+            },
+        )
+        project = _project_entity("proj-1", "prod-1")
+        strategy_doc = _strategy_doc_entity(parent_id="proj-1")
+
+        with patch(
+            "zenos.interface.marketing_dashboard_api._auth_and_scope",
+            return_value=(_partner(), "effective-partner"),
+        ), patch(
+            "zenos.interface.marketing_dashboard_api._ensure_marketing_repos",
+            new=AsyncMock(return_value=None),
+        ), patch(
+            "zenos.interface.marketing_dashboard_api._entity_repo"
+        ) as mock_entity_repo, patch(
+            "zenos.interface.marketing_dashboard_api._entry_repo"
+        ) as mock_entry_repo, patch(
+            "zenos.interface.marketing_dashboard_api.current_partner_id"
+        ) as mock_ctx:
+            mock_entity_repo.get_by_id = AsyncMock(return_value=project)
+            mock_entity_repo.upsert = AsyncMock(side_effect=lambda entity: entity)
+            mock_entity_repo.list_by_parent = AsyncMock(return_value=[strategy_doc])
+            mock_entry_repo.create = AsyncMock()
+            mock_ctx.set = MagicMock(return_value="ctx-token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await update_project_content_plan(request)
+
+        assert resp.status_code == 200
+        body = json.loads(resp.body)
+        assert body["project"]["contentPlan"][0]["weekLabel"] == "Week 1"
+        assert body["project"]["contentPlan"][0]["days"][0]["topic"] == "主題 A"
+
 
 class TestReviewPost:
     async def test_updates_post_status_and_writes_transition_audit(self):

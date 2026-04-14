@@ -351,6 +351,43 @@ def _normalize_content_plan(marketing: dict) -> list[dict]:
     return result
 
 
+def _sanitize_content_plan(raw: object) -> list[dict]:
+    if not isinstance(raw, list):
+        raise ValueError("contentPlan must be a list")
+    sanitized: list[dict] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        week_label = str(item.get("weekLabel") or item.get("week_label") or "").strip()
+        days_raw = item.get("days")
+        if not week_label or not isinstance(days_raw, list):
+            continue
+        days: list[dict] = []
+        for day in days_raw:
+            if not isinstance(day, dict):
+                continue
+            status = str(day.get("status") or "suggested").strip()
+            if status not in {"published", "confirmed", "suggested"}:
+                status = "suggested"
+            days.append(
+                {
+                    "day": str(day.get("day") or "").strip(),
+                    "platform": str(day.get("platform") or "").strip() or "Threads",
+                    "topic": str(day.get("topic") or "").strip(),
+                    "status": status,
+                }
+            )
+        sanitized.append(
+            {
+                "week_label": week_label,
+                "is_current": bool(item.get("isCurrent") or item.get("is_current")),
+                "days": days,
+                "ai_note": str(item.get("aiNote") or item.get("ai_note") or "").strip(),
+            }
+        )
+    return sanitized
+
+
 def _to_post_dict(post: Entity) -> dict:
     marketing = _marketing_data(post)
     metrics = marketing.get("metrics")
@@ -1215,6 +1252,66 @@ async def create_project_topic(request: Request) -> Response:
         current_partner_id.reset(token)
 
 
+async def update_project_content_plan(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner or not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    await _ensure_marketing_repos()
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+    if not isinstance(body, dict):
+        return _error_response("INVALID_INPUT", "Body must be an object", 400, request=request)
+
+    try:
+        content_plan = _sanitize_content_plan(body.get("contentPlan") or body.get("content_plan") or [])
+    except ValueError as exc:
+        return _error_response("INVALID_INPUT", str(exc), 400, request=request)
+
+    project_id = request.path_params.get("projectId") or request.path_params.get("campaignId")
+    token = current_partner_id.set(effective_id)
+    try:
+        project = await _entity_repo.get_by_id(project_id)
+        if project is None or not _is_marketing_project(project):
+            return _error_response("NOT_FOUND", "Project not found", 404, request=request)
+
+        details = project.details if isinstance(project.details, dict) else {}
+        marketing = _marketing_data(project)
+        marketing["content_plan"] = content_plan
+        marketing["planning_status"] = "planned" if content_plan else "pending"
+        details["marketing"] = marketing
+        project.details = details
+        project.updated_at = datetime.now(timezone.utc)
+        updated = await _entity_repo.upsert(project)
+
+        await _entry_repo.create(
+            EntityEntry(
+                id=uuid.uuid4().hex,
+                partner_id=effective_id,
+                entity_id=updated.id or project_id,
+                type="change",
+                content=f"更新排程，共 {sum(len(week.get('days') or []) for week in content_plan)} 筆"[:200],
+                context=f"weeks={len(content_plan)}"[:200],
+                author=(str(partner.get("displayName") or partner.get("email") or "")[:120] or None),
+            )
+        )
+
+        docs = await _entity_repo.list_by_parent(project_id)
+        strategy_doc = _find_latest_strategy_doc(docs)
+        posts = [entity for entity in docs if not _is_style_document(entity) and not _is_strategy_document(entity)]
+        return _json_response({"project": _to_project_dict(updated, posts, strategy_doc=strategy_doc)}, request=request)
+    except Exception as exc:
+        logger.error("update_project_content_plan failed: %s", exc, exc_info=True)
+        return _error_response("INTERNAL_ERROR", "Failed to update content plan", 500, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+
 async def get_project_styles(request: Request) -> Response:
     if request.method == "OPTIONS":
         return _handle_options(request)
@@ -1492,6 +1589,7 @@ marketing_dashboard_routes = [
     Route("/api/marketing/projects", projects_collection, methods=["GET", "POST", "OPTIONS"]),
     Route("/api/marketing/projects/{projectId}", get_project_detail, methods=["GET", "OPTIONS"]),
     Route("/api/marketing/projects/{projectId}/strategy", update_project_strategy, methods=["PUT", "OPTIONS"]),
+    Route("/api/marketing/projects/{projectId}/content-plan", update_project_content_plan, methods=["PUT", "OPTIONS"]),
     Route("/api/marketing/projects/{projectId}/topics", create_project_topic, methods=["POST", "OPTIONS"]),
     Route("/api/marketing/projects/{projectId}/styles", get_project_styles, methods=["GET", "OPTIONS"]),
     Route("/api/marketing/styles", create_style, methods=["POST", "OPTIONS"]),
@@ -1499,6 +1597,7 @@ marketing_dashboard_routes = [
     Route("/api/marketing/campaigns", projects_collection, methods=["GET", "POST", "OPTIONS"]),
     Route("/api/marketing/campaigns/{campaignId}", get_project_detail, methods=["GET", "OPTIONS"]),
     Route("/api/marketing/campaigns/{campaignId}/strategy", update_project_strategy, methods=["PUT", "OPTIONS"]),
+    Route("/api/marketing/campaigns/{campaignId}/content-plan", update_project_content_plan, methods=["PUT", "OPTIONS"]),
     Route("/api/marketing/campaigns/{campaignId}/topics", create_project_topic, methods=["POST", "OPTIONS"]),
     Route("/api/marketing/posts/{postId}/review", review_post, methods=["POST", "OPTIONS"]),
     Route("/api/marketing/prompts", get_prompt_ssot, methods=["GET", "OPTIONS"]),

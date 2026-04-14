@@ -238,6 +238,18 @@ export async function updateMarketingProjectStrategy(
   return res.project;
 }
 
+export async function updateMarketingProjectContentPlan(
+  token: string,
+  projectId: string,
+  contentPlan: WeekPlan[]
+): Promise<MarketingProject> {
+  const res = await apiFetch<{ project: MarketingProject }>(`/api/marketing/projects/${projectId}/content-plan`, token, {
+    method: "PUT",
+    body: JSON.stringify({ contentPlan }),
+  });
+  return res.project;
+}
+
 export async function createMarketingProject(
   token: string,
   data: {
