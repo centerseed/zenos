@@ -1,4 +1,4 @@
-# L3 文件治理規則 v2.1（含完整範例）
+# L3 文件治理規則 v2.2（含完整範例）
 
 ## 文件的定位
 L3 document entity 是正式文件的語意代理。
@@ -8,7 +8,12 @@ L3 document entity 是正式文件的語意代理。
   - 外部 Authoring 模式：source 在 Git/Drive/Notion，ZenOS 以 source_uri 追蹤。
   - ZenOS Delivery 模式：markdown 內容可直接寫入 ZenOS snapshot（GCS private），作為穩定 permalink 的閱讀版本。
 
-文件不是 L2（文件是 L2 概念的具體體現），不是task（文件沒有 owner 和 AC）。
+文件不是 L2（文件是 L2 概念的具體體現），不是 task。
+
+但不要把這句話誤解成「所有文件都不需要驗收邊界」。
+對齊 `SPEC-doc-governance` 與 `SPEC-task-governance`：
+- 文件本身不是 task，不會有 task 的 owner / assignee / confirm lifecycle。
+- 但某些文件類型會成為 agent 的執行依據，這些文件必須帶明確驗收邊界，否則不得拿來派工或驗收。
 
 ### 內容承載雙模式（新增）
 
@@ -43,6 +48,33 @@ L3 document entity 是正式文件的語意代理。
 搜尋時會自動展開（搜 ADR 也會找到 DECISION，反之亦然）。
 
 > **原則：** 新功能開發必須同時建 SPEC + TEST。DESIGN 視複雜度決定。DECISION 只在重大不可逆的決策時建立。
+
+## 哪些文件必須有驗收邊界
+
+| 文件類型 | 是否可直接作為 execution spec | 必要驗收邊界 | 缺少時怎麼處理 |
+|---------|------------------------------|------------|--------------|
+| `SPEC` | 可以 | `Acceptance Criteria` + 穩定 `AC-*` ID | 不得進 `Under Review/Approved`，不得交 Architect/Developer 派工 |
+| `DESIGN` / `TD` | 只有在拿來 handoff 實作時可以 | `Spec Compliance Matrix` + `Done Criteria` | 可保留為分析草稿，但不得拿來 dispatch |
+| `PLAN` | 不可直接派工 | `entry_criteria` + `exit_criteria` + Resume Point | 可保留為協作脈絡，但不得取代 task / AC 驗收 |
+| `TEST` / `TC` | QA 驗收依據 | Given/When/Then，P0/P1 分級 | 不得宣稱 QA coverage 完整 |
+| `DECISION` / `ADR` | 不可 | 不要求產品 AC；需有理由、替代方案、後果 | 不得單獨作為 Developer 的執行依據 |
+| `REFERENCE` / `REF` / `REPORT` / `GUIDE` / `MEETING` | 不可 | 不要求產品 AC | 只能作為背景材料，不得單獨派工 |
+
+### Dispatch Gate
+
+Agent 在拿文件派工前，必須先判定它是不是 executable document：
+
+1. `SPEC`：每個 P0 需求都要有至少一條帶 ID 的 AC。沒有 AC ID = 退回 PM。
+2. `DESIGN/TD`：若要拿來 dispatch，必須列出 `Spec Compliance Matrix` 與 `Done Criteria`。沒有就只能當分析文件。
+3. `PLAN`：只能描述 task 群脈絡與完成邊界，不能直接當執行單。真正可 claim 的單位仍是 task。
+4. `DECISION/ADR`、`REFERENCE/REF`、願景文件、核心架構文件：預設都是 non-executable。除非另有 `SPEC + task + Done Criteria`，否則不能直接要求 Developer 開工。
+
+### Approved / Dispatch 品質閘
+
+- `SPEC` 在 `Under Review -> Approved` 前，必須已定義 AC，這與 `SPEC-doc-governance` 一致。
+- `DESIGN/TD` 若將被用於 handoff，必須在交付前補齊可驗證的 `Done Criteria`。
+- `PLAN` 若將被用於多階段協作，必須先寫清楚 `entry_criteria` / `exit_criteria`，否則 agent 只能看到「下一步」，看不到「何時算完成」。
+- 任何 non-executable 文件若被拿來當唯一實作依據，agent 應停止並回報，而不是自行腦補驗收條件。
 
 ## 各文件類別完整範例 Frontmatter
 

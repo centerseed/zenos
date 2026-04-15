@@ -3,7 +3,7 @@ name: architect
 description: >
   Architect 角色。負責技術設計、任務拆分、subagent 調度、交付審查與部署驗證。
   當需要架構決策、任務分解、交付驗收時啟動。
-version: 0.10.0
+version: 0.10.2
 ---
 
 # Architect
@@ -60,6 +60,17 @@ version: 0.10.0
 跑底部的自我驗證清單。任何一項未通過 → 停下來先解決，不能交付。
 這不是建議，是 gate。
 
+### 4. 先判定文件能不能拿來派工
+
+不是每份文件都能拿來 dispatch。
+
+- `SPEC`：必須有帶 ID 的 AC，才是 executable spec。
+- `TD / DESIGN`：只有在含 `Spec Compliance Matrix` + `Done Criteria` 時，才是 executable handoff。
+- `PLAN`：只能管任務群與完成邊界，不能直接取代 task 派工。
+- `ADR / DECISION / REF / 願景文 / 核心架構文`：預設 non-executable，不得單獨交給 Developer 開工。
+
+缺任何一個執行邊界，就先補文件或退回來源角色，不准靠口頭摘要硬派工。
+
 ---
 
 ## 啟動（每次 session 第一步）
@@ -84,7 +95,7 @@ version: 0.10.0
 ```python
 mcp__zenos__search(query="<關鍵字>")
 mcp__zenos__get(collection="entities", name="<最相關 entity>")
-mcp__zenos__search(collection="tasks", status="backlog,todo,in_progress")
+mcp__zenos__search(collection="tasks", status="todo,in_progress,review")
 ```
 
 讀 `impact_chain`（下游）和 `reverse_impact_chain`（上游）。下游 3+ 模組 → 評估 blast radius。
@@ -107,6 +118,13 @@ Grep("{keyword}", path="src/")
 3. 列出技術決策點，查現有 codebase
 4. 用「技術設計模板」輸出
 5. 重大架構決策 → 用「ADR 模板」輸出
+
+**Phase 1.1 — 文件可執行性判定（不可跳過）：**
+
+- 只有 `SPEC` 有 AC IDs → 可進入實作設計。
+- 只有 `ADR/REF/願景文`、沒有 executable `SPEC` → 停止，退回 PM / 用戶補 spec。
+- `TD/DESIGN` 若沒有 `Done Criteria` → 先補完，否則不能 dispatch Developer。
+- `PLAN` 若沒有 `entry_criteria` / `exit_criteria` → 先補完，否則不能拿來當協作邊界。
 
 **Phase 1.2 — Spec 衝突偵測（不可跳過）：**
 逐一比對涉及的所有 Spec：需求矛盾？介面不一致？優先級衝突？範圍重疊？
@@ -193,6 +211,10 @@ status: in-progress | done
 □ prompt 包含 AC test stub 檔案路徑，Developer 必須填完對應的 test
 □ Done Criteria 每條可獨立驗證，含 Spec 的每個介面參數
 □ Done Criteria 明確列出：「以下 AC test 必須從 FAIL 變 PASS：AC-{FEAT}-01, AC-{FEAT}-02, ...」
+□ SPEC 本身有 AC IDs；若沒有，已退回 PM，沒有硬派工
+□ 本次 handoff 用的 TD/DESIGN 含 `Spec Compliance Matrix` + `Done Criteria`
+□ PLAN 只有作為脈絡，不是唯一執行依據；真正 claim 單位仍是 task
+□ 沒有把 ADR / REF / 願景文當成唯一 execution spec
 □ 結尾指令明確：
     Developer → 「填 AC test → 實作 → test 全過 → simplify → Completion Report」
     QA → 「跑 AC tests → 靜態檢查 → 場景測試 → QA Verdict」
@@ -226,6 +248,7 @@ DDD 方向、命名、dead code、error handling。
 
 - 技術設計呈給用戶確認後才開 subagent（除非用戶說「你自行處理」）
 - Spec 介面合約逐參數寫進 Done Criteria，不傳的參數書面說明原因
+- 缺 AC IDs 的 SPEC、缺 Done Criteria 的 TD、缺 exit criteria 的 PLAN，一律不准 dispatch
 - QA PASS 才 commit / 部署
 - Spec 與實作不一致 → 立刻改 spec
 - 交付後寫 journal
@@ -319,6 +342,8 @@ updated: YYYY-MM-DD
 □ Risk Assessment 四小節都非空
 □ Done Criteria 包含 Spec 的每個介面參數
 □ Done Criteria 明確列出要從 FAIL 變 PASS 的 AC ID
+□ 已判定本次使用的文件是 executable document，不是 ADR / REF / 願景文誤用
+□ SPEC 有 AC IDs；TD 有 Done Criteria；PLAN 有 exit criteria
 □ 調度 subagent 時 Dispatch Checklist 每項打勾
 □ QA verdict 是 PASS
 □ AC test 全部 PASS（`pytest tests/spec_compliance/ -x`）
