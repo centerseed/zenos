@@ -3,22 +3,21 @@
 /**
  * CrmAiPanel — AI Briefing and Debrief panel for Deal detail page.
  *
- * Reuses cowork-helper.ts streamCoworkChat() for SSE streaming.
- * No AI logic lives here — only context pack assembly, display, and copy.
+ * Uses the shared copilot infrastructure:
+ *   useCopilotChat hook + CopilotRailShell + CopilotChatViewport + CopilotInputBar
+ *
+ * CRM-specific logic (context pack building, follow-up parsing, stage advance)
+ * is preserved here; streaming mechanics are delegated to the hook.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Copy, Check, RefreshCw, PlugZap, ChevronDown, ChevronUp } from "lucide-react";
-import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import {
-  streamCoworkChat,
-  checkCoworkHelperHealth,
-  getDefaultHelperBaseUrl,
-  getDefaultHelperToken,
-  getDefaultHelperModel,
-  getDefaultHelperCwd,
-  CoworkStreamEvent,
-} from "@/lib/cowork-helper";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Bot, Copy, Check, PlugZap } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
+import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
+import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
+import { useCopilotChat } from "@/lib/copilot/useCopilotChat";
+import type { CopilotEntryConfig } from "@/lib/copilot/types";
 import { sanitizeContextValue } from "@/config/ai-redaction-rules";
 import type { Deal, Activity, Company, Contact, FunnelStage, DealAiEntries } from "@/lib/crm-api";
 import { patchDealStage } from "@/lib/crm-api";
@@ -26,19 +25,13 @@ import { patchDealStage } from "@/lib/crm-api";
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 type AiMode = "briefing" | "debrief";
-type AiStatus = "idle" | "loading" | "streaming" | "done" | "error";
 
 interface FollowUpDraft {
   line: string;
   email: { subject: string; body: string };
 }
 
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-}
-
-interface CrmAiPanelProps {
+export interface CrmAiPanelProps {
   mode: AiMode;
   deal: Deal;
   activities: Activity[];
@@ -55,39 +48,7 @@ interface CrmAiPanelProps {
   aiEntries?: DealAiEntries | null;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Parse a raw SSE line from the helper into a text delta.
- * Mirrors parseCoworkStreamLine from marketing/logic.ts but simplified for CRM.
- */
-function parseSseLineForDelta(line: string): string {
-  const raw = line.trim();
-  if (!raw) return "";
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    const candidates: unknown[] = [
-      (parsed.delta as Record<string, unknown> | undefined)?.text,
-      (parsed.content_block_delta as Record<string, unknown> | undefined)?.text,
-      parsed.text,
-      (parsed.content_block as Record<string, unknown> | undefined)?.text,
-    ];
-    const messageObj = parsed.message as Record<string, unknown> | undefined;
-    const messageContent = Array.isArray(messageObj?.content) ? messageObj.content : null;
-    if (messageContent && messageContent.length > 0) {
-      const first = messageContent[0] as Record<string, unknown>;
-      candidates.push(first?.text);
-    }
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.trim().length > 0) {
-        return candidate;
-      }
-    }
-    return "";
-  } catch {
-    return raw;
-  }
-}
+// ─── Context pack helpers ──────────────────────────────────────────────────────
 
 /**
  * Build a summary of recent activities (≤1500 chars) from newest to oldest.
@@ -170,7 +131,6 @@ function buildBriefingPrompt(
   const sanitized = sanitizeContextValue(contextPack);
   let packed = JSON.stringify(sanitized, null, 2);
   if (packed.length > 2000) {
-    // Truncate activities_summary to fit
     const truncatedPack = { ...(sanitized as Record<string, unknown>), activities_summary: "（摘要過長，已截斷）" };
     packed = JSON.stringify(truncatedPack, null, 2);
   }
@@ -216,7 +176,7 @@ function buildDebriefPrompt(
 
 /**
  * Extract LINE and Email follow-up sections from completed AI markdown output.
- * Looks for ## LINE 和 ## Email (or similar headings).
+ * Looks for ## LINE and ## Email (or similar headings).
  */
 function extractFollowUpDraft(markdown: string): FollowUpDraft | null {
   const lineMatch = markdown.match(/##\s*(?:LINE|Line|line)[^\n]*\n([\s\S]*?)(?=##|$)/);
@@ -244,6 +204,55 @@ function extractFollowUpDraft(markdown: string): FollowUpDraft | null {
   return {
     line: lineContent,
     email: { subject: emailSubject, body: emailBody },
+  };
+}
+
+// ─── CrmAiPanel entry factories ───────────────────────────────────────────────
+
+function createBriefingEntry(params: {
+  deal: Deal;
+  activities: Activity[];
+  company: Company | null;
+  contacts: Contact[];
+  aiEntries?: DealAiEntries | null;
+}): CopilotEntryConfig {
+  return {
+    intent_id: "crm-briefing",
+    title: "AI 會議準備",
+    mode: "chat",
+    launch_behavior: "manual",
+    session_policy: "scoped_resume",
+    suggested_skill: "/crm-briefing",
+    scope: { deal_id: params.deal.id, scope_label: params.deal.title },
+    context_pack: { scene: "briefing", deal_id: params.deal.id },
+    write_targets: [],
+    build_prompt: (userInput: string) => {
+      if (userInput) {
+        return `/crm-briefing\n\n使用者追問：\n${userInput}\n\n請根據之前的 briefing context 回答。`;
+      }
+      return buildBriefingPrompt(params.deal, params.activities, params.company, params.contacts, params.aiEntries);
+    },
+  };
+}
+
+function createDebriefEntry(params: {
+  deal: Deal;
+  company: Company | null;
+  triggerActivity: Activity;
+  aiEntries?: DealAiEntries | null;
+}): CopilotEntryConfig {
+  return {
+    intent_id: "crm-debrief",
+    title: "AI 活動 Debrief",
+    mode: "chat",
+    launch_behavior: "auto_start",
+    session_policy: "ephemeral",
+    suggested_skill: "/crm-debrief",
+    scope: { deal_id: params.deal.id, scope_label: params.deal.title },
+    context_pack: { scene: "debrief", deal_id: params.deal.id },
+    write_targets: [],
+    build_prompt: (_userInput: string) =>
+      buildDebriefPrompt(params.deal, params.company, params.triggerActivity, params.aiEntries),
   };
 }
 
@@ -410,9 +419,27 @@ function StageAdvanceButton({ deal, token, onAdvanced }: StageAdvanceButtonProps
   );
 }
 
-// ─── CrmAiPanel ──────────────────────────────────────────────────────────────
+// ─── Offline warning ──────────────────────────────────────────────────────────
 
-const MAX_TURNS = 8;
+function OfflineWarning({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="m-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+      <PlugZap className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
+      <div className="text-sm text-amber-300">
+        <p className="font-medium">Local Helper 未連線</p>
+        <p className="text-xs text-amber-400 mt-0.5">請先啟動 Local Helper（port 4317），再重試。</p>
+      </div>
+      <button
+        onClick={onRetry}
+        className="ml-auto shrink-0 px-3 py-1 text-xs rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors"
+      >
+        重試
+      </button>
+    </div>
+  );
+}
+
+// ─── CrmAiPanel ──────────────────────────────────────────────────────────────
 
 export function CrmAiPanel({
   mode,
@@ -427,449 +454,145 @@ export function CrmAiPanel({
   onStreamComplete,
   aiEntries,
 }: CrmAiPanelProps) {
-  const [status, setStatus] = useState<AiStatus>("idle");
-  const [streamingText, setStreamingText] = useState("");
-  const [finalText, setFinalText] = useState("");
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [followUp, setFollowUp] = useState<FollowUpDraft | null>(null);
-  const [helperOffline, setHelperOffline] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-
-  // Briefing chat state
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const [userInput, setUserInput] = useState("");
-  const [turnCount, setTurnCount] = useState(0);
-
-  const abortRef = useRef<AbortController | null>(null);
-  const conversationId = useRef(`crm-${mode}-${deal.id}-${Date.now()}`);
-  const chatEndRef = useRef<HTMLDivElement | null>(null);
-
-  const title = mode === "briefing" ? "AI 會議準備" : "AI 活動 Debrief";
-
-  /**
-   * Core streaming function.
-   * @param prompt — the prompt to send; if omitted, builds the briefing prompt.
-   * @param isFollowUp — if true, append AI response to chatHistory on completion.
-   */
-  const startStream = useCallback(async (prompt?: string, isFollowUp = false) => {
-    const baseUrl = getDefaultHelperBaseUrl();
-    const helperToken = getDefaultHelperToken();
-    const model = getDefaultHelperModel();
-    const cwd = getDefaultHelperCwd();
-
-    // Health check before streaming
-    const health = await checkCoworkHelperHealth(baseUrl, helperToken || undefined);
-    if (!health.ok) {
-      setHelperOffline(true);
-      setStatus("idle");
-      return;
+  // Build the entry config based on mode
+  const entry = useMemo<CopilotEntryConfig | null>(() => {
+    if (mode === "briefing") {
+      return createBriefingEntry({ deal, activities, company, contacts, aiEntries });
     }
-    setHelperOffline(false);
-
-    const resolvedPrompt =
-      prompt ??
-      (mode === "briefing"
-        ? buildBriefingPrompt(deal, activities, company, contacts, aiEntries)
-        : triggerActivity
-          ? buildDebriefPrompt(deal, company, triggerActivity, aiEntries)
-          : null);
-
-    if (!resolvedPrompt) return;
-
-    abortRef.current = new AbortController();
-
-    setStatus("loading");
-    setStreamingText("");
-    if (!isFollowUp) {
-      setFinalText("");
-      setErrorMsg(null);
-      setFollowUp(null);
-      setCollapsed(false);
-    } else {
-      setErrorMsg(null);
+    if (triggerActivity) {
+      return createDebriefEntry({ deal, company, triggerActivity, aiEntries });
     }
+    return null;
+  }, [mode, deal, activities, company, contacts, triggerActivity, aiEntries]);
 
-    let collected = "";
+  const chat = useCopilotChat(entry);
+  const [open, setOpen] = useState(true);
 
-    try {
-      await streamCoworkChat({
-        baseUrl,
-        token: helperToken || undefined,
-        mode: "start",
-        conversationId: conversationId.current,
-        prompt: resolvedPrompt,
-        model: model || undefined,
-        cwd: cwd || undefined,
-        maxTurns: 6,
-        signal: abortRef.current.signal,
-        onEvent: (event: CoworkStreamEvent) => {
-          if (event.type === "message") {
-            setStatus("streaming");
-            const delta = parseSseLineForDelta(event.line);
-            if (delta) {
-              collected += delta;
-              setStreamingText(collected);
-            }
-          } else if (event.type === "done") {
-            const text = collected.trim();
-            setStreamingText("");
+  // Debrief: auto-start exactly once when connector first becomes ready
+  const debriefAutoStartedRef = useRef(false);
+  useEffect(() => {
+    if (
+      mode === "debrief" &&
+      triggerActivity &&
+      chat.connectorStatus === "connected" &&
+      !debriefAutoStartedRef.current &&
+      chat.messages.length === 0 &&
+      chat.status === "idle"
+    ) {
+      debriefAutoStartedRef.current = true;
+      void chat.send("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, triggerActivity, chat.connectorStatus, chat.status]);
 
-            if (mode === "briefing") {
-              // Append AI response to chat history; stay "idle" so user can follow up
-              if (text) {
-                setChatHistory((prev) => [...prev, { role: "assistant", content: text }]);
-              }
-              setFinalText(text);
-              setStatus("idle");
-            } else {
-              // Debrief mode — original behaviour; set "done" to show follow-up draft
-              setFinalText(text);
-              if (text) {
-                const draft = extractFollowUpDraft(text);
-                if (draft) setFollowUp(draft);
-                onStreamComplete?.(text);
-              }
-              setStatus("done");
-            }
-          } else if (event.type === "error") {
-            setErrorMsg(event.message);
-            setStatus("error");
-          }
-        },
-      });
-    } catch (err) {
-      if (err instanceof Error && err.name === "AbortError") {
-        setStatus("idle");
-        return;
+  // Briefing: first send uses empty input — build_prompt fills the context pack
+  const handleStartBriefing = useCallback(() => {
+    void chat.send("");
+  }, [chat]);
+
+  // Debrief: fire onStreamComplete when status transitions from running → idle
+  const prevStatusRef = useRef(chat.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = chat.status;
+    if (
+      mode === "debrief" &&
+      prev !== "idle" &&
+      chat.status === "idle" &&
+      chat.messages.length > 0
+    ) {
+      const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
+      if (lastAssistant) {
+        onStreamComplete?.(lastAssistant.content);
       }
-      setErrorMsg(err instanceof Error ? err.message : "串流失敗");
-      setStatus("error");
     }
-  }, [mode, deal, activities, company, contacts, triggerActivity, onStreamComplete, aiEntries]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, chat.status, chat.messages, onStreamComplete]);
 
-  // Auto-start debrief on mount
-  useEffect(() => {
-    if (mode === "debrief" && triggerActivity) {
-      startStream();
-    }
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, []); // Run once on mount
+  // Extract follow-up draft from last assistant message (debrief only)
+  const followUp = useMemo<FollowUpDraft | null>(() => {
+    if (mode !== "debrief") return null;
+    const lastAssistant = [...chat.messages].reverse().find((m) => m.role === "assistant");
+    return lastAssistant ? extractFollowUpDraft(lastAssistant.content) : null;
+  }, [mode, chat.messages]);
 
-  // Auto-scroll to bottom when chat history updates
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [chatHistory, streamingText]);
+  const isStreaming = chat.status === "loading" || chat.status === "streaming";
+  const hasChatContent = chat.messages.length > 0 || !!chat.streamingText;
 
-  function handleCancel() {
-    abortRef.current?.abort();
-    setStatus("idle");
-  }
+  // Filter out system messages for the viewport (show only user/assistant)
+  const visibleMessages = useMemo(
+    () => chat.messages.filter((m) => m.role !== "system"),
+    [chat.messages]
+  );
 
-  async function handleSendMessage() {
-    if (!userInput.trim() || status !== "idle") return;
-
-    const message = userInput.trim();
-    setUserInput("");
-    setChatHistory((prev) => [...prev, { role: "user", content: message }]);
-    setTurnCount((t) => t + 1);
-
-    const followUpPrompt = `/crm-briefing\n\n使用者追問（基於前面的會議準備對話）：\n${message}\n\n請根據之前的 briefing context 回答。`;
-    await startStream(followUpPrompt, true);
-  }
-
-  const displayText = status === "streaming" ? streamingText : finalText;
+  const inputBar =
+    mode === "briefing" && hasChatContent ? (
+      <CopilotInputBar
+        status={chat.status}
+        onSend={(input) => void chat.send(input)}
+        onCancel={() => void chat.cancel()}
+        onRetry={() => void chat.retry()}
+        hasStructuredResult={false}
+        placeholder="追問或調整重點..."
+      />
+    ) : undefined;
 
   return (
-    <div className="bg-card border border-border rounded-xl overflow-hidden">
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-secondary/20">
-        <div className="flex items-center gap-2">
-          <Bot className="h-4 w-4 text-primary" />
-          <span className="text-sm font-medium text-foreground">{title}</span>
-          {status === "loading" && (
-            <span className="text-xs text-muted-foreground animate-pulse">初始化中...</span>
-          )}
-          {status === "streaming" && (
-            <span className="text-xs text-primary animate-pulse">AI 回覆中</span>
-          )}
+    <CopilotRailShell
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) onClose?.();
+      }}
+      entry={entry}
+      chatStatus={chat.status}
+      connectorStatus={chat.connectorStatus}
+      desktopInline
+      footer={inputBar}
+    >
+      {/* Briefing CTA — only before first message */}
+      {mode === "briefing" && !hasChatContent && chat.status === "idle" && chat.connectorStatus !== "disconnected" && (
+        <div className="p-4">
+          <Button onClick={handleStartBriefing} className="w-full">
+            <Bot className="mr-2 h-4 w-4" />
+            準備下次會議
+          </Button>
         </div>
-        <div className="flex items-center gap-1">
-          {(status === "done" || status === "error" || (mode === "briefing" && chatHistory.length > 0)) && (
-            <button
-              onClick={() => setCollapsed((c) => !c)}
-              className="p-1 rounded hover:bg-secondary transition-colors"
-              aria-label={collapsed ? "展開" : "收合"}
-            >
-              {collapsed ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronUp className="h-4 w-4 text-muted-foreground" />}
-            </button>
-          )}
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="p-1 rounded hover:bg-secondary transition-colors text-muted-foreground hover:text-foreground text-xs px-2"
-            >
-              關閉
-            </button>
-          )}
-        </div>
-      </div>
+      )}
 
-      {/* Body */}
-      {!collapsed && (
-        <div>
-          {/* ── Helper offline fallback (both modes) ── */}
-          {helperOffline && status === "idle" && (
-            <div className="m-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-              <PlugZap className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="text-sm text-amber-300">
-                <p className="font-medium">Local Helper 未連線</p>
-                <p className="text-xs text-amber-400 mt-0.5">請先啟動 Local Helper（port 4317），再重試。</p>
-              </div>
-              <button
-                onClick={() => startStream()}
-                className="ml-auto shrink-0 px-3 py-1 text-xs rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors"
-              >
-                重試
-              </button>
+      {/* Offline warning */}
+      {chat.connectorStatus === "disconnected" && chat.status === "idle" && (
+        <OfflineWarning onRetry={() => void chat.checkHealth()} />
+      )}
+
+      {/* Chat area */}
+      {(hasChatContent || isStreaming) && (
+        <CopilotChatViewport
+          messages={visibleMessages}
+          streamingText={chat.streamingText}
+          isStreaming={isStreaming}
+          emptyStateTitle={mode === "briefing" ? "AI 會議準備" : "AI 活動 Debrief"}
+          emptyStateDescription="開始對話後，AI 回覆會顯示在這裡"
+        />
+      )}
+
+      {/* Debrief-specific: follow-up draft + stage advance */}
+      {mode === "debrief" && chat.status === "idle" && visibleMessages.length > 0 && (
+        <div className="space-y-4 p-4">
+          {followUp && (
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Follow-up 草稿</h4>
+              <FollowUpDraftUI draft={followUp} />
             </div>
           )}
-
-          {mode === "briefing" ? (
-            /* ══ Briefing: conversational UI ══ */
-            <div className="flex flex-col">
-              {/* CTA button — only when no chat has started yet */}
-              {status === "idle" && !helperOffline && chatHistory.length === 0 && (
-                <div className="p-4">
-                  <button
-                    onClick={() => startStream()}
-                    className="w-full py-3 text-sm font-medium rounded-xl bg-primary text-primary-foreground hover:bg-primary/90 transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Bot className="h-4 w-4" />
-                    準備下次會議
-                  </button>
-                </div>
-              )}
-
-              {/* Chat history — scrollable */}
-              {chatHistory.length > 0 && (
-                <div className="overflow-y-auto max-h-[400px] space-y-4 p-4">
-                  {chatHistory.map((msg, i) => (
-                    <div key={i} className={msg.role === "user" ? "text-right" : ""}>
-                      <span className="text-xs text-muted-foreground">
-                        {msg.role === "user" ? "你" : "Claude"}
-                      </span>
-                      <div
-                        className={`mt-1 p-3 rounded-lg text-sm ${
-                          msg.role === "user"
-                            ? "bg-blue-50 dark:bg-blue-950/40 ml-auto max-w-[80%] inline-block text-left"
-                            : "bg-secondary/30"
-                        }`}
-                      >
-                        {msg.role === "assistant" ? (
-                          <MarkdownRenderer content={msg.content} className="text-sm text-foreground space-y-1" />
-                        ) : (
-                          <p className="text-sm text-foreground">{msg.content}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Streaming — show latest AI response inline */}
-                  {(status === "streaming" || status === "loading") && (
-                    <div>
-                      <span className="text-xs text-muted-foreground">Claude</span>
-                      <div className="mt-1 p-3 rounded-lg text-sm bg-secondary/30">
-                        {status === "loading" ? (
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <RefreshCw className="h-3 w-3 animate-spin" />
-                            <span>連線中...</span>
-                          </div>
-                        ) : (
-                          <MarkdownRenderer content={streamingText} className="text-sm text-foreground space-y-1" />
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  <div ref={chatEndRef} />
-                </div>
-              )}
-
-              {/* Loading spinner before first response */}
-              {status === "loading" && chatHistory.length === 0 && (
-                <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">連線中...</span>
-                </div>
-              )}
-
-              {/* Streaming first response (no history yet) */}
-              {status === "streaming" && chatHistory.length === 0 && streamingText && (
-                <div className="p-4">
-                  <span className="text-xs text-muted-foreground">Claude</span>
-                  <div className="mt-1 p-3 rounded-lg text-sm bg-secondary/30">
-                    <MarkdownRenderer content={streamingText} className="text-sm text-foreground space-y-1" />
-                  </div>
-                </div>
-              )}
-
-              {/* Cancel button while streaming */}
-              {status === "streaming" && (
-                <div className="flex justify-end px-4 pb-2">
-                  <button
-                    onClick={handleCancel}
-                    className="px-3 py-1 text-xs rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 transition-colors"
-                  >
-                    取消
-                  </button>
-                </div>
-              )}
-
-              {/* Error */}
-              {status === "error" && (
-                <div className="p-4 space-y-2">
-                  <p className="text-sm text-red-400">{errorMsg ?? "發生錯誤"}</p>
-                  <button
-                    onClick={() => startStream()}
-                    className="px-4 py-1.5 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors flex items-center gap-1.5"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    重試
-                  </button>
-                </div>
-              )}
-
-              {/* Input area — show after first response, while under turn limit */}
-              {status !== "streaming" && status !== "loading" && chatHistory.length > 0 && turnCount < MAX_TURNS && (
-                <div className="border-t border-border p-3 flex gap-2">
-                  <input
-                    type="text"
-                    className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                    placeholder="追問或調整重點..."
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault();
-                        void handleSendMessage();
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => void handleSendMessage()}
-                    disabled={!userInput.trim()}
-                    className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                  >
-                    送出
-                  </button>
-                </div>
-              )}
-
-              {/* Turn limit reached */}
-              {turnCount >= MAX_TURNS && (
-                <div className="border-t border-border p-3 text-sm text-muted-foreground text-center">
-                  已達對話上限（{MAX_TURNS} 輪）。如需繼續，請關閉後重新開啟。
-                </div>
-              )}
-
-              {/* Copy latest summary button */}
-              {chatHistory.length > 0 && status === "idle" && (
-                <div className="px-3 pb-3">
-                  <button
-                    onClick={() => {
-                      const lastAssistant = [...chatHistory].reverse().find((m) => m.role === "assistant");
-                      if (lastAssistant) {
-                        void navigator.clipboard.writeText(lastAssistant.content);
-                      }
-                    }}
-                    className="w-full py-2 text-sm border border-border rounded-md hover:bg-secondary/50 transition-colors text-muted-foreground"
-                  >
-                    複製最新準備摘要
-                  </button>
-                </div>
-              )}
-            </div>
-          ) : (
-            /* ══ Debrief: original single-shot UI ══ */
-            <div className="p-4 space-y-4">
-              {/* Loading spinner */}
-              {status === "loading" && (
-                <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">連線中...</span>
-                </div>
-              )}
-
-              {/* Streaming / done markdown */}
-              {(status === "streaming" || status === "done") && displayText && (
-                <div className="prose-sm">
-                  <MarkdownRenderer
-                    content={displayText}
-                    className="text-sm text-foreground space-y-1"
-                  />
-                  {status === "streaming" && (
-                    <div className="flex justify-end mt-2">
-                      <button
-                        onClick={handleCancel}
-                        className="px-3 py-1 text-xs rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 transition-colors"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Error */}
-              {status === "error" && (
-                <div className="space-y-2">
-                  <p className="text-sm text-red-400">{errorMsg ?? "發生錯誤"}</p>
-                  <button
-                    onClick={() => startStream()}
-                    className="px-4 py-1.5 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors flex items-center gap-1.5"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    重試
-                  </button>
-                </div>
-              )}
-
-              {/* Follow-up draft */}
-              {status === "done" && followUp && (
-                <div className="space-y-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Follow-up 草稿
-                  </h4>
-                  <FollowUpDraftUI draft={followUp} />
-                </div>
-              )}
-
-              {/* Stage advance */}
-              {status === "done" && onStageAdvanced && (
-                <div className="pt-2 border-t border-border">
-                  <p className="text-xs text-muted-foreground mb-2">如 AI 建議推進漏斗階段：</p>
-                  <StageAdvanceButton deal={deal} token={token} onAdvanced={onStageAdvanced} />
-                </div>
-              )}
-
-              {/* Re-run after done */}
-              {status === "done" && (
-                <div className="flex justify-end">
-                  <button
-                    onClick={() => startStream()}
-                    className="px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 transition-colors flex items-center gap-1.5"
-                  >
-                    <RefreshCw className="h-3 w-3" />
-                    重新生成
-                  </button>
-                </div>
-              )}
+          {onStageAdvanced && (
+            <div className="pt-2 border-t border-border">
+              <p className="text-xs text-muted-foreground mb-2">如 AI 建議推進漏斗階段：</p>
+              <StageAdvanceButton deal={deal} token={token} onAdvanced={onStageAdvanced} />
             </div>
           )}
         </div>
       )}
-    </div>
+    </CopilotRailShell>
   );
 }

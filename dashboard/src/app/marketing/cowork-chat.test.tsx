@@ -136,7 +136,7 @@ describe("CoworkChatSheet", () => {
     });
   });
 
-  it("shows apply button for structured output and writes back", async () => {
+  it("auto-applies structured output and writes back", async () => {
     mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: "capability_check", capability: { mcpOk: true, skillsLoaded: ["/marketing-plan"] } });
       onEvent({
@@ -148,13 +148,11 @@ describe("CoworkChatSheet", () => {
     });
     const { onApply } = renderSheet();
     fireEvent.click(screen.getByText("開始討論"));
-    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
-    expect(screen.getByText("語氣")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("套用到欄位"));
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
   });
 
-  it("allows summarizing the conversation into a structured result", async () => {
+  it("allows summarizing the conversation into a structured result and auto-applies", async () => {
+    const { onApply } = renderSheet();
     mockStreamCoworkChat
       .mockImplementationOnce(async ({ onEvent }) => {
         onEvent({ type: "capability_check", capability: { mcpOk: true, skillsLoaded: ["/marketing-plan"] } });
@@ -170,11 +168,10 @@ describe("CoworkChatSheet", () => {
         onEvent({ type: "done", requestId: "req-2", code: 0 });
       });
 
-    renderSheet();
     fireEvent.click(screen.getByText("開始討論"));
     await waitFor(() => expect(screen.getByText("整理結果")).toBeInTheDocument());
     fireEvent.click(screen.getByText("整理結果"));
-    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
     expect(mockStreamCoworkChat).toHaveBeenCalledTimes(2);
   });
 
@@ -186,7 +183,7 @@ describe("CoworkChatSheet", () => {
     expect(screen.getByText("已載入上下文清單")).toBeInTheDocument();
   });
 
-  it("detects conflict before apply", async () => {
+  it("detects conflict during auto-apply", async () => {
     mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: "capability_check", capability: { mcpOk: true, skillsLoaded: ["/marketing-plan"] } });
       onEvent({
@@ -198,42 +195,30 @@ describe("CoworkChatSheet", () => {
     });
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     const onApply = vi.fn(async () => {});
+    const baseProps = {
+      campaignId: "proj-1" as string | null,
+      onError: vi.fn(),
+    };
+    const baseFieldContext = {
+      fieldId: "strategy" as const,
+      fieldLabel: "策略設定",
+      currentPhase: "strategy" as const,
+      suggestedSkill: "/marketing-plan",
+      projectSummary: "官網 Blog / 長期經營",
+      fieldValue: { audience: ["跑步新手"], tone: "直接" },
+      onApply,
+    };
+    // Render with conflictVersion v1 — baseline is captured on sheet open
     const { rerender } = render(
-      <CoworkChatSheet
-        campaignId="proj-1"
-        onError={vi.fn()}
-        fieldContext={{
-          fieldId: "strategy",
-          fieldLabel: "策略設定",
-          currentPhase: "strategy",
-          suggestedSkill: "/marketing-plan",
-          projectSummary: "官網 Blog / 長期經營",
-          fieldValue: { audience: ["跑步新手"], tone: "直接" },
-          conflictVersion: "v1",
-          onApply,
-        }}
-      />
+      <CoworkChatSheet {...baseProps} fieldContext={{ ...baseFieldContext, conflictVersion: "v1" }} />
     );
     fireEvent.click(screen.getByText("AI 討論（Beta）"));
-    fireEvent.click(screen.getByText("開始討論"));
-    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
+    // Simulate external update: conflictVersion changes to v2 while chat is open
     rerender(
-      <CoworkChatSheet
-        campaignId="proj-1"
-        onError={vi.fn()}
-        fieldContext={{
-          fieldId: "strategy",
-          fieldLabel: "策略設定",
-          currentPhase: "strategy",
-          suggestedSkill: "/marketing-plan",
-          projectSummary: "官網 Blog / 長期經營",
-          fieldValue: { audience: ["跑步新手"], tone: "直接" },
-          conflictVersion: "v2",
-          onApply,
-        }}
-      />
+      <CoworkChatSheet {...baseProps} fieldContext={{ ...baseFieldContext, conflictVersion: "v2" }} />
     );
-    fireEvent.click(screen.getByText("套用到欄位"));
+    fireEvent.click(screen.getByText("開始討論"));
+    // Auto-apply triggers → conflict detected (baseline v1 !== current v2) → window.confirm
     await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
     expect(onApply).not.toHaveBeenCalled();
   });
@@ -250,7 +235,7 @@ describe("CoworkChatSheet", () => {
     expect(mockStreamCoworkChat).toHaveBeenCalledTimes(2);
   });
 
-  it("shows retry action after writeback failure", async () => {
+  it("shows retry action after auto-apply writeback failure", async () => {
     mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: "capability_check", capability: { mcpOk: true, skillsLoaded: ["/marketing-plan"] } });
       onEvent({
@@ -282,11 +267,12 @@ describe("CoworkChatSheet", () => {
     );
     fireEvent.click(screen.getByText("AI 討論（Beta）"));
     fireEvent.click(screen.getByText("開始討論"));
-    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
-    fireEvent.click(screen.getByText("套用到欄位"));
+    // Auto-apply triggers, but onApply throws → error state
     await waitFor(() => {
-      expect(screen.getByText(/對話中斷或寫回失敗/)).toBeInTheDocument();
-      expect(screen.getByText("重試上一輪")).toBeInTheDocument();
+      expect(onApply).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("重試")).toBeInTheDocument();
     });
     expect(onError).toHaveBeenCalledWith("ZenOS write failed");
   });

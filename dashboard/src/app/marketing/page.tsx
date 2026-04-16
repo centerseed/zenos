@@ -105,7 +105,12 @@ import {
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-
+import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
+import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
+import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
+import { CopilotApplyPreview } from "@/components/ai/CopilotApplyPreview";
+import { useCopilotChat } from "@/lib/copilot/useCopilotChat";
+import type { CopilotEntryConfig } from "@/lib/copilot/types";
 type Campaign = MarketingProject;
 type CampaignGroup = MarketingProjectGroup;
 
@@ -1228,6 +1233,7 @@ function buildApplyChangePreview(field: FieldDiscussionConfig | undefined, paylo
   ].filter((item) => item.before !== item.after);
 }
 
+
 export function CoworkChatSheet({
   campaignId,
   onUseOutput,
@@ -1244,67 +1250,125 @@ export function CoworkChatSheet({
   const generateHelperToken = () =>
     `mk-${Math.random().toString(36).slice(2, 8)}${Math.random().toString(36).slice(2, 8)}`;
   const effectiveCampaignId = campaignId || "global";
-  const conversationScope = fieldContext?.fieldId || "general";
-  const startedStorageKey = `zenos.marketing.cowork.started.${effectiveCampaignId}.${conversationScope}`;
   const allowedOrigins = "https://zenos-naruvia.web.app";
   const helperInstallCommand = "curl -fsSL https://zenos-naruvia.web.app/installers/install-claude-code-helper-macos.sh | bash";
+
+  // Helper settings — localStorage management
   const [helperBaseUrl, setHelperBaseUrlState] = useState(getDefaultHelperBaseUrl());
   const [helperToken, setHelperTokenState] = useState(getDefaultHelperToken() || generateHelperToken());
   const [helperCwd, setHelperCwdState] = useState(getDefaultHelperCwd());
   const [helperModel, setHelperModelState] = useState(getDefaultHelperModel());
   const helperSecureStartCommand = `SAFE_WORKSPACE=$HOME/.zenos/claude-code-helper/workspace LOCAL_HELPER_TOKEN=${helperToken || "<your_token>"} ALLOWED_ORIGINS=${allowedOrigins} ~/.zenos/claude-code-helper/start-secure.sh`;
+
+  // Sheet open state
   const [open, setOpen] = useState(false);
-  const [prompt, setPrompt] = useState("");
-  const [checkingHealth, setCheckingHealth] = useState(false);
-  const [healthText, setHealthText] = useState("未檢查");
-  const [running, setRunning] = useState(false);
-  const [chatStatus, setChatStatus] = useState<ChatStatus>("idle");
-  const [requestId, setRequestId] = useState<string | null>(null);
-  const [logLines, setLogLines] = useState<string[]>([]);
-  const [streamingOutput, setStreamingOutput] = useState("");
-  const [capability, setCapability] = useState<CoworkCapabilityCheck | null>(null);
-  const [applyPayload, setApplyPayload] = useState<StructuredApplyPayload | null>(null);
-  const [missingApplyKeys, setMissingApplyKeys] = useState<string[]>([]);
-  const [lastSubmittedPrompt, setLastSubmittedPrompt] = useState("");
-  const [canRetry, setCanRetry] = useState(false);
-  const chatViewportRef = useRef<HTMLDivElement | null>(null);
-  const [hasStartedConversation, setHasStartedConversation] = useState(false);
+
+  // Diagnostics / setup guide state
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [showSetupGuide, setShowSetupGuide] = useState(false);
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [copiedInstall, setCopiedInstall] = useState(false);
   const [copiedSecureStart, setCopiedSecureStart] = useState(false);
-  const [showSetupGuide, setShowSetupGuide] = useState(false);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
-  const baselineConflictVersionRef = useRef<string | null>(null);
 
+  // Conflict detection
+  const baselineConflictVersionRef = useRef<string | null>(fieldContext?.conflictVersion || null);
+
+  const persistHelperSettings = () => {
+    setDefaultHelperBaseUrl(helperBaseUrl);
+    setDefaultHelperToken(helperToken);
+    setDefaultHelperCwd(helperCwd);
+    setDefaultHelperModel(helperModel);
+  };
+
+  // Build CopilotEntryConfig for this field context
+  const entry = useMemo((): CopilotEntryConfig | null => {
+    if (!fieldContext) {
+      // Freeform mode: create a minimal entry without apply
+      return {
+        intent_id: `marketing.freeform.${effectiveCampaignId}`,
+        title: "直接在 Web 跟 Claude Code CLI 討論",
+        mode: "chat",
+        launch_behavior: "manual",
+        session_policy: "scoped_resume",
+        scope: {
+          campaign_id: effectiveCampaignId,
+          scope_label: "自由對話",
+        },
+        context_pack: {},
+        write_targets: [],
+        build_prompt: (userInput) => userInput,
+      };
+    }
+    const contextPack = buildContextPack({
+      fieldId: fieldContext.fieldId,
+      currentPhase: fieldContext.currentPhase,
+      suggestedSkill: fieldContext.suggestedSkill,
+      projectSummary: fieldContext.projectSummary,
+      fieldValue: fieldContext.fieldValue,
+      relatedContext: fieldContext.relatedContext,
+    });
+    return {
+      intent_id: `marketing.${fieldContext.fieldId}.${effectiveCampaignId}`,
+      title: `討論這段：${fieldContext.fieldLabel}`,
+      mode: fieldContext.onApply ? "apply" : "chat",
+      launch_behavior: "manual",
+      session_policy: "scoped_resume",
+      suggested_skill: fieldContext.suggestedSkill,
+      scope: {
+        campaign_id: effectiveCampaignId,
+        scope_label: "像用 Claude Code 一樣直接聊；欄位背景已自動帶入。",
+      },
+      context_pack: contextPack,
+      write_targets: fieldContext.onApply ? [fieldContext.fieldId] : [],
+      build_prompt: (userInput) => buildDiscussionPrompt(fieldContext, userInput),
+      parse_structured_result: (raw) => {
+        const { payload } = parseStructuredApplyPayload(raw, fieldContext.fieldId);
+        if (!payload) return null;
+        return {
+          target: payload.targetField,
+          value: payload.value,
+        };
+      },
+      on_apply: fieldContext.onApply
+        ? async (result) => {
+            // Conflict detection
+            const baselineVersion = baselineConflictVersionRef.current;
+            const currentVersion = fieldContext.conflictVersion || null;
+            if (baselineVersion && currentVersion && baselineVersion !== currentVersion) {
+              const shouldOverwrite = window.confirm(
+                `${fieldContext.conflictLabel || fieldContext.fieldLabel} 在你對話期間已被其他來源更新。按「確定」覆蓋，按「取消」放棄套用。`
+              );
+              if (!shouldOverwrite) throw new Error("已放棄套用：衝突");
+            }
+            try {
+              await fieldContext.onApply!({
+                targetField: result.target as DiscussionFieldId,
+                value: result.value,
+              });
+              baselineConflictVersionRef.current = fieldContext.conflictVersion || baselineConflictVersionRef.current;
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : "套用失敗";
+              onError(msg);
+              throw err; // re-throw so useCopilotChat sets error state
+            }
+          }
+        : undefined,
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldContext, effectiveCampaignId]);
+
+  // Persist settings when entry changes (field switches)
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const started = window.localStorage.getItem(startedStorageKey) === "1";
-    setHasStartedConversation(started);
-  }, [startedStorageKey]);
+    persistHelperSettings();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [helperBaseUrl, helperToken, helperCwd, helperModel]);
 
-  useEffect(() => {
-    const el = chatViewportRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [logLines, streamingOutput]);
+  // Use the unified copilot hook
+  const chat = useCopilotChat(entry);
+  // Track last sent input for retry (empty string is valid when fieldContext provides prompt)
+  const lastSentInputRef = useRef<string>("");
 
-  useEffect(() => {
-    setLogLines([]);
-    setStreamingOutput("");
-    setApplyPayload(null);
-    setMissingApplyKeys([]);
-    setChatStatus("idle");
-    setRequestId(null);
-    setCanRetry(false);
-    baselineConflictVersionRef.current = fieldContext?.conflictVersion || null;
-  }, [effectiveCampaignId, conversationScope]);
-
-  useEffect(() => {
-    if (!open || healthText !== "未檢查") return;
-    void runHealthCheck();
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const conversationId = `marketing-${effectiveCampaignId}-${conversationScope}`;
+  // Context pack for display in diagnostics
   const contextPack = useMemo(
     () =>
       fieldContext
@@ -1319,708 +1383,362 @@ export function CoworkChatSheet({
         : null,
     [fieldContext]
   );
+
+  // Prompt preview for diagnostics
   const promptPreview = useMemo(() => {
     if (fieldContext) {
-      return buildDiscussionPrompt(fieldContext, prompt.trim());
+      return buildDiscussionPrompt(fieldContext, "");
     }
-    return prompt.trim() || "尚未輸入訊息";
-  }, [fieldContext, prompt]);
-  const statusText = {
-    idle: "等待輸入",
-    loading: "初始化中",
-    streaming: "AI 回覆中",
-    "awaiting-local-approval": "等待本機確認",
-    "apply-ready": "可套用",
-    applying: "寫回中",
-    error: "需要修復",
-  } as const;
+    return "自由對話模式";
+  }, [fieldContext]);
 
-  const updateConversationStarted = (started: boolean) => {
-    if (typeof window !== "undefined") {
-      if (started) {
-        window.localStorage.setItem(startedStorageKey, "1");
-      } else {
-        window.localStorage.removeItem(startedStorageKey);
-      }
+  // changePreview — buildApplyChangePreview adapter
+  const changePreview = useMemo(() => {
+    if (!fieldContext || !chat.structuredResult) return [];
+    const payload: StructuredApplyPayload | null = chat.structuredResult
+      ? { targetField: chat.structuredResult.target as DiscussionFieldId, value: chat.structuredResult.value }
+      : null;
+    return buildApplyChangePreview(fieldContext, payload);
+  }, [fieldContext, chat.structuredResult]);
+
+  // Summarize: send a special summarize prompt
+  const handleSummarize = useCallback(() => {
+    if (!fieldContext) return;
+    void chat.send(
+      `請根據目前對話整理成可直接套用到 ${fieldContext.fieldLabel} 的結構化結果。請先簡短總結，再輸出符合 target_field/value 契約的 JSON。`
+    );
+  }, [chat, fieldContext]);
+
+  // Auto-apply: when AI produces a structured result, automatically apply it
+  // so the user doesn't have to click "套用到欄位" manually.
+  useEffect(() => {
+    if (chat.status === "apply-ready" && chat.structuredResult && entry?.on_apply) {
+      void chat.apply();
     }
-    setHasStartedConversation(started);
-  };
+  }, [chat.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const persistHelperSettings = () => {
-    setDefaultHelperBaseUrl(helperBaseUrl);
-    setDefaultHelperToken(helperToken);
-    setDefaultHelperCwd(helperCwd);
-    setDefaultHelperModel(helperModel);
-  };
+  const isStreaming = chat.status === "loading" || chat.status === "streaming";
+  const isRunning = chat.status === "loading" || chat.status === "streaming" || chat.status === "applying";
 
-  const runHealthCheck = async () => {
-    setCheckingHealth(true);
-    persistHelperSettings();
-    const health = await checkCoworkHelperHealth(helperBaseUrl, helperToken);
-    if (!health) {
-      setCapability(null);
-      setHealthText("不可用：helper unavailable");
-      setCheckingHealth(false);
-      return;
-    }
-    setCapability(health.capability || null);
-    setHealthText(health.ok ? "可連線" : `不可用：${health.message || health.status}`);
-    setCheckingHealth(false);
-  };
+  // Capability check state — expose from chat
+  const capability = chat.capability;
+  const helperUnavailable = chat.connectorStatus === "disconnected";
+  const healthText =
+    chat.connectorStatus === "checking"
+      ? "檢查中"
+      : chat.connectorStatus === "connected"
+        ? "可連線"
+        : "不可用：helper unavailable";
 
-  const sendMessage = async (promptOverride?: string) => {
-    const promptInput = typeof promptOverride === "string" ? promptOverride : prompt;
-    const userPrompt = promptInput.trim();
-    if (running || (!userPrompt && !fieldContext)) return;
-    const effectivePrompt = fieldContext ? buildDiscussionPrompt(fieldContext, userPrompt) : userPrompt;
-    persistHelperSettings();
-    setPrompt("");
-    setLastSubmittedPrompt(userPrompt);
-    setCanRetry(true);
-    setRunning(true);
-    setChatStatus((prev) => nextChatStatus(prev, "send"));
-    setRequestId(null);
-    setStreamingOutput("");
-    setApplyPayload(null);
-    setMissingApplyKeys([]);
-    setLogLines((prev) => [...prev, `你：${userPrompt}`]);
+  const conversationId = `marketing-${effectiveCampaignId}-${fieldContext?.fieldId || "general"}`;
 
-    const runOnce = async (mode: "start" | "continue") => {
-      let collected = "";
-      let stderrCombined = "";
-      let exitCode: number | null = null;
-      await streamCoworkChat({
-        baseUrl: helperBaseUrl,
-        token: helperToken,
-        mode,
-        conversationId,
-        prompt: effectivePrompt,
-        model: helperModel,
-        cwd: helperCwd,
-        maxTurns: 8,
-        onEvent: (event: CoworkStreamEvent) => {
-          if ("requestId" in event && event.requestId && !requestId) setRequestId(event.requestId);
-          if (event.type === "capability_check") {
-            setCapability(event.capability);
-            if (!event.capability.mcpOk) {
-              setLogLines((prev) => [...prev, "系統：ZenOS 連線失敗，這輪仍可對話但無法讀寫資料。"]);
-            }
-            const missingSkills = event.capability.missingSkills || [];
-            if (missingSkills.length > 0) {
-              setLogLines((prev) => [...prev, `系統：部分 skill 未載入：${missingSkills.join(", ")}`]);
-            }
-            return;
-          }
-          if (event.type === "permission_request") {
-            setChatStatus((prev) => nextChatStatus(prev, "permission_request"));
-            setLogLines((prev) => [...prev, `系統：等待本機 terminal 確認 ${event.request.toolName}（${event.request.timeoutSeconds} 秒）`]);
-            return;
-          }
-          if (event.type === "permission_result") {
-            setLogLines((prev) => [...prev, `系統：${event.result.toolName} ${event.result.approved ? "已核准" : `已拒絕（${event.result.reason || "unknown"}）`}`]);
-            setChatStatus((prev) => nextChatStatus(prev, "permission_result"));
-            return;
-          }
-          if (event.type === "stderr") {
-            const text = event.text.trim();
-            if (text) {
-              stderrCombined += `${stderrCombined ? "\n" : ""}${text}`;
-              setLogLines((prev) => [...prev, `系統：${text}`]);
-            }
-            return;
-          }
-          if (event.type === "message") {
-            setChatStatus((prev) => nextChatStatus(prev, "message"));
-            const parsed = parseCoworkStreamLine(event.line);
-            if (parsed.delta) {
-              collected += parsed.delta;
-              setStreamingOutput(collected);
-              return;
-            }
-            if (parsed.debug) {
-              setLogLines((prev) => [...prev, `系統：${parsed.debug}`]);
-            }
-            return;
-          }
-          if (event.type === "done") {
-            if (typeof event.code === "number") {
-              exitCode = event.code;
-            }
-            if (collected.trim()) {
-              setLogLines((prev) => [...prev, `Claude：${collected.trim()}`]);
-              const { payload, missingKeys } = parseStructuredApplyPayload(collected.trim(), fieldContext?.fieldId);
-              if (payload && fieldContext?.onApply) {
-                setApplyPayload(payload);
-                setChatStatus((prev) => nextChatStatus(prev, "apply_available"));
-              } else {
-                setChatStatus((prev) => nextChatStatus(prev, "reset"));
-              }
-              if (missingKeys.length > 0) {
-                setMissingApplyKeys(missingKeys);
-                setLogLines((prev) => [...prev, `系統：結構化結果缺少鍵：${missingKeys.join(", ")}`]);
-              }
-              if (!payload) {
-                onUseOutput?.(collected.trim());
-              }
-            } else if (chatStatus !== "error") {
-              setChatStatus((prev) => nextChatStatus(prev, "reset"));
-            }
-          }
-          if (event.type === "error") {
-            setChatStatus((prev) => nextChatStatus(prev, "error"));
-            setLogLines((prev) => [...prev, `系統：${event.message}`]);
-          }
-        },
-      });
+  const diagnosticsNode = (
+    <div>
+      <div className="border-b border-border/30 bg-muted/10 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+            <span>會話 ID：{conversationId}</span>
+            {fieldContext && (
+              <Badge variant="outline" className="text-[10px]">
+                已載入 {fieldContext.fieldLabel} 背景
+              </Badge>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[11px]"
+              disabled={chat.connectorStatus === "checking"}
+              onClick={() => void chat.checkHealth()}
+            >
+              {chat.connectorStatus === "checking" ? "檢查中..." : "檢查 helper"}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[11px]"
+              onClick={() => setShowDiagnostics((v) => !v)}
+            >
+              {showDiagnostics ? "收起診斷" : "診斷與設定"}
+            </Button>
+          </div>
+        </div>
 
-      if (exitCode !== null && exitCode !== 0) {
-        throw new Error(stderrCombined || `Claude Code CLI exited with code ${exitCode}`);
-      }
-    };
-
-    try {
-      if (hasStartedConversation) {
-        try {
-          await runOnce("continue");
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (/not found|session/i.test(msg)) {
-            updateConversationStarted(false);
-            await runOnce("start");
-            updateConversationStarted(true);
-          } else {
-            throw err;
-          }
-        }
-      } else {
-        await runOnce("start");
-        updateConversationStarted(true);
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "呼叫 Claude Code CLI 失敗";
-       setChatStatus((prev) => nextChatStatus(prev, "error"));
-      setLogLines((prev) => [...prev, `系統：${msg}`]);
-      onError(msg);
-    } finally {
-      setRunning(false);
-      setStreamingOutput("");
-      setRequestId(null);
-    }
-  };
-
-  const handleCancel = async () => {
-    if (!requestId || !running) return;
-    try {
-      await cancelCoworkRequest({
-        baseUrl: helperBaseUrl,
-        token: helperToken,
-        requestId,
-      });
-      setLogLines((prev) => [...prev, "系統：已送出取消請求"]);
-      setChatStatus((prev) => nextChatStatus(prev, "cancel"));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "取消失敗";
-      setLogLines((prev) => [...prev, `系統：${msg}`]);
-      setChatStatus((prev) => nextChatStatus(prev, "error"));
-      onError(msg);
-    }
-  };
-
-  const handleApply = async () => {
-    if (!applyPayload || !fieldContext?.onApply) return;
-    try {
-      const baselineVersion = baselineConflictVersionRef.current;
-      const currentVersion = fieldContext.conflictVersion || null;
-      if (baselineVersion && currentVersion && baselineVersion !== currentVersion) {
-        const shouldOverwrite = window.confirm(
-          `${fieldContext.conflictLabel || fieldContext.fieldLabel} 在你對話期間已被其他來源更新。按「確定」覆蓋，按「取消」放棄套用。`
-        );
-        if (!shouldOverwrite) {
-          setLogLines((prev) => [...prev, `系統：已放棄套用，因為 ${fieldContext.fieldLabel} 發生衝突。`]);
-          setChatStatus((prev) => nextChatStatus(prev, "cancel"));
-          setApplyPayload(null);
-          return;
-        }
-      }
-      setChatStatus((prev) => nextChatStatus(prev, "apply_start"));
-      await fieldContext.onApply(applyPayload);
-      setLogLines((prev) => [...prev, `系統：已套用到 ${applyPayload.targetField}`]);
-      setApplyPayload(null);
-      setMissingApplyKeys([]);
-      baselineConflictVersionRef.current = fieldContext.conflictVersion || baselineConflictVersionRef.current;
-      setChatStatus((prev) => nextChatStatus(prev, "apply_done"));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "套用失敗";
-      setLogLines((prev) => [...prev, `系統：${msg}`]);
-      setChatStatus((prev) => nextChatStatus(prev, "error"));
-      onError(msg);
-    }
-  };
-
-  const helperUnavailable = healthText.startsWith("不可用");
-  const helperStatusTone = helperUnavailable
-    ? "border-destructive/30 bg-destructive/10 text-destructive"
-    : healthText === "可連線"
-      ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-      : "border-border/40 bg-background/70 text-muted-foreground";
-  const statusTone =
-    chatStatus === "error"
-      ? "border-destructive/30 bg-destructive/10 text-destructive"
-      : chatStatus === "apply-ready"
-        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-        : "border-border/40 bg-background/70 text-muted-foreground";
-  const changePreview = useMemo(() => buildApplyChangePreview(fieldContext, applyPayload), [fieldContext, applyPayload]);
-  const canSummarize = !running && (logLines.length > 0 || hasStartedConversation);
-
-  return (
-    <Sheet
-      open={open}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (nextOpen) {
-          baselineConflictVersionRef.current = fieldContext?.conflictVersion || null;
-        } else {
-          setChatStatus((prev) => nextChatStatus(prev, "reset"));
-          setApplyPayload(null);
-          setMissingApplyKeys([]);
-          setPrompt("");
-          setStreamingOutput("");
-          setCanRetry(false);
-        }
-      }}
-    >
-      <SheetTrigger
-        render={
-          <Button size="sm" variant="outline" className="h-7 gap-1.5 text-[11px]">
-            <PlugZap className="h-3.5 w-3.5" />
-            {launcherLabel}
-          </Button>
-        }
-      />
-      <SheetContent side="right" className="w-full p-0 sm:max-w-3xl">
-        <div className="flex h-full flex-col bg-background">
-          <SheetHeader className="border-b border-border/40 px-4 py-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <SheetTitle>{fieldContext ? `討論這段：${fieldContext.fieldLabel}` : "直接在 Web 跟 Claude Code CLI 討論"}</SheetTitle>
-                <SheetDescription>
-                  {fieldContext ? "像用 Claude Code 一樣直接聊；欄位背景已自動帶入。" : "主體就是對話，設定只在需要時再展開。"}
-                </SheetDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className={`text-[10px] ${statusTone}`}>
-                  Claude Code：{statusText[chatStatus]}
-                </Badge>
-                <Badge variant="outline" className={`text-[10px] ${helperStatusTone}`}>
-                  helper：{healthText}
-                </Badge>
-                <Badge variant="outline" className="text-[10px]">
-                  rules {REDACTION_RULES_VERSION}
-                </Badge>
-              </div>
+        {helperUnavailable && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
+            <span>helper 目前不可用。先啟動本機 helper，再回來繼續聊天。</span>
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(helperSecureStartCommand);
+                  setCopiedSecureStart(true);
+                  setTimeout(() => setCopiedSecureStart(false), 1200);
+                }}
+              >
+                {copiedSecureStart ? "已複製啟動指令" : "啟動 helper"}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-[11px]"
+                onClick={() => {
+                  setShowSetupGuide(true);
+                  setShowDiagnostics(true);
+                }}
+              >
+                看設定
+              </Button>
             </div>
-          </SheetHeader>
+          </div>
+        )}
 
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="border-b border-border/30 bg-muted/10 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                  <span>會話 ID：{conversationId}</span>
-                  {fieldContext && (
-                    <Badge variant="outline" className="text-[10px]">
-                      已載入 {fieldContext.fieldLabel} 背景
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    disabled={checkingHealth}
-                    onClick={runHealthCheck}
-                  >
-                    {checkingHealth ? "檢查中..." : "檢查 helper"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-[11px]"
-                    onClick={() => setShowDiagnostics((v) => !v)}
-                  >
-                    {showDiagnostics ? "收起診斷" : "診斷與設定"}
-                  </Button>
-                </div>
+        {capability && (
+          <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
+            {!capability.mcpOk && (
+              <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+                ZenOS 連線失敗，這輪只能對話不能寫回
               </div>
+            )}
+            {capability.missingSkills && capability.missingSkills.length > 0 && (
+              <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+                缺 skill：{capability.missingSkills.join(", ")}
+              </div>
+            )}
+            <div className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1 text-muted-foreground">
+              已載入 skill：{capability.skillsLoaded.length > 0 ? capability.skillsLoaded.join(", ") : "未偵測到"}
+            </div>
+          </div>
+        )}
 
-              {helperUnavailable && (
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-[11px] text-destructive">
-                  <span>helper 目前不可用。先啟動本機 helper，再回來繼續聊天。</span>
-                  <div className="flex items-center gap-2">
+        <details className="mt-3 rounded-xl border border-border/30 bg-background/70 p-3">
+          <summary className="cursor-pointer text-xs font-medium text-foreground">查看這輪帶入的 prompt / context</summary>
+          <div className="mt-3 grid gap-3">
+            {contextPack && (
+              <div className="rounded-lg border border-border/30 bg-background/70 p-3">
+                <div className="mb-2 text-[11px] font-medium text-foreground">已載入上下文清單</div>
+                <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                  {JSON.stringify(contextPack, null, 2)}
+                </pre>
+              </div>
+            )}
+            <div className="rounded-lg border border-border/30 bg-background/70 p-3">
+              <div className="mb-2 text-[11px] font-medium text-foreground">Prompt 預覽</div>
+              <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{promptPreview}</pre>
+            </div>
+          </div>
+        </details>
+
+        {showDiagnostics && (
+          <div className="mt-3 space-y-3 rounded-xl border border-border/40 bg-card/60 p-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-medium text-foreground">診斷與設定</div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => setShowSetupGuide((v) => !v)}
+              >
+                {showSetupGuide ? "收起首次設定" : "首次設定"}
+              </Button>
+            </div>
+
+            {showSetupGuide && (
+              <div className="space-y-2 text-[11px]">
+                <div className="rounded border border-border/30 bg-background/70 p-2">
+                  <div className="mb-1 text-muted-foreground">1. 一鍵安裝 helper</div>
+                  <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperInstallCommand}</code>
+                  <div className="mt-2 flex justify-end">
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-7 text-[11px]"
+                      className="h-6 px-2 text-[10px]"
+                      onClick={async () => {
+                        await navigator.clipboard.writeText(helperInstallCommand);
+                        setCopiedInstall(true);
+                        setTimeout(() => setCopiedInstall(false), 1200);
+                      }}
+                    >
+                      {copiedInstall ? "已複製" : "複製安裝指令"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="rounded border border-border/30 bg-background/70 p-2">
+                  <div className="mb-1 text-muted-foreground">2. 設定 token 並啟動 helper</div>
+                  <input
+                    value={helperToken}
+                    onChange={(e) => setHelperTokenState(e.target.value)}
+                    placeholder="貼一組 token（例如公司提供給你的）"
+                    className="mb-2 h-8 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                  />
+                  <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperSecureStartCommand}</code>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    token 是這頁和你本機 helper 的配對碼；如果公司有預設值，直接貼上即可。
+                  </p>
+                  <div className="mt-2 flex justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[10px]"
+                      onClick={() => setHelperTokenState(generateHelperToken())}
+                    >
+                      產生新 token
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-[10px]"
                       onClick={async () => {
                         await navigator.clipboard.writeText(helperSecureStartCommand);
                         setCopiedSecureStart(true);
                         setTimeout(() => setCopiedSecureStart(false), 1200);
                       }}
                     >
-                      {copiedSecureStart ? "已複製啟動指令" : "啟動 helper"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 text-[11px]"
-                      onClick={() => {
-                        setShowSetupGuide(true);
-                        setShowDiagnostics(true);
-                      }}
-                    >
-                      看設定
+                      {copiedSecureStart ? "已複製" : "複製啟動指令"}
                     </Button>
                   </div>
                 </div>
-              )}
-
-              {capability && (
-                <div className="mt-3 flex flex-wrap gap-2 text-[11px]">
-                  {!capability.mcpOk && (
-                    <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
-                      ZenOS 連線失敗，這輪只能對話不能寫回
-                    </div>
-                  )}
-                  {capability.missingSkills && capability.missingSkills.length > 0 && (
-                    <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
-                      缺 skill：{capability.missingSkills.join(", ")}
-                    </div>
-                  )}
-                  <div className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1 text-muted-foreground">
-                    已載入 skill：{capability.skillsLoaded.length > 0 ? capability.skillsLoaded.join(", ") : "未偵測到"}
-                  </div>
-                </div>
-              )}
-
-              <details className="mt-3 rounded-xl border border-border/30 bg-background/70 p-3">
-                <summary className="cursor-pointer text-xs font-medium text-foreground">查看這輪帶入的 prompt / context</summary>
-                <div className="mt-3 grid gap-3">
-                  {contextPack && (
-                    <div className="rounded-lg border border-border/30 bg-background/70 p-3">
-                      <div className="mb-2 text-[11px] font-medium text-foreground">已載入上下文清單</div>
-                      <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                        {JSON.stringify(contextPack, null, 2)}
-                      </pre>
-                    </div>
-                  )}
-                  <div className="rounded-lg border border-border/30 bg-background/70 p-3">
-                    <div className="mb-2 text-[11px] font-medium text-foreground">Prompt 預覽</div>
-                    <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{promptPreview}</pre>
-                  </div>
-                </div>
-              </details>
-
-              {showDiagnostics && (
-                <div className="mt-3 space-y-3 rounded-xl border border-border/40 bg-card/60 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="text-xs font-medium text-foreground">診斷與設定</div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 px-2 text-[10px]"
-                      onClick={() => setShowSetupGuide((v) => !v)}
-                    >
-                      {showSetupGuide ? "收起首次設定" : "首次設定"}
-                    </Button>
-                  </div>
-
-                  {showSetupGuide && (
-                    <div className="space-y-2 text-[11px]">
-                      <div className="rounded border border-border/30 bg-background/70 p-2">
-                        <div className="mb-1 text-muted-foreground">1. 一鍵安裝 helper</div>
-                        <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperInstallCommand}</code>
-                        <div className="mt-2 flex justify-end">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-2 text-[10px]"
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(helperInstallCommand);
-                              setCopiedInstall(true);
-                              setTimeout(() => setCopiedInstall(false), 1200);
-                            }}
-                          >
-                            {copiedInstall ? "已複製" : "複製安裝指令"}
-                          </Button>
-                        </div>
-                      </div>
-                      <div className="rounded border border-border/30 bg-background/70 p-2">
-                        <div className="mb-1 text-muted-foreground">2. 設定 token 並啟動 helper</div>
-                        <input
-                          value={helperToken}
-                          onChange={(e) => setHelperTokenState(e.target.value)}
-                          placeholder="貼一組 token（例如公司提供給你的）"
-                          className="mb-2 h-8 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-                        />
-                        <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperSecureStartCommand}</code>
-                        <p className="mt-1 text-[10px] text-muted-foreground">
-                          token 是這頁和你本機 helper 的配對碼；如果公司有預設值，直接貼上即可。
-                        </p>
-                        <div className="mt-2 flex justify-end gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-2 text-[10px]"
-                            onClick={() => setHelperTokenState(generateHelperToken())}
-                          >
-                            產生新 token
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 px-2 text-[10px]"
-                            onClick={async () => {
-                              await navigator.clipboard.writeText(helperSecureStartCommand);
-                              setCopiedSecureStart(true);
-                              setTimeout(() => setCopiedSecureStart(false), 1200);
-                            }}
-                          >
-                            {copiedSecureStart ? "已複製" : "複製啟動指令"}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
-                    <label className="text-[11px] text-muted-foreground">模型</label>
-                    <select
-                      value={helperModel}
-                      onChange={(e) => setHelperModelState(e.target.value)}
-                      className="h-8 rounded-md border border-border/50 bg-background px-2 text-[11px] text-foreground outline-none focus:border-primary/50"
-                    >
-                      <option value="sonnet">Sonnet（預設）</option>
-                      <option value="opus">Opus</option>
-                      <option value="haiku">Haiku</option>
-                    </select>
-                  </div>
-
-                  <div className="flex items-center justify-between rounded border border-border/30 bg-background/70 px-2 py-1.5">
-                    <span className="text-[11px] text-muted-foreground">進階設定（URL / CWD）</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 px-2 text-[10px]"
-                      onClick={() => setShowAdvancedSettings((v) => !v)}
-                    >
-                      {showAdvancedSettings ? "收起" : "展開"}
-                    </Button>
-                  </div>
-
-                  {showAdvancedSettings && (
-                    <div className="grid gap-2">
-                      <input
-                        value={helperBaseUrl}
-                        onChange={(e) => setHelperBaseUrlState(e.target.value)}
-                        placeholder="Helper URL（預設 http://127.0.0.1:4317）"
-                        className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-                      />
-                      <input
-                        value={helperCwd}
-                        onChange={(e) => setHelperCwdState(e.target.value)}
-                        placeholder="專案路徑 cwd（選填）"
-                        className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-                      />
-                    </div>
-                  )}
-
-                </div>
-              )}
-            </div>
-
-            <div className="flex-1 overflow-hidden px-4 py-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div>
-                  <div className="text-sm font-medium text-foreground">對話紀錄</div>
-                  <div className="text-xs text-muted-foreground">這裡才是主要聊天區，Claude 的回覆會持續往下串流。</div>
-                </div>
-                <Badge variant="outline" className="text-[10px]">
-                  {running ? "串流中" : "待輸入"}
-                </Badge>
               </div>
-              <div
-                ref={chatViewportRef}
-                className="flex h-full min-h-[420px] flex-col gap-3 overflow-y-auto rounded-3xl border border-white/10 bg-black/20 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+            )}
+
+            <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
+              <label className="text-[11px] text-muted-foreground">模型</label>
+              <select
+                value={helperModel}
+                onChange={(e) => setHelperModelState(e.target.value)}
+                className="h-8 rounded-md border border-border/50 bg-background px-2 text-[11px] text-foreground outline-none focus:border-primary/50"
               >
-                {logLines.length === 0 ? (
-                  <div className="m-auto max-w-md text-center">
-                    <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
-                      <Bot className="h-5 w-5 text-foreground" />
-                    </div>
-                    <div className="text-sm font-medium text-foreground">直接開始聊，不用先填設定</div>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {fieldContext
-                        ? `已自動帶入 ${fieldContext.fieldLabel} 背景。你只要描述想改成什麼樣子。`
-                        : "把你的需求直接打進來，這裡會像 Claude Code 一樣串流回覆。"}
-                    </p>
-                  </div>
-                ) : (
-                  logLines.map((line, index) => {
-                    const isUser = line.startsWith("你：");
-                    const isAssistant = line.startsWith("Claude：");
-                    const content = line.replace(/^(你|Claude|系統)：\s*/, "");
-                    return (
-                      <div key={`${index}-${line.slice(0, 20)}`} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                        <div
-                          className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm shadow-sm ${
-                            isUser
-                              ? "border border-primary/25 bg-primary/15 text-primary-foreground"
-                              : isAssistant
-                                ? "border border-emerald-500/15 bg-emerald-500/8 text-foreground"
-                                : "border border-white/8 bg-white/5 text-muted-foreground"
-                          }`}
-                        >
-                          {content}
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-                {running && streamingOutput && (
-                  <div className="flex justify-start">
-                    <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl border border-emerald-500/15 bg-emerald-500/8 px-4 py-3 text-sm text-foreground">
-                      {streamingOutput}
-                      <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded bg-foreground/60 align-middle" />
-                    </div>
-                  </div>
-                )}
-              </div>
+                <option value="sonnet">Sonnet（預設）</option>
+                <option value="opus">Opus</option>
+                <option value="haiku">Haiku</option>
+              </select>
             </div>
 
-            <div className="border-t border-border/30 bg-background px-4 py-4">
-              <div className="mb-3">
-                <div className="text-sm font-medium text-foreground">輸入區</div>
-                <div className="text-xs text-muted-foreground">把你想調整的方向直接打在下面，再送出。</div>
-              </div>
-              {missingApplyKeys.length > 0 && (
-                <div className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                  結構化結果缺少鍵：{missingApplyKeys.join(", ")}
-                </div>
-              )}
-
-              {chatStatus === "error" && (
-                <div className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                  對話中斷或寫回失敗。可先修復 helper / 連線後，再重試上一輪。
-                </div>
-              )}
-
-              {applyPayload && chatStatus === "apply-ready" && (
-                <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-                  <div className="mb-2 text-xs font-medium text-foreground">可套用變更：{applyPayload.targetField}</div>
-                  {changePreview.length > 0 && (
-                    <div className="mb-3 grid gap-2">
-                      {changePreview.map((item) => (
-                        <div key={item.label} className="rounded-md border border-border/30 bg-background/70 p-2">
-                          <div className="mb-2 text-[11px] font-medium text-foreground">{item.label}</div>
-                          <div className="grid gap-2 sm:grid-cols-2">
-                            <div>
-                              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">目前</div>
-                              <div className="whitespace-pre-wrap rounded border border-border/20 bg-card/50 px-2 py-1.5 text-[11px] text-muted-foreground">
-                                {item.before}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">套用後</div>
-                              <div className="whitespace-pre-wrap rounded border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-[11px] text-foreground">
-                                {item.after}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                    {typeof applyPayload.value === "string" ? applyPayload.value : JSON.stringify(applyPayload.value, null, 2)}
-                  </pre>
-                </div>
-              )}
-
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                {fieldContext?.onApply ? (
-                  <div className="text-xs text-muted-foreground">AI 輸出結構化結果後，可直接套用到欄位。</div>
-                ) : onUseOutput ? (
-                  <div className="text-xs text-muted-foreground">回覆完成後會自動帶回呼叫端。</div>
-                ) : (
-                  <div className="text-xs text-muted-foreground">提示：進入活動後可把回覆直接帶回策略欄位。</div>
-                )}
-                <div className="text-xs text-muted-foreground">
-                  {fieldContext
-                    ? `現在在聊：${fieldContext.fieldLabel}`
-                    : "自由對話模式"}
-                </div>
-              </div>
-
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder={
-                  fieldContext
-                    ? `直接說你想怎麼改 ${fieldContext.fieldLabel}；背景已自動帶入`
-                    : "直接輸入你想跟 AI 討論的內容"
-                }
-                className="min-h-[120px] w-full rounded-3xl border border-border/50 bg-card/80 px-4 py-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
-              />
-
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs text-muted-foreground">
-                  {running ? "Claude 正在串流回覆" : "Enter 換行，按按鈕送出"}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {canSummarize && fieldContext && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() =>
-                        void sendMessage(
-                          `請根據目前對話整理成可直接套用到 ${fieldContext.fieldLabel} 的結構化結果。請先簡短總結，再輸出符合 target_field/value 契約的 JSON。`
-                        )
-                      }
-                    >
-                      整理結果
-                    </Button>
-                  )}
-                  {chatStatus === "error" && canRetry && (
-                    <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void sendMessage(lastSubmittedPrompt)}>
-                      重試上一輪
-                    </Button>
-                  )}
-                  {applyPayload && chatStatus === "apply-ready" && (
-                    <Button size="sm" className="h-8 text-xs" onClick={handleApply}>
-                      套用到欄位
-                    </Button>
-                  )}
-                  {running && (
-                    <Button size="sm" variant="outline" className="h-8 text-xs" onClick={handleCancel}>
-                      停止
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    className="h-8 text-xs"
-                    disabled={running || chatStatus === "applying" || (!fieldContext && !prompt.trim())}
-                    onClick={() => void sendMessage()}
-                  >
-                    {running ? "執行中..." : fieldContext ? "開始討論" : "送出"}
-                  </Button>
-                </div>
-              </div>
+            <div className="flex items-center justify-between rounded border border-border/30 bg-background/70 px-2 py-1.5">
+              <span className="text-[11px] text-muted-foreground">進階設定（URL / CWD）</span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 px-2 text-[10px]"
+                onClick={() => setShowAdvancedSettings((v) => !v)}
+              >
+                {showAdvancedSettings ? "收起" : "展開"}
+              </Button>
             </div>
+
+            {showAdvancedSettings && (
+              <div className="grid gap-2">
+                <input
+                  value={helperBaseUrl}
+                  onChange={(e) => setHelperBaseUrlState(e.target.value)}
+                  placeholder="Helper URL（預設 http://127.0.0.1:4317）"
+                  className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                />
+                <input
+                  value={helperCwd}
+                  onChange={(e) => setHelperCwdState(e.target.value)}
+                  placeholder="專案路徑 cwd（選填）"
+                  className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                />
+              </div>
+            )}
           </div>
-        </div>
-      </SheetContent>
-    </Sheet>
+        )}
+      </div>
+    </div>
+  );
+
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (nextOpen) {
+      baselineConflictVersionRef.current = fieldContext?.conflictVersion || null;
+    } else {
+      chat.reset();
+    }
+  };
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-7 gap-1.5 text-[11px]"
+        onClick={() => handleOpenChange(true)}
+      >
+        <PlugZap className="h-3.5 w-3.5" />
+        {launcherLabel}
+      </Button>
+      <CopilotRailShell
+        open={open}
+        onOpenChange={handleOpenChange}
+        entry={entry}
+        chatStatus={chat.status}
+        connectorStatus={chat.connectorStatus}
+        diagnostics={diagnosticsNode}
+        footer={
+          <div>
+            {chat.lastError && chat.status === "error" && (
+              <div className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+                對話中斷或寫回失敗。可先修復 helper / 連線後，再重試上一輪。
+              </div>
+            )}
+
+            {chat.structuredResult && chat.status === "apply-ready" && (
+              <div className="mb-3">
+                <CopilotApplyPreview
+                  result={chat.structuredResult}
+                  changePreview={changePreview}
+                  missingKeys={chat.missingKeys}
+                />
+              </div>
+            )}
+
+            <CopilotInputBar
+              status={chat.status}
+              onSend={(input) => {
+                persistHelperSettings();
+                lastSentInputRef.current = input;
+                void chat.send(input);
+              }}
+              onCancel={() => void chat.cancel()}
+              onRetry={() => void chat.retry()}
+              onApply={entry?.on_apply ? () => void chat.apply() : undefined}
+              onSummarize={fieldContext ? handleSummarize : undefined}
+              hasStructuredResult={!!chat.structuredResult}
+              sendLabel={fieldContext ? "開始討論" : "送出"}
+              canSendEmpty={!!fieldContext}
+              placeholder={
+                fieldContext
+                  ? `直接說你想怎麼改 ${fieldContext.fieldLabel}；背景已自動帶入`
+                  : "直接輸入你想跟 AI 討論的內容"
+              }
+              extraActions={
+                chat.status === "error" ? (
+                  <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => void chat.send(lastSentInputRef.current)}>
+                    重試上一輪
+                  </Button>
+                ) : undefined
+              }
+            />
+          </div>
+        }
+      >
+        <CopilotChatViewport
+          messages={chat.messages}
+          streamingText={chat.streamingText}
+          isStreaming={isStreaming}
+          emptyStateTitle="直接開始聊，不用先填設定"
+          emptyStateDescription={
+            fieldContext
+              ? `已自動帶入 ${fieldContext.fieldLabel} 背景。你只要描述想改成什麼樣子。`
+              : "把你的需求直接打進來，這裡會像 Claude Code 一樣串流回覆。"
+          }
+        />
+      </CopilotRailShell>
+    </>
   );
 }
 
