@@ -2,44 +2,26 @@
  * API layer — all data fetching goes through the ZenOS REST API.
  * Replaces direct Firestore SDK calls. All functions require a Firebase ID token.
  */
-import type { Entity, Relationship, Blindspot, Task, TaskComment, Partner, QualitySignals, ImpactChainHop } from "@/types";
+import type { BundleHighlight, Entity, Relationship, Blindspot, Task, TaskComment, Partner, QualitySignals, ImpactChainHop } from "@/types";
 import { getPartnerWorkspaceRole } from "@/lib/partner";
+import {
+  API_BASE,
+  apiRequest,
+  hydrateDateFields,
+  setActiveWorkspaceId,
+} from "@/lib/api-client";
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_MCP_API_URL ||
-  "https://zenos-mcp-165893875709.asia-east1.run.app";
-
-const ACTIVE_WORKSPACE_STORAGE_KEY = "zenos.activeWorkspaceId";
+export { API_BASE, setActiveWorkspaceId };
 
 const DATE_FIELDS = new Set([
   "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
-  "summaryUpdatedAt",
+  "summaryUpdatedAt", "highlightsUpdatedAt",
+  "summary_updated_at", "highlights_updated_at", "last_published_at",
 ]);
-
-function getStoredActiveWorkspaceId(): string | null {
-  if (typeof window === "undefined") return null;
-  const storage = window.localStorage;
-  if (!storage || typeof storage.getItem !== "function") return null;
-  return storage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-}
 
 /** Recursively convert ISO date strings to Date objects in-place */
 function hydrateDates<T>(obj: T): T {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) {
-    obj.forEach(hydrateDates);
-    return obj;
-  }
-  if (typeof obj === "object") {
-    for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-      if (DATE_FIELDS.has(key) && typeof val === "string") {
-        (obj as Record<string, unknown>)[key] = new Date(val);
-      } else if (val !== null && typeof val === "object") {
-        hydrateDates(val);
-      }
-    }
-  }
-  return obj;
+  return hydrateDateFields(obj, DATE_FIELDS);
 }
 
 async function apiFetch<T>(
@@ -47,16 +29,10 @@ async function apiFetch<T>(
   token: string,
   options?: { cache?: RequestCache }
 ): Promise<T> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...(options?.cache ? { cache: options.cache } : {}),
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    },
+  const data = await apiRequest<T>(path, {
+    cache: options?.cache,
+    token,
   });
-  if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
-  const data = await res.json();
   return hydrateDates(data) as T;
 }
 
@@ -114,13 +90,14 @@ function normalizePartner(data: Record<string, unknown>): Partner {
   }) as unknown as Partner;
 }
 
-export function setActiveWorkspaceId(workspaceId: string | null): void {
-  if (typeof window === "undefined") return;
-  if (!workspaceId) {
-    window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-    return;
+function unwrapTaskPayload(payload: { task?: Task } | Task): Task {
+  if ("id" in payload) {
+    return payload;
   }
-  window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
+  if (payload.task) {
+    return payload.task;
+  }
+  throw new Error("Task payload missing task");
 }
 
 /** Fetch all product entities */
@@ -168,6 +145,10 @@ export interface DocumentDeliveryResponse {
     visibility: Entity["visibility"];
     sources: Entity["sources"];
     doc_role?: "single" | "index" | null;
+    bundle_highlights?: BundleHighlight[];
+    highlights_updated_at?: Date | null;
+    change_summary?: string | null;
+    summary_updated_at?: Date | null;
     canonical_path?: string | null;
     primary_snapshot_revision_id?: string | null;
     last_published_at?: Date | null;
@@ -211,40 +192,44 @@ export async function publishDocumentSnapshot(
   token: string,
   docId: string
 ): Promise<{ revision_id: string; canonical_path: string } | null> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const res = await fetch(`${API_BASE}/api/docs/${docId}/publish`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    },
-  });
-  if (!res.ok) return null;
-  return hydrateDates(await res.json());
+  try {
+    const result = await apiRequest<{ revision_id: string; canonical_path: string }>(
+      `/api/docs/${docId}/publish`,
+      {
+        method: "POST",
+        token,
+      }
+    );
+    return hydrateDates(result);
+  } catch {
+    return null;
+  }
 }
 
 export async function saveDocumentMarkdown(
   token: string,
   docId: string,
   content: string,
-  opts?: { source_id?: string; source_version_ref?: string }
+  opts: { base_revision_id: string; source_id?: string; source_version_ref?: string }
 ): Promise<{ revision_id: string; canonical_path: string } | null> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const res = await fetch(`${API_BASE}/api/docs/${docId}/content`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    },
-    body: JSON.stringify({
-      content,
-      ...(opts?.source_id ? { source_id: opts.source_id } : {}),
-      ...(opts?.source_version_ref ? { source_version_ref: opts.source_version_ref } : {}),
-    }),
-  });
-  if (!res.ok) return null;
-  return hydrateDates(await res.json());
+  try {
+    const result = await apiRequest<{ revision_id: string; canonical_path: string }>(
+      `/api/docs/${docId}/content`,
+      {
+        json: {
+          base_revision_id: opts.base_revision_id,
+          content,
+          ...(opts?.source_id ? { source_id: opts.source_id } : {}),
+          ...(opts?.source_version_ref ? { source_version_ref: opts.source_version_ref } : {}),
+        },
+        method: "POST",
+        token,
+      }
+    );
+    return hydrateDates(result);
+  } catch {
+    return null;
+  }
 }
 
 export async function updateDocumentVisibility(
@@ -252,18 +237,19 @@ export async function updateDocumentVisibility(
   docId: string,
   visibility: Entity["visibility"]
 ): Promise<{ visibility: Entity["visibility"]; warnings?: string[] } | null> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const res = await fetch(`${API_BASE}/api/docs/${docId}/access`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    },
-    body: JSON.stringify({ visibility }),
-  });
-  if (!res.ok) return null;
-  return hydrateDates(await res.json());
+  try {
+    const result = await apiRequest<{ visibility: Entity["visibility"]; warnings?: string[] }>(
+      `/api/docs/${docId}/access`,
+      {
+        json: { visibility },
+        method: "PATCH",
+        token,
+      }
+    );
+    return hydrateDates(result);
+  } catch {
+    return null;
+  }
 }
 
 export async function createDocumentShareLink(
@@ -271,41 +257,52 @@ export async function createDocumentShareLink(
   docId: string,
   opts?: { expires_in_hours?: number; max_access_count?: number }
 ): Promise<{ token_id: string; share_url: string; expires_at: Date } | null> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const res = await fetch(`${API_BASE}/api/docs/${docId}/share-links`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    },
-    body: JSON.stringify(opts ?? {}),
-  });
-  if (!res.ok) return null;
-  return hydrateDates(await res.json());
+  try {
+    const result = await apiRequest<{ token_id: string; share_url: string; expires_at: Date }>(
+      `/api/docs/${docId}/share-links`,
+      {
+        json: opts ?? {},
+        method: "POST",
+        token,
+      }
+    );
+    return hydrateDates(result);
+  } catch {
+    return null;
+  }
 }
 
 export async function revokeDocumentShareLink(
   token: string,
   tokenId: string
 ): Promise<boolean> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const res = await fetch(`${API_BASE}/api/docs/share-links/${tokenId}`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    },
-  });
-  return res.ok;
+  try {
+    await apiRequest(`/api/docs/share-links/${tokenId}`, {
+      method: "DELETE",
+      responseType: "void",
+      token,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getSharedDocumentByToken(
   token: string
 ): Promise<{ doc: { id: string; name: string }; content: string } | null> {
-  const res = await fetch(`${API_BASE}/s/${encodeURIComponent(token)}`);
-  if (!res.ok) return null;
-  return hydrateDates(await res.json());
+  try {
+    const result = await apiRequest<{ doc: { id: string; name: string }; content: string }>(
+      `/s/${encodeURIComponent(token)}`,
+      {
+        retryWithSameOrigin: true,
+        useWorkspace: false,
+      }
+    );
+    return hydrateDates(result);
+  } catch {
+    return null;
+  }
 }
 
 /** Fetch child entities of a parent */
@@ -421,18 +418,14 @@ export async function updatePreferences(
   token: string,
   patch: import("@/types").PartnerPreferences,
 ): Promise<import("@/types").PartnerPreferences> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const res = await fetch(`${API_BASE}/api/partner/preferences`, {
-    method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    },
-    body: JSON.stringify(patch),
-  });
-  if (!res.ok) throw new Error(`API /api/partner/preferences: ${res.status}`);
-  const data = await res.json();
+  const data = await apiRequest<{ preferences: import("@/types").PartnerPreferences }>(
+    "/api/partner/preferences",
+    {
+      json: patch,
+      method: "PATCH",
+      token,
+    }
+  );
   return data.preferences ?? {};
 }
 
@@ -441,25 +434,76 @@ export async function getPartners(token: string): Promise<Partner[]> {
   return (res.partners ?? []).map((partner) => normalizePartner(partner as unknown as Record<string, unknown>));
 }
 
+export async function activatePartner(token: string): Promise<void> {
+  await apiRequest("/api/partners/activate", {
+    method: "POST",
+    responseType: "void",
+    token,
+  });
+}
+
+export async function invitePartner(
+  token: string,
+  data: {
+    email: string;
+    department: string;
+    workspace_role?: "member" | "guest";
+    accessMode?: Partner["accessMode"];
+    access_mode?: Partner["accessMode"];
+    authorized_entity_ids?: string[];
+  }
+): Promise<void> {
+  await apiRequest("/api/partners/invite", {
+    json: data,
+    method: "POST",
+    responseType: "void",
+    token,
+  });
+}
+
+export async function deletePartner(token: string, partnerId: string): Promise<void> {
+  await apiRequest(`/api/partners/${partnerId}`, {
+    method: "DELETE",
+    responseType: "void",
+    token,
+  });
+}
+
+export async function updatePartnerStatus(
+  token: string,
+  partnerId: string,
+  status: "active" | "suspended"
+): Promise<void> {
+  await apiRequest(`/api/partners/${partnerId}/status`, {
+    json: { status },
+    method: "PUT",
+    responseType: "void",
+    token,
+  });
+}
+
 export async function updatePartnerScope(
   token: string,
   partnerId: string,
-  data: { roles: string[]; department: string; accessMode?: Partner["accessMode"]; authorizedEntityIds?: string[] }
+  data: {
+    roles: string[];
+    department: string;
+    workspaceRole?: "member" | "guest";
+    accessMode?: Partner["accessMode"];
+    authorizedEntityIds?: string[];
+  }
 ): Promise<Partner> {
-  const res = await fetch(`${API_BASE}/api/partners/${partnerId}/scope`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const result = await apiRequest<Record<string, unknown>>(`/api/partners/${partnerId}/scope`, {
+    json: {
       ...data,
+      workspace_role: data.workspaceRole,
       access_mode: data.accessMode,
       authorized_entity_ids: data.authorizedEntityIds,
-    }),
+    },
+    method: "PUT",
+    token,
   });
-  if (!res.ok) throw new Error(`API /api/partners/${partnerId}/scope: ${res.status}`);
-  return normalizePartner(await res.json() as Record<string, unknown>);
+  return normalizePartner(result);
 }
 
 export async function getDepartments(token: string): Promise<string[]> {
@@ -468,43 +512,34 @@ export async function getDepartments(token: string): Promise<string[]> {
 }
 
 export async function createDepartment(token: string, name: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/api/departments`, {
+  const data = await apiRequest<{ departments: string[] }>("/api/departments", {
+    json: { name },
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ name }),
+    token,
   });
-  if (!res.ok) throw new Error(`API /api/departments: ${res.status}`);
-  const data = await res.json();
   return data.departments ?? [];
 }
 
 export async function renameDepartment(token: string, currentName: string, nextName: string): Promise<string[]> {
-  const res = await fetch(`${API_BASE}/api/departments/${encodeURIComponent(currentName)}`, {
-    method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ name: nextName }),
-  });
-  if (!res.ok) throw new Error(`API /api/departments/${currentName}: ${res.status}`);
-  const data = await res.json();
+  const data = await apiRequest<{ departments: string[] }>(
+    `/api/departments/${encodeURIComponent(currentName)}`,
+    {
+      json: { name: nextName },
+      method: "PUT",
+      token,
+    }
+  );
   return data.departments ?? [];
 }
 
 export async function deleteDepartment(token: string, name: string, fallback = "all"): Promise<string[]> {
-  const res = await fetch(
-    `${API_BASE}/api/departments/${encodeURIComponent(name)}?fallback=${encodeURIComponent(fallback)}`,
+  const data = await apiRequest<{ departments: string[] }>(
+    `/api/departments/${encodeURIComponent(name)}?fallback=${encodeURIComponent(fallback)}`,
     {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
+      token,
     }
   );
-  if (!res.ok) throw new Error(`API /api/departments/${name}: ${res.status}`);
-  const data = await res.json();
   return data.departments ?? [];
 }
 
@@ -518,15 +553,12 @@ export async function updateEntityVisibility(
     visible_to_departments?: string[];
   }
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/entities/${entityId}/visibility`, {
+  await apiRequest(`/api/entities/${entityId}/visibility`, {
+    json: data,
     method: "PUT",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data),
+    responseType: "void",
+    token,
   });
-  if (!res.ok) throw new Error(`API /api/entities/${entityId}/visibility: ${res.status}`);
 }
 
 /** Request a signed upload URL for a task attachment */
@@ -535,16 +567,14 @@ export async function uploadTaskAttachment(
   taskId: string,
   data: { filename: string; content_type: string; description?: string }
 ): Promise<{ attachment_id: string; proxy_url: string; signed_put_url: string }> {
-  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/attachments`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data),
-  });
-  if (!res.ok) throw new Error(`Upload attachment failed: ${res.status}`);
-  return res.json();
+  return apiRequest<{ attachment_id: string; proxy_url: string; signed_put_url: string }>(
+    `/api/data/tasks/${taskId}/attachments`,
+    {
+      json: data,
+      method: "POST",
+      token,
+    }
+  );
 }
 
 /** Upload file directly to GCS using a signed PUT URL */
@@ -566,16 +596,11 @@ export async function addLinkAttachment(
   taskId: string,
   data: { url: string; filename?: string; description?: string }
 ): Promise<{ attachment_id: string }> {
-  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/attachments`, {
+  return apiRequest<{ attachment_id: string }>(`/api/data/tasks/${taskId}/attachments`, {
+    json: { type: "link", ...data },
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ type: "link", ...data }),
+    token,
   });
-  if (!res.ok) throw new Error(`Add link attachment failed: ${res.status}`);
-  return res.json();
 }
 
 /** Fetch quality signals: search_unused and summary_poor flags */
@@ -604,17 +629,12 @@ export async function createTask(
     project?: string;
   }
 ): Promise<Task> {
-  const res = await fetch(`${API_BASE}/api/data/tasks`, {
+  const body = await apiRequest<{ task?: Task } | Task>("/api/data/tasks", {
+    json: data,
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data),
+    token,
   });
-  if (!res.ok) throw new Error(`Create task failed: ${res.status}`);
-  const body = await res.json();
-  return hydrateDates(body.task ?? body) as Task;
+  return hydrateDates(unwrapTaskPayload(body)) as Task;
 }
 
 /** Update an existing task (partial update) */
@@ -631,17 +651,12 @@ export async function updateTask(
     result?: string;
   }
 ): Promise<Task> {
-  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}`, {
+  const body = await apiRequest<{ task?: Task } | Task>(`/api/data/tasks/${taskId}`, {
+    json: updates,
     method: "PATCH",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(updates),
+    token,
   });
-  if (!res.ok) throw new Error(`Update task failed: ${res.status}`);
-  const body = await res.json();
-  return hydrateDates(body.task ?? body) as Task;
+  return hydrateDates(unwrapTaskPayload(body)) as Task;
 }
 
 /** Confirm a task (approve or reject) */
@@ -653,17 +668,12 @@ export async function confirmTask(
     rejection_reason?: string;
   }
 ): Promise<Task> {
-  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/confirm`, {
+  const body = await apiRequest<{ task?: Task } | Task>(`/api/data/tasks/${taskId}/confirm`, {
+    json: data,
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(data),
+    token,
   });
-  if (!res.ok) throw new Error(`Confirm task failed: ${res.status}`);
-  const body = await res.json();
-  return hydrateDates(body.task ?? body) as Task;
+  return hydrateDates(unwrapTaskPayload(body)) as Task;
 }
 
 /** Fetch comments for a task */
@@ -683,16 +693,11 @@ export async function getTaskComments(token: string, taskId: string): Promise<Ta
 
 /** Create a comment on a task */
 export async function createTaskComment(token: string, taskId: string, content: string): Promise<TaskComment> {
-  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/comments`, {
+  const body = await apiRequest<{ comment: Record<string, string> }>(`/api/data/tasks/${taskId}/comments`, {
+    json: { content },
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ content }),
+    token,
   });
-  if (!res.ok) throw new Error(`Create comment failed: ${res.status}`);
-  const body = await res.json();
   const c = body.comment;
   return hydrateDates({
     id: c.id,
@@ -706,11 +711,11 @@ export async function createTaskComment(token: string, taskId: string, content: 
 
 /** Delete a task comment */
 export async function deleteTaskComment(token: string, taskId: string, commentId: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/data/tasks/${taskId}/comments/${commentId}`, {
+  await apiRequest(`/api/data/tasks/${taskId}/comments/${commentId}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${token}` },
+    responseType: "void",
+    token,
   });
-  if (!res.ok) throw new Error(`Delete comment failed: ${res.status}`);
 }
 
 /** Delete a task attachment */
@@ -719,12 +724,9 @@ export async function deleteTaskAttachment(
   taskId: string,
   attachmentId: string
 ): Promise<void> {
-  const res = await fetch(
-    `${API_BASE}/api/data/tasks/${taskId}/attachments/${attachmentId}`,
-    {
-      method: "DELETE",
-      headers: { Authorization: `Bearer ${token}` },
-    }
-  );
-  if (!res.ok) throw new Error(`Delete attachment failed: ${res.status}`);
+  await apiRequest(`/api/data/tasks/${taskId}/attachments/${attachmentId}`, {
+    method: "DELETE",
+    responseType: "void",
+    token,
+  });
 }

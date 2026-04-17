@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import logging
 
+from zenos.infrastructure.github_adapter import GitHubAdapter
+from zenos.infrastructure.context import current_partner_id
+from zenos.infrastructure.sql_common import SCHEMA, get_pool
+
 from zenos.domain.knowledge import EntityEntry
 from zenos.infrastructure.context import (
     current_partner_department,
@@ -14,6 +18,7 @@ from zenos.interface.mcp._common import (
     _serialize,
     _new_id,
     _unified_response,
+    _error_response,
     _build_governance_hints,
     _build_context_bundle,
     _enrich_task_result,
@@ -25,6 +30,196 @@ from zenos.interface.mcp._visibility import (
 from zenos.interface.mcp._audit import _audit_log
 
 logger = logging.getLogger(__name__)
+
+
+def _payload_explicit_formal_entry(data: dict) -> bool:
+    if data.get("formal_entry") is not None:
+        return bool(data.get("formal_entry"))
+    details = data.get("details")
+    if isinstance(details, dict) and details.get("formal_entry") is not None:
+        return bool(details.get("formal_entry"))
+    return False
+
+
+def _payload_effective_status(data: dict) -> str:
+    return str(data.get("status") or "current").strip().lower()
+
+
+def _github_source_uris_from_payload(data: dict) -> list[str]:
+    uris: list[str] = []
+
+    source = data.get("source")
+    if isinstance(source, dict) and str(source.get("type") or "").strip().lower() == "github":
+        uri = str(source.get("uri") or "").strip()
+        if uri:
+            uris.append(uri)
+
+    sources = data.get("sources")
+    if isinstance(sources, list):
+        for src in sources:
+            if isinstance(src, dict) and str(src.get("type") or "").strip().lower() == "github":
+                uri = str(src.get("uri") or "").strip()
+                if uri:
+                    uris.append(uri)
+
+    for key in ("add_source", "update_source"):
+        src = data.get(key)
+        if isinstance(src, dict) and str(src.get("type") or "").strip().lower() == "github":
+            uri = str(src.get("uri") or "").strip()
+            if uri:
+                uris.append(uri)
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for uri in uris:
+        if uri not in seen:
+            seen.add(uri)
+            deduped.append(uri)
+    return deduped
+
+
+async def _check_github_source_remote_visibility(uri: str) -> tuple[bool, str, bool]:
+    """Check whether a GitHub source is remotely readable.
+
+    Returns:
+        (is_visible, message, hard_failure)
+        hard_failure=True means the source is definitively not shareable yet
+        (e.g. 404 / permission denied / invalid URI) and current formal-entry
+        writes should be rejected. Network/rate-limit uncertainty is soft.
+    """
+    try:
+        await GitHubAdapter().read_content(uri)
+        return True, "", False
+    except FileNotFoundError:
+        return False, f"GitHub source 尚未 remote 可見：{uri}", True
+    except PermissionError:
+        return False, f"GitHub source 目前無法被 ZenOS 讀取：{uri}", True
+    except ValueError as exc:
+        return False, f"GitHub source 無效：{exc}", True
+    except RuntimeError as exc:
+        return False, f"GitHub source remote 檢查暫時失敗：{exc}", False
+    except Exception as exc:
+        logger.warning("GitHub remote visibility check failed for %s", uri, exc_info=True)
+        return False, f"GitHub source remote 檢查失敗：{exc}", False
+
+
+async def _preflight_document_remote_visibility(data: dict) -> tuple[str | None, list[str]]:
+    """Reject explicit current formal-entry GitHub docs when remote is unavailable."""
+    if _payload_effective_status(data) != "current":
+        return None, []
+    if not _payload_explicit_formal_entry(data):
+        return None, []
+
+    warnings: list[str] = []
+    for uri in _github_source_uris_from_payload(data):
+        is_visible, message, hard_failure = await _check_github_source_remote_visibility(uri)
+        if is_visible:
+            continue
+        if message:
+            warnings.append(message)
+        if hard_failure:
+            return (
+                "current formal-entry 文件的 GitHub source 尚未 remote 可見；請先 push，或改走 git + gcs 交付",
+                warnings,
+            )
+    return None, warnings
+
+
+def _is_formal_entry_document(serialized: dict) -> bool:
+    details = serialized.get("details")
+    if isinstance(details, dict) and details.get("formal_entry") is not None:
+        return bool(details.get("formal_entry"))
+    parent_id = str(serialized.get("parent_id") or "").strip()
+    doc_role = str(serialized.get("doc_role") or "single").strip().lower()
+    return bool(parent_id) and doc_role == "index"
+
+
+async def _document_delivery_suggestions(serialized: dict) -> list[str]:
+    """Return delivery-mode suggestions for current formal-entry docs."""
+    doc_id = str(serialized.get("id") or "").strip()
+    if not doc_id:
+        return []
+    partner = _current_partner.get()
+    partner_id = str((partner or {}).get("id") or "").strip()
+    if not partner_id:
+        return []
+
+    status = str(serialized.get("status") or "").strip().lower()
+    sources = serialized.get("sources") or []
+    has_github_source = any(
+        isinstance(src, dict) and str(src.get("type") or "").strip().lower() == "github"
+        for src in sources
+    )
+    is_formal_entry = _is_formal_entry_document(serialized)
+    if status != "current" or not is_formal_entry:
+        return []
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT primary_snapshot_revision_id, delivery_status
+            FROM {SCHEMA}.entities
+            WHERE partner_id = $1 AND id = $2
+            """,
+            partner_id,
+            doc_id,
+        )
+
+    has_snapshot = bool(row and row["primary_snapshot_revision_id"])
+    suggestions: list[str] = []
+    if not has_snapshot:
+        suggestions.append("current formal-entry 文件建議採 git + gcs；請補 delivery snapshot")
+        if has_github_source:
+            suggestions.append("GitHub source 若尚未 remote 可見，正式入口不得停在 git only")
+    elif row and row["delivery_status"] == "stale":
+        suggestions.append("delivery snapshot 目前為 stale；建議重新 publish current formal-entry 文件")
+    return suggestions
+
+
+async def _maybe_auto_publish_document(serialized: dict) -> list[str]:
+    """Best-effort auto-publish for current formal-entry GitHub docs."""
+    doc_id = str(serialized.get("id") or "").strip()
+    if not doc_id:
+        return []
+
+    status = str(serialized.get("status") or "").strip().lower()
+    sources = serialized.get("sources") or []
+    has_github_source = any(
+        isinstance(src, dict) and str(src.get("type") or "").strip().lower() == "github"
+        for src in sources
+    )
+    is_formal_entry = _is_formal_entry_document(serialized)
+    if status != "current" or not is_formal_entry or not has_github_source:
+        return []
+
+    partner = _current_partner.get()
+    partner_id = current_partner_id.get() or str((partner or {}).get("id") or "").strip()
+    if not partner_id:
+        return []
+
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT primary_snapshot_revision_id
+            FROM {SCHEMA}.entities
+            WHERE partner_id = $1 AND id = $2
+            """,
+            partner_id,
+            doc_id,
+        )
+    if row and row["primary_snapshot_revision_id"]:
+        return []
+
+    try:
+        from zenos.interface.dashboard_api import _publish_document_snapshot_internal
+
+        await _publish_document_snapshot_internal(effective_id=partner_id, doc_id=doc_id)
+        return ["current formal-entry 文件已自動補上 delivery snapshot"]
+    except Exception:
+        logger.warning("Auto-publish failed for document %s", doc_id, exc_info=True)
+        return ["current formal-entry 文件應採 git + gcs，但自動 publish 失敗；請檢查 GitHub source 是否已 push 並可讀"]
 
 
 async def write(
@@ -68,14 +263,23 @@ async def write(
                       q1_persistent: bool — 持久性：是否為公司核心持久知識？（非臨時性、不隨 sprint 消失）
                       q2_cross_role: bool — 跨角色：是否跨角色共識？（不是某個人的個人筆記）
                       q3_company_consensus: bool — 全司共識：是否為經確認的公司知識？（在不同情境指向同一件事）
-                    — impacts 門檻（string，三問全 true 後獨立驗證）：
-                      impacts_draft: str — 具體影響描述，格式「A 改了什麼 → B 的什麼要跟著看」（至少 1 條）
+                    — impacts 門檻（三問全 true 後獨立驗證）：
+                      impacts_draft: str | list[str] — 具體影響描述，格式「A 改了什麼 → B 的什麼要跟著看」（至少 1 條）
                     — 正確：
                       layer_decision={
                         "q1_persistent": true,
                         "q2_cross_role": true,
                         "q3_company_consensus": true,
                         "impacts_draft": "A 改了什麼→B 的什麼要跟著看"
+                      }
+                      layer_decision={
+                        "q1_persistent": true,
+                        "q2_cross_role": true,
+                        "q3_company_consensus": true,
+                        "impacts_draft": [
+                          "A 改了什麼→B 的什麼要跟著看",
+                          "C 改了什麼→D 的什麼要跟著看"
+                        ]
                       }
                     — 錯誤（不要這樣傳）：
                       layer_decision="{\"q1_persistent\":true,...}"
@@ -142,7 +346,10 @@ async def write(
             if existing_entity:
                 auth_error = _check_write_visibility(existing_entity, data)
                 if auth_error:
-                    return auth_error
+                    return _error_response(
+                        error_code=str(auth_error.get("error", "FORBIDDEN")),
+                        message=str(auth_error.get("message", "Forbidden")),
+                    )
                 # Capture before-state for audit diff
                 _before_visibility = {
                     "visibility": getattr(existing_entity, "visibility", "public"),
@@ -221,6 +428,19 @@ async def write(
                     changes={"input": data},
                 )
                 return _unified_response(data=serialized)
+            rejection_reason, preflight_warnings = await _preflight_document_remote_visibility(data)
+            if rejection_reason is not None:
+                return _unified_response(
+                    status="rejected",
+                    data={},
+                    warnings=preflight_warnings,
+                    suggestions=[
+                        "請先把 GitHub source push 到 remote，再 capture current formal-entry 文件",
+                        "若現在就需要讓別人讀，請改成 git + gcs 或直接補 delivery snapshot",
+                    ],
+                    governance_hints=_build_governance_hints(warnings=preflight_warnings),
+                    rejection_reason=rejection_reason,
+                )
             result = await _mcp.ontology_service.upsert_document(data, partner=_current_partner.get())
             serialized = _serialize(result)
             _audit_log(
@@ -231,11 +451,14 @@ async def write(
             linked_ids = serialized.get("linked_entity_ids") or data.get("linked_entity_ids") or []
             # ADR-022: pick up bundle operation suggestions
             bundle_suggestions = getattr(result, "_bundle_suggestions", None) or []
+            delivery_suggestions = await _document_delivery_suggestions(serialized)
+            auto_publish_suggestions = await _maybe_auto_publish_document(serialized)
             return _unified_response(
                 data=serialized,
-                suggestions=bundle_suggestions if bundle_suggestions else None,
+                warnings=preflight_warnings or None,
+                suggestions=(bundle_suggestions + delivery_suggestions + auto_publish_suggestions) or None,
                 context_bundle=await _build_context_bundle(linked_entity_ids=linked_ids),
-                governance_hints=_build_governance_hints(),
+                governance_hints=_build_governance_hints(warnings=preflight_warnings),
             )
 
         elif collection == "protocols":

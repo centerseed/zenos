@@ -1,7 +1,7 @@
 # L3 文件治理規則 v2.2（含完整範例）
 
 ## 文件的定位
-L3 document entity 是正式文件的語意代理。
+L3 document entity 是正式文件的語意索引入口。
 
 - metadata 永遠在 ZenOS（entity / source / relationship / status）。
 - 內容承載有兩種合法模式：
@@ -9,6 +9,7 @@ L3 document entity 是正式文件的語意代理。
   - ZenOS Delivery 模式：markdown 內容可直接寫入 ZenOS snapshot（GCS private），作為穩定 permalink 的閱讀版本。
 
 文件不是 L2（文件是 L2 概念的具體體現），不是 task。
+但對使用者與 agent 而言，**它必須是從 L2 找到正式文件的穩定入口**，不能只是 metadata 容器。
 
 但不要把這句話誤解成「所有文件都不需要驗收邊界」。
 對齊 `SPEC-doc-governance` 與 `SPEC-task-governance`：
@@ -26,6 +27,36 @@ L3 document entity 是正式文件的語意代理。
 - 要「正式編輯協作」→ 優先外部 Authoring 模式。
 - 要「快速發布可讀版本」或「直接讓 agent 改 md 並分享」→ 使用 ZenOS Delivery Snapshot。
 - 兩者可並存：外部來源做主編輯，ZenOS snapshot 做穩定發布面。
+
+### Agent 自動判斷矩陣
+
+這個決定預設不丟給用戶。agent 必須先判斷文件應落在哪一種模式：
+
+- `git only`
+- `git + gcs`
+- `gcs only`
+
+判斷規則：
+- 預設先假設 `git only`
+- 若文件是 `current` 且屬於某個 L2 / bundle 的正式入口，升級為 `git + gcs`
+- 若文件會被分享、會被其他 agent 直接閱讀，且 GitHub source 尚未 remote 可見，則不得停在 `git only`；必須補 `gcs`
+- 只有用戶明確要求「不要經 git，直接發布」，才可用 `gcs only`
+
+一句話：
+- 非入口協作文檔 → `git only`
+- current 正式入口 → `git + gcs`
+- 明確要求直發 → `gcs only`
+
+### Delivery-first 硬規則
+
+- `current` 的關鍵 L3 document，不得只剩外部 source 而沒有 ZenOS 可讀 delivery。
+- 若文件是某個 L2 的正式入口，治理完成定義必須包含：
+  - 可從 ZenOS Reader 直接閱讀
+  - 有 snapshot revision 可作為穩定 permalink
+  - 分享優先使用 `/docs?docId=...` 或 share-link，不把 GitHub URL 當主要閱讀入口
+- GitHub / Drive / Notion URL 是 provenance，不是主要交付面。
+- 若文件長期作為正式入口卻沒有 delivery snapshot，應視為治理缺口，不得宣稱「已完成治理」。
+- 若 source.type=`github` 且要讓其他人直接從 source 讀到內容，agent 必須確認該檔案已 push 到 remote；只存在本地工作樹或未 push commit，不算可交付文件入口。
 
 ## 情境 → 文件對應（泛用版）
 
@@ -182,13 +213,28 @@ Then: {預期結果}
 
 > **原子取代：** 建立新版文件時，可在 `write` 的 data 中同時填入 `supersedes` 欄位，Server 會原子性地將舊文件標為 superseded。
 
-## doc_role: single vs index（ADR-022 Document Bundle）
+## doc_role: single vs index（ADR-022 / SPEC-document-bundle）
 
 ### 概念
-- **single**（預設）：文件有一個主要 source，可能有輔助 source
-- **index**：文件本身是多個 source 的索引/集合
+- **index**（預設）：文件本身是多個 source 的索引/集合；即使目前只有 1 個 source 也合法
+- **single**（例外）：文件有一個主要 source，且文件本身就是獨立治理單位
   - 軟體範例：「產品文件集」包含 SPEC + DESIGN + TEST 三類文件
   - 非軟體範例：「合規文件包」包含 CONTRACT + REFERENCE + GUIDE
+
+### 選擇規則
+
+- **預設一律選 `index`**
+- 只有在以下情況才可用 `single`：
+  - 該文件被要求單獨分享、單獨授權、單獨 supersede
+  - 該文件不是某個 L2 的主文件入口，而是獨立存在的正式文件物件
+  - 你能明確說出「為什麼把它收進 bundle 反而更差」
+
+### bundle-first 硬規則
+
+- 不得因為「現在只有一份文件」就直接建 `single`
+- 同一個 L2 主題的正式文件，預設應收斂到同一個 `index`
+- `index` 建立後，必須補 `bundle_highlights`
+- `bundle_highlights` 至少要指出 1 份 `primary` source 與「為什麼先讀它」
 
 ### 建立 index 文件範例
 ```
@@ -210,7 +256,11 @@ write(
 ```
 
 ### single → index 升級流程
-觸發條件：single 文件累積 3+ sources 且涵蓋 2+ 不同 doc_type
+觸發條件：
+- single 文件新增第 2 份同主題正式文件
+- 或 single 已成為某個 L2 的主文件入口
+- 或你無法再合理辯護它繼續維持 single
+
 ```
 write(collection="documents", data={
     "doc_id": "existing-doc-id",
@@ -221,6 +271,28 @@ write(collection="documents", data={
 ### Dashboard 顯示
 - single 文件：平面 source 列表，每個 source 顯示平台圖標 + 狀態
 - index 文件：按 doc_type 分組顯示 sources（SPEC 區、DESIGN 區、TEST 區...）
+- index 文件：在 source 清單前優先顯示 `bundle_highlights`
+- L2 detail：必須直接顯示掛在該 L2 下的 doc bundles，不能只留 documents 頁入口
+- current 文件：若已有 delivery snapshot，Reader 應優先導向 ZenOS `/docs`，不是外部 source URL
+
+### bundle_highlights 範例
+
+```json
+[
+  {
+    "source_id": "src-spec-1",
+    "headline": "這是 onboarding flow 的 SSOT",
+    "reason_to_read": "定義 4 步流程、觸發條件與消失條件",
+    "priority": "primary"
+  },
+  {
+    "source_id": "src-adr-1",
+    "headline": "這份解釋為什麼用 preferences JSONB 與 overlay",
+    "reason_to_read": "需要理解架構與資料流時先看",
+    "priority": "important"
+  }
+]
+```
 
 ## Capture/Sync 路由決策樹
 
@@ -229,24 +301,52 @@ write(collection="documents", data={
     ↓
 1. search(collection="documents", query="文件主題") 查重
     ↓
-2a. 找到既有 document entity
+2a. 找到既有 index document entity
     → 加為新 source：write(data={"doc_id": "...", "source": {"uri": "...", "type": "github"}})
-    → 檢查：sources 3+ && doc_types 2+ → 建議升級 doc_role 為 index
+    → 同輪更新 bundle_highlights / primary source（若閱讀入口改變）
     ↓
-2b. 無既有 entity
+2b. 找到既有 single document entity
+    → 預設提議升級為 index，再加新 source
+    → 不得因為「先方便」就繼續堆 single
+    ↓
+2c. 無既有 entity
     → 判斷類別（11 類 + legacy 別名自動轉換）
-    → write(collection="documents", data={...}) 建新 entity
+    → 預設 write(collection="documents", data={doc_role:"index", ...}) 建新 entity
+    → 補 bundle_highlights
+    → 同時判斷 `git only / git + gcs / gcs only`
     ↓
-2c. 使用者明確要求「直接把 markdown 寫進 ZenOS 文件（不經 Git）」
+2d. 使用者明確要求「直接把 markdown 寫進 ZenOS 文件（不經 Git）」
     → 走 Document Delivery 內容寫入流程（POST /api/docs/{doc_id}/content）
     → 產生/更新 snapshot revision（GCS private）
     → Reader 走 /docs permalink，不依賴外部 source 可用性
+2e. 文件已是 current / 正式入口，但還沒有 snapshot
+    → 優先補 delivery snapshot
+    → 沒補 snapshot 前，不得把外部 GitHub URL 當唯一閱讀入口
+2f. 文件 source 指向 GitHub，且打算讓別人直接從 source 找到
+    → 先確認該檔案/commit 已 push 到 remote
+    → 若未 push，只能視為 local-only，不得宣稱其他 agent / 使用者可從 source 找到
+    → 這種情況應優先 push，或直接補 delivery snapshot 當正式入口
+2g. 文件是 `current formal-entry`
+    → 不論用戶是否理解 delivery 差異，agent 預設都要補 `gcs`
+    → 不得把「要不要補 snapshot」當成一般性提問丟回給用戶
     ↓
 3. 檔案已刪除/改名？
     → stale：暫時不可達
     → unresolvable：確認已永久刪除
     → 唯一 source 且 unresolvable → 文件 status 改為 archived
 ```
+
+## Done Criteria（文件治理完成的最低標準）
+
+以下 5 項都滿足，才算 document governance 完成：
+
+1. 文件已正確分類、frontmatter 合法
+2. 已正確掛到對應 L2
+3. 若屬正式文件入口，已建立或更新 `index` doc entity
+4. `bundle_highlights` 已補齊，且至少有 1 筆 `primary`
+5. 從 L2 detail 可以直接知道先讀哪份文件，而不是只看到 source list
+6. 若文件 status=`current` 且作為正式入口，ZenOS Reader / snapshot 已可用；否則視為 delivery 治理缺口
+7. 若正式入口仍依賴 GitHub source，agent 已確認對應檔案/commit 在 remote 可見；未 push 的本地檔案不算完成治理
 
 ## Supersede 操作步驟（完整流程）
 
@@ -325,6 +425,28 @@ write(
 治理要求：
 - 這條流程是「內容發布」，不是取代 capture 的知識抽取；必要時仍需補 `entries` / `relationships`。
 - 若文件長期要多人協作，仍應保留外部 Authoring source（Git/Drive）並定期 republish snapshot。
+- 若文件 status=`current` 且是某個 L2 的主要入口，應優先確保 snapshot 存在；沒有 snapshot 時只能視為暫時未完成，不應把 GitHub URL 當正式交付面。
+- 若 GitHub source 尚未 push 到 remote，則不得把該 source 當成「其他人現在可讀」的入口；此時應先 push，或改走 delivery snapshot。
+- direct write 不是預設模式；只有用戶明確要求不經 git 直接發布，才走 `gcs only`
+
+## GitHub source 可發現性檢查
+
+若文件使用 `source.type=github`，agent 在 capture / sync / 治理完成前，必須區分三件事：
+
+1. **本地存在**：檔案在工作樹裡
+2. **git tracked**：檔案已被 git 追蹤，可組出合法 GitHub URL
+3. **remote 可見**：對應 commit/path 已 push，其他人真的打得開
+
+只有第 3 項成立，才能說「別人現在可從 GitHub source 找到」。
+
+最低檢查要求：
+- 檔案已被 git tracked
+- 本地分支的相關 commit 已 push 到對應 remote branch，或該檔案 path 已存在於 remote 預設分支/指定 branch
+- 若做不到 remote 可見性確認，agent 必須明說「目前只保證本地存在，不保證別人找得到」
+
+治理動作：
+- `current` 正式入口文件：若 remote 不可見，優先補 delivery snapshot
+- 非正式入口文件：可先保留 metadata，但不得對外宣稱 source 已可分享
 
 ## 寫文件前必做：查重
 

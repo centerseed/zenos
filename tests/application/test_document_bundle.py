@@ -59,7 +59,9 @@ def _make_doc_entity(
     name: str = "Test Document",
     doc_role: str = "single",
     sources: list[dict] | None = None,
+    bundle_highlights: list[dict] | None = None,
     change_summary: str | None = None,
+    highlights_updated_at: datetime | None = None,
     summary_updated_at: datetime | None = None,
 ) -> Entity:
     """Create a test document entity."""
@@ -82,6 +84,8 @@ def _make_doc_entity(
         parent_id="parent-1",
         sources=sources,
         doc_role=doc_role,
+        bundle_highlights=bundle_highlights or [],
+        highlights_updated_at=highlights_updated_at,
         change_summary=change_summary,
         summary_updated_at=summary_updated_at,
     )
@@ -89,8 +93,8 @@ def _make_doc_entity(
 
 class TestDocRoleHandling:
     @pytest.mark.asyncio
-    async def test_new_doc_defaults_to_single(self):
-        """New document without doc_role defaults to single."""
+    async def test_new_doc_defaults_to_index(self):
+        """New document without doc_role defaults to index."""
         svc = _make_service()
         parent = Entity(
             id="parent-1", name="Parent Module", type="module",
@@ -106,7 +110,7 @@ class TestDocRoleHandling:
             "source": {"type": "github", "uri": "https://github.com/owner/repo/blob/main/new.md"},
             "linked_entity_ids": ["parent-1"],
         })
-        assert result.doc_role == "single"
+        assert result.doc_role == "index"
 
     @pytest.mark.asyncio
     async def test_create_with_index_role(self):
@@ -128,6 +132,29 @@ class TestDocRoleHandling:
             "doc_role": "index",
         })
         assert result.doc_role == "index"
+
+    @pytest.mark.asyncio
+    async def test_formal_entry_persists_in_details(self):
+        """formal_entry flag is persisted in document details."""
+        svc = _make_service()
+        parent = Entity(
+            id="parent-1", name="Parent Module", type="module",
+            summary="Parent", tags=Tags(what=["x"], why="", how="", who=[""]),
+            level=2,
+        )
+        svc._entities.get_by_id = AsyncMock(return_value=parent)
+
+        result = await svc.upsert_document({
+            "title": "Doc Index",
+            "summary": "A document index",
+            "tags": {"what": ["test"], "why": "testing", "how": "auto", "who": ["dev"]},
+            "source": {"type": "github", "uri": "https://github.com/owner/repo/blob/main/index.md"},
+            "linked_entity_ids": ["parent-1"],
+            "doc_role": "index",
+            "formal_entry": True,
+        })
+        assert result.details is not None
+        assert result.details["formal_entry"] is True
 
 
 class TestAddSource:
@@ -353,6 +380,83 @@ class TestChangeSummary:
             "summary": "Updated entity summary",
         })
         assert result.change_summary == "Existing summary"
+
+
+class TestBundleHighlights:
+    @pytest.mark.asyncio
+    async def test_bundle_highlights_set_timestamp(self):
+        existing = _make_doc_entity(doc_role="index")
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+
+        before = datetime.now(timezone.utc)
+        result = await svc.upsert_document({
+            "id": "doc-test-1",
+            "bundle_highlights": [{
+                "source_id": "src-1",
+                "headline": "This is the SSOT",
+                "reason_to_read": "Defines the main flow",
+                "priority": "primary",
+            }],
+        })
+        assert result.bundle_highlights[0]["headline"] == "This is the SSOT"
+        assert result.highlights_updated_at is not None
+        assert result.highlights_updated_at >= before
+
+    @pytest.mark.asyncio
+    async def test_bundle_highlights_preserved_on_other_updates(self):
+        existing = _make_doc_entity(
+            doc_role="index",
+            bundle_highlights=[{
+                "source_id": "src-1",
+                "headline": "Existing",
+                "reason_to_read": "Still important",
+                "priority": "primary",
+            }],
+            highlights_updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+
+        result = await svc.upsert_document({
+            "id": "doc-test-1",
+            "summary": "Updated summary only",
+        })
+        assert result.bundle_highlights[0]["headline"] == "Existing"
+
+    @pytest.mark.asyncio
+    async def test_index_without_bundle_highlights_generates_suggestion(self):
+        existing = _make_doc_entity(doc_role="index")
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+
+        result = await svc.upsert_document({
+            "id": "doc-test-1",
+            "summary": "Updated summary only",
+        })
+        suggestions = getattr(result, "_bundle_suggestions", [])
+        assert any("bundle_highlights" in s for s in suggestions)
+
+    @pytest.mark.asyncio
+    async def test_bundle_highlights_require_existing_source(self):
+        existing = _make_doc_entity(doc_role="index")
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+
+        with pytest.raises(ValueError, match="bundle_highlights source_id"):
+            await svc.upsert_document({
+                "id": "doc-test-1",
+                "bundle_highlights": [{
+                    "source_id": "missing-src",
+                    "headline": "Bad highlight",
+                    "reason_to_read": "Points to nowhere",
+                    "priority": "primary",
+                }],
+            })
 
 
 class TestSourceIdGeneration:

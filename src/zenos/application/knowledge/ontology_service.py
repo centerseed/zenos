@@ -293,6 +293,10 @@ class OntologyService:
             normalized["impacts_draft"] = ""
         elif isinstance(impacts_draft, str):
             normalized["impacts_draft"] = impacts_draft
+        elif isinstance(impacts_draft, list):
+            normalized["impacts_draft"] = "\n".join(
+                str(item).strip() for item in impacts_draft if str(item).strip()
+            )
         else:
             normalized["impacts_draft"] = str(impacts_draft)
         return normalized
@@ -1247,12 +1251,24 @@ class OntologyService:
                         "若確認這是 L2，請修正 layer_decision 中回答 False 的三問，並提供具體的 impacts_draft。"
                     )
                 # All three questions passed — validate impacts_draft
-                impacts_draft = (layer_decision.get("impacts_draft") or "").strip()
+                impacts_draft_raw = layer_decision.get("impacts_draft")
+                if isinstance(impacts_draft_raw, list):
+                    impacts_items = [
+                        str(item).strip()
+                        for item in impacts_draft_raw
+                        if str(item).strip()
+                    ]
+                    impacts_draft = "\n".join(impacts_items)
+                    layer_decision["impacts_draft"] = impacts_draft
+                else:
+                    impacts_draft = str(impacts_draft_raw or "").strip()
+                    layer_decision["impacts_draft"] = impacts_draft
                 if not impacts_draft:
                     raise ValueError(
                         "IMPACTS_DRAFT_REQUIRED: 三問通過，但未提供 impacts_draft。\n"
                         "請在 layer_decision 中提供：\n"
                         "  'impacts_draft': 'A 改了什麼→B 的什麼要跟著看'\n"
+                        "  或 ['A 改了什麼→B 的什麼要跟著看', ...]\n"
                         "（至少 1 條具體 impacts 描述，格式：A 改了{什麼}→B 的{什麼}要跟著看）\n"
                         "語意判斷可在 agent 端執行，impacts_draft 是草稿，confirm 時再補 relationship。"
                     )
@@ -1521,6 +1537,10 @@ class OntologyService:
             # ADR-022 Document Bundle fields
             if "doc_role" in merged_data:
                 entity.doc_role = merged_data["doc_role"]
+            if "bundle_highlights" in merged_data:
+                entity.bundle_highlights = merged_data["bundle_highlights"]
+            if "highlights_updated_at" in merged_data:
+                entity.highlights_updated_at = merged_data["highlights_updated_at"]
             if "change_summary" in merged_data:
                 entity.change_summary = merged_data["change_summary"]
             if "summary_updated_at" in merged_data:
@@ -1545,6 +1565,8 @@ class OntologyService:
                 visible_to_departments=list(merged_data.get("visible_to_departments", [])),
                 # ADR-022 Document Bundle fields
                 doc_role=merged_data.get("doc_role"),
+                bundle_highlights=list(merged_data.get("bundle_highlights", [])),
+                highlights_updated_at=merged_data.get("highlights_updated_at"),
                 change_summary=merged_data.get("change_summary"),
                 summary_updated_at=merged_data.get("summary_updated_at"),
             )
@@ -2022,6 +2044,18 @@ class OntologyService:
         )
         related_ids = linked_entity_ids[1:] if len(linked_entity_ids) > 1 else []
 
+        # Formal-entry contract: persist as details.formal_entry so delivery logic
+        # can use an explicit marker instead of relying only on heuristics.
+        details = dict(existing.details or {}) if existing and isinstance(existing.details, dict) else {}
+        incoming_details = data.get("details")
+        if isinstance(incoming_details, dict):
+            details.update(incoming_details)
+        formal_entry = data.get("formal_entry")
+        if formal_entry is not None:
+            details["formal_entry"] = bool(formal_entry)
+        if not details:
+            details = None
+
         # --- ADR-022 Bundle Operations ---
         # Detect add_source / update_source / remove_source in data
         add_source_data = data.get("add_source")
@@ -2034,7 +2068,33 @@ class OntologyService:
         if doc_role is None and existing:
             doc_role = existing.doc_role or "single"
         elif doc_role is None:
-            doc_role = "single"
+            doc_role = "index"
+
+        # Handle bundle_highlights
+        bundle_highlights = data.get("bundle_highlights")
+        highlights_updated_at = None
+        if bundle_highlights is not None:
+            highlights_updated_at = datetime.now(timezone.utc)
+        elif existing:
+            bundle_highlights = list(existing.bundle_highlights or [])
+            highlights_updated_at = existing.highlights_updated_at
+        else:
+            bundle_highlights = []
+
+        if bundle_highlights is not None and not isinstance(bundle_highlights, list):
+            raise ValueError("bundle_highlights must be a list")
+        if isinstance(bundle_highlights, list):
+            normalized_highlights: list[dict] = []
+            for item in bundle_highlights:
+                if not isinstance(item, dict):
+                    raise ValueError("bundle_highlights items must be objects")
+                normalized_highlights.append({
+                    "source_id": str(item.get("source_id", "")).strip(),
+                    "headline": str(item.get("headline", "")).strip(),
+                    "reason_to_read": str(item.get("reason_to_read", "")).strip(),
+                    "priority": str(item.get("priority", "important")).strip() or "important",
+                })
+            bundle_highlights = normalized_highlights
 
         # Handle change_summary
         change_summary = data.get("change_summary")
@@ -2136,6 +2196,7 @@ class OntologyService:
                         f"source_id '{target_sid}' not found in this document"
                     )
                 suggestions.append("change_summary 可能需要更新")
+                suggestions.append("bundle_highlights 可能需要更新")
 
         else:
             # Check for plural "sources" payload first (ADR-022 bundle creation)
@@ -2181,6 +2242,28 @@ class OntologyService:
                 _sync_bundle_source_status(src, _bundle_source_status(src))
         ensure_source_ids(sources)
 
+        if has_bundle_op:
+            suggestions.append("bundle_highlights 可能需要更新")
+
+        if doc_role == "index":
+            if bundle_highlights:
+                valid_source_ids = {str(src.get("source_id", "")).strip() for src in sources if isinstance(src, dict)}
+                primary_count = 0
+                for item in bundle_highlights:
+                    sid = item.get("source_id", "")
+                    if sid and sid not in valid_source_ids:
+                        raise ValueError(f"bundle_highlights source_id '{sid}' not found in this document")
+                    if not item.get("headline"):
+                        raise ValueError("bundle_highlights requires headline")
+                    if not item.get("reason_to_read"):
+                        raise ValueError("bundle_highlights requires reason_to_read")
+                    if item.get("priority") == "primary":
+                        primary_count += 1
+                if primary_count == 0:
+                    suggestions.append("index document 建議至少標記一筆 primary bundle_highlight")
+            else:
+                suggestions.append("index document 建議補上 bundle_highlights")
+
         # Build unified Tags from legacy DocumentTags format
         tags_data = data.get("tags")
         existing_tags = existing.tags if existing else Tags(what=[], why="", how="", who=[])
@@ -2218,16 +2301,19 @@ class OntologyService:
             "tags": tags,
             "status": data.get("status", existing.status if existing else "current"),
             "parent_id": parent_id,
+            "details": details,
             "sources": sources,
             # ADR-022 Document Bundle fields
             "doc_role": doc_role,
+            "bundle_highlights": bundle_highlights,
+            "highlights_updated_at": highlights_updated_at,
             "change_summary": change_summary,
             "summary_updated_at": summary_updated_at,
         }
         # Document lifecycle updates are governance operations that should remain
         # merge-safe but not be blocked by confirmed-entity protection.
         entity_payload["force"] = data.get("force", True)
-        for optional_key in ("details", "owner", "visibility", "last_reviewed_at"):
+        for optional_key in ("owner", "visibility", "last_reviewed_at"):
             if optional_key in data:
                 entity_payload[optional_key] = data[optional_key]
         if "confirmed_by_user" in data:

@@ -8,15 +8,16 @@ description: >
   或說「把這個專案加入 ZenOS」「幫我建這個服務的 ontology」「把這個 repo 的文件掃進去」，
   或在討論完某個設計決策後想保存到知識層時，一定要使用這個 skill。
   引數範例：無引數、path/to/file.md、/Users/me/project/（目錄）
-version: 2.3.0
+version: 2.3.1
 ---
 
 # /zenos-capture — 知識捕獲 + 首次建構
 
 你是 ZenOS 的知識治理 agent。根據引數自動選擇模式：
 
-> **啟動前必須完成 [Step 0: Context Establishment](../governance/bootstrap-protocol.md)**。
+> **啟動前先讀 `skills/governance/bootstrap-protocol.md`，完成 Step 0: Context Establishment。**
 > 跳過 Step 0 就開始寫入 ontology = 違規操作。
+> 若 `skills/governance/bootstrap-protocol.md` 不存在：直接回報「ZenOS 安裝不完整，請先重新執行 /zenos-setup」，不要自行補 Step 0，也不要繼續 ideate。
 > 完成 Step 0 後你會有：`PRODUCT_ID`、`PRODUCT_NAME`、`PROJECT_NAME`、`L2_ENTITIES`、`EXISTING_DOCS`。
 > 後續所有 `search` / `write` 都帶 `product_id=PRODUCT_ID`。
 
@@ -378,6 +379,7 @@ mcp__zenos__get(collection="entities", name="<候選模組>")
 # 所有查重都必須帶 product_id，避免跨產品誤判。兩種查重都沒命中才建立新 document。
 write(collection="documents", data={
   title, source, tags, summary,
+  doc_role: "index",   # ← 新建預設一律 index
   linked_entity_ids,   # ← 必填，不可省略（見下方說明）
   confirmed_by_user: False
 })
@@ -386,6 +388,35 @@ write(collection="documents", data={
 > **linked_entity_ids 必帶，不可省略**：你在掃描時已經知道這份文件跟哪個 entity 相關，直接帶上。
 > 如果不確定歸屬，**必須先 `search(collection="entities", query="{文件關鍵字}")` 找最相關的 L2 entity**，選最佳匹配。
 > 真的找不到任何相關 entity → 停下來告知用戶，不要建立 `parent_id: null` 的孤兒 document。
+
+> **bundle-first 規則**：新建 document 時，預設必須用 `doc_role="index"`，即使目前只有 1 份 source 也一樣。
+> 只有在你能明確說出為什麼這份文件應獨立治理、而不是成為某個 L2 的文件入口時，才可建立 `single`。
+
+建立或更新 index document 後，**同輪必做**：
+
+```python
+write(collection="documents", data={
+  "doc_id": "...",
+  "bundle_highlights": [
+    {
+      "source_id": "<primary-source-id>",
+      "headline": "這是這個主題最先該讀的文件",
+      "reason_to_read": "一句話說明這份文件的角色，例如 SSOT / 最新決策 / AC 定義",
+      "priority": "primary"
+    }
+  ]
+})
+```
+
+**最低要求**：
+- 至少 1 筆 `priority="primary"`
+- `headline` 要回答「這份文件最值得看的點」
+- `reason_to_read` 要回答「為什麼現在先讀它」
+- 不得只建立 document metadata 而不補 `bundle_highlights`
+
+若找到同主題既有 document：
+- 已是 `index` → `add_source` 到既有 bundle，並更新 `bundle_highlights`
+- 是 `single` 且屬同一主題 → 優先升級為 `index`，不要再新增平行 single
 
 文件 entry 的 `source.uri`（**必須嚴格遵守**）：
 
@@ -415,6 +446,13 @@ git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null  # fallback → main
 
 # 7. 驗證檔案在 git 追蹤中（防止寫入指向未 push 檔案的 URL）
 git ls-files --error-unmatch "{相對路徑}" 2>/dev/null || echo "WARNING: 檔案未被 git 追蹤"
+
+# 8. 驗證 remote 可見性（防止「本地有、別人找不到」）
+#    先檢查 remote 預設分支是否已存在該 path
+git cat-file -e "origin/{branch}:{相對路徑}" 2>/dev/null || echo "INFO: remote 預設分支尚未看到這個檔案"
+#    若檔案不在 remote 預設分支，至少還要確認本地 HEAD 是否已 push 到 upstream
+git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null || echo "INFO: 目前分支沒有 upstream"
+git merge-base --is-ancestor HEAD @{u} 2>/dev/null || echo "INFO: 本地 HEAD 尚未完整 push 到 upstream"
 ```
 
 **禁止**：
@@ -584,6 +622,9 @@ mcp__zenos__journal_read(project="{專案名}", limit=5)
 - **意圖性 vs 事實性維度**：Why/How 是意圖性維度，AI 填的一律 draft；What/Who 是事實性維度，AI 可直接填入
 - **Documents 預設不存原始內容（metadata-first）**：capture 預設只存 document metadata 與語意摘要，原文留在來源（Git/Drive）
 - **例外：Delivery 直寫模式可存 markdown snapshot**：若用戶明確要求直接發布內容，可走 Document Delivery 內容寫入流程（GCS private revision）
+- **current 文件改成 delivery-first**：若某份 L3 document 是正式入口或會被直接分享，應補 ZenOS Reader / snapshot，不要只留 GitHub URL
+- **GitHub source 要驗 remote 可見性**：本地存在、git tracked 都還不夠；若檔案或 commit 尚未 push，其他人依舊找不到，不能宣稱 source 可分享
+- **agent 自動判斷 git / gcs**：這不是給用戶選的；capture 預設先走 `git`，但對 `current formal-entry` 自動補 `gcs snapshot`
 - **首次建構先骨架後神經**：先確認實體結構，再大量建文件 entry
 - **快，且只記 code 裡沒有的知識**：速度比完美重要。Entry 記決策脈絡、已知限制、重要變更——agent 讀 code 拿不到的東西
 - **100 字一個知識點**：entry content 上限 200 字元（~100 中文字）。寫不下代表要拆或粒度太大
@@ -605,7 +646,8 @@ mcp__zenos__journal_read(project="{專案名}", limit=5)
 - L2 概念之間優先用 `impacts` 和 `enables`
 
 ### Document / Blindspot / Protocol
-- Document：`source.type`（github/gdrive/notion/upload）必填，`linked_entity_ids` 盡量帶，寫入前用 `source.uri` 查重
+- Document：`source.type`（github/gdrive/notion/upload）必填，`linked_entity_ids` 盡量帶，寫入前用 `source.uri` 查重；若 status=`current` 且作為正式入口，應補 delivery snapshot
+- Document（github）：若文件要被其他人直接從 source 讀取，還必須確認 remote 可見；未 push 時要明講 `local-only`，不得把該 URL 當正式可分享入口
 - Blindspot：`severity`（red/yellow/green）必填，`related_entity_ids` 必須都存在
 - Protocol：`entity_id` 必須存在，`content` 必須含四維 what/why/how/who
 

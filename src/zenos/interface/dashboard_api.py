@@ -77,6 +77,22 @@ from zenos.interface.admin_api import (
 logger = logging.getLogger(__name__)
 
 
+class RevisionConflictError(RuntimeError):
+    """Raised when a direct document write is based on a stale revision."""
+
+    def __init__(
+        self,
+        *,
+        current_revision_id: str | None,
+        canonical_path: str | None,
+        last_published_at: datetime | None,
+    ) -> None:
+        super().__init__("Document revision conflict")
+        self.current_revision_id = current_revision_id
+        self.canonical_path = canonical_path
+        self.last_published_at = last_published_at
+
+
 # ──────────────────────────────────────────────
 # Repository cache (lazy-init with shared pool)
 # ──────────────────────────────────────────────
@@ -294,6 +310,73 @@ async def _get_revision_by_id(partner_id: str, revision_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+async def _publish_document_snapshot_internal(
+    *,
+    effective_id: str,
+    doc_id: str,
+    doc_entity: Entity | None = None,
+) -> dict:
+    """Publish a GitHub-backed document into a private snapshot revision."""
+    await _ensure_repos()
+    if doc_entity is None:
+        token = current_partner_id.set(effective_id)
+        try:
+            doc_entity = await _entity_repo.get_by_id(doc_id)
+        finally:
+            current_partner_id.reset(token)
+
+    if not doc_entity or doc_entity.type != EntityType.DOCUMENT:
+        raise ValueError(f"Document '{doc_id}' not found")
+
+    source = _select_publish_source(doc_entity.sources or [])
+    if not source:
+        raise ValueError("Document has no source to publish")
+
+    source_uri = str(source.get("uri", "")).strip()
+    source_type = str(source.get("type", "")).strip()
+    source_id = source.get("source_id")
+    if not source_uri:
+        raise ValueError("Selected source has empty URI")
+    if source_type != SourceType.GITHUB:
+        raise RuntimeError(f"Source type '{source_type}' is not yet publishable in Phase 1")
+
+    source_service = SourceService(entity_repo=_entity_repo, source_adapter=GitHubAdapter())
+    token = current_partner_id.set(effective_id)
+    try:
+        content = await source_service.read_source(doc_id, source_uri=source_uri)
+    finally:
+        current_partner_id.reset(token)
+
+    from zenos.infrastructure.gcs_client import get_documents_bucket, upload_blob
+
+    revision_id = uuid.uuid4().hex
+    snapshot_path = f"docs/{doc_id}/revisions/{revision_id}.md"
+    bucket = get_documents_bucket()
+    payload = content.encode("utf-8")
+    upload_blob(bucket, snapshot_path, payload, "text/markdown; charset=utf-8")
+    content_hash = hashlib.sha256(payload).hexdigest()
+
+    stored_revision_id = await _create_revision_and_mark_ready(
+        partner_id=effective_id,
+        doc_id=doc_id,
+        source_id=source_id,
+        source_version_ref=source_uri,
+        snapshot_bucket=bucket,
+        snapshot_object_path=snapshot_path,
+        content_hash=content_hash,
+        content_type="text/markdown; charset=utf-8",
+        created_by=effective_id,
+    )
+    return {
+        "doc_id": doc_id,
+        "canonical_path": f"/docs/{doc_id}",
+        "revision_id": stored_revision_id,
+        "delivery_status": "ready",
+        "source_id": source_id,
+        "source_uri": source_uri,
+    }
+
+
 async def _create_revision_and_mark_ready(
     *,
     partner_id: str,
@@ -305,12 +388,31 @@ async def _create_revision_and_mark_ready(
     content_hash: str,
     content_type: str,
     created_by: str,
+    expected_base_revision_id: str | None = None,
 ) -> str:
     revision_id = uuid.uuid4().hex
     canonical_path = f"/docs/{doc_id}"
     pool = await get_pool()
     async with pool.acquire() as conn:
         async with conn.transaction():
+            if expected_base_revision_id is not None:
+                row = await conn.fetchrow(
+                    f"""
+                    SELECT primary_snapshot_revision_id, canonical_path, last_published_at
+                    FROM {SCHEMA}.entities
+                    WHERE partner_id = $1 AND id = $2
+                    FOR UPDATE
+                    """,
+                    partner_id,
+                    doc_id,
+                )
+                current_primary = row["primary_snapshot_revision_id"] if row else None
+                if current_primary != expected_base_revision_id:
+                    raise RevisionConflictError(
+                        current_revision_id=current_primary,
+                        canonical_path=row["canonical_path"] if row else canonical_path,
+                        last_published_at=row["last_published_at"] if row else None,
+                    )
             await conn.execute(
                 f"""
                 INSERT INTO {SCHEMA}.document_revisions (
@@ -416,7 +518,8 @@ async def _is_task_visible_for_partner(
     """Task visibility rules:
 
     - Admin: always visible.
-    - Guest: task must have at least one linked entity in allowed_ids.
+    - Guest: task must have at least one linked entity in allowed_ids and that
+      linked entity must itself be visible to the guest.
       Tasks with no linked entities are NOT visible to guests.
     - Member: task is visible only if ALL linked entities are visible.
       Tasks with no linked entities are always visible (fail-open).
@@ -429,7 +532,7 @@ async def _is_task_visible_for_partner(
             return False
 
         if is_guest(partner):
-            # Guest: requires at least one linked entity in scope.
+            # Guest: requires at least one linked entity in scope and visible.
             if not linked:
                 return False
             if allowed_ids is None:
@@ -437,7 +540,10 @@ async def _is_task_visible_for_partner(
             for eid in linked:
                 if isinstance(eid, dict):
                     eid = eid.get("id", "")
-                if eid and eid in allowed_ids:
+                if not eid or eid not in allowed_ids:
+                    continue
+                entity = await _get_entity_by_id_with_context(effective_id, eid)
+                if entity and OntologyService.is_entity_visible_for_partner(entity, partner):
                     return True
             return False
 
@@ -516,6 +622,8 @@ def _entity_to_dict(e: Entity) -> dict:
         "updatedAt": e.updated_at,
         # ADR-022 Document Bundle fields
         "docRole": e.doc_role,
+        "bundleHighlights": e.bundle_highlights,
+        "highlightsUpdatedAt": e.highlights_updated_at,
         "changeSummary": e.change_summary,
         "summaryUpdatedAt": e.summary_updated_at,
     }
@@ -1790,27 +1898,12 @@ async def publish_document_snapshot(request: Request) -> Response:
     if not await _is_document_visible_for_partner(doc_entity, partner, effective_id):
         return _error_response("NOT_FOUND", f"Document '{doc_id}' not found", 404, request=request)
 
-    source = _select_publish_source(doc_entity.sources or [])
-    if not source:
-        return _error_response("INVALID_INPUT", "Document has no source to publish", 400, request=request)
-
-    source_uri = str(source.get("uri", "")).strip()
-    source_type = str(source.get("type", "")).strip()
-    source_id = source.get("source_id")
-    if not source_uri:
-        return _error_response("INVALID_INPUT", "Selected source has empty URI", 400, request=request)
-    if source_type != SourceType.GITHUB:
-        return _error_response(
-            "SOURCE_UNAVAILABLE",
-            f"Source type '{source_type}' is not yet publishable in Phase 1",
-            409,
-            request=request,
-        )
-
-    source_service = SourceService(entity_repo=_entity_repo, source_adapter=GitHubAdapter())
-    token = current_partner_id.set(effective_id)
     try:
-        content = await source_service.read_source(doc_id, source_uri=source_uri)
+        payload = await _publish_document_snapshot_internal(
+            effective_id=effective_id,
+            doc_id=doc_id,
+            doc_entity=doc_entity,
+        )
     except FileNotFoundError:
         return _error_response("SOURCE_NOT_FOUND", "Source file not found", 404, request=request)
     except PermissionError:
@@ -1819,49 +1912,10 @@ async def publish_document_snapshot(request: Request) -> Response:
         return _error_response("INVALID_INPUT", str(exc), 400, request=request)
     except RuntimeError as exc:
         return _error_response("SOURCE_ERROR", str(exc), 409, request=request)
-    finally:
-        current_partner_id.reset(token)
-
-    try:
-        from zenos.infrastructure.gcs_client import get_documents_bucket, upload_blob
-
-        revision_id = uuid.uuid4().hex
-        snapshot_path = f"docs/{doc_id}/revisions/{revision_id}.md"
-        bucket = get_documents_bucket()
-        payload = content.encode("utf-8")
-        upload_blob(bucket, snapshot_path, payload, "text/markdown; charset=utf-8")
-        content_hash = hashlib.sha256(payload).hexdigest()
     except Exception:
         logger.exception("Failed to write document snapshot for %s", doc_id)
         return _error_response("GCS_ERROR", "Failed to write document snapshot", 500, request=request)
-
-    try:
-        stored_revision_id = await _create_revision_and_mark_ready(
-            partner_id=effective_id,
-            doc_id=doc_id,
-            source_id=source_id,
-            source_version_ref=source_uri,
-            snapshot_bucket=bucket,
-            snapshot_object_path=snapshot_path,
-            content_hash=content_hash,
-            content_type="text/markdown; charset=utf-8",
-            created_by=effective_id,
-        )
-    except Exception:
-        logger.exception("Failed to persist revision metadata for %s", doc_id)
-        return _error_response("INTERNAL_ERROR", "Failed to persist snapshot revision", 500, request=request)
-
-    return _json_response(
-        {
-            "doc_id": doc_id,
-            "canonical_path": f"/docs/{doc_id}",
-            "revision_id": stored_revision_id,
-            "delivery_status": "ready",
-            "source_id": source_id,
-            "source_uri": source_uri,
-        },
-        request=request,
-    )
+    return _json_response(payload, request=request)
 
 
 async def save_document_content(request: Request) -> Response:
@@ -1888,6 +1942,16 @@ async def save_document_content(request: Request) -> Response:
     content = body.get("content")
     if not isinstance(content, str):
         return _error_response("INVALID_INPUT", "content must be a string", 400, request=request)
+
+    base_revision_id = body.get("base_revision_id")
+    if not isinstance(base_revision_id, str) or not base_revision_id.strip():
+        return _error_response(
+            "INVALID_INPUT",
+            "base_revision_id is required for direct document writes",
+            400,
+            request=request,
+        )
+    base_revision_id = base_revision_id.strip()
 
     await _ensure_repos()
     token = current_partner_id.set(effective_id)
@@ -1934,6 +1998,19 @@ async def save_document_content(request: Request) -> Response:
             content_hash=content_hash,
             content_type="text/markdown; charset=utf-8",
             created_by=effective_id,
+            expected_base_revision_id=base_revision_id,
+        )
+    except RevisionConflictError as exc:
+        return _json_response(
+            {
+                "error": "REVISION_CONFLICT",
+                "message": "Document has a newer published revision",
+                "current_revision_id": exc.current_revision_id,
+                "canonical_path": exc.canonical_path or f"/docs/{doc_id}",
+                "last_published_at": exc.last_published_at,
+            },
+            status_code=409,
+            request=request,
         )
     except Exception:
         logger.exception("Failed to persist direct markdown revision metadata for %s", doc_id)
@@ -1998,6 +2075,10 @@ async def get_document_delivery(request: Request) -> Response:
                 "visibility": doc_entity.visibility,
                 "sources": doc_entity.sources or [],
                 "doc_role": doc_entity.doc_role or "single",
+                "bundle_highlights": doc_entity.bundle_highlights or [],
+                "highlights_updated_at": doc_entity.highlights_updated_at,
+                "change_summary": doc_entity.change_summary,
+                "summary_updated_at": doc_entity.summary_updated_at,
                 "canonical_path": row["canonical_path"] if row else None,
                 "primary_snapshot_revision_id": row["primary_snapshot_revision_id"] if row else None,
                 "last_published_at": row["last_published_at"] if row else None,

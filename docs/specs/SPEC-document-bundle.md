@@ -4,7 +4,7 @@ id: SPEC-document-bundle
 status: Draft
 ontology_entity: L3 文件治理
 created: 2026-04-09
-updated: 2026-04-09
+updated: 2026-04-16
 supersedes:
   - SPEC-doc-source-governance
 ---
@@ -18,7 +18,7 @@ supersedes:
 
 ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部系統。但現行設計有兩個根本限制：
 
-**限制一：一對一綁定。** 每個 doc entity 只能掛一個 source。但在真實工作中，一個知識主題會隨時間累積多份文件——規格、決策紀錄、設計文件、測試場景、行銷版摘要、客戶面對版本。現行做法是為每個檔案建一個獨立的 doc entity，導致 L2 entity 底下掛了大量碎片化的 L3 節點，知識地圖變成文件清單。
+**限制一：文件模型以單檔為中心，不以檢索為中心。** 現行預設把 doc entity 當成單一文件代理，導致同一主題的規格、決策、設計、測試、客戶版摘要被拆成多個碎片 L3。結果是 L2 底下堆滿文件節點，但使用者與 agent 仍然不知道「這個主題該先讀哪份、重點是什麼、下一步去哪裡」。
 
 **限制二：文件類別僅限軟體開發。** 現有的文件類型（SPEC、ADR、TD、TC、REF）完全圍繞軟體開發流程設計。但 ZenOS 的目標客群是中小企業——他們的文件可能是行銷企劃、客戶合約、報價單、會議紀錄、公司政策。現有分類無法涵蓋這些場景，導致非技術文件只能塞進 REF（語意不精確）或不被治理（更糟）。
 
@@ -27,10 +27,11 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 > ZenOS 是語意索引層，不是內容倉庫。管「意義和關聯」，內容留在原生系統，透過 MCP 聯邦模式讓 AI agent 同時擁有語意理解和內容存取能力。
 
 本 spec 做四件事：
-1. **Document Bundle**：L3 doc entity 從「單一文件代理」升級為「語意文件索引」，一個 entity 聚合同一主題的多份文件
+1. **Bundle-first Document Entity**：L3 doc entity 從「單一文件代理」升級為「語意文件索引」，預設聚合同一主題的多份文件
 2. **泛用文件類別**：擴展文件類別系統，讓非軟體開發的文件也能被穩定治理
-3. **Source Platform Contract**：定義不同平台 URI 如何掛在同一個 doc entity 上，以及哪些平台今天真的可讀
-4. **治理 Skill 泛用化**：更新 `document-governance.md`，讓任何產業的 agent 都能遵循一致的文件治理流程
+3. **Highlight-first Retrieval Contract**：定義 doc entity 如何聚合底下文件 highlights / links，讓人從 L2 就能判斷先讀什麼
+4. **Source Platform Contract**：定義不同平台 URI 如何掛在同一個 doc entity 上，以及哪些平台今天真的可讀
+5. **治理 Skill 泛用化**：更新 `document-governance.md`，讓任何產業的 agent 都能遵循一致的文件治理流程
 
 ## 目標用戶
 
@@ -60,8 +61,8 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 
 `doc entity` 是語意文件索引，不是檔案本體。
 
-- `single`：一個 doc entity 對應一份正式文件
-- `index`：一個 doc entity 對應同一語意主題下的多份正式文件
+- `index`：預設模式。一個 doc entity 對應同一語意主題下的 1..N 份正式文件
+- `single`：例外模式。只在明確需要把某份正式文件當成獨立治理對象時使用
 
 不論 `single` 或 `index`，實際內容都存在外部平台；ZenOS 只保存：
 
@@ -69,7 +70,23 @@ ZenOS 的 L3 document entity 目前是正式文件的語意代理——metadata 
 - ontology 掛載脈絡
 - source metadata
 - source status
+- bundle highlights
 - change summary
+
+### Bundle-first 檢索原則
+
+對使用者與 agent 而言，文件治理的第一優先不是「存成幾個節點」，而是：
+
+1. 從 L2 能立即看到有哪些文件可讀
+2. 不用先知道檔名，也能知道應先點哪一份
+3. 同一主題的文件入口只有一個穩定 bundle，不必在多個 L3 間猜測
+
+因此本 spec 定義：
+
+- 預設新建 doc entity 必須使用 `doc_role=index`
+- `index` 即使目前只有 1 份 source 也合法
+- 每個 index 必須提供 `bundle_highlights`
+- L2 detail 與知識地圖必須把 doc bundle 視為該 L2 的文件入口，而不是只顯示零散外鏈
 
 ### 不同平台 URI 如何被支援
 
@@ -136,27 +153,37 @@ doc entity
 
 ### P0（必須有）
 
-#### P0-1: Document Index — L3 doc entity 新子類型
+#### P0-1: Bundle-first Document Entity — L3 doc entity 預設使用 index
 
-- **描述**：L3 doc entity 新增 `doc_role` 欄位，區分兩種角色：
+- **描述**：L3 doc entity 的預設角色改為 `index`。`single` 保留，但降為例外模式，只有在文件本身就是獨立治理單位時才可使用。
 
   | doc_role | 語意 | source 數量 | 用途 |
   |----------|------|------------|------|
-  | `single` | 單一文件的語意代理（現有行為） | 1 | 向後相容，現有 doc entity 自動為 single |
-  | `index` | 某個語意主題的文件索引 | 1..N | 聚合同主題的多份文件 |
+  | `index` | 某個語意主題的文件索引（預設） | 1..N | 聚合同主題的多份文件，作為 L2 的穩定文件入口 |
+  | `single` | 單一文件的語意代理（例外） | 1 | 文件本身就是獨立治理單位，不需要再聚合其他文件 |
 
 - **新建判準**：
-  - **選 single**：目前只有一份正式文件，且短期內沒有要聚合多份版本或附件
-  - **選 index**：同一主題已知會聚合 2 份以上正式文件，或文件集本身就是產品需求的一部分（如「訂閱管理文件集」包含 SPEC + DECISION + DESIGN）
+  - **預設選 index**：只要這份文件屬於某個 L2 主題的正式文件入口，就應建 index，即使現在只有 1 份 source
+  - **只有以下情況可選 single**：
+    1. 該文件有獨立生命周期，且不希望與同主題其他文件聚合
+    2. 該文件被產品明確要求單獨分享、單獨授權、單獨 supersede
+    3. 該文件不是某個 L2 的主文件入口，而是單獨存在的正式文件物件
 
 - **Index 與 Single 的治理差異**：
-  - `single`：doc entity 的 `status` 直接反映文件狀態（draft/approved/superseded）
   - `index`：doc entity 的 `status` 反映索引本身的狀態（active/archived）。個別文件的狀態追蹤在每個 source 的 `doc_status` 欄位
+  - `single`：doc entity 的 `status` 直接反映文件狀態（draft/approved/superseded）
+
+- **硬規則**：
+  - Agent 建新 doc entity 時，若未明確說明 `single` 的例外理由，server/治理規則必須引導使用 `index`
+  - 同一個 L2 主題的正式文件，不得預設拆成多個平行 single entity 當作主要入口
+  - `index` 的最小合法 source 數量為 1，不得以「目前只有一份文件」作為拒絕建立 index 的理由
 
 - **Acceptance Criteria**：
-  - Given 現有 doc entity 未指定 doc_role，When 系統讀取，Then 預設為 `single`（向後相容）
-  - Given agent 建立 doc_role=index 的 entity，When 傳入多個 source，Then 全部正確儲存
-  - Given doc_role=single 的 entity，When agent 嘗試新增第 2 個 source，Then 拒絕操作，提示「single doc entity 只能有一個 source，若需聚合多份文件請改用 index」
+  - `AC-P0-1-1` Given agent 建立新的 doc entity 且未傳 `doc_role`，When write 執行，Then 系統以 `index` 建立，而不是 `single`
+  - `AC-P0-1-2` Given agent 建立 `doc_role=index` 的 entity 且只傳入 1 個 source，When write 執行，Then 寫入成功
+  - `AC-P0-1-3` Given agent 建立 `doc_role=single` 的 entity，When write 執行，Then 必須同時提供 single 理由；未提供時回傳 warning 或 reject，引導改用 `index`
+  - `AC-P0-1-4` Given 現有舊 doc entity 未指定 doc_role，When 系統讀取，Then 仍向後相容視為 `single`；但新建流程不得再以 `single` 為預設
+  - `AC-P0-1-5` Given doc_role=single 的 entity，When agent 嘗試新增第 2 個 source，Then 拒絕操作，提示「single doc entity 只能有一個 source，若需聚合多份文件請改用 index」
 
 #### P0-2: Source 結構升級（每個 source 獨立可識別）
 
@@ -269,23 +296,40 @@ doc entity
   - Given agent 寫入 `doc_type: "UNKNOWN_TYPE"`，When write 執行，Then 回傳 warning 建議使用 `OTHER`，但不拒絕
   - Given 行銷競品分析與客服客訴分析都使用 `doc_type: "REPORT"`，When 文件分別掛到不同 L2 entity，Then 兩者在 ontology 與 Dashboard 中視為不同主題，不因類型相同而混為同一組文件
 
-#### P0-5: Change Summary — Doc Entity 層級的變化摘要
+#### P0-5: Bundle Highlights + Change Summary — Doc Entity 層級的檢索摘要
 
-- **描述**：Doc entity 新增 `change_summary` 欄位，記錄文件集的最新重要變化。讓 agent 不需要讀取所有 source 原文就能快速掌握重點。change_summary 由 agent 在 capture/sync 時更新（不是 server 自動生成）。
+- **描述**：Doc entity 必須同時提供 `bundle_highlights` 與 `change_summary`。前者回答「這個文件集底下有哪些值得先看的文件與重點」，後者回答「最近變了什麼」。兩者都由 agent 在 capture/sync 時更新（不是 server 自動生成）。
 
 - **欄位結構**：
+  - `bundle_highlights`（index 必填，list[object]，1..5 筆）：
+    - `source_id`：指向哪一份 source
+    - `headline`：一句話說這份文件最值得看的點
+    - `reason_to_read`：為什麼現在要先看它（例如「這是 SSOT」「這份定義 AC」「這份描述最新決策」）
+    - `priority`：`primary` / `important` / `supporting`
   - `change_summary`（選填，string）：一段人話摘要，描述文件集最近的重要變化
   - `summary_updated_at`（系統管理）：change_summary 最後更新時間
+  - `highlights_updated_at`（系統管理）：bundle_highlights 最後更新時間
 
 - **使用場景範例**：
+  - `bundle_highlights`
+    - `SPEC-dashboard-onboarding.md` — 這是 onboarding flow 的 SSOT，定義 4 步流程與觸發/消失邏輯
+    - `ADR-023-dashboard-onboarding.md` — 這份解釋 preferences JSONB、前端 overlay 與 API 選型理由
   - 「2026-04-09：新增 ADR-020 決定採用 MCP 聯邦模式，不做 content snapshot。SPEC 已更新 Phase 規劃。」
   - 「2026-04-05：客戶合約 v2 簽署完成，新增 SLA 附件。舊合約已標記 superseded。」
 
+- **硬規則**：
+  - `doc_role=index` 若沒有 `bundle_highlights`，不得視為完成治理
+  - `bundle_highlights` 必須至少標出 1 份 `priority=primary` 的 source
+  - `bundle_highlights` 只能引用屬於該 bundle 的 `source_id`，不得寫成游離文字清單
+
 - **Acceptance Criteria**：
-  - Given agent 更新 doc entity 的 change_summary，When write 執行，Then summary_updated_at 自動設為當前時間
-  - Given agent 搜尋 doc entity，When search 結果回傳，Then 包含 change_summary 欄位
-  - Given agent 呼叫 get(doc_id)，When 回傳，Then 包含 change_summary 和 summary_updated_at
-  - Given change_summary 超過 90 天未更新且 entity 有活躍的 source 變動，When analyze 執行，Then 回傳 warning「change_summary 可能過時」
+  - `AC-P0-5-1` Given agent 建立或更新 `doc_role=index` 的 entity，When write 執行，Then `bundle_highlights` 必須可被寫入與讀回
+  - `AC-P0-5-2` Given index entity 缺少 `bundle_highlights`，When 該 entity 被標記為 current/active，Then 系統回傳 warning 或治理失敗提示
+  - `AC-P0-5-3` Given agent 更新 doc entity 的 `change_summary`，When write 執行，Then `summary_updated_at` 自動設為當前時間
+  - `AC-P0-5-4` Given agent 更新 doc entity 的 `bundle_highlights`，When write 執行，Then `highlights_updated_at` 自動設為當前時間
+  - `AC-P0-5-5` Given agent 搜尋 doc entity，When search 結果回傳，Then 包含 `bundle_highlights`、`change_summary`
+  - `AC-P0-5-6` Given agent 呼叫 get(doc_id)，When 回傳，Then 包含 `bundle_highlights`、`change_summary`、`summary_updated_at`、`highlights_updated_at`
+  - `AC-P0-5-7` Given `change_summary` 超過 90 天未更新且 entity 有活躍的 source 變動，When analyze 執行，Then 回傳 warning「change_summary 可能過時」
 
 #### P0-6: Capture/Sync 路由規則（解決 reviewer Finding #1）
 
@@ -341,16 +385,17 @@ doc entity
 
   **「輕量參考」的定義**：不具備上述任一特徵的連結。移除它不影響知識圖譜的語意完整性。
 
-- **首次建立時何時直接建 index**：
-  - 當 agent 同時 capture 同一主題的 2+ 份文件時，直接建 index（不先建 single 再升級）
-  - 當主題的性質明確會產出多份文件時（如「客戶交付」天生包含合約+SLA+驗收），直接建 index
-  - 不確定時，建 single。後續需要時再升級為 index
+  - **首次建立時何時直接建 index**：
+  - 預設永遠直接建 index（即使目前只有 1 份文件）
+  - 當 agent 同時 capture 同一主題的 2+ 份文件時，直接把全部 sources 收進同一個 index
+  - 只有在符合 P0-1 的 single 例外條件時，才可建立 single
 
 - **Acceptance Criteria**：
-  - Given agent capture 一份新 SPEC 且已存在同主題的 index entity，When 路由判斷，Then agent 選擇 add_source 而非建新 entity
-  - Given agent capture 一份新文件且沒有任何相關 doc entity，When 路由判斷，Then agent 建立新 doc entity
-  - Given agent 不確定路由，When 路由判斷，Then agent 停止並回報用戶（不自行猜測）
-  - Given governance skill 已更新，When agent 讀取 governance_guide("document")，Then 回傳包含路由決策樹的治理指引
+  - `AC-P0-6-1` Given agent capture 一份新 SPEC 且已存在同主題的 index entity，When 路由判斷，Then agent 選擇 `add_source` 而非建新 entity
+  - `AC-P0-6-2` Given agent capture 一份新文件且沒有任何相關 doc entity，When 路由判斷，Then agent 建立新的 `index` doc entity，而不是 `single`
+  - `AC-P0-6-3` Given agent 同時 capture 同一主題的 3 份文件，When 路由判斷，Then 3 份文件被收進同一個 index entity
+  - `AC-P0-6-4` Given agent 不確定路由，When 路由判斷，Then agent 停止並回報用戶（不自行猜測）
+  - `AC-P0-6-5` Given governance skill 已更新，When agent 讀取 `governance_guide("document")`，Then 回傳包含 bundle-first 路由規則
 
 #### P0-7: Git URI 嚴格驗證
 
@@ -390,11 +435,49 @@ doc entity
 
 #### P0-9: Dashboard 外鏈跳轉與 Source 列表
 
-- **描述**：Dashboard 在 doc entity 詳情頁顯示所有 source。對 index 類型，按 doc_type 分組顯示。每個 source 旁有平台圖標和「在 XXX 中打開」按鈕。
+- **描述**：Dashboard 在 doc entity 詳情頁顯示所有 source。對 index 類型，按 doc_type 分組顯示。每個 source 旁有平台圖標和「在 XXX 中打開」按鈕，且必須優先顯示 `bundle_highlights`，讓使用者先看懂哪些文件最重要。
 - **Acceptance Criteria**：
-  - Given doc_role=index 的 entity 有 4 個 source（SPEC、DECISION、DESIGN、TEST），When Dashboard 顯示，Then 按 doc_type 分組展示
-  - Given source 的 source_status 為 `stale`，Then 連結旁顯示警告標記
-  - Given source 的 source_status 為 `unresolvable`，Then 連結顯示為不可點擊
+  - `AC-P0-9-1` Given `doc_role=index` 的 entity 有 4 個 source（SPEC、DECISION、DESIGN、TEST），When Dashboard 顯示，Then 按 `doc_type` 分組展示
+  - `AC-P0-9-2` Given index entity 有 `bundle_highlights`，When Dashboard 顯示，Then highlights 區塊顯示在 source 清單之前
+  - `AC-P0-9-3` Given highlight 指向某個 source，When 使用者點擊 highlight，Then 打開對應 source 或 doc reader
+  - `AC-P0-9-4` Given source 的 `source_status` 為 `stale`，Then 連結旁顯示警告標記
+  - `AC-P0-9-5` Given source 的 `source_status` 為 `unresolvable`，Then 連結顯示為不可點擊
+
+#### P0-10: L2 Detail 必須把 Doc Bundle 視為主要文件入口
+
+- **描述**：每個 L2 detail 頁或右側 detail sheet，必須直接顯示掛在該 L2 下的 doc bundles。使用者不需要先知道檔名或切去 documents 頁，應能從 L2 直接看到「有哪些文件、先看哪份、SSOT 是哪份」。
+
+- **顯示內容**：
+  - bundle 標題
+  - `bundle_highlights`
+  - `change_summary`
+  - primary source link
+  - 其餘 source 計數與入口
+
+- **硬規則**：
+  - L2 detail 不得只顯示「有幾份文件」或一排外鏈；必須顯示可讀的 highlights
+  - 若某 L2 掛了多個 doc bundles，必須分別顯示，避免不同主題文件混在一起
+
+- **Acceptance Criteria**：
+  - `AC-P0-10-1` Given 某個 L2 底下掛有 doc bundle，When 使用者開啟 L2 detail，Then 直接看到該 bundle 的 title、highlights、primary source
+  - `AC-P0-10-2` Given bundle 有 `priority=primary` 的 highlight，When L2 detail 顯示，Then 該 highlight 以「先讀這份」或等價標示呈現
+  - `AC-P0-10-3` Given 某個 L2 掛有 2 個 doc bundles，When L2 detail 顯示，Then 兩個 bundle 分開呈現，不合併為單一清單
+  - `AC-P0-10-4` Given bundle 缺少 `bundle_highlights`，When L2 detail 顯示，Then 顯示治理缺口警告，而不是沉默顯示空白
+
+#### P0-11: Knowledge Map 必須提供 L2 → Doc Bundle 的可視入口
+
+- **描述**：知識地圖中的 L2 與 doc bundle 之間必須有穩定、可點擊的圖譜關聯。目的是讓使用者從概念節點出發時，能自然沿圖走到相關文件，而不是只能靠搜尋或 detail 面板猜。
+
+- **圖譜要求**：
+  - doc bundle 與其 primary L2 之間有穩定邊（`parent_id` 或物化 graph edge）
+  - 點擊 L2 時，UI 能顯示其下 doc bundles
+  - 點擊 doc bundle 時，UI 能顯示 bundle highlights 與 source links
+
+- **Acceptance Criteria**：
+  - `AC-P0-11-1` Given L2 掛有 doc bundle，When 知識地圖載入，Then 圖上存在 L2 → doc bundle 的穩定關聯
+  - `AC-P0-11-2` Given 使用者從 L2 節點開啟 detail，When 點擊文件入口，Then 能進入對應 doc bundle detail
+  - `AC-P0-11-3` Given 使用者從 doc bundle 節點開啟 detail，When 查看內容，Then 能看到 highlights 與 source links，而不是只有 metadata
+  - `AC-P0-11-4` Given doc bundle 被移動或重分類，When ontology sync 完成，Then 圖譜邊與 detail 顯示仍與新的 primary L2 一致
 
 ---
 
@@ -436,8 +519,9 @@ doc entity
   3. 原有的 single source 自動成為 index 的第一個 source（繼承 is_primary=true）
   4. 新文件成為第二個 source
 - **Acceptance Criteria**：
-  - Given doc_role=single 的 entity，When agent 寫入 doc_role=index 並追加新 source，Then 原有 source 保留，doc_role 更新為 index
-  - Given 升級後的 entity，When search/get 回傳，Then 顯示完整的 sources 陣列
+  - `AC-P1-2-1` Given `doc_role=single` 的 entity，When agent 寫入 `doc_role=index` 並追加新 source，Then 原有 source 保留，doc_role 更新為 index
+  - `AC-P1-2-2` Given 升級後的 entity，When search/get 回傳，Then 顯示完整的 sources 陣列
+  - `AC-P1-2-3` Given single 升級為 index，When 升級完成，Then agent 必須補上 `bundle_highlights`
 
 #### P1-3: Bundle Source 主動同步
 
@@ -490,7 +574,9 @@ doc entity
 - **source_status 在 source 層級** — 確認 SPEC-doc-source-governance 開放問題：每個 source 獨立追蹤 source_status
 - **source platform rollout** — `github` 先正式支援；`gdrive` / `notion` / `wiki` 先定義 contract 與 setup_hint，後續補 reader adapter
 - **doc_role 欄位** — documents 表新增 enum 欄位，預設 `single`（向後相容）
+- **doc_role 欄位** — documents 表新增 enum 欄位。舊資料預設視為 `single`（向後相容）；新建流程預設使用 `index`
 - **doc_type 映射** — server-side 維護新舊類別映射表，搜尋時透明展開
+- **bundle_highlights 欄位** — documents 表新增 JSONB 欄位，存 source-linked highlight objects
 - **change_summary 欄位** — documents 表新增 text 欄位 + timestamp
 - **read_source 介面變更** — 新增可選 source_id 參數，向後相容（不帶=讀 primary）
 - **write mutation 擴展** — 新增 add_source / update_source / remove_source 操作語意
@@ -498,6 +584,7 @@ doc entity
 - **governance_guide("document") 更新** — 回傳內容需包含泛用類別表和路由決策樹
 - **SPEC-doc-governance 需補 amendment** — 說明 L3 新增 index 子類型，不改變原有 single 行為
 - **SPEC-doc-source-governance 已被吸收** — 本 spec 成為 doc entity/source platform 的單一真相來源
+- **L2 detail / graph integration** — Dashboard 必須把 doc bundle 視為 L2 的文件入口，而不是 documents 頁的旁支功能
 
 ## 已決議事項（原開放問題）
 

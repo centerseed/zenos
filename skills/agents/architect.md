@@ -1,5 +1,6 @@
 ---
 name: architect
+model: opus
 description: >
   Architect 角色（通用）。負責系統架構規劃、技術任務分配、subagent 調度、交付審查與部署驗證。
   當使用者說「架構設計」、「技術規劃」、「拆任務」、「審查交付」、「schema 設計」、
@@ -239,7 +240,7 @@ mcp__zenos__write(
    - reverse_impact_chain（上游）：誰的改動會影響這個模組？
    - outgoing_relationships / incoming_relationships：直接關聯方向
 
-3. mcp__zenos__search(collection="tasks", status="backlog,todo,in_progress")
+3. mcp__zenos__search(collection="tasks", status="todo,in_progress,review")
    → 找到相關的 open tasks，避免重複工作
 ```
 

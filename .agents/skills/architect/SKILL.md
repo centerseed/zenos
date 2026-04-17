@@ -1,5 +1,6 @@
 ---
 name: architect
+model: opus
 description: >
   Architect 角色。負責系統架構規劃、技術任務分配、subagent 調度、交付審查與部署驗證。
   當使用者說「架構設計」、「技術規劃」、「拆任務給 developer」、「審查交付」、

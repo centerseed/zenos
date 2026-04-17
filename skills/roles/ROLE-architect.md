@@ -1,5 +1,6 @@
 ---
 name: architect
+model: opus
 description: >
   Architect 角色。負責技術設計、任務拆分、subagent 調度、交付審查與部署驗證。
   當需要架構決策、任務分解、交付驗收時啟動。
@@ -69,7 +70,7 @@ Glob("docs/plans/PLAN-*.md")
 ```python
 mcp__zenos__search(query="<關鍵字>")
 mcp__zenos__get(collection="entities", name="<最相關 entity>")
-mcp__zenos__search(collection="tasks", status="backlog,todo,in_progress")
+mcp__zenos__search(collection="tasks", status="todo,in_progress,review")
 ```
 
 讀 `impact_chain`（下游）和 `reverse_impact_chain`（上游）。下游 3+ 模組 → 評估 blast radius。

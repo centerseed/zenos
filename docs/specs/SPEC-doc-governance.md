@@ -4,7 +4,7 @@ id: SPEC-doc-governance
 status: Approved
 ontology_entity: documentation-governance
 created: 2026-03-26
-updated: 2026-03-27
+updated: 2026-04-17
 ---
 
 # Feature Spec: ZenOS-Enabled 專案文件治理規則
@@ -63,6 +63,18 @@ updated: 2026-03-27
 5. 文件正文的穩定性應高於協作便利性；需要保留歷史時，寧可開新文件，不覆寫既有決策。
 6. 專案特例可以存在，但必須明文記錄為 local convention，不可只靠口頭共識。
 7. 任何影響文件分類、狀態、命名、取代關係、或 ontology 對應的修改，都必須同步更新 ontology；否則視為未完成變更。
+8. 文件治理的完成定義必須包含「可被找到」：使用者與 agent 必須能從對應的 L2 主題快速找到正確文件入口，而不是只把 metadata 寫進 ontology。
+
+### Amendment：bundle-first L3 document entity
+
+本 spec 原本把 L3 document entity 視為單一正式文件的語意代理。自 `SPEC-document-bundle` 起，L3 文件治理補充以下硬規則：
+
+- 新建 doc entity 預設應採 `doc_role=index`
+- `index` 即使目前只有 1 份 source 也合法
+- `single` 保留，但僅作為例外模式，不再是新建預設
+- 同一個 L2 主題下的正式文件，原則上應收斂為同一個 doc bundle 的多個 source，而不是拆成多個平行 L3 作為主要入口
+
+此 amendment 不改變本 spec 對 frontmatter、生命周期、supersede、archive、ontology sync 的要求；它只把 L3 的預設資料模型，從單檔代理升級為 bundle-first 索引。
 
 ---
 
@@ -230,12 +242,14 @@ superseded_by: {id}   # 僅當 status: Superseded 時填寫
 - L3 document entity 的主要掛載點以 `parent_id` 為準；若系統另外物化 `part_of` 或其他 relationship 作為圖譜邊，必須保證與 `parent_id` 一致，不可一邊存在一邊脫落。
 - `linked_entity_ids` 若作為文件同步輸入，必須定義為 `list[str]`。第一個 ID 代表 primary parent，其餘代表額外關聯；不得接受會造成逐字元解析的模糊字串格式。
 - 對 rename、reclassify、archive、supersede 這類批次治理操作，系統應提供專用 sync 模式或等價流程，一次處理路徑更新、掛載修復、狀態調整與追溯關係，而不是要求 caller 手動拆成多次危險 write。
+- 對 `doc_role=index` 的文件同步，除 `sources` 外還必須同步維護 `bundle_highlights`、primary source 與 L2 掛載入口。不得只更新 source 清單而忽略文件入口層。
 
 完成定義：
 
 - Git 內文件已更新
 - 對應 ontology 的 L2 / L3 entity 已更新
 - ZenOS ingest / capture / sync 流程重新可用，且不會指向過時 metadata
+- 若文件屬於某個 L2 主題的主要文件入口，則必須能從該 L2 直接看到 doc bundle、highlights 與主要連結
 
 ---
 
@@ -357,6 +371,15 @@ PM 和 Architect agent 是文件的主要建立者。治理規則寫在 spec 裡
 | zenos-capture | L3 document entity | 合規流程中的 ontology 同步執行者 |
 | zenos-sync | L3 document entity | 增量同步時的 frontmatter 解析與狀態對齊 |
 
+### bundle-first 治理責任補充
+
+| 工具 / Workflow | 額外責任 |
+|----------------|---------|
+| `document-governance` | 判斷新文件應進既有 bundle、升級 single→index、或例外建立 single；同時自動判斷 `git only / git+gcs / gcs only` |
+| `zenos-capture` | 建立/更新 document 時補齊 `bundle_highlights`，避免只寫 metadata |
+| `zenos-sync` | 新增 source、rename、supersede 後，提醒或補做 bundle highlights / primary source 對齊；若啟用 auto-publish，僅能對 `current` + `github source` + 正式入口文件發布 snapshot |
+| Dashboard / Knowledge Map | 從 L2 直接呈現 doc bundle 入口，不得把文件入口藏在 documents 清單深處 |
+
 ### 強制動作序列
 
 Agent 每次建立或修改受治理文件時，必須依序完成以下四個階段。不可跳過任何階段。
@@ -379,6 +402,30 @@ Agent 要寫/改文件
 ```
 
 **禁止行為**：未搜尋就直接建新文件。
+
+**新增強制檢查：bundle-first 路由**
+
+- 若找到同主題的 `doc_role=index`，應優先 `add_source` 到既有 bundle
+- 若找到同主題的 `doc_role=single`，且新文件與其屬於同一 L2 主題，應優先提議升級為 `index`
+- 若沒有找到同主題文件入口，應預設新建 `index`
+- 不得因為「目前只有一份文件」就直接建 `single`
+
+**新增強制檢查：authoring vs delivery 自動判斷**
+
+- agent 必須先判斷該文件是：
+  - `git only`
+  - `git + gcs`
+  - `gcs only`
+- 不得把這個選擇預設丟回給用戶
+- 判斷基準至少包含：
+  - 是否為 `current`
+  - 是否為 formal-entry
+  - 是否需要分享 / 給其他 agent 直接閱讀
+  - 若 source.type=github，是否 remote 可見
+- 規則：
+  - `current + formal-entry` → 預設 `git + gcs`
+  - 非入口、以編輯協作為主 → 可 `git only`
+  - 用戶明確要求 direct delivery → 可 `gcs only`
 
 #### 階段二：新建 / 更新 / Supersede 判斷
 
@@ -415,13 +462,18 @@ Agent 要寫/改文件
 3. 確認目標目錄正確（type → directory 對應）
 4. 寫入檔案
 5. 呼叫 `mcp__zenos__write(collection="documents")` 建立 L3 document entity
-6. 若 `ontology_entity` 為 TBD，開一個追蹤 task 或在文件內標記 TODO
+6. 若建立的是 `doc_role=index`，必須同輪補上 `bundle_highlights`；至少指出一份 primary source 與「為什麼先讀它」
+7. 若 `ontology_entity` 為 TBD，開一個追蹤 task 或在文件內標記 TODO
+8. 若文件屬於 `current formal-entry`，agent 不得停在 `git only`；必須同輪補齊 delivery snapshot，除非用戶明確要求暫緩
 
 ##### 更新既有文件
 
 1. 更新 frontmatter 的 `updated` 日期
 2. 修改文件內容（僅限合法的更新範圍）
 3. 呼叫 `mcp__zenos__write(collection="documents")` 更新 L3 document entity
+4. 若本次更新改變了 bundle 中的 SSOT、閱讀優先序、或新增了關鍵 source，必須同步更新 `bundle_highlights`
+5. 若文件屬於 `current` 正式入口且專案/命令啟用了 auto-publish，必須同步發布或刷新 delivery snapshot；publish 失敗時標記 delivery 狀態，不得靜默略過
+6. 若 github source 對其他人仍不可見（未 push / remote 不可達），則不得把 GitHub URL 當完成交付；必須補 delivery snapshot 或明確標示未完成
 
 ##### Supersede 舊文件
 
@@ -477,6 +529,7 @@ Agent 要寫/改文件
 1. **Supersede 必須雙向可追溯**：舊文件有 `superseded_by`，新文件的 description 或 frontmatter 應記錄它取代了什麼。
 2. **路徑變更必須原子完成**：rename/搬移文件時，Git 變更與 ontology entity 更新必須在同一個 commit 或同一輪操作中完成，不得分批留斷鏈。
 3. **Archive 不是刪除**：封存後的文件仍保留 frontmatter 與 entity 關聯，ontology 中的 L3 entity 標為 archived 而非刪除。
+4. **Delivery 直寫不得無鎖覆蓋**：若文件採 ZenOS direct markdown write，更新請求必須帶 `base_revision_id`；與當前 primary revision 不一致時必須回 `409 REVISION_CONFLICT`。
 
 ---
 

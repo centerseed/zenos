@@ -40,6 +40,27 @@ def _mock_tool_bootstrap():
          patch("zenos.interface.mcp.entry_repo", new=AsyncMock()):
         yield
 
+
+def _ok_data(result: dict) -> dict:
+    assert result["status"] == "ok"
+    return result["data"]
+
+
+def _non_ok_data(result: dict, status: str) -> dict:
+    assert result["status"] == status
+    return result["data"]
+
+
+class _Acquire:
+    def __init__(self, conn):
+        self._conn = conn
+
+    async def __aenter__(self):
+        return self._conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
 def _make_entity(**overrides) -> Entity:
     defaults = dict(
         id="ent-1",
@@ -137,9 +158,10 @@ class TestSearchTool:
             mock_ts.list_tasks = AsyncMock(return_value=[])
 
             result = await search(query="Paceriz", collection="all")
+            data = _ok_data(result)
 
-            assert "results" in result
-            assert result["count"] == 1
+            assert "results" in data
+            assert data["count"] == 1
             mock_os.search.assert_called_once_with(
                 "Paceriz", max_level=2, product_id=None,
             )
@@ -152,9 +174,10 @@ class TestSearchTool:
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities")
+            data = _ok_data(result)
 
-            assert "entities" in result
-            assert len(result["entities"]) == 2
+            assert "entities" in data
+            assert len(data["entities"]) == 2
 
     async def test_list_entities_with_confirmed_filter(self):
         from zenos.interface.mcp import search
@@ -167,8 +190,7 @@ class TestSearchTool:
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities", confirmed_only=True)
-
-            assert len(result["entities"]) == 1
+            assert len(_ok_data(result)["entities"]) == 1
 
     async def test_list_tasks_with_assignee(self):
         from zenos.interface.mcp import search
@@ -178,6 +200,7 @@ class TestSearchTool:
             mock_ts.list_tasks = AsyncMock(return_value=tasks)
 
             result = await search(collection="tasks", assignee="developer")
+            data = _ok_data(result)
 
             mock_ts.list_tasks.assert_called_once_with(
                 assignee="developer",
@@ -188,7 +211,7 @@ class TestSearchTool:
                 project=None,
                 plan_id=None,
             )
-            assert "tasks" in result
+            assert "tasks" in data
 
     async def test_list_tasks_with_status_filter(self):
         from zenos.interface.mcp import search
@@ -208,6 +231,24 @@ class TestSearchTool:
                 plan_id=None,
             )
 
+    async def test_list_tasks_normalizes_project_filter(self):
+        from zenos.interface.mcp import search
+
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
+            mock_ts.list_tasks = AsyncMock(return_value=[])
+
+            await search(collection="tasks", project="  Paceriz  ")
+
+            mock_ts.list_tasks.assert_called_once_with(
+                assignee=None,
+                created_by=None,
+                status=None,
+                limit=200,
+                offset=0,
+                project="paceriz",
+                plan_id=None,
+            )
+
     async def test_empty_keyword_search(self):
         """Empty query with collection=all should list all collections."""
         from zenos.interface.mcp import search
@@ -223,9 +264,10 @@ class TestSearchTool:
             mock_ts.list_tasks = AsyncMock(return_value=[])
 
             result = await search(query="", collection="all")
+            data = _ok_data(result)
 
-            assert "entities" in result
-            assert "tasks" in result
+            assert "entities" in data
+            assert "tasks" in data
 
     async def test_limit_respected(self):
         from zenos.interface.mcp import search
@@ -235,8 +277,7 @@ class TestSearchTool:
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities", limit=3)
-
-            assert len(result["entities"]) == 3
+            assert len(_ok_data(result)["entities"]) == 3
 
     async def test_entities_confidential_hidden_for_member(self):
         from zenos.interface.mcp import search, _current_partner
@@ -252,7 +293,7 @@ class TestSearchTool:
             with patch("zenos.interface.mcp.ontology_service") as mock_os:
                 mock_os.list_entities = AsyncMock(return_value=[restricted])
                 result = await search(collection="entities")
-            assert result["entities"] == []
+            assert _ok_data(result)["entities"] == []
         finally:
             current_partner_department.reset(token_dept)
             current_partner_roles.reset(token_roles)
@@ -273,7 +314,7 @@ class TestSearchTool:
             with patch("zenos.interface.mcp.ontology_service") as mock_os:
                 mock_os.list_entities = AsyncMock(return_value=[restricted])
                 result = await search(collection="entities")
-            assert result["entities"] == []
+            assert _ok_data(result)["entities"] == []
         finally:
             current_partner_department.reset(token_dept)
             current_partner_roles.reset(token_roles)
@@ -294,8 +335,9 @@ class TestSearchTool:
             with patch("zenos.interface.mcp.ontology_service") as mock_os:
                 mock_os.list_entities = AsyncMock(return_value=[confidential])
                 result = await search(collection="entities")
-            assert len(result["entities"]) == 1
-            assert result["entities"][0]["id"] == "ent-c"
+            data = _ok_data(result)
+            assert len(data["entities"]) == 1
+            assert data["entities"][0]["id"] == "ent-c"
         finally:
             current_partner_department.reset(token_dept)
             current_partner_roles.reset(token_roles)
@@ -327,9 +369,10 @@ class TestSearchTool:
                 collection="documents",
                 query="spec-a.md",
             )
+            data = _ok_data(result)
 
-            assert "documents" in result
-            assert [d["id"] for d in result["documents"]] == ["doc-1"]
+            assert "documents" in data
+            assert [d["id"] for d in data["documents"]] == ["doc-1"]
 
 
 class TestSearchNewParams:
@@ -343,8 +386,9 @@ class TestSearchNewParams:
         with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.list_entities = AsyncMock(return_value=entities)
             result = await search(collection="entities", limit=2, offset=2)
-            assert len(result["entities"]) == 2
-            assert result["entities"][0]["id"] == "ent-2"
+            data = _ok_data(result)
+            assert len(data["entities"]) == 2
+            assert data["entities"][0]["id"] == "ent-2"
 
     async def test_offset_pagination_tasks(self):
         """offset is passed to task_service.list_tasks."""
@@ -373,7 +417,7 @@ class TestSearchNewParams:
         with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.list_entities = AsyncMock(return_value=[l1, l2, l3])
             result = await search(collection="entities")
-            ids = [e["id"] for e in result["entities"]]
+            ids = [e["id"] for e in _ok_data(result)["entities"]]
             assert "ent-l1" in ids
             assert "ent-l2" in ids
             assert "ent-l3" not in ids
@@ -386,7 +430,7 @@ class TestSearchNewParams:
         with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.list_entities = AsyncMock(return_value=[l3])
             result = await search(collection="entities", entity_level="all")
-            assert len(result["entities"]) == 1
+            assert len(_ok_data(result)["entities"]) == 1
 
     async def test_entity_level_l1_only(self):
         """entity_level='L1' filters out L2 and L3."""
@@ -397,7 +441,7 @@ class TestSearchNewParams:
         with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.list_entities = AsyncMock(return_value=[l1, l2])
             result = await search(collection="entities", entity_level="L1")
-            ids = [e["id"] for e in result["entities"]]
+            ids = [e["id"] for e in _ok_data(result)["entities"]]
             assert "ent-l1" in ids
             assert "ent-l2" not in ids
 
@@ -411,7 +455,7 @@ class TestSearchNewParams:
         with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.list_entities = AsyncMock(return_value=[no_level])
             result = await search(collection="entities")
-            assert len(result["entities"]) == 1
+            assert len(_ok_data(result)["entities"]) == 1
 
     async def test_product_id_filters_entities_to_subtree(self):
         """product_id filters entities to the product's subtree."""
@@ -423,7 +467,7 @@ class TestSearchNewParams:
         with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.list_entities = AsyncMock(return_value=[product, child, unrelated])
             result = await search(collection="entities", product_id="prod-1")
-            ids = [e["id"] for e in result["entities"]]
+            ids = [e["id"] for e in _ok_data(result)["entities"]]
             assert "prod-1" in ids
             assert "mod-1" in ids
             assert "mod-2" not in ids
@@ -455,9 +499,10 @@ class TestSearchNewParams:
             mock_os.search = AsyncMock(return_value=results)
             mock_ts.list_tasks = AsyncMock(return_value=[])
             result = await search(query="test", collection="all", offset=2, limit=2)
-            assert result["count"] == 2
-            assert result["total"] == 5
-            assert result["results"][0]["id"] == "ent-2"
+            data = _ok_data(result)
+            assert data["count"] == 2
+            assert data["total"] == 5
+            assert data["results"][0]["id"] == "ent-2"
 
     async def test_search_with_product_name(self):
         """product name resolves to product_id via get_by_name."""
@@ -487,10 +532,11 @@ class TestSearchNewParams:
             mock_repo.get_by_name = AsyncMock(return_value=None)
 
             result = await search(query="test", collection="all", product="NonExistent")
+            data = _non_ok_data(result, "rejected")
 
-            assert "error" in result
-            assert "NonExistent" in result["error"]
-            assert "hint" in result
+            assert data["error"] == "NOT_FOUND"
+            assert "NonExistent" in data["message"]
+            assert "hint" in data
 
     async def test_search_product_name_takes_priority(self):
         """When both product and product_id are passed, product takes priority."""
@@ -564,10 +610,11 @@ class TestGetTool:
             mock_os.get_entity = AsyncMock(return_value=ewr)
 
             result = await get(collection="entities", name="Paceriz")
+            data = _ok_data(result)
 
-            assert result["entity"]["name"] == "Paceriz"
-            assert len(result["outgoing_relationships"]) == 1
-            assert len(result["incoming_relationships"]) == 0
+            assert data["entity"]["name"] == "Paceriz"
+            assert len(data["outgoing_relationships"]) == 1
+            assert len(data["incoming_relationships"]) == 0
 
     async def test_get_entity_by_id(self):
         from zenos.interface.mcp import get
@@ -580,7 +627,7 @@ class TestGetTool:
 
             result = await get(collection="entities", id="ent-1")
 
-            assert result["entity"]["id"] == "ent-1"
+            assert _ok_data(result)["entity"]["id"] == "ent-1"
 
     async def test_guest_get_entity_enforces_shared_l1_scope(self):
         from zenos.interface.mcp import get, _current_partner
@@ -627,8 +674,8 @@ class TestGetTool:
                 allowed = await get(collection="entities", id="ent-shared")
                 denied = await get(collection="entities", id="ent-other")
 
-                assert allowed["entity"]["id"] == "ent-shared"
-                assert denied["error"] == "NOT_FOUND"
+                assert _ok_data(allowed)["entity"]["id"] == "ent-shared"
+                assert _non_ok_data(denied, "rejected")["error"] == "NOT_FOUND"
         finally:
             _current_partner.reset(token)
 
@@ -674,8 +721,8 @@ class TestGetTool:
                 allowed = await get(collection="documents", id="doc-shared")
                 denied = await get(collection="documents", id="doc-other")
 
-                assert allowed["id"] == "doc-shared"
-                assert denied["error"] == "NOT_FOUND"
+                assert _ok_data(allowed)["id"] == "doc-shared"
+                assert _non_ok_data(denied, "rejected")["error"] == "NOT_FOUND"
         finally:
             _current_partner.reset(token)
 
@@ -687,23 +734,25 @@ class TestGetTool:
 
             result = await get(collection="entities", name="NonExistent")
 
-            assert result["error"] == "NOT_FOUND"
+            assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
 
     async def test_get_no_name_no_id(self):
         from zenos.interface.mcp import get
 
         result = await get(collection="entities")
+        data = _non_ok_data(result, "rejected")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "Must provide" in result["message"]
+        assert data["error"] == "INVALID_INPUT"
+        assert "Must provide" in data["message"]
 
     async def test_get_unknown_collection(self):
         from zenos.interface.mcp import get
 
         result = await get(collection="foobar", name="test")
+        data = _non_ok_data(result, "rejected")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "Unknown collection" in result["message"]
+        assert data["error"] == "INVALID_INPUT"
+        assert "Unknown collection" in data["message"]
 
     async def test_get_task_by_id(self):
         from zenos.interface.mcp import get
@@ -715,7 +764,7 @@ class TestGetTool:
 
             result = await get(collection="tasks", id="task-1")
 
-            assert result["title"] == "Fix login"
+            assert _ok_data(result)["title"] == "Fix login"
 
     async def test_get_task_not_found(self):
         from zenos.interface.mcp import get
@@ -725,15 +774,16 @@ class TestGetTool:
 
             result = await get(collection="tasks", id="nonexistent")
 
-            assert result["error"] == "NOT_FOUND"
+            assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
 
     async def test_get_task_requires_id(self):
         from zenos.interface.mcp import get
 
         result = await get(collection="tasks", name="some-name")
+        data = _non_ok_data(result, "rejected")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "id" in result["message"].lower()
+        assert data["error"] == "INVALID_INPUT"
+        assert "id" in data["message"].lower()
 
     async def test_get_blindspot_by_id(self):
         from zenos.interface.mcp import get
@@ -744,7 +794,7 @@ class TestGetTool:
 
             result = await get(collection="blindspots", id="bs-1")
 
-            assert result["description"] == "No monitoring"
+            assert _ok_data(result)["description"] == "No monitoring"
 
     async def test_get_document_by_id(self):
         from zenos.interface.mcp import get
@@ -755,7 +805,7 @@ class TestGetTool:
 
             result = await get(collection="documents", id="doc-1")
 
-            assert result["title"] == "API Spec"
+            assert _ok_data(result)["title"] == "API Spec"
 
     async def test_get_protocol_by_id_prefers_protocol_doc_id(self):
         from zenos.interface.mcp import get
@@ -767,7 +817,7 @@ class TestGetTool:
 
             result = await get(collection="protocols", id="proto-1")
 
-            assert result["id"] == "proto-1"
+            assert _ok_data(result)["id"] == "proto-1"
             mock_pr.get_by_id.assert_called_once_with("proto-1")
             mock_pr.get_by_entity.assert_not_called()
 
@@ -786,9 +836,10 @@ class TestReadSourceTool:
             mock_ss.read_source = AsyncMock(return_value="# Hello World")
 
             result = await read_source(doc_id="doc-1")
+            data = _ok_data(result)
 
-            assert result["doc_id"] == "doc-1"
-            assert result["content"] == "# Hello World"
+            assert data["doc_id"] == "doc-1"
+            assert data["content"] == "# Hello World"
 
     async def test_read_source_not_found(self):
         from zenos.interface.mcp import read_source
@@ -798,7 +849,7 @@ class TestReadSourceTool:
 
             result = await read_source(doc_id="nonexistent")
 
-            assert result["error"] == "NOT_FOUND"
+            assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
 
     async def test_read_source_file_not_found(self):
         from zenos.interface.mcp import read_source
@@ -809,7 +860,7 @@ class TestReadSourceTool:
 
             result = await read_source(doc_id="doc-1")
 
-            assert result["error"] == "NOT_FOUND"
+            assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
 
     async def test_read_source_permission_error(self):
         from zenos.interface.mcp import read_source
@@ -819,9 +870,10 @@ class TestReadSourceTool:
                 side_effect=PermissionError("No access"))
 
             result = await read_source(doc_id="doc-1")
+            data = _non_ok_data(result, "error")
 
-            assert result["error"] == "ADAPTER_ERROR"
-            assert "Permission denied" in result["message"]
+            assert data["error"] == "ADAPTER_ERROR"
+            assert "Permission denied" in data["message"]
 
     async def test_read_source_runtime_error(self):
         from zenos.interface.mcp import read_source
@@ -832,7 +884,7 @@ class TestReadSourceTool:
 
             result = await read_source(doc_id="doc-1")
 
-            assert result["error"] == "ADAPTER_ERROR"
+            assert _non_ok_data(result, "error")["error"] == "ADAPTER_ERROR"
 
 
 # ---------------------------------------------------------------------------
@@ -1020,6 +1072,164 @@ class TestWriteTool:
             assert result["data"]["operation"] == "rename"
             assert result["data"]["dry_run"] is True
             assert result["data"]["document_id"] == "doc-1"
+
+    async def test_write_documents_adds_delivery_suggestions_for_current_formal_entry(self):
+        from zenos.interface.mcp import write, _current_partner
+        from zenos.domain.knowledge import Entity, Tags
+
+        doc = Entity(
+            id="doc-1",
+            name="Spec",
+            type="document",
+            summary="summary",
+            tags=Tags(what=["demo"], why="why", how="how", who=["pm"]),
+            status="current",
+            parent_id="module-1",
+            sources=[{
+                "source_id": "src-1",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+                "is_primary": True,
+            }],
+            doc_role="index",
+            bundle_highlights=[{
+                "source_id": "src-1",
+                "headline": "SSOT",
+                "reason_to_read": "primary",
+                "priority": "primary",
+            }],
+        )
+
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "primary_snapshot_revision_id": None,
+            "delivery_status": None,
+        })
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acquire(conn))
+
+        token = _current_partner.set({"id": "partner-1", "isAdmin": False})
+        try:
+            with (
+                patch("zenos.interface.mcp.ontology_service") as mock_os,
+                patch("zenos.interface.mcp.write.get_pool", new=AsyncMock(return_value=pool)),
+                patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+                patch("zenos.interface.mcp.write._audit_log"),
+                patch("zenos.interface.dashboard_api._publish_document_snapshot_internal", new=AsyncMock(return_value={"revision_id": "rev-1"})),
+            ):
+                mock_os.upsert_document = AsyncMock(return_value=doc)
+
+                result = await write(
+                    collection="documents",
+                    data={
+                        "title": "Spec",
+                        "summary": "summary",
+                        "tags": {"what": ["demo"], "why": "why", "how": "how", "who": ["pm"]},
+                        "linked_entity_ids": ["module-1"],
+                    },
+                )
+
+            assert result["status"] == "ok"
+            assert any("git + gcs" in s for s in result["suggestions"])
+            assert any("delivery snapshot" in s for s in result["suggestions"])
+            assert any("自動補上 delivery snapshot" in s for s in result["suggestions"])
+        finally:
+            _current_partner.reset(token)
+
+    async def test_write_documents_uses_explicit_formal_entry_flag(self):
+        from zenos.interface.mcp import write, _current_partner
+        from zenos.domain.knowledge import Entity, Tags
+
+        doc = Entity(
+            id="doc-1",
+            name="Spec",
+            type="document",
+            summary="summary",
+            tags=Tags(what=["demo"], why="why", how="how", who=["pm"]),
+            status="current",
+            parent_id=None,
+            details={"formal_entry": True},
+            sources=[{
+                "source_id": "src-1",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+                "is_primary": True,
+            }],
+            doc_role="single",
+        )
+
+        conn = MagicMock()
+        conn.fetchrow = AsyncMock(return_value={
+            "primary_snapshot_revision_id": None,
+            "delivery_status": None,
+        })
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acquire(conn))
+
+        token = _current_partner.set({"id": "partner-1", "isAdmin": False})
+        try:
+            with (
+                patch("zenos.interface.mcp.ontology_service") as mock_os,
+                patch("zenos.interface.mcp.write.get_pool", new=AsyncMock(return_value=pool)),
+                patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+                patch("zenos.interface.mcp.write._audit_log"),
+                patch("zenos.interface.dashboard_api._publish_document_snapshot_internal", new=AsyncMock(return_value={"revision_id": "rev-1"})),
+            ):
+                mock_os.upsert_document = AsyncMock(return_value=doc)
+
+                result = await write(
+                    collection="documents",
+                    data={
+                        "title": "Spec",
+                        "summary": "summary",
+                        "tags": {"what": ["demo"], "why": "why", "how": "how", "who": ["pm"]},
+                    },
+                )
+
+            assert result["status"] == "ok"
+            assert any("git + gcs" in s for s in result["suggestions"])
+        finally:
+            _current_partner.reset(token)
+
+    async def test_write_documents_rejects_unpushed_github_for_explicit_formal_entry(self):
+        from zenos.interface.mcp import write, _current_partner
+
+        token = _current_partner.set({"id": "partner-1", "isAdmin": False})
+        try:
+            with (
+                patch("zenos.interface.mcp.ontology_service") as mock_os,
+                patch("zenos.interface.mcp.write._audit_log"),
+                patch("zenos.interface.mcp.write.GitHubAdapter") as mock_adapter_cls,
+            ):
+                mock_adapter = MagicMock()
+                mock_adapter.read_content = AsyncMock(side_effect=FileNotFoundError("not pushed"))
+                mock_adapter_cls.return_value = mock_adapter
+
+                result = await write(
+                    collection="documents",
+                    data={
+                        "title": "Spec",
+                        "summary": "summary",
+                        "tags": {"what": ["demo"], "why": "why", "how": "how", "who": ["pm"]},
+                        "formal_entry": True,
+                        "status": "current",
+                        "source": {
+                            "type": "github",
+                            "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                        },
+                    },
+                )
+
+            assert result["status"] == "rejected"
+            assert "remote 可見" in result["rejection_reason"]
+            assert any("push 到 remote" in s for s in result["suggestions"])
+            mock_os.upsert_document.assert_not_called()
+        finally:
+            _current_partner.reset(token)
 
     async def test_write_relationship_success(self):
         from zenos.interface.mcp import write
@@ -1310,6 +1520,28 @@ class TestTaskTool:
             payload = mock_ts.create_task.call_args.args[0]
             assert payload["linked_entities"] == ["ent-1", "ent-2"]
             assert payload["acceptance_criteria"] == ["a", "b"]
+
+    async def test_create_task_normalizes_project_scope(self):
+        from zenos.interface.mcp import task, _current_partner
+        from zenos.application.action.task_service import TaskResult
+
+        t = _make_task(project="paceriz")
+        create_result = TaskResult(task=t, cascade_updates=[])
+        token_partner = _current_partner.set({"id": "partner-1", "defaultProject": "  Paceriz  "})
+        try:
+            with patch("zenos.interface.mcp.task_service") as mock_ts:
+                mock_ts.create_task = AsyncMock(return_value=create_result)
+
+                await task(
+                    action="create",
+                    title="Fix login",
+                    created_by="architect",
+                )
+
+                payload = mock_ts.create_task.call_args.args[0]
+                assert payload["project"] == "paceriz"
+        finally:
+            _current_partner.reset(token_partner)
 
     async def test_create_task_missing_title(self):
         from zenos.interface.mcp import task
@@ -1611,9 +1843,10 @@ class TestAnalyzeTool:
             mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
 
             result = await analyze(check_type="quality")
+            data = _ok_data(result)
 
-            assert "quality" in result
-            assert result["quality"]["score"] == 85
+            assert "quality" in data
+            assert data["quality"]["score"] == 85
 
     async def test_analyze_quality_includes_l2_repair_suggestions(self):
         from zenos.interface.mcp import analyze
@@ -1645,11 +1878,12 @@ class TestAnalyzeTool:
             mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
 
             result = await analyze(check_type="quality")
+            data = _ok_data(result)
 
-            assert result["quality"]["active_l2_missing_impacts"] == 1
-            assert len(result["quality"]["l2_impacts_repairs"]) == 1
-            assert result["quality"]["l2_backfill_count"] == 1
-            assert result["quality"]["l2_backfill_proposals"][0]["entity_id"] == "mod-1"
+            assert data["quality"]["active_l2_missing_impacts"] == 1
+            assert len(data["quality"]["l2_impacts_repairs"]) == 1
+            assert data["quality"]["l2_backfill_count"] == 1
+            assert data["quality"]["l2_backfill_proposals"][0]["entity_id"] == "mod-1"
 
     async def test_analyze_staleness(self):
         from zenos.interface.mcp import analyze
@@ -1671,7 +1905,7 @@ class TestAnalyzeTool:
 
             result = await analyze(check_type="staleness")
 
-            assert result["staleness"]["count"] == 1
+            assert _ok_data(result)["staleness"]["count"] == 1
 
     async def test_analyze_blindspot(self):
         from zenos.interface.mcp import analyze
@@ -1683,7 +1917,7 @@ class TestAnalyzeTool:
 
             result = await analyze(check_type="blindspot")
 
-            assert result["blindspots"]["count"] == 1
+            assert _ok_data(result)["blindspots"]["count"] == 1
 
     async def test_analyze_all(self):
         from zenos.interface.mcp import analyze
@@ -1699,10 +1933,11 @@ class TestAnalyzeTool:
             mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
 
             result = await analyze(check_type="all")
+            data = _ok_data(result)
 
-            assert "quality" in result
-            assert "staleness" in result
-            assert "blindspots" in result
+            assert "quality" in data
+            assert "staleness" in data
+            assert "blindspots" in data
 
     async def test_analyze_all_includes_kpis_when_data_available(self):
         from zenos.interface.mcp import analyze
@@ -1744,20 +1979,22 @@ class TestAnalyzeTool:
             mock_br.list_all = AsyncMock(return_value=[])
 
             result = await analyze(check_type="all")
+            data = _ok_data(result)
 
-            assert "kpis" in result
-            assert "health_signal" in result
-            assert result["health_signal"]["overall_level"] == "red"
-            assert result["kpis"]["blindspot_total"] == 2
-            assert result["kpis"]["duplicate_blindspot_rate"] == 0.5
+            assert "kpis" in data
+            assert "health_signal" in data
+            assert data["health_signal"]["overall_level"] == "red"
+            assert data["kpis"]["blindspot_total"] == 2
+            assert data["kpis"]["duplicate_blindspot_rate"] == 0.5
 
     async def test_analyze_invalid_type(self):
         from zenos.interface.mcp import analyze
 
         result = await analyze(check_type="foobar")
+        data = _non_ok_data(result, "rejected")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "Unknown check_type" in result["message"]
+        assert data["error"] == "INVALID_INPUT"
+        assert "Unknown check_type" in data["message"]
 
     async def test_analyze_quality_entry_saturation_empty(self):
         """analyze quality: entry_saturation=[] and count=0 when no saturated entities."""
@@ -1778,10 +2015,11 @@ class TestAnalyzeTool:
             tools_mod.entry_repo.list_saturated_entities = AsyncMock(return_value=[])
 
             result = await analyze(check_type="quality")
+            data = _ok_data(result)
 
-            assert "quality" in result
-            assert result["quality"]["entry_saturation"] == []
-            assert result["quality"]["entry_saturation_count"] == 0
+            assert "quality" in data
+            assert data["quality"]["entry_saturation"] == []
+            assert data["quality"]["entry_saturation_count"] == 0
 
     async def test_analyze_quality_entry_saturation_has_proposal(self):
         """analyze quality: saturated entity produces proposal in entry_saturation."""
@@ -1822,9 +2060,10 @@ class TestAnalyzeTool:
             tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=entries)
 
             result = await analyze(check_type="quality")
+            data = _ok_data(result)
 
-            assert result["quality"]["entry_saturation_count"] == 1
-            saturation_items = result["quality"]["entry_saturation"]
+            assert data["quality"]["entry_saturation_count"] == 1
+            saturation_items = data["quality"]["entry_saturation"]
             assert len(saturation_items) == 1
             assert saturation_items[0]["entity_id"] == "ent-1"
             assert saturation_items[0]["consolidation_proposal"] is not None
@@ -1855,10 +2094,11 @@ class TestAnalyzeTool:
             tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=entries)
 
             result = await analyze(check_type="quality")
+            data = _ok_data(result)
 
-            assert "quality" in result
-            assert result["quality"]["entry_saturation_count"] == 1
-            assert result["quality"]["entry_saturation"][0]["consolidation_proposal"] is None
+            assert "quality" in data
+            assert data["quality"]["entry_saturation_count"] == 1
+            assert data["quality"]["entry_saturation"][0]["consolidation_proposal"] is None
 
 
 # ===================================================================
@@ -2154,10 +2394,11 @@ class TestGetEntitiesActiveEntries:
         tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=[entry])
 
         result = await get(collection="entities", name="Paceriz")
+        data = _ok_data(result)
 
-        assert "active_entries" in result
-        assert len(result["active_entries"]) == 1
-        assert result["active_entries"][0]["type"] == "decision"
+        assert "active_entries" in data
+        assert len(data["active_entries"]) == 1
+        assert data["active_entries"][0]["type"] == "decision"
         tools_mod.entry_repo.list_by_entity.assert_called_once()
 
     async def test_get_entity_active_entries_empty_when_none(self):
@@ -2173,9 +2414,10 @@ class TestGetEntitiesActiveEntries:
         tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=[])
 
         result = await get(collection="entities", name="Paceriz")
+        data = _ok_data(result)
 
-        assert "active_entries" in result
-        assert result["active_entries"] == []
+        assert "active_entries" in data
+        assert data["active_entries"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -2194,21 +2436,23 @@ class TestGovernanceGuideTool:
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="entity", level=1)
+        data = _ok_data(result)
 
-        assert result["topic"] == "entity"
-        assert result["level"] == 1
-        assert result["version"] == "1.1"
-        assert isinstance(result["content"], str)
-        assert len(result["content"]) > 0
+        assert data["topic"] == "entity"
+        assert data["level"] == 1
+        assert data["version"] == "1.1"
+        assert isinstance(data["content"], str)
+        assert len(data["content"]) > 0
 
     async def test_default_level_is_1(self):
         """governance_guide defaults to level=1 when level not provided."""
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="capture")
+        data = _ok_data(result)
 
-        assert result["level"] == 1
-        assert result["topic"] == "capture"
+        assert data["level"] == 1
+        assert data["topic"] == "capture"
 
     # ── DC-2: All four topics × three levels ────────────────────────────────
 
@@ -2219,15 +2463,16 @@ class TestGovernanceGuideTool:
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic=topic, level=level)
+        data = _ok_data(result)
 
-        assert "error" not in result
-        assert result["topic"] == topic
-        assert result["level"] == level
-        assert isinstance(result["version"], str)
-        assert len(result["version"]) > 0
-        assert isinstance(result["content"], str)
-        assert len(result["content"]) >= 100, (
-            f"Content for {topic} level={level} is too short: {len(result['content'])} chars"
+        assert "error" not in data
+        assert data["topic"] == topic
+        assert data["level"] == level
+        assert isinstance(data["version"], str)
+        assert len(data["version"]) > 0
+        assert isinstance(data["content"], str)
+        assert len(data["content"]) >= 100, (
+            f"Content for {topic} level={level} is too short: {len(data['content'])} chars"
         )
 
     async def test_level1_content_is_shorter_than_level3(self):
@@ -2237,7 +2482,7 @@ class TestGovernanceGuideTool:
         result_l1 = await governance_guide(topic="entity", level=1)
         result_l3 = await governance_guide(topic="entity", level=3)
 
-        assert len(result_l1["content"]) < len(result_l3["content"])
+        assert len(_ok_data(result_l1)["content"]) < len(_ok_data(result_l3)["content"])
 
     # ── DC-3: Invalid input returns INVALID_INPUT error ─────────────────────
 
@@ -2246,22 +2491,24 @@ class TestGovernanceGuideTool:
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="unknown_topic", level=1)
+        data = _non_ok_data(result, "rejected")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "unknown_topic" in result["message"]
+        assert data["error"] == "INVALID_INPUT"
+        assert "unknown_topic" in data["message"]
         # Must list valid topics in the message
         for valid in ["entity", "document", "task", "capture"]:
-            assert valid in result["message"]
+            assert valid in data["message"]
 
     async def test_invalid_level_returns_error(self):
         """Invalid level returns INVALID_INPUT error with valid levels listed."""
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="entity", level=99)
+        data = _non_ok_data(result, "rejected")
 
-        assert result["error"] == "INVALID_INPUT"
-        assert "99" in result["message"]
-        assert "1/2/3" in result["message"]
+        assert data["error"] == "INVALID_INPUT"
+        assert "99" in data["message"]
+        assert "1/2/3" in data["message"]
 
     async def test_level_zero_returns_error(self):
         """Level 0 (boundary) returns INVALID_INPUT error."""
@@ -2269,7 +2516,7 @@ class TestGovernanceGuideTool:
 
         result = await governance_guide(topic="task", level=0)
 
-        assert result["error"] == "INVALID_INPUT"
+        assert _non_ok_data(result, "rejected")["error"] == "INVALID_INPUT"
 
     async def test_empty_topic_returns_error(self):
         """Empty string topic returns INVALID_INPUT error."""
@@ -2277,7 +2524,7 @@ class TestGovernanceGuideTool:
 
         result = await governance_guide(topic="", level=1)
 
-        assert result["error"] == "INVALID_INPUT"
+        assert _non_ok_data(result, "rejected")["error"] == "INVALID_INPUT"
 
     # ── DC-4: Content is server-side (smoke test via import) ────────────────
 
@@ -2299,7 +2546,7 @@ class TestGovernanceGuideTool:
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="entity", level=3)
-        content = result["content"]
+        content = _ok_data(result)["content"]
 
         # Must mention the three-question gate (external rule)
         assert "三問" in content
@@ -2312,7 +2559,7 @@ class TestGovernanceGuideTool:
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="capture", level=2)
-        content = result["content"]
+        content = _ok_data(result)["content"]
 
         # External rule: routing is mentioned
         assert "LAYER_DOWNGRADE_REQUIRED" in content

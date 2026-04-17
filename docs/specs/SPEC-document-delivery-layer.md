@@ -4,7 +4,7 @@ id: SPEC-document-delivery-layer
 status: Draft
 ontology_entity: L3 文件治理
 created: 2026-04-11
-updated: 2026-04-11
+updated: 2026-04-17
 ---
 
 # Feature Spec: ZenOS Document Delivery Layer (Lightweight Doc System)
@@ -32,6 +32,7 @@ updated: 2026-04-11
 1. 不在 ZenOS 內重建 Google Drive 等級的多人編輯器。
 2. 不做雙向同步回寫（ZenOS -> Drive/Git）作為 v1 需求。
 3. 不開放 GCS object public URL 作為正式分享機制。
+4. 不在沒有衝突檢查的情況下，把 ZenOS delivery md 當成多人即時協作編輯器。
 
 ## 4. 核心定位與邊界
 
@@ -44,6 +45,24 @@ updated: 2026-04-11
 - `source_uri` 是來源參考，不是終端分享入口。
 - 對外分享一律使用 ZenOS permalink（`/docs/{doc_id}` 或 share link）。
 - GCS 只接受 server account 存取；終端使用者無直接 bucket 權限。
+
+### Agent 預設決策原則
+
+是否使用 Git authoring、GCS delivery，預設不交由終端使用者判斷。
+系統應由 agent 依文件角色自動決定：
+
+- 預設：`git` 是 authoring source
+- 若文件屬於 `current` 正式入口、會被分享、或會被其他 agent 直接閱讀，則自動補 `gcs delivery snapshot`
+- 若文件不是正式入口，且主要用途是編輯協作，則可維持 `git only`
+- 若用戶明確要求「不要經 git，直接發布內容」，才允許 `gcs only`
+
+換句話說，v1 的標準判斷不是「git 還是 gcs 二選一」，而是：
+
+- `git only`
+- `git + gcs`
+- `gcs only`
+
+其中預設應優先落在 `git + gcs`（對 current formal-entry docs）或 `git only`（對非入口協作文檔）。
 
 ## 5. 需求
 
@@ -70,6 +89,18 @@ AC:
 
 1. Given 任一文件 revision，When 檢查 metadata，Then 僅存在 `snapshot_object_path`，不存在永久可公開 URL。
 2. Given 未通過 ZenOS API 驗權，When 請求文件內容，Then 不可直接從 GCS 讀取成功。
+
+### P0-2.1 Snapshot 路徑 contract
+
+- 文件 snapshot bucket 由 `GCS_DOCUMENTS_BUCKET` 指定。
+- v1 的 object path 必須固定為：
+  - `docs/{doc_id}/revisions/{revision_id}.md`
+- 產品層對外分享與閱讀入口必須是 `/docs/{doc_id}` 或 share link，不得直接暴露 bucket/object path。
+
+AC:
+
+1. Given 任一 markdown snapshot revision，When 檢查其 metadata，Then `snapshot_object_path` 符合 `docs/{doc_id}/revisions/{revision_id}.md`。
+2. Given Reader 回傳文件內容，When 檢查 response，Then 使用 `canonical_path=/docs/{doc_id}` 作為穩定入口，而不是 GCS object URL。
 
 ### P0-3 ACL 由 ZenOS 應用層主控
 
@@ -112,6 +143,79 @@ AC:
 
 1. Given markdown 文件含 `#` 與 code block，When 開啟 Reader，Then 正確渲染 TOC 與 code highlighting。
 2. Given 使用者無權限，When 開啟 `/docs/{doc_id}`，Then 顯示拒絕訊息與返回入口。
+
+### P0-5.1 Authoring vs Delivery 自動判斷矩陣
+
+- agent 不得預設把「文件要寫 git 還是寫 gcs」丟回給用戶決定。
+- agent 必須依下列訊號自動判斷：
+  - `is_formal_entry`: 是否為某個 L2/current doc bundle 的正式入口
+  - `is_current`: 是否為 current 文件
+  - `sharing_needed`: 是否預期會被其他人或其他 agent 直接閱讀/分享
+  - `remote_visible`: 若來源是 github，是否已 push 且 remote 可見
+  - `user_explicit_direct_delivery`: 用戶是否明確要求不經 git 直接發布
+
+判斷規則：
+
+1. 預設模式為 `git only`
+2. 若 `is_current=true` 且 `is_formal_entry=true`，則至少升級為 `git + gcs`
+3. 若 `sharing_needed=true` 且 `remote_visible=false`，則不得維持 `git only`；必須補 `gcs delivery`
+4. 若 `user_explicit_direct_delivery=true`，可使用 `gcs only`
+5. 若文件只是 supporting doc、非 current、非 formal-entry，且主要用途是協作編輯，則維持 `git only`
+
+AC:
+
+1. Given agent 建立一份 `current` 且 `formal-entry` 的 github 文件，When agent 完成治理判斷，Then 預設結果是 `git + gcs`，不是 `git only`。
+2. Given agent 建立一份非正式入口的協作文檔，When agent 完成治理判斷，Then 可維持 `git only`。
+3. Given github source 尚未 push 到 remote，但文件會被其他人直接閱讀，When agent 完成治理判斷，Then 不得把未 push GitHub URL 當正式入口，必須補 `gcs delivery` 或阻擋宣稱已可分享。
+4. Given 用戶明確要求「不要經 git，直接發布」，When agent 完成治理判斷，Then 可使用 `gcs only`。
+
+### P0-6 Sync 後自動 Publish contract
+
+- `/zenos-sync` 不得把所有文件一律自動發布成 snapshot。
+- 系統只可對以下文件執行 auto-publish：
+  - `status=current`
+  - 作為某個 L2 的正式入口或 current doc bundle 的 primary source
+  - `source.type=github`
+- auto-publish 應作為明確 mode 或 flag 啟用；預設可由 workflow/專案策略決定，但不得隱式對所有 source type 生效。
+- auto-publish 成功後，必須更新：
+  - `primary_snapshot_revision_id`
+  - `last_published_at`
+  - `delivery_status=ready`
+- 若來源讀取失敗，必須保留最後可用 revision，並把 `delivery_status` 標記為 `stale`，不得把 Reader 清空。
+
+AC:
+
+1. Given `/zenos-sync` 掃到 `status=current` 且 `source.type=github` 的正式入口文件，When 啟用 auto-publish，Then 會建立新 snapshot revision 並更新 `primary_snapshot_revision_id`。
+2. Given `/zenos-sync` 掃到 `source.type=gdrive` 或 `notion` 的文件，When auto-publish 流程執行，Then 不得假裝成功 publish，必須跳過並回傳明確原因。
+3. Given 同一輪 sync 只新增 metadata 或補關聯，When 文件不屬於 current 正式入口，Then 不得強制產生 snapshot。
+4. Given auto-publish 時來源 GitHub 檔案已不可讀，但舊 snapshot 存在，When sync 完成，Then Reader 仍可讀舊 snapshot 且 `delivery_status=stale`。
+5. Given 文件符合 `current + formal-entry` 條件，When agent 執行 sync/capture，Then auto-publish 或等價 delivery 補齊流程必須被視為預設路徑，而不是可選附加動作。
+
+### P0-7 Direct Markdown Write Concurrency Contract
+
+- `POST /api/docs/{doc_id}/content` 必須從「無鎖覆蓋」升級為 optimistic concurrency control。
+- 請求必須帶：
+  - `base_revision_id`
+  - `content`
+  - `source_id` / `source_version_ref`（若有）
+- server 在寫入前，必須比較：
+  - `base_revision_id`
+  - 當前 `primary_snapshot_revision_id`
+- 若兩者不一致，server 必須拒絕本次寫入並回 `409 Conflict`，不得默默覆蓋。
+- 衝突 response 至少要包含：
+  - `code=REVISION_CONFLICT`
+  - `current_revision_id`
+  - `canonical_path`
+  - `last_published_at`
+- 衝突時，較舊的一方不得自動把自己的內容寫成新的 primary revision。
+- revision 歷史可以保留，但 primary 指標切換必須受衝突檢查保護。
+
+AC:
+
+1. Given 使用者 A 與 B 都從 `rev-1` 開始編輯同一份 delivery md，When A 先成功提交並產生 `rev-2`，Then B 之後以 `base_revision_id=rev-1` 提交時回 `409 Conflict`。
+2. Given 使用者提交 `POST /api/docs/{doc_id}/content` 但未帶 `base_revision_id`，When server 驗證請求，Then 回 `400` 或 `409`，不得沿用舊的無鎖覆蓋行為。
+3. Given 發生 revision conflict，When client 收到 response，Then response 內包含 `current_revision_id` 與 `canonical_path`，讓 client 能重新載入最新版本。
+4. Given 兩個使用者幾乎同時送出 direct markdown write，When 第一個 transaction 已更新 `primary_snapshot_revision_id`，Then 第二個 transaction 不得再把自己的版本設成 primary，除非重新基於最新 revision 提交。
 
 ### P1-1 Reader 內權限管理
 
@@ -182,6 +286,8 @@ AC:
    - 撤銷 token。
 6. `GET /s/{token}`
    - 匿名/外部分享入口，經 token 驗證後導到受限 Reader。
+7. `POST /api/docs/{doc_id}/content`
+   - direct markdown write 必須要求 `base_revision_id`，並在 revision 衝突時回 `409 REVISION_CONFLICT`。
 
 ## 8. 發布流程（Ingest -> Publish）
 
@@ -195,6 +301,30 @@ AC:
 
 - 保留最後可用 revision 作為 fallback。
 - 將 `delivery_status` 標為 `stale`，並在 Reader 顯示來源同步警告。
+
+### Agent 自動決策流程
+
+1. agent 先判斷文件是否屬於 `current formal-entry`
+2. 若否，預設走 `git only`
+3. 若是，預設走 `git + gcs`
+4. 若 github source 未 push 或 remote 不可見，則不得把 `git only` 視為完成；必須補 snapshot
+5. 只有用戶明確要求 direct delivery，才可改走 `gcs only`
+
+### Sync Auto-publish 流程
+
+1. `/zenos-sync` 完成文件 metadata/source 治理後，判斷該文件是否符合 auto-publish 條件。
+2. 僅對 `current` + `github source` + 正式入口文件執行 publish。
+3. publish 成功後，更新 `primary_snapshot_revision_id`、`last_published_at`、`delivery_status=ready`。
+4. publish 失敗但舊 snapshot 仍存在時，保留原 primary revision，標記 `delivery_status=stale`。
+5. 不符合條件的文件只更新 ontology / source metadata，不寫 snapshot。
+
+### Direct Markdown Write 衝突處理流程
+
+1. client 先讀當前 delivery metadata，取得 `primary_snapshot_revision_id`。
+2. client 提交 `POST /api/docs/{doc_id}/content` 時，必須附帶 `base_revision_id`。
+3. server 以 transaction 檢查當前 primary revision 是否仍等於 `base_revision_id`。
+4. 一致才允許建立新 revision 並切 primary。
+5. 不一致時回 `409 REVISION_CONFLICT`，要求 client reload 後重提。
 
 ## 9. Plan Layer（交付邊界）
 
@@ -224,12 +354,15 @@ AC:
    **緩解：** server 強制授權，前端僅顯示授權後結果。
 3. **風險：** snapshot 與來源長期偏離。  
    **緩解：** sync job + `delivery_status` + Reader 警示 + manual republish。
+4. **風險：** 兩個使用者同時直寫同一份 delivery md，互相覆蓋。  
+   **緩解：** `base_revision_id` optimistic lock + `409 REVISION_CONFLICT`，不允許 silent overwrite。
 
 ## 12. Open Questions
 
 1. v1 是否需要支援附件（圖片/檔案）在 markdown 中的 proxy rewrite？
 2. `confidential` 是否允許 owner 產生一次性外部 share token（break-glass）？
 3. `GET /api/docs/{doc_id}/content` 應回 markdown 原文還是 server-side HTML（需統一 XSS 防護策略）？
+4. `/zenos-sync` 的 auto-publish 預設應該是 workspace policy、專案 policy，還是 command flag？本 spec 只要求它必須是顯式 contract，不要求最終 UI 入口。
 
 ## 13. Ontology Sync Implications（強制對齊）
 
@@ -247,12 +380,14 @@ AC:
 2. GCS private snapshot 儲存
 3. server-side ACL enforcement
 4. share token create/revoke/expire
+5. `POST /api/docs/{doc_id}/content` 的 `base_revision_id` 衝突保護
 
 ### Phase 1.5
 
 1. Reader 管理面板（visibility + grants）
 2. `Edit in source` 導向
 3. fallback snapshot 與 stale 提示一致化
+4. `/zenos-sync` 對 `current` GitHub formal-entry docs 的 auto-publish
 
 ### Phase 2
 
