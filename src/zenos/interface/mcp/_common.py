@@ -81,8 +81,22 @@ def _unified_response(
     context_bundle: dict | None = None,
     governance_hints: dict | None = None,
     rejection_reason: str | None = None,
+    applied_filters: dict | None = None,
+    completeness: str | None = None,
 ) -> dict:
-    """Phase 1 unified response format for all MCP tool responses."""
+    """Phase 1 unified response format for all MCP tool responses.
+
+    applied_filters / completeness are additive behavior-contract fields
+    (SPEC-mcp-tool-contract §5 INV3/INV4):
+
+    - applied_filters: dict echoing server-side filters the caller should
+      know excluded items (e.g. {"entity_level": {"input": "L1",
+      "effective_max_level": 1, "included_types": ["product", "project",
+      "goal", "role"]}, "visibility_applied": true}).
+    - completeness: "partial" when result is ranked/threshold-trimmed and
+      may omit existing items; "exhaustive" when result is guaranteed
+      complete within the declared applied_filters (pagination still ok).
+    """
     from zenos.interface.mcp._auth import _current_partner
     from zenos.infrastructure.context import current_partner_id as _current_partner_id
     from zenos.application.identity.workspace_context import build_workspace_context_sync
@@ -98,6 +112,14 @@ def _unified_response(
     }
     if rejection_reason is not None:
         resp["rejection_reason"] = rejection_reason
+    if applied_filters is not None:
+        resp["applied_filters"] = applied_filters
+    if completeness is not None:
+        if completeness not in ("partial", "exhaustive"):
+            raise ValueError(
+                f"completeness must be 'partial' or 'exhaustive', got {completeness!r}"
+            )
+        resp["completeness"] = completeness
 
     # Inject workspace_context when a partner is authenticated
     partner = _current_partner.get()

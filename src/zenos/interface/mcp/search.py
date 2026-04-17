@@ -94,12 +94,18 @@ async def search(
         product_id: 按產品 ID 過濾。只回傳該產品及其子樹內的 entity/task。
         product: 按產品名稱過濾（case-insensitive）。找不到時回傳錯誤提示。
             與 product_id 並存，product 優先。
-        entity_level: 控制搜尋的 entity 層級。
-            "L1" = 只搜 L1（product, project, goal, role）
-            "L2" = 只搜 L2（module, strategy, knowledge 等）
-            "L1,L2" = 搜 L1+L2（預設行為）
-            "L1,L2,L3" 或 "all" = 搜所有層級（含 L3 文件/細節）
-            不傳時預設只搜 L1+L2，排除 L3 細節節點。
+        entity_level: 控制搜尋的 entity 層級（按 entity.level 欄位過濾）。
+            實際 type→level 映射（current codebase）：
+              level=1: product
+              level=2: module
+              level=3: document, goal, role, project
+            "L1"      = max_level=1（只含 level=1 的 type：product）
+            "L2"      = max_level=2（含 level 1+2：product, module）
+            "L1,L2"   = 等同 "L2"（預設行為）
+            "L3" / "L1,L2,L3" / "all" = 不過濾 level（含 level=3：project / goal / role / document）
+            不傳時預設 max_level=2（排除 L3）。
+            ⚠️ project / goal / role 屬 level=3，需要 entity_level="all" 才看得到。
+            回傳 response 的 `applied_filters.entity_level` 會 echo 實際套用的 max_level。
         workspace_id: 選填。切換到指定 workspace 執行搜尋（必須在你的可用列表內）。
     """
     from zenos.interface.mcp import _ensure_services
@@ -129,6 +135,38 @@ async def search(
 
     # Parse entity_level → max_level int for domain layer
     max_level = _parse_entity_level(entity_level)
+
+    # Build applied_filters echo (INV3: server-side filters must be transparent).
+    # This tells the agent exactly what was excluded, so empty results can be
+    # correctly interpreted as "nothing matched" vs "filter excluded candidates".
+    _TYPES_AT_OR_BELOW_LEVEL = {
+        1: ["product"],
+        2: ["product", "module"],
+        3: ["product", "module", "document", "goal", "role", "project"],
+    }
+    applied_filters: dict = {
+        "collection": collection,
+        "entity_level": {
+            "input": entity_level,
+            "effective_max_level": max_level,
+            "included_types": (
+                _TYPES_AT_OR_BELOW_LEVEL.get(max_level) if max_level is not None else None
+            ),
+            "excluded_types": (
+                [
+                    t for t in _TYPES_AT_OR_BELOW_LEVEL[3]
+                    if t not in _TYPES_AT_OR_BELOW_LEVEL.get(max_level, [])
+                ] if max_level is not None else []
+            ),
+        },
+        "visibility_applied": True,
+    }
+    if product_id is not None:
+        applied_filters["product_id"] = product_id
+    if confirmed_only is not None:
+        applied_filters["confirmed_only"] = confirmed_only
+    if status is not None:
+        applied_filters["status"] = status
 
     # Keyword search mode (cross-collection)
     if query.strip() and collection == "all":
@@ -189,7 +227,12 @@ async def search(
             if eid:
                 _schedule_tool_event("search", eid, query, exposed_count)
 
-        return _unified_response(data=_inject_workspace_context(results), warnings=warnings)
+        return _unified_response(
+            data=_inject_workspace_context(results),
+            warnings=warnings,
+            applied_filters=applied_filters,
+            completeness="partial",  # keyword search is ranked; may omit matches
+        )
 
     # Collection-specific listing
     collections = (
@@ -358,4 +401,11 @@ async def search(
         if eid:
             _schedule_tool_event("search", eid, query or None, total_count)
 
-    return _unified_response(data=_inject_workspace_context(results), warnings=warnings)
+    # Collection listing is exhaustive within the declared applied_filters
+    # (pagination via limit/offset is ok; the filter scope is fully materialized).
+    return _unified_response(
+        data=_inject_workspace_context(results),
+        warnings=warnings,
+        applied_filters=applied_filters,
+        completeness="exhaustive",
+    )

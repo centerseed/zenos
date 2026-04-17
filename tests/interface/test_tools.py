@@ -457,6 +457,43 @@ class TestSearchNewParams:
             result = await search(collection="entities")
             assert len(_ok_data(result)["entities"]) == 1
 
+    async def test_applied_filters_echoes_entity_level(self):
+        """INV3: search response echoes applied_filters so agent can see what was excluded."""
+        from zenos.interface.mcp import search
+
+        l1 = _make_entity(id="ent-l1", name="Product", level=1)
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=[l1])
+            result = await search(collection="entities", entity_level="L1")
+
+        af = result["applied_filters"]
+        assert af["entity_level"]["input"] == "L1"
+        assert af["entity_level"]["effective_max_level"] == 1
+        assert af["entity_level"]["included_types"] == ["product"]
+        # project/goal/role/module must appear in excluded_types so agent
+        # understands why their L1=project entity didn't show up.
+        assert "project" in af["entity_level"]["excluded_types"]
+        assert "module" in af["entity_level"]["excluded_types"]
+        assert af["visibility_applied"] is True
+
+    async def test_completeness_declared_per_mode(self):
+        """INV4: collection listing is exhaustive; keyword search is partial."""
+        from zenos.interface.mcp import search
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=[])
+            listing = await search(collection="entities")
+        assert listing["completeness"] == "exhaustive"
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.task_service") as mock_ts, \
+             patch("zenos.interface.mcp.entry_repo") as mock_er:
+            mock_os.search = AsyncMock(return_value=[])
+            mock_ts.list_tasks = AsyncMock(return_value=[])
+            mock_er.search_content = AsyncMock(return_value=[])
+            keyword = await search(query="foo", collection="all")
+        assert keyword["completeness"] == "partial"
+
     async def test_product_id_filters_entities_to_subtree(self):
         """product_id filters entities to the product's subtree."""
         from zenos.interface.mcp import search
