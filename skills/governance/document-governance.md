@@ -1,5 +1,10 @@
 # L3 文件治理規則 v2.2（含完整範例）
 
+> **Reference only.**
+> SSOT: `governance_guide(topic="document", level=2)` via MCP.
+> This file is a human-readable mirror and MAY LAG the SSOT.
+> Agents must call governance_guide before acting on rules.
+
 ## 文件的定位
 L3 document entity 是正式文件的語意索引入口。
 

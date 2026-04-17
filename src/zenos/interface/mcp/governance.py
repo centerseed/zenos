@@ -2,25 +2,39 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 
 from zenos.interface.governance_rules import GOVERNANCE_RULES
-from zenos.interface.mcp._common import _unified_response
+from zenos.interface.mcp._common import _unified_response, _error_response
 
 logger = logging.getLogger(__name__)
 
 _VALID_TOPICS = frozenset(GOVERNANCE_RULES.keys())
 _VALID_LEVELS = frozenset({1, 2, 3})
+_RULES_FILE = Path(__file__).resolve().parents[1] / "governance_rules.py"
+
+
+def _content_version() -> str:
+    return datetime.fromtimestamp(_RULES_FILE.stat().st_mtime, tz=timezone.utc).isoformat()
+
+
+def _content_hash(content: str) -> str:
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return f"sha256:{digest}"
 
 
 async def governance_guide(
     topic: str,
-    level: int = 1,
+    level: int = 2,
+    since_hash: str | None = None,
 ) -> dict:
     """取得 ZenOS 治理規則指南。
 
     讓任何 MCP client 按需載入 ZenOS 治理規則，取代 local skill 文件。
-    規則分四個主題，三個深度層級。不需要 DB 連線，不需要 partner key。
+    規則分七個主題，三個深度層級。不需要 DB 連線，不需要 partner key。
 
     使用時機：
     - 開始 capture/write 操作前想確認規則 → governance_guide(topic="entity", level=1)
@@ -29,37 +43,64 @@ async def governance_guide(
 
     Args:
         topic: 規則主題。entity=L2知識節點治理, document=L3文件治理,
-               task=任務建票與驗收, capture=知識捕獲分層路由
+               bundle=L3 文件 bundle-first 規則, task=任務建票與驗收,
+               capture=知識捕獲分層路由, sync=知識同步流程,
+               remediation=治理缺口修復流程
         level: 深度層級。1=核心摘要(~1k tokens), 2=完整規則(~2-3k),
-               3=含範例(~3-5k)。預設 1。
+               3=含範例(~3-5k)。預設 2。
 
     Returns:
         dict with keys: topic, level, version, content
         On invalid input: {"error": "INVALID_INPUT", "message": "..."}
     """
-    if topic not in _VALID_TOPICS:
-        return {
-            "error": "INVALID_INPUT",
-            "message": f"topic 必須是 {sorted(_VALID_TOPICS)} 之一，收到：'{topic}'",
-        }
+    normalized_topic = (topic or "").strip()
+    if normalized_topic not in _VALID_TOPICS:
+        return _error_response(
+            status="rejected",
+            error_code="UNKNOWN_TOPIC",
+            message=f"topic 必須是 {sorted(_VALID_TOPICS)} 之一，收到：'{topic}'",
+            extra_data={"available_topics": sorted(_VALID_TOPICS)},
+        )
     if level not in _VALID_LEVELS:
-        return {
-            "error": "INVALID_INPUT",
-            "message": f"level 必須是 1/2/3，收到：{level}",
-        }
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_LEVEL",
+            message=f"level 必須是 1/2/3，收到：{level}",
+        )
 
     _topic_versions = {
         "entity": "1.1",
-        "document": "1.1",
+        "document": "1.2",
+        "bundle": "1.0",
         "task": "2.0",
-        "capture": "1.0",
+        "capture": "1.1",
+        "sync": "1.0",
+        "remediation": "1.0",
     }
-    return {
-        "topic": topic,
-        "level": level,
-        "version": _topic_versions.get(topic, "1.0"),
-        "content": GOVERNANCE_RULES[topic][level],
-    }
+    content = GOVERNANCE_RULES[normalized_topic][level]
+    content_hash = _content_hash(content)
+    content_version = _content_version()
+    if since_hash and since_hash == content_hash:
+        return _unified_response(
+            data={
+                "topic": normalized_topic,
+                "level": level,
+                "version": _topic_versions.get(normalized_topic, "1.0"),
+                "content_version": content_version,
+                "content_hash": content_hash,
+                "unchanged": True,
+            }
+        )
+    return _unified_response(
+        data={
+            "topic": normalized_topic,
+            "level": level,
+            "version": _topic_versions.get(normalized_topic, "1.0"),
+            "content": content,
+            "content_version": content_version,
+            "content_hash": content_hash,
+        }
+    )
 
 
 async def find_gaps(

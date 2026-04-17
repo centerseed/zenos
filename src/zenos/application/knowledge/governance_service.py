@@ -7,12 +7,15 @@ in governance.py. Each method returns a governance result object.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel as _PydanticBaseModel
 
+from zenos.application.knowledge.governance_ssot_audit import run_governance_ssot_audit
 from zenos.domain.governance import (
     _L2_TECH_TERMS,
     _blindspot_threshold,
@@ -29,6 +32,7 @@ from zenos.domain.governance import (
     compute_search_unused_signals,
     detect_staleness,
     detect_stale_documents_from_consistency,
+    determine_recommended_action,
     find_stale_l2_downstream_entities,
     run_quality_check,
 )
@@ -40,6 +44,58 @@ logger = logging.getLogger(__name__)
 
 # Graph topology constants
 LEVERAGE_THRESHOLD = 3  # out-degree >= this value flags a high-impact node
+_LEVEL_PRIORITY = {"green": 0, "yellow": 1, "red": 2}
+_LLM_DEPENDENCY_REGISTRY: tuple[dict[str, Any], ...] = (
+    {
+        "location": "src/zenos/application/knowledge/ontology_service.py::infer_all_classify",
+        "path_category": "critical",
+        "purpose": "entity_auto_classification",
+        "compliant": False,
+        "notes": "write(collection='entities') 省略 type 時會呼叫 GovernanceAI infer_all。",
+    },
+    {
+        "location": "src/zenos/application/knowledge/ontology_service.py::l2_semantic_gate",
+        "path_category": "optional_enrichment",
+        "purpose": "l2_semantic_gate",
+        "compliant": True,
+        "notes": "L2 三問輔助判斷；失敗時只回 warning，不阻擋 write。",
+    },
+    {
+        "location": "src/zenos/application/knowledge/ontology_service.py::post_save_enrichment",
+        "path_category": "optional_enrichment",
+        "purpose": "entity_relationship_enrichment",
+        "compliant": True,
+        "notes": "entity upsert 後補 relationships / doc links；失敗不影響主路徑。",
+    },
+    {
+        "location": "src/zenos/application/action/task_service.py::infer_task_links",
+        "path_category": "critical",
+        "purpose": "task_auto_linking",
+        "compliant": False,
+        "notes": "task(action=create) 未帶 linked_entities 時會呼叫 infer_task_links。",
+    },
+    {
+        "location": "src/zenos/interface/mcp/write.py::suggest_relationship_verb",
+        "path_category": "optional_enrichment",
+        "purpose": "relationship_verb_suggestion",
+        "compliant": True,
+        "notes": "write(collection='relationships') 的 suggested_verbs 為附加建議。",
+    },
+    {
+        "location": "src/zenos/interface/mcp/analyze.py::entry_consolidation",
+        "path_category": "optional_enrichment",
+        "purpose": "entry_consolidation",
+        "compliant": True,
+        "notes": "analyze(quality) 的 consolidate_entries proposal；失敗不影響主要分析。",
+    },
+    {
+        "location": "src/zenos/interface/mcp/__init__.py::_compress_journal",
+        "path_category": "non_critical",
+        "purpose": "journal_compression",
+        "compliant": True,
+        "notes": "工作日誌壓縮為背景整理任務，失敗可跳過。",
+    },
+)
 
 
 class GovernanceService:
@@ -54,6 +110,7 @@ class GovernanceService:
         blindspot_repo: BlindspotRepository | None = None,
         task_repo=None,  # TaskRepository (duck typing to avoid circular import)
         tool_event_repo=None,  # ToolEventRepository (duck typing to avoid circular import)
+        usage_log_repo=None,  # UsageLogRepository (duck typing to avoid circular import)
         governance_ai: Any = None,  # GovernanceAI (duck typing to avoid circular import)
     ) -> None:
         self._entities = entity_repo
@@ -62,7 +119,237 @@ class GovernanceService:
         self._blindspots = blindspot_repo
         self._tasks = task_repo
         self._tool_events = tool_event_repo
+        self._usage_logs = usage_log_repo
         self._governance_ai = governance_ai
+
+    @staticmethod
+    def _provider_name_from_model(model: str) -> str:
+        model_lower = (model or "").lower()
+        if model_lower.startswith("gemini/") or model_lower.startswith("gemini"):
+            return "gemini"
+        if model_lower.startswith("openai/") or model_lower.startswith("gpt-"):
+            return "openai"
+        if "/" in model_lower:
+            return model_lower.split("/", 1)[0]
+        return model_lower or "unknown"
+
+    @staticmethod
+    def _rate(numerator: int, denominator: int) -> float:
+        if denominator <= 0:
+            return 0.0
+        return round(numerator / denominator, 4)
+
+    @classmethod
+    def _compute_bundle_highlights_coverage(cls, documents: list[Entity]) -> float:
+        index_docs = [doc for doc in documents if getattr(doc, "doc_role", None) == "index"]
+        if not index_docs:
+            return 1.0
+        covered = sum(1 for doc in index_docs if list(getattr(doc, "bundle_highlights", []) or []))
+        return cls._rate(covered, len(index_docs))
+
+    @classmethod
+    def _merge_governance_ssot_signal(cls, signal: dict, governance_ssot: dict) -> dict:
+        merged = dict(signal)
+        findings = governance_ssot.get("findings", [])
+        ssot_level = governance_ssot.get("overall_level", "green")
+        red_count = sum(1 for item in findings if item.get("severity") == "red")
+        merged.setdefault("kpis", {})
+        merged["kpis"]["governance_ssot"] = {"value": red_count, "level": ssot_level}
+        merged["governance_ssot"] = governance_ssot
+        merged["overall_level"] = cls._worse_level(merged.get("overall_level", "green"), ssot_level)
+        merged["recommended_action"] = determine_recommended_action(merged["overall_level"])
+        merged.setdefault("red_reasons", [])
+        if ssot_level == "red":
+            merged["red_reasons"].append({
+                "kpi": "governance_ssot",
+                "value": red_count,
+                "reason": "governance SSOT drift is red",
+            })
+        return merged
+
+    @classmethod
+    def _worse_level(cls, left: str, right: str) -> str:
+        return left if _LEVEL_PRIORITY[left] >= _LEVEL_PRIORITY[right] else right
+
+    def _configured_provider_rows(self) -> list[dict[str, Any]]:
+        llm = getattr(self._governance_ai, "_llm", None)
+        if llm is not None:
+            model = str(getattr(llm, "model", "") or "")
+            raw_api_key = getattr(llm, "api_key", None)
+            api_key_present = bool(
+                isinstance(raw_api_key, str)
+                and raw_api_key.strip()
+                and raw_api_key.strip().lower() not in {"none", "null"}
+            )
+            return [{
+                "name": self._provider_name_from_model(model),
+                "model": model,
+                "api_key_present": api_key_present,
+            }]
+        model = os.getenv("ZENOS_LLM_MODEL", "gemini/gemini-2.5-flash-lite")
+        raw_api_key = os.getenv("GEMINI_API_KEY")
+        return [{
+            "name": self._provider_name_from_model(model),
+            "model": model,
+            "api_key_present": bool(
+                raw_api_key
+                and raw_api_key.strip()
+                and raw_api_key.strip().lower() not in {"none", "null"}
+            ),
+        }]
+
+    async def _collect_provider_status(self, partner_id: str | None) -> list[dict]:
+        telemetry_rows: dict[str, dict[str, Any]] = {}
+        if partner_id and self._usage_logs is not None:
+            rows = await self._usage_logs.summarize_provider_health(partner_id, days=7, hours=1)
+            telemetry_rows = {str(row.get("provider")): row for row in rows}
+
+        providers: dict[str, dict[str, Any]] = {
+            row["name"]: dict(row) for row in self._configured_provider_rows() if row.get("name")
+        }
+        for provider, row in telemetry_rows.items():
+            providers.setdefault(provider, {
+                "name": provider,
+                "model": str(row.get("model", provider)),
+                "api_key_present": True,
+            })
+
+        statuses: list[dict] = []
+        for provider, config in sorted(providers.items()):
+            row = telemetry_rows.get(provider, {})
+            success_7d = int(row.get("success_count_7d") or 0)
+            fallback_7d = int(row.get("fallback_count_7d") or 0)
+            exception_7d = int(row.get("exception_count_7d") or 0)
+            success_1h = int(row.get("success_count_1h") or 0)
+            fallback_1h = int(row.get("fallback_count_1h") or 0)
+            exception_1h = int(row.get("exception_count_1h") or 0)
+            attempts_7d = success_7d + fallback_7d
+            attempts_1h = success_1h + fallback_1h
+            fallback_rate_7d = self._rate(fallback_7d, attempts_7d)
+            exception_rate_7d = self._rate(exception_7d, attempts_7d)
+            error_rate_1h = self._rate(exception_1h, attempts_1h)
+            api_key_present = bool(config.get("api_key_present"))
+
+            if not api_key_present:
+                status = "down"
+            elif exception_rate_7d > 0.05 or fallback_rate_7d > 0.2:
+                status = "degraded"
+            elif success_7d > 0 or row.get("last_success_at") is not None:
+                status = "healthy"
+            else:
+                status = "degraded"
+
+            notes: list[str] = []
+            if not api_key_present:
+                notes.append("API key missing")
+            if attempts_7d == 0 and success_7d == 0:
+                notes.append("近 7 天無 telemetry rows")
+
+            statuses.append({
+                "name": provider,
+                "status": status,
+                "last_success_at": (
+                    row["last_success_at"].isoformat()
+                    if row.get("last_success_at") is not None
+                    else None
+                ),
+                "error_rate_1h": error_rate_1h,
+                "success_count_7d": success_7d,
+                "fallback_count_7d": fallback_7d,
+                "exception_count_7d": exception_7d,
+                "fallback_rate_7d": fallback_rate_7d,
+                "exception_rate_7d": exception_rate_7d,
+                "model": str(config.get("model") or row.get("model") or ""),
+                "notes": "; ".join(notes) if notes else "",
+            })
+        return statuses
+
+    def _collect_dependency_points(self) -> list[dict]:
+        repo_root = Path(__file__).resolve().parents[4]
+        points: list[dict] = []
+        for entry in _LLM_DEPENDENCY_REGISTRY:
+            rel_path = str(entry["location"]).split("::", 1)[0]
+            if not (repo_root / rel_path).exists():
+                continue
+            points.append(dict(entry))
+        return points
+
+    @classmethod
+    def _merge_llm_health_signal(cls, signal: dict, llm_health: dict) -> dict:
+        merged = dict(signal)
+        findings = llm_health.get("findings", [])
+        llm_level = llm_health.get("overall_level", "green")
+        red_count = sum(1 for item in findings if item.get("severity") == "red")
+        merged.setdefault("kpis", {})
+        merged["kpis"]["llm_health"] = {"value": red_count, "level": llm_level}
+        merged["llm_health"] = llm_health
+        merged["overall_level"] = cls._worse_level(merged.get("overall_level", "green"), llm_level)
+        merged["recommended_action"] = determine_recommended_action(merged["overall_level"])
+        merged.setdefault("red_reasons", [])
+        if llm_level == "red":
+            merged["red_reasons"].append({
+                "kpi": "llm_health",
+                "value": red_count,
+                "reason": "server LLM dependency or provider health is red",
+            })
+        return merged
+
+    async def analyze_llm_health(self, partner_id: str | None = None) -> dict:
+        """Analyze provider health and server-side LLM dependency points."""
+        provider_status = await self._collect_provider_status(partner_id)
+        dependency_points = self._collect_dependency_points()
+
+        findings: list[dict] = []
+        for point in dependency_points:
+            if point.get("compliant", False):
+                continue
+            severity = "red" if point["path_category"] == "critical" else "yellow"
+            findings.append({
+                "severity": severity,
+                "type": (
+                    "critical_path_llm_dependency"
+                    if point["path_category"] == "critical"
+                    else "deprecated_dependency"
+                ),
+                "location": point["location"],
+                "description": point["notes"],
+            })
+
+        for provider in provider_status:
+            provider_name = provider["name"]
+            if provider["status"] == "down":
+                findings.append({
+                    "severity": "red",
+                    "type": "provider_down",
+                    "location": provider_name,
+                    "description": provider.get("notes") or f"{provider_name} provider is down",
+                })
+            if provider["fallback_rate_7d"] > 0.2:
+                findings.append({
+                    "severity": "yellow",
+                    "type": "provider_fallback_rate_high",
+                    "location": provider_name,
+                    "description": f"{provider_name} fallback rate over 7d = {provider['fallback_rate_7d']:.0%}",
+                })
+            if provider["exception_rate_7d"] > 0.05:
+                findings.append({
+                    "severity": "red",
+                    "type": "provider_exception_rate_high",
+                    "location": provider_name,
+                    "description": f"{provider_name} exception rate over 7d = {provider['exception_rate_7d']:.0%}",
+                })
+
+        overall_level = "green"
+        for finding in findings:
+            overall_level = self._worse_level(overall_level, str(finding["severity"]))
+
+        return {
+            "check_type": "llm_health",
+            "provider_status": provider_status,
+            "dependency_points": dependency_points,
+            "findings": findings,
+            "overall_level": overall_level,
+        }
 
     async def _load_all_relationships(self, entities: list) -> list:
         """Collect all relationships by querying each entity's relationships."""
@@ -613,14 +900,27 @@ class GovernanceService:
         # Determine bootstrap mode: < 50 entities
         bootstrap = len(entities) < 50
 
-        return compute_health_kpis(
+        signal = compute_health_kpis(
             entities=entities,
             protocols=protocols,
             blindspots=blindspots,
             quality_score=quality_score,
             l2_repairs_count=l2_repairs_count,
+            bundle_highlights_coverage=self._compute_bundle_highlights_coverage(documents),
             bootstrap=bootstrap,
         )
+        try:
+            from zenos.infrastructure.context import current_partner_id as _current_partner_id
+
+            llm_health = await self.analyze_llm_health(_current_partner_id.get())
+            signal = self._merge_llm_health_signal(signal, llm_health)
+        except Exception:
+            logger.warning("compute_health_signal: llm health enrichment failed", exc_info=True)
+        try:
+            signal = self._merge_governance_ssot_signal(signal, run_governance_ssot_audit())
+        except Exception:
+            logger.warning("compute_health_signal: governance ssot enrichment failed", exc_info=True)
+        return signal
 
     async def run_staleness_check(self) -> dict:
         """Detect staleness patterns across entities and documents.

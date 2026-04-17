@@ -21,6 +21,9 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      - name: Lint governance SSOT
+        run: python scripts/lint_governance_ssot.py
+
       - name: Run pytest (domain + interface only, no Firestore)
         run: pytest tests/domain/ tests/interface/ -v
         env:

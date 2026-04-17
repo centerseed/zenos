@@ -11,7 +11,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from zenos.application.knowledge.ontology_service import OntologyService
+from zenos.application.knowledge.ontology_service import (
+    DocumentLinkageValidationError,
+    OntologyService,
+)
 from zenos.application.action.task_service import TaskService
 from zenos.application.knowledge.governance_ai import GovernanceInference, InferredRel
 from zenos.domain.action import Task
@@ -604,11 +607,26 @@ class TestUpsertDocumentValidation:
                 "source": {"type": "ftp", "uri": "/x", "adapter": "ftp"},
                 "tags": {"what": ["x"], "why": "y", "how": "z", "who": ["a"]},
                 "summary": "test",
+                "linked_entity_ids": ["mod-1"],
+            })
+
+    async def test_missing_linked_entity_ids_rejected(self):
+        svc = _make_service()
+        with pytest.raises(DocumentLinkageValidationError, match="linked_entity_ids 為必填"):
+            await svc.upsert_document({
+                "title": "Doc",
+                "source": {
+                    "type": "github",
+                    "uri": "https://github.com/owner/repo/blob/main/doc.md",
+                    "adapter": "git",
+                },
+                "tags": {"what": ["x"], "why": "y", "how": "z", "who": ["a"]},
+                "summary": "test",
             })
 
     async def test_nonexistent_linked_entity(self):
         svc = _make_service()
-        with pytest.raises(ValueError, match="not found"):
+        with pytest.raises(DocumentLinkageValidationError, match="不存在的 entity ID"):
             await svc.upsert_document({
                 "title": "Doc",
                 "source": {
@@ -622,7 +640,19 @@ class TestUpsertDocumentValidation:
             })
 
     async def test_valid_document_passes(self):
-        svc = _make_service()
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"mod-1": module}.get(eid)
+        )
+        svc = _make_service(repos)
         result = await svc.upsert_document({
             "title": "API Spec",
             "source": {
@@ -632,6 +662,7 @@ class TestUpsertDocumentValidation:
             },
             "tags": {"what": ["api"], "why": "ref", "how": "REST", "who": ["dev"]},
             "summary": "API spec doc",
+            "linked_entity_ids": ["mod-1"],
         })
         # upsert_document now returns Entity(type="document")
         assert result.name == "API Spec"
@@ -639,6 +670,14 @@ class TestUpsertDocumentValidation:
 
     async def test_source_uri_is_idempotent_and_reuses_existing_document_entity(self):
         repos = _mock_repos()
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
         existing_doc = Entity(
             id="doc-existing",
             name="Old Title",
@@ -648,7 +687,12 @@ class TestUpsertDocumentValidation:
             sources=[{"uri": "https://github.com/acme/repo/blob/main/docs/spec.md", "label": "spec.md", "type": "github"}],
         )
         repos["entity_repo"].list_all = AsyncMock(return_value=[existing_doc])
-        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing_doc)
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {
+                "doc-existing": existing_doc,
+                "mod-1": module,
+            }.get(eid)
+        )
         svc = _make_service(repos)
 
         result = await svc.upsert_document({
@@ -660,6 +704,7 @@ class TestUpsertDocumentValidation:
             },
             "tags": {"what": ["api"], "why": "ref", "how": "REST", "who": ["dev"]},
             "summary": "updated summary",
+            "linked_entity_ids": ["mod-1"],
         })
 
         assert result.id == "doc-existing"
@@ -696,6 +741,7 @@ class TestUpsertDocumentValidation:
         result = await svc.upsert_document({
             "id": "doc-1",
             "summary": "new summary only",
+            "linked_entity_ids": ["mod-1"],
         })
 
         assert result.parent_id == "mod-1"
@@ -737,6 +783,7 @@ class TestUpsertDocumentValidation:
         result = await svc.upsert_document({
             "id": "doc-1",
             "source": {"uri": "/new.md"},
+            "linked_entity_ids": ["mod-1"],
         })
 
         assert result.parent_id == "mod-1"

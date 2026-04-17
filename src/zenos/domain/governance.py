@@ -2080,6 +2080,7 @@ HEALTH_THRESHOLDS: dict[str, dict[str, float]] = {
     "median_confirm_latency_days": {"green": 3, "yellow": 7},
     "active_l2_missing_impacts":   {"green": 0, "yellow": 3},
     "duplicate_blindspot_rate":    {"green": 0.05, "yellow": 0.15},
+    "bundle_highlights_coverage":  {"green": 0.80, "yellow": 0.50},
 }
 
 BOOTSTRAP_OVERRIDES: dict[str, dict[str, float]] = {
@@ -2098,8 +2099,8 @@ def _kpi_level(kpi_name: str, value: float, *, bootstrap: bool = False) -> str:
     green_threshold = thresholds["green"]
     yellow_threshold = thresholds["yellow"]
 
-    # quality_score is "higher is better"; others are "lower is better"
-    if kpi_name == "quality_score":
+    # quality_score / bundle_highlights_coverage are "higher is better"; others are "lower is better"
+    if kpi_name in {"quality_score", "bundle_highlights_coverage"}:
         if value >= green_threshold:
             return "green"
         if value >= yellow_threshold:
@@ -2119,6 +2120,7 @@ def compute_health_kpis(
     blindspots: list[Blindspot],
     quality_score: int,
     l2_repairs_count: int,
+    bundle_highlights_coverage: float | None = None,
     *,
     bootstrap: bool = False,
 ) -> dict:
@@ -2175,6 +2177,8 @@ def compute_health_kpis(
         "active_l2_missing_impacts": l2_repairs_count,
         "duplicate_blindspot_rate": round(duplicate_blindspot_rate, 4),
     }
+    if bundle_highlights_coverage is not None:
+        raw_kpis["bundle_highlights_coverage"] = round(bundle_highlights_coverage, 4)
 
     kpis = {}
     for name, value in raw_kpis.items():
@@ -2233,4 +2237,3 @@ def _kpi_repair_hint(kpi_name: str) -> str:
         "duplicate_blindspot_rate": "合併重複的 blindspots",
     }
     return hints.get(kpi_name, "")
-

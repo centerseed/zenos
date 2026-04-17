@@ -1,5 +1,10 @@
 # 知識捕獲治理規則
 
+> **Reference only.**
+> SSOT: `governance_guide(topic="capture", level=2)` via MCP.
+> This file is a human-readable mirror and MAY LAG the SSOT.
+> Agents must call governance_guide before acting on rules.
+
 > **前置條件：** 所有捕獲操作開始前必須完成 [Step 0: Context Establishment](bootstrap-protocol.md)。
 > 這確保不同用戶在不同裝置上執行 capture 時，都從同一個 product scope 出發。
 

@@ -225,29 +225,34 @@ class GovernanceAI:
                 tokens_in=int(payload.get("tokens_in", 0)),
                 tokens_out=int(payload.get("tokens_out", 0)),
                 model=str(payload.get("model", "")),
+                outcome=str(payload.get("outcome", "success")),
             )
         except Exception:
             logger.warning("GovernanceAI usage logging failed", exc_info=True)
 
-    def _schedule_usage_log(self, feature: str) -> None:
+    def _schedule_usage_log(self, feature: str, *, outcome: str = "success") -> None:
         """Schedule usage logging without blocking the caller path."""
-        if hasattr(self._llm, "consume_last_usage"):
-            usage = self._llm.consume_last_usage()
-        else:
-            usage = getattr(self._llm, "last_usage", None)
-        if not usage:
-            return
+        usage = None
+        if outcome == "success":
+            if hasattr(self._llm, "consume_last_usage"):
+                usage = self._llm.consume_last_usage()
+            else:
+                usage = getattr(self._llm, "last_usage", None)
+            if not usage:
+                return
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
 
+        model = str(getattr(self._llm, "model", ""))
         payload = {
             "timestamp": datetime.utcnow(),
             "feature": feature,
-            "model": str(usage.get("model", getattr(self._llm, "model", ""))),
-            "tokens_in": int(usage.get("tokens_in", 0)),
-            "tokens_out": int(usage.get("tokens_out", 0)),
+            "model": str(usage.get("model", model)) if usage else model,
+            "tokens_in": int(usage.get("tokens_in", 0)) if usage else 0,
+            "tokens_out": int(usage.get("tokens_out", 0)) if usage else 0,
+            "outcome": outcome,
             "partner_id": self._get_partner_id() if self._get_partner_id else None,
         }
         loop.create_task(self._write_usage_log(payload))
@@ -381,7 +386,7 @@ class GovernanceAI:
                 response_schema=GovernanceInference,
                 temperature=0.1,
             )
-            self._schedule_usage_log("governance.infer_all")
+            self._schedule_usage_log("governance.infer_all", outcome="success")
             _audit_governance(
                 "governance.infer_all",
                 {
@@ -394,6 +399,8 @@ class GovernanceAI:
             )
             return result
         except Exception:
+            self._schedule_usage_log("governance.infer_all", outcome="exception")
+            self._schedule_usage_log("governance.infer_all", outcome="fallback")
             _audit_governance(
                 "governance.infer_all.error",
                 {
@@ -448,7 +455,7 @@ class GovernanceAI:
                 response_schema=TaskLinkInference,
                 temperature=0.1,
             )
-            self._schedule_usage_log("governance.infer_doc_entities")
+            self._schedule_usage_log("governance.infer_doc_entities", outcome="success")
             _audit_governance(
                 "governance.infer_doc_entities",
                 {
@@ -460,6 +467,8 @@ class GovernanceAI:
             )
             return result.entity_ids
         except Exception:
+            self._schedule_usage_log("governance.infer_doc_entities", outcome="exception")
+            self._schedule_usage_log("governance.infer_doc_entities", outcome="fallback")
             _audit_governance(
                 "governance.infer_doc_entities.error",
                 {
@@ -514,7 +523,7 @@ class GovernanceAI:
                 response_schema=TaskLinkInference,
                 temperature=0.1,
             )
-            self._schedule_usage_log("governance.infer_task_links")
+            self._schedule_usage_log("governance.infer_task_links", outcome="success")
             _audit_governance(
                 "governance.infer_task_links",
                 {
@@ -526,6 +535,8 @@ class GovernanceAI:
             )
             return result.entity_ids
         except Exception:
+            self._schedule_usage_log("governance.infer_task_links", outcome="exception")
+            self._schedule_usage_log("governance.infer_task_links", outcome="fallback")
             _audit_governance(
                 "governance.infer_task_links.error",
                 {
@@ -586,7 +597,7 @@ class GovernanceAI:
                 response_schema=ConsolidationProposal,
                 temperature=0.1,
             )
-            self._schedule_usage_log("governance.consolidate_entries")
+            self._schedule_usage_log("governance.consolidate_entries", outcome="success")
             _audit_governance(
                 "governance.consolidate_entries",
                 {
@@ -602,6 +613,8 @@ class GovernanceAI:
             result.entity_name = entity_name
             return result
         except Exception:
+            self._schedule_usage_log("governance.consolidate_entries", outcome="exception")
+            self._schedule_usage_log("governance.consolidate_entries", outcome="fallback")
             _audit_governance(
                 "governance.consolidate_entries.error",
                 {

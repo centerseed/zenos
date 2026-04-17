@@ -1,5 +1,10 @@
 # Step 0: Context Establishment Protocol
 
+> **Reference only.**
+> SSOT: `governance_guide(topic="capture", level=2)` via MCP.
+> This file is a human-readable mirror and MAY LAG the SSOT.
+> Agents must call governance_guide before acting on rules.
+
 > **ADR-016** 定義。所有治理 skill（capture / sync / governance）在開始操作前**必須完成此協議**。
 > 跳過任何一步就不可以開始寫入 ontology。
 
@@ -201,6 +206,6 @@ cat {TARGET}/.zenos-project.json 2>/dev/null
 各 skill 在開頭加上：
 
 ```markdown
-> **啟動前必須完成 [Step 0: Context Establishment](../../governance/bootstrap-protocol.md)**。
+> **啟動前先讀 `skills/governance/bootstrap-protocol.md`，完成 Step 0: Context Establishment。**
 > 跳過 Step 0 就開始寫入 ontology = 違規操作。
 ```

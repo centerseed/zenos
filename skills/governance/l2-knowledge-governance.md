@@ -1,5 +1,10 @@
 # L2 知識節點治理規則 v1.1（含完整範例）
 
+> **Reference only.**
+> SSOT: `governance_guide(topic="entity", level=2)` via MCP.
+> This file is a human-readable mirror and MAY LAG the SSOT.
+> Agents must call governance_guide before acting on rules.
+
 ## 什麼是 L2 Entity
 L2 Entity = 公司共識概念。改了它，不同角色（工程師、行銷、老闆）都會受影響。
 不是技術模組的文件索引，而是值得被治理傳播追蹤的概念。

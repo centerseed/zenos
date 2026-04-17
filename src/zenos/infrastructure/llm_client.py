@@ -15,6 +15,13 @@ import litellm
 from pydantic import BaseModel
 
 
+def _normalize_api_key(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    if not normalized or normalized.lower() in {"none", "null"}:
+        return None
+    return normalized
+
+
 class LLMClient:
     """Lightweight LLM client for structured (JSON) output."""
 
@@ -25,7 +32,7 @@ class LLMClient:
         default_temperature: float = 0.1,
     ):
         self.model = model
-        self.api_key = api_key
+        self.api_key = _normalize_api_key(api_key)
         self.default_temperature = default_temperature
         self.last_usage: dict[str, int | str] | None = None
 
@@ -143,6 +150,6 @@ def create_llm_client() -> LLMClient:
     """Create an LLMClient configured from environment variables."""
     return LLMClient(
         model=os.getenv("ZENOS_LLM_MODEL", "gemini/gemini-2.5-flash-lite"),
-        api_key=os.getenv("GEMINI_API_KEY"),
+        api_key=_normalize_api_key(os.getenv("GEMINI_API_KEY")),
         default_temperature=0.1,
     )

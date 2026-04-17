@@ -1,5 +1,10 @@
 # Shared Rules — 建票與確認
 
+> **Reference only.**
+> SSOT: `governance_guide(topic="task", level=2)` via MCP.
+> This file is a human-readable mirror and MAY LAG the SSOT.
+> Agents must call governance_guide before acting on rules.
+
 ## Product Scope（所有操作必帶）
 
 所有治理操作開始前必須完成 [Step 0: Context Establishment](bootstrap-protocol.md)。

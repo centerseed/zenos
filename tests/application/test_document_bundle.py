@@ -168,6 +168,7 @@ class TestAddSource:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "add_source": {
                 "uri": "https://github.com/owner/repo/blob/main/docs/new.md",
                 "type": "github",
@@ -192,6 +193,7 @@ class TestAddSource:
         with pytest.raises(ValueError, match="single doc entity 只能有一個 source"):
             await svc.upsert_document({
                 "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
                 "add_source": {
                     "uri": "https://github.com/owner/repo/blob/main/docs/extra.md",
                     "type": "github",
@@ -201,7 +203,7 @@ class TestAddSource:
 
     @pytest.mark.asyncio
     async def test_add_source_generates_suggestion(self):
-        """Bundle operations should produce change_summary suggestion."""
+        """Bundle operations should produce deterministic highlight suggestion."""
         existing = _make_doc_entity(doc_role="index")
         repo = _make_entity_repo()
         repo.get_by_id = AsyncMock(return_value=existing)
@@ -209,14 +211,22 @@ class TestAddSource:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "add_source": {
                 "uri": "https://github.com/owner/repo/blob/main/docs/new.md",
                 "type": "github",
                 "label": "new.md",
+                "doc_type": "SPEC",
             },
         })
         suggestions = getattr(result, "_bundle_suggestions", [])
         assert any("change_summary" in s for s in suggestions)
+        highlight_suggestion = next(
+            suggestion for suggestion in suggestions
+            if isinstance(suggestion, dict) and suggestion.get("type") == "bundle_highlights_suggestion"
+        )
+        assert highlight_suggestion["items"][0]["headline"] == "new.md"
+        assert highlight_suggestion["items"][0]["priority"] == "primary"
 
     @pytest.mark.asyncio
     async def test_add_source_unknown_doc_type_warns(self):
@@ -228,6 +238,7 @@ class TestAddSource:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "add_source": {
                 "uri": "https://github.com/owner/repo/blob/main/docs/new.md",
                 "type": "github",
@@ -237,6 +248,69 @@ class TestAddSource:
         })
         suggestions = getattr(result, "_bundle_suggestions", [])
         assert any("not a known type" in s for s in suggestions)
+
+    @pytest.mark.asyncio
+    async def test_add_source_only_suggests_diff_when_highlights_exist(self):
+        existing = _make_doc_entity(
+            doc_role="index",
+            sources=[
+                {"source_id": "src-1", "uri": "https://github.com/o/r/blob/main/a.md", "type": "github", "label": "a.md", "status": "valid"},
+                {"source_id": "src-2", "uri": "https://github.com/o/r/blob/main/b.md", "type": "github", "label": "b.md", "status": "valid"},
+                {"source_id": "src-3", "uri": "https://github.com/o/r/blob/main/c.md", "type": "github", "label": "c.md", "status": "valid"},
+            ],
+            bundle_highlights=[
+                {"source_id": "src-1", "headline": "A", "reason_to_read": "r1", "priority": "primary"},
+                {"source_id": "src-2", "headline": "B", "reason_to_read": "r2", "priority": "important"},
+                {"source_id": "src-3", "headline": "C", "reason_to_read": "r3", "priority": "supporting"},
+            ],
+        )
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+
+        result = await svc.upsert_document({
+            "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
+            "add_source": {
+                "uri": "https://github.com/owner/repo/blob/main/docs/new.md",
+                "type": "github",
+                "label": "new.md",
+                "doc_type": "PLAN",
+            },
+        })
+
+        highlight_suggestion = next(
+            suggestion for suggestion in getattr(result, "_bundle_suggestions", [])
+            if isinstance(suggestion, dict) and suggestion.get("type") == "bundle_highlights_suggestion"
+        )
+        assert len(highlight_suggestion["items"]) == 1
+        assert highlight_suggestion["items"][0]["headline"] == "new.md"
+        assert highlight_suggestion["items"][0]["priority"] == "important"
+
+    @pytest.mark.asyncio
+    async def test_document_bundle_write_does_not_call_governance_ai(self):
+        class ExplodingGovernanceAI:
+            def infer_all(self, entity_data, existing_entities, unlinked_docs):
+                raise AssertionError("bundle path should not call GovernanceAI")
+
+        existing = _make_doc_entity(doc_role="index")
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+        svc._governance_ai = ExplodingGovernanceAI()
+
+        result = await svc.upsert_document({
+            "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
+            "add_source": {
+                "uri": "https://github.com/owner/repo/blob/main/docs/new.md",
+                "type": "github",
+                "label": "new.md",
+                "doc_type": "SPEC",
+            },
+        })
+
+        assert len(result.sources) == 2
 
 
 class TestUpdateSource:
@@ -250,6 +324,7 @@ class TestUpdateSource:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "update_source": {
                 "source_id": "src-1",
                 "label": "updated-label.md",
@@ -270,6 +345,7 @@ class TestUpdateSource:
         with pytest.raises(ValueError, match="not found"):
             await svc.upsert_document({
                 "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
                 "update_source": {
                     "source_id": "nonexistent",
                     "label": "new-label",
@@ -287,6 +363,7 @@ class TestUpdateSource:
         with pytest.raises(ValueError, match="requires source_id"):
             await svc.upsert_document({
                 "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
                 "update_source": {"label": "new-label"},
             })
 
@@ -308,6 +385,7 @@ class TestRemoveSource:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "remove_source": {"source_id": "src-1"},
         })
         assert len(result.sources) == 1
@@ -324,6 +402,7 @@ class TestRemoveSource:
         with pytest.raises(ValueError, match="不可移除最後一個"):
             await svc.upsert_document({
                 "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
                 "remove_source": {"source_id": "src-1"},
             })
 
@@ -342,6 +421,7 @@ class TestRemoveSource:
         with pytest.raises(ValueError, match="single doc entity 不支援 remove_source"):
             await svc.upsert_document({
                 "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
                 "remove_source": {"source_id": "src-1"},
             })
 
@@ -358,6 +438,7 @@ class TestChangeSummary:
         before = datetime.now(timezone.utc)
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "change_summary": "Updated SPEC with new acceptance criteria",
         })
         assert result.change_summary == "Updated SPEC with new acceptance criteria"
@@ -377,6 +458,7 @@ class TestChangeSummary:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "summary": "Updated entity summary",
         })
         assert result.change_summary == "Existing summary"
@@ -393,6 +475,7 @@ class TestBundleHighlights:
         before = datetime.now(timezone.utc)
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "bundle_highlights": [{
                 "source_id": "src-1",
                 "headline": "This is the SSOT",
@@ -422,6 +505,7 @@ class TestBundleHighlights:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "summary": "Updated summary only",
         })
         assert result.bundle_highlights[0]["headline"] == "Existing"
@@ -435,6 +519,7 @@ class TestBundleHighlights:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "summary": "Updated summary only",
         })
         suggestions = getattr(result, "_bundle_suggestions", [])
@@ -450,6 +535,7 @@ class TestBundleHighlights:
         with pytest.raises(ValueError, match="bundle_highlights source_id"):
             await svc.upsert_document({
                 "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
                 "bundle_highlights": [{
                     "source_id": "missing-src",
                     "headline": "Bad highlight",
@@ -472,6 +558,7 @@ class TestSourceIdGeneration:
 
         result = await svc.upsert_document({
             "id": "doc-test-1",
+            "linked_entity_ids": ["parent-1"],
             "summary": "trigger update",
         })
         assert result.sources[0].get("source_id")

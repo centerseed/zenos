@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from pydantic import BaseModel
 
-from zenos.infrastructure.llm_client import LLMClient
+from zenos.infrastructure.llm_client import LLMClient, create_llm_client
 
 
 class _SimpleSchema(BaseModel):
@@ -155,3 +155,12 @@ def test_non_gemini_model_does_not_inject_schema(monkeypatch):
 
     system_msgs = [m for m in captured["messages"] if m["role"] == "system"]
     assert system_msgs[0]["content"] == "You are helpful."
+
+
+def test_create_llm_client_normalizes_literal_none_api_key(monkeypatch):
+    monkeypatch.setenv("ZENOS_LLM_MODEL", "gemini/gemini-2.5-flash-lite")
+    monkeypatch.setenv("GEMINI_API_KEY", "None")
+
+    client = create_llm_client()
+
+    assert client.api_key is None

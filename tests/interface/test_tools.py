@@ -1187,6 +1187,7 @@ class TestWriteTool:
                         "title": "Spec",
                         "summary": "summary",
                         "tags": {"what": ["demo"], "why": "why", "how": "how", "who": ["pm"]},
+                        "linked_entity_ids": ["module-1"],
                     },
                 )
 
@@ -1194,6 +1195,65 @@ class TestWriteTool:
             assert any("git + gcs" in s for s in result["suggestions"])
         finally:
             _current_partner.reset(token)
+
+    async def test_write_documents_rejects_missing_linked_entity_ids_with_error_code(self):
+        from zenos.interface.mcp import write
+        from zenos.application.knowledge.ontology_service import DocumentLinkageValidationError
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.write._audit_log"),
+        ):
+            mock_os.upsert_document = AsyncMock(
+                side_effect=DocumentLinkageValidationError(
+                    "LINKED_ENTITY_IDS_REQUIRED",
+                    "linked_entity_ids 為必填；請先 search(collection='entities') 找到合法 entity IDs 後再寫入 document。",
+                )
+            )
+
+            result = await write(
+                collection="documents",
+                data={
+                    "title": "Spec",
+                    "summary": "summary",
+                    "tags": {"what": ["demo"], "why": "why", "how": "how", "who": ["pm"]},
+                },
+            )
+
+        assert result["status"] == "rejected"
+        assert result["data"]["error"]["code"] == "LINKED_ENTITY_IDS_REQUIRED"
+        assert "linked_entity_ids 為必填" in result["data"]["message"]
+        assert any("search(collection='entities')" in s for s in result["suggestions"])
+
+    async def test_write_documents_rejects_missing_entity_ids_with_details(self):
+        from zenos.interface.mcp import write
+        from zenos.application.knowledge.ontology_service import DocumentLinkageValidationError
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.write._audit_log"),
+        ):
+            mock_os.upsert_document = AsyncMock(
+                side_effect=DocumentLinkageValidationError(
+                    "LINKED_ENTITY_NOT_FOUND",
+                    "linked_entity_ids 包含不存在的 entity ID；請確認後重試。",
+                    missing_entity_ids=["ghost-1"],
+                )
+            )
+
+            result = await write(
+                collection="documents",
+                data={
+                    "title": "Spec",
+                    "summary": "summary",
+                    "tags": {"what": ["demo"], "why": "why", "how": "how", "who": ["pm"]},
+                    "linked_entity_ids": ["ghost-1"],
+                },
+            )
+
+        assert result["status"] == "rejected"
+        assert result["data"]["error"]["code"] == "LINKED_ENTITY_NOT_FOUND"
+        assert result["data"]["error"]["missing_entity_ids"] == ["ghost-1"]
 
     async def test_write_documents_rejects_unpushed_github_for_explicit_formal_entry(self):
         from zenos.interface.mcp import write, _current_partner
@@ -1925,6 +1985,13 @@ class TestAnalyzeTool:
         report = QualityReport(score=90, passed=[], failed=[], warnings=[])
 
         with patch("zenos.interface.mcp.governance_service") as mock_gs:
+            mock_gs.analyze_llm_health = AsyncMock(return_value={
+                "check_type": "llm_health",
+                "provider_status": [],
+                "dependency_points": [],
+                "findings": [],
+                "overall_level": "green",
+            })
             mock_gs.run_quality_check = AsyncMock(return_value=report)
             mock_gs.run_staleness_check = AsyncMock(
                 return_value={"warnings": [], "document_consistency_warnings": [], "document_consistency_count": 0}
@@ -1938,6 +2005,56 @@ class TestAnalyzeTool:
             assert "quality" in data
             assert "staleness" in data
             assert "blindspots" in data
+            assert "llm_health" in data
+
+    async def test_analyze_llm_health(self):
+        from zenos.interface.mcp import analyze
+
+        llm_health = {
+            "check_type": "llm_health",
+            "provider_status": [
+                {
+                    "name": "gemini",
+                    "status": "degraded",
+                    "last_success_at": None,
+                    "error_rate_1h": 0.0,
+                    "success_count_7d": 0,
+                    "fallback_count_7d": 3,
+                    "exception_count_7d": 1,
+                    "fallback_rate_7d": 0.75,
+                    "exception_rate_7d": 0.25,
+                    "model": "gemini/gemini-2.5-flash-lite",
+                    "notes": "API key missing",
+                }
+            ],
+            "dependency_points": [
+                {
+                    "location": "src/zenos/application/action/task_service.py::infer_task_links",
+                    "path_category": "critical",
+                    "purpose": "task_auto_linking",
+                    "compliant": False,
+                    "notes": "task(action=create) 未帶 linked_entities 時會呼叫 infer_task_links。",
+                }
+            ],
+            "findings": [
+                {
+                    "severity": "red",
+                    "type": "critical_path_llm_dependency",
+                    "location": "src/zenos/application/action/task_service.py::infer_task_links",
+                    "description": "task(action=create) 未帶 linked_entities 時會呼叫 infer_task_links。",
+                }
+            ],
+            "overall_level": "red",
+        }
+
+        with patch("zenos.interface.mcp.governance_service") as mock_gs:
+            mock_gs.analyze_llm_health = AsyncMock(return_value=llm_health)
+
+            result = await analyze(check_type="llm_health")
+            data = _ok_data(result)
+
+            assert data["llm_health"]["overall_level"] == "red"
+            assert data["llm_health"]["provider_status"][0]["name"] == "gemini"
 
     async def test_analyze_all_includes_kpis_when_data_available(self):
         from zenos.interface.mcp import analyze
@@ -1955,14 +2072,24 @@ class TestAnalyzeTool:
                 "median_confirm_latency_days": {"value": 1.0, "level": "green"},
                 "active_l2_missing_impacts": {"value": 0, "level": "green"},
                 "duplicate_blindspot_rate": {"value": 0.5, "level": "red"},
+                "bundle_highlights_coverage": {"value": 0.5, "level": "yellow"},
+                "llm_health": {"value": 2, "level": "red"},
             },
             "overall_level": "red",
             "recommended_action": "run_governance",
             "red_reasons": [],
+            "llm_health": {
+                "check_type": "llm_health",
+                "provider_status": [],
+                "dependency_points": [],
+                "findings": [],
+                "overall_level": "red",
+            },
         }
         with patch("zenos.interface.mcp.governance_service") as mock_gs, \
              patch("zenos.interface.mcp.ontology_service") as mock_os, \
              patch("zenos.interface.mcp.blindspot_repo") as mock_br:
+            mock_gs.analyze_llm_health = AsyncMock(return_value=health_signal["llm_health"])
             mock_gs.run_quality_check = AsyncMock(return_value=report)
             mock_gs.run_staleness_check = AsyncMock(
                 return_value={"warnings": [], "document_consistency_warnings": [], "document_consistency_count": 0}
@@ -1986,6 +2113,21 @@ class TestAnalyzeTool:
             assert data["health_signal"]["overall_level"] == "red"
             assert data["kpis"]["blindspot_total"] == 2
             assert data["kpis"]["duplicate_blindspot_rate"] == 0.5
+            assert data["kpis"]["bundle_highlights_coverage"] == 0.5
+
+    async def test_analyze_governance_ssot(self):
+        from zenos.interface.mcp import analyze
+
+        with patch("zenos.interface.mcp.analyze.run_governance_ssot_audit", return_value={
+            "check_type": "governance_ssot",
+            "findings": [],
+            "overall_level": "green",
+        }):
+            result = await analyze(check_type="governance_ssot")
+            data = _ok_data(result)
+
+            assert data["governance_ssot"]["overall_level"] == "green"
+            assert data["governance_ssot"]["findings"] == []
 
     async def test_analyze_invalid_type(self):
         from zenos.interface.mcp import analyze
@@ -2432,7 +2574,7 @@ class TestGovernanceGuideTool:
     # ── DC-1: Returns correct structure ─────────────────────────────────────
 
     async def test_returns_correct_structure_for_valid_input(self):
-        """governance_guide returns {topic, level, version, content} for valid input."""
+        """governance_guide returns content metadata for valid input."""
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="entity", level=1)
@@ -2443,23 +2585,43 @@ class TestGovernanceGuideTool:
         assert data["version"] == "1.1"
         assert isinstance(data["content"], str)
         assert len(data["content"]) > 0
+        assert data["content_hash"].startswith("sha256:")
+        assert isinstance(data["content_version"], str)
 
-    async def test_default_level_is_1(self):
-        """governance_guide defaults to level=1 when level not provided."""
+    async def test_default_level_is_2(self):
+        """governance_guide defaults to level=2 when level not provided."""
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic="capture")
         data = _ok_data(result)
 
-        assert data["level"] == 1
+        assert data["level"] == 2
         assert data["topic"] == "capture"
 
-    # ── DC-2: All four topics × three levels ────────────────────────────────
+    async def test_since_hash_returns_unchanged_payload(self):
+        """Matching since_hash returns unchanged=true and omits content."""
+        from zenos.interface.mcp import governance_guide
 
-    @pytest.mark.parametrize("topic", ["entity", "document", "task", "capture"])
+        first = _ok_data(await governance_guide(topic="entity", level=2))
+        second = _ok_data(await governance_guide(
+            topic="entity",
+            level=2,
+            since_hash=first["content_hash"],
+        ))
+
+        assert second["unchanged"] is True
+        assert "content" not in second
+        assert second["content_hash"] == first["content_hash"]
+
+    # ── DC-2: All topics × three levels ─────────────────────────────────────
+
+    @pytest.mark.parametrize(
+        "topic",
+        ["entity", "document", "bundle", "task", "capture", "sync", "remediation"],
+    )
     @pytest.mark.parametrize("level", [1, 2, 3])
     async def test_all_topics_and_levels_return_content(self, topic, level):
-        """Each of the 12 topic/level combinations returns non-empty content."""
+        """Each topic/level combination returns non-empty content."""
         from zenos.interface.mcp import governance_guide
 
         result = await governance_guide(topic=topic, level=level)
@@ -2493,10 +2655,11 @@ class TestGovernanceGuideTool:
         result = await governance_guide(topic="unknown_topic", level=1)
         data = _non_ok_data(result, "rejected")
 
-        assert data["error"] == "INVALID_INPUT"
+        assert data["error"] == "UNKNOWN_TOPIC"
         assert "unknown_topic" in data["message"]
+        assert "available_topics" in data
         # Must list valid topics in the message
-        for valid in ["entity", "document", "task", "capture"]:
+        for valid in ["entity", "document", "bundle", "task", "capture", "sync", "remediation"]:
             assert valid in data["message"]
 
     async def test_invalid_level_returns_error(self):
@@ -2506,7 +2669,7 @@ class TestGovernanceGuideTool:
         result = await governance_guide(topic="entity", level=99)
         data = _non_ok_data(result, "rejected")
 
-        assert data["error"] == "INVALID_INPUT"
+        assert data["error"] == "INVALID_LEVEL"
         assert "99" in data["message"]
         assert "1/2/3" in data["message"]
 
@@ -2516,7 +2679,7 @@ class TestGovernanceGuideTool:
 
         result = await governance_guide(topic="task", level=0)
 
-        assert _non_ok_data(result, "rejected")["error"] == "INVALID_INPUT"
+        assert _non_ok_data(result, "rejected")["error"] == "INVALID_LEVEL"
 
     async def test_empty_topic_returns_error(self):
         """Empty string topic returns INVALID_INPUT error."""
@@ -2524,7 +2687,7 @@ class TestGovernanceGuideTool:
 
         result = await governance_guide(topic="", level=1)
 
-        assert _non_ok_data(result, "rejected")["error"] == "INVALID_INPUT"
+        assert _non_ok_data(result, "rejected")["error"] == "UNKNOWN_TOPIC"
 
     # ── DC-4: Content is server-side (smoke test via import) ────────────────
 
@@ -2533,7 +2696,15 @@ class TestGovernanceGuideTool:
         from zenos.interface.governance_rules import GOVERNANCE_RULES
 
         # Verify the dict has all required keys
-        assert set(GOVERNANCE_RULES.keys()) == {"entity", "document", "task", "capture"}
+        assert set(GOVERNANCE_RULES.keys()) == {
+            "entity",
+            "document",
+            "bundle",
+            "task",
+            "capture",
+            "sync",
+            "remediation",
+        }
         for topic, levels in GOVERNANCE_RULES.items():
             assert set(levels.keys()) == {1, 2, 3}, (
                 f"Topic '{topic}' missing levels: {set(levels.keys())}"
