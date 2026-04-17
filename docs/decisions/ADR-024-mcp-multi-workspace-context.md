@@ -121,13 +121,32 @@ Dashboard API 中 `_resolve_active_workspace_id`、`_active_partner_view`、`_bu
 
 Dashboard API 和 MCP middleware 都 import 這個模組，避免邏輯分叉。
 
-### 6. Setup 流程與 skill 文件更新
+### 6. Legacy `/role` 路徑退出 shared workspace 主流程
+
+`/api/partners/{id}/role` 與 Team page 的「設為擁有者 / 設為一般成員」按鈕，
+屬於舊的 company/admin 心智，不符合 `active workspace context` 模型。
+
+從本 ADR 起：
+
+1. shared workspace 成員權限調整，一律走 `/api/partners/{id}/scope`
+2. `/scope` 只表達 `member / guest / unassigned` 這類 shared-access 語意
+3. `/role` 不得再用來把 shared member/guest 升成 owner，也不得藉此清掉 `sharedPartnerId`
+4. Team page 不再暴露 shared member 的 owner/admin 切換 UI
+
+理由：
+
+- shared workspace 角色是 active workspace 內的語意，不是 global `isAdmin` flag
+- 用 `/role` 改 shared member，等於把 identity flag 與 membership 狀態混在一起
+- 這正是先前「人和 agent 權限看起來不同、像是要重設 token」的根源之一
+
+### 7. Setup 流程與 skill 文件更新
 
 MCP client 配置與 agent skill 文件必須同步更新，否則 ADR 只是 server-side 設計，沒有端到端可操作路徑：
 
 1. **`skills/release/zenos-setup/SKILL.md`**：setup 產生的 system prompt 加入 workspace 使用指引，告知 agent 如何讀取 `workspace_context`、何時帶 `workspace_id` 參數。
 2. **MCP tool description**：每個 tool 的 docstring 加入 `workspace_id` 參數說明與使用時機。
 3. **stdio transport 不需額外配置**：workspace 切換完全透過 tool 參數完成，`mcp.json` 不需改動。
+4. setup / onboarding 文案不得把 shared membership 問題誤導成「需要換 token」。token 是 identity credential；workspace 與 role 變更應由 runtime 投影處理。
 
 ## Alternatives
 
@@ -147,6 +166,7 @@ MCP client 配置與 agent skill 文件必須同步更新，否則 ADR 只是 se
 - Agent 從 `workspace_context` 可明確告知用戶「目前在哪個 workspace 操作」，遇到歧義可主動確認。
 - Default 行為對齊 SPEC：無指定 → home workspace，MCP 與 dashboard 一致。
 - Workspace resolution 統一到 `application/workspace_context.py`，不分叉。
+- shared workspace 權限管理正式收斂到 `/scope`，不再讓 legacy `/role` 路徑破壞 membership。
 
 ### 負面
 
@@ -160,8 +180,9 @@ MCP client 配置與 agent skill 文件必須同步更新，否則 ADR 只是 se
 2. 修改 `ApiKeyMiddleware`：先解析 tool 參數或 header 中的 workspace_id，再投射 partner view。
 3. 寫入類 tool 增加 `workspace_id` optional 參數。
 4. 所有 tool output 注入 `workspace_context`。
-5. 更新 setup skill 與 MCP tool description，加入 workspace 使用指引。
-6. 當產品需要支援 3+ workspace 時，另開 ADR 處理 `workspace_memberships` 表拆分。
+5. 下線 Team page 的 shared member owner/admin toggle，只保留 scope/status 管理。
+6. 更新 setup skill 與 MCP tool description，加入 workspace 使用指引與「不要把權限變更當成換 token」說明。
+7. 當產品需要支援 3+ workspace 時，另開 ADR 處理 `workspace_memberships` 表拆分。
 
 ## Implementation
 

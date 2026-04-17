@@ -2,10 +2,11 @@
  * CRM API layer — all CRM data fetching goes through the ZenOS REST API.
  * Uses the same API_BASE and auth pattern as api.ts.
  */
-
-const API_BASE =
-  process.env.NEXT_PUBLIC_MCP_API_URL ||
-  "https://zenos-mcp-165893875709.asia-east1.run.app";
+import {
+  apiRequest,
+  hydrateDateFields,
+  serializeJsonBody,
+} from "@/lib/api-client";
 
 const CRM_DATE_FIELDS = new Set([
   "createdAt",
@@ -17,9 +18,7 @@ const CRM_DATE_FIELDS = new Set([
 ]);
 
 function serializeBody<T>(body: T): string {
-  return JSON.stringify(body, (_key, value) =>
-    value instanceof Date ? value.toISOString() : value
-  );
+  return serializeJsonBody(body);
 }
 
 function normalizeCompanyInput(
@@ -80,21 +79,7 @@ function normalizeActivityInput(
 
 /** Recursively convert ISO date strings to Date objects */
 function hydrateDates<T>(obj: T): T {
-  if (obj === null || obj === undefined) return obj;
-  if (Array.isArray(obj)) {
-    obj.forEach(hydrateDates);
-    return obj;
-  }
-  if (typeof obj === "object") {
-    for (const [key, val] of Object.entries(obj as Record<string, unknown>)) {
-      if (CRM_DATE_FIELDS.has(key) && typeof val === "string") {
-        (obj as Record<string, unknown>)[key] = new Date(val);
-      } else if (val !== null && typeof val === "object") {
-        hydrateDates(val);
-      }
-    }
-  }
-  return obj;
+  return hydrateDateFields(obj, CRM_DATE_FIELDS);
 }
 
 async function apiFetch<T>(
@@ -102,31 +87,11 @@ async function apiFetch<T>(
   token: string,
   options?: RequestInit
 ): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  const data = await apiRequest<T>(path, {
     ...options,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(options?.body ? { "Content-Type": "application/json" } : {}),
-      ...options?.headers,
-    },
+    body: options?.body ?? undefined,
+    token,
   });
-
-  if (!res.ok) {
-    let errorDetail = "";
-    try {
-      const body = await res.json();
-      errorDetail = body.message || body.error || JSON.stringify(body);
-    } catch {
-      try {
-        errorDetail = await res.text();
-      } catch {
-        errorDetail = res.statusText;
-      }
-    }
-    throw new Error(`API ${path}: ${res.status}${errorDetail ? ` - ${errorDetail}` : ""}`);
-  }
-
-  const data = await res.json();
   return hydrateDates(data) as T;
 }
 
@@ -416,12 +381,13 @@ export interface AiInsight {
 }
 
 export interface DealAiEntries {
+  briefings: AiInsight[];
   debriefs: AiInsight[];
   commitments: AiInsight[];
 }
 
 /**
- * Fetch all AI entries (debriefs + commitments) for a deal.
+ * Fetch all AI entries (briefings + debriefs + commitments) for a deal.
  * GET /api/crm/deals/{dealId}/ai-entries
  * Response is already camelCase.
  */
@@ -441,7 +407,7 @@ export async function createAiInsight(
   token: string,
   dealId: string,
   data: {
-    insightType: string;
+    insightType: "briefing" | "debrief" | "commitment";
     content: string;
     metadata: Record<string, unknown>;
     activityId?: string;
@@ -456,6 +422,37 @@ export async function createAiInsight(
   return apiFetch<AiInsight>(`/api/crm/deals/${dealId}/ai-insights`, token, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+/**
+ * Update a saved briefing snapshot.
+ * PATCH /api/crm/briefings/{insightId}
+ */
+export async function updateBriefing(
+  token: string,
+  insightId: string,
+  data: {
+    content?: string;
+    metadata?: Record<string, unknown>;
+  }
+): Promise<AiInsight> {
+  return apiFetch<AiInsight>(`/api/crm/briefings/${insightId}`, token, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Delete a saved briefing snapshot.
+ * DELETE /api/crm/briefings/{insightId}
+ */
+export async function deleteBriefing(
+  token: string,
+  insightId: string
+): Promise<void> {
+  await apiFetch<unknown>(`/api/crm/briefings/${insightId}`, token, {
+    method: "DELETE",
   });
 }
 

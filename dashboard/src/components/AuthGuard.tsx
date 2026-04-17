@@ -4,8 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { LoadingState } from "@/components/LoadingState";
-
-const API_URL = process.env.NEXT_PUBLIC_MCP_API_URL || "https://zenos-mcp-165893875709.asia-east1.run.app";
+import { activatePartner } from "@/lib/api";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, partner, loading, error, signOut, refetchPartner } = useAuth();
@@ -24,20 +23,15 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // Auto-activate invited partners
   useEffect(() => {
-    if (!user || !partner || partner.status !== "invited" || activating) return;
+    const authUser = user;
+    if (!authUser || !partner || partner.status !== "invited" || activating) return;
+    const invitedUser: NonNullable<typeof authUser> = authUser;
 
     async function activate() {
       setActivating(true);
       try {
-        const token = await user!.getIdToken();
-        const res = await fetch(`${API_URL}/api/partners/activate`, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          const body = await res.text();
-          throw new Error(`Activation failed: ${res.status} ${body}`);
-        }
+        const token = await invitedUser.getIdToken();
+        await activatePartner(token);
         await refetchPartner();
       } catch (err) {
         console.error("Failed to activate partner:", err);

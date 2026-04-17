@@ -61,10 +61,26 @@ export interface Source {
   doc_type?: string;
 }
 
+export interface BundleHighlight {
+  source_id: string;
+  headline: string;
+  reason_to_read: string;
+  priority: "primary" | "important" | "supporting";
+}
+
 export interface Entity {
   id: string;
   name: string;
-  type: "product" | "module" | "goal" | "role" | "project" | "document";
+  type:
+    | "product"
+    | "module"
+    | "goal"
+    | "role"
+    | "project"
+    | "document"
+    | "company"
+    | "person"
+    | "deal";
   summary: string;
   tags: Tags;
   status: "active" | "paused" | "completed" | "planned" | "current" | "stale" | "draft" | "conflict";
@@ -83,6 +99,8 @@ export interface Entity {
   updatedAt: Date;
   // ADR-022 Document Bundle fields (only for type="document")
   docRole?: "single" | "index" | null;
+  bundleHighlights?: BundleHighlight[];
+  highlightsUpdatedAt?: Date | null;
   changeSummary?: string | null;
   summaryUpdatedAt?: Date | null;
 }

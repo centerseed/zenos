@@ -290,7 +290,7 @@ const server = createServer(async (req, res) => {
         conversationId,
         prompt,
         cwd,
-        maxTurns: Number.isFinite(body.maxTurns) ? Number(body.maxTurns) : 6,
+        maxTurns: Number.isFinite(body.maxTurns) ? Number(body.maxTurns) : 10,
       });
       return;
     } catch (error) {

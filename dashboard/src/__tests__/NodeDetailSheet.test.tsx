@@ -259,6 +259,49 @@ describe("NodeDetailSheet — document reader link", () => {
   });
 });
 
+describe("NodeDetailSheet — doc bundle highlights", () => {
+  it("shows bundle highlights for a document entity", () => {
+    const entity = makeEntity({
+      type: "document",
+      docRole: "index",
+      sources: [{ uri: "https://github.com/org/repo/blob/main/docs/spec.md", label: "SPEC", type: "github", source_id: "src-1" }],
+      bundleHighlights: [{
+        source_id: "src-1",
+        headline: "這是 onboarding flow 的 SSOT",
+        reason_to_read: "先看這份就知道完整流程",
+        priority: "primary",
+      }],
+    });
+    render(<NodeDetailSheet {...defaultProps} entity={entity} />);
+    expect(screen.getByText("What To Read First")).toBeInTheDocument();
+    expect(screen.getByText("這是 onboarding flow 的 SSOT")).toBeInTheDocument();
+    expect(screen.getByText("先讀這份")).toBeInTheDocument();
+  });
+
+  it("shows doc bundle cards on an L2 entity", () => {
+    const parent = makeEntity();
+    const childDoc = makeEntity({
+      id: "doc-1",
+      parentId: "entity-1",
+      type: "document",
+      name: "Dashboard Onboarding Bundle",
+      docRole: "index",
+      summary: "Onboarding-related documents",
+      sources: [{ uri: "https://github.com/org/repo/blob/main/docs/spec.md", label: "SPEC", type: "github", source_id: "src-1" }],
+      bundleHighlights: [{
+        source_id: "src-1",
+        headline: "先看這份規格",
+        reason_to_read: "它定義了流程與 AC",
+        priority: "primary",
+      }],
+    });
+    render(<NodeDetailSheet {...defaultProps} entity={parent} entities={[childDoc]} />);
+    expect(screen.getByText("Doc Bundles")).toBeInTheDocument();
+    expect(screen.getByText("Dashboard Onboarding Bundle")).toBeInTheDocument();
+    expect(screen.getByText("先看這份規格")).toBeInTheDocument();
+  });
+});
+
 describe("NodeDetailSheet — permission editor", () => {
   it("renders selectable permission options for admins and saves normalized arrays", async () => {
     authState.user = {

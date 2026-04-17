@@ -501,7 +501,41 @@ class TestInvitePartner:
 class TestUpdatePartnerRole:
     """Tests for PUT /api/partners/{id}/role."""
 
-    async def test_update_role_success(self):
+    async def test_update_role_success_for_home_workspace_partner(self):
+        from zenos.interface.admin_api import update_partner_role
+
+        request = _mock_request(
+            method="PUT",
+            headers={"authorization": "Bearer fake-token"},
+            body={"isAdmin": True},
+            path_params={"id": "partner-2"},
+        )
+
+        from datetime import datetime, timezone
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2", "email": "user@test.com", "displayName": "User",
+            "isAdmin": False, "status": "active", "sharedPartnerId": None,
+            "invitedBy": None, "createdAt": datetime(2026,1,1,tzinfo=timezone.utc),
+            "updatedAt": datetime(2026,1,1,tzinfo=timezone.utc),
+        })
+        mock_repo.update_fields = AsyncMock(return_value=None)
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch(
+                 "zenos.interface.admin_api._get_caller_partner",
+                 return_value=("partner-2", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": None}),
+             ), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+
+            resp = await update_partner_role(request)
+
+            assert resp.status_code == 200
+            mock_repo.update_fields.assert_called_once()
+            assert mock_repo.update_fields.call_args.args[1]["isAdmin"] is True
+            assert "sharedPartnerId" not in mock_repo.update_fields.call_args.args[1]
+
+    async def test_update_role_rejects_shared_workspace_partner(self):
         from zenos.interface.admin_api import update_partner_role
 
         request = _mock_request(
@@ -527,9 +561,8 @@ class TestUpdatePartnerRole:
 
             resp = await update_partner_role(request)
 
-            assert resp.status_code == 200
-            mock_repo.update_fields.assert_called_once()
-            assert mock_repo.update_fields.call_args.args[1]["sharedPartnerId"] is None
+            assert resp.status_code == 409
+            mock_repo.update_fields.assert_not_called()
 
     async def test_update_role_not_found(self):
         from zenos.interface.admin_api import update_partner_role

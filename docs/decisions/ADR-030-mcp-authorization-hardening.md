@@ -50,6 +50,12 @@ MCP authorization hardening 的第一原則是先讓下列三者重新對齊：
 
 在這個 contract 收斂完成前，不再新增更多建立在舊 fallback 假設上的 permission case。否則測試只會把錯誤行為固化成新的假契約。
 
+同時，與 SSOT 衝突的舊 regression case 必須直接刪除或改寫，不得繼續保留：
+
+- 不得再用測試保護「guest 在 shared workspace 可看到 restricted/confidential task」
+- 不得再用測試保護「shared member 可透過 legacy `/role` 變成 owner」
+- 不得再用測試保護「權限變更要靠重設 token 才生效」這種 setup 誤導語意
+
 ### D2. 把 MCP authorization 測試矩陣重構為四層，而不是繼續把案例堆進單一 isolation 檔
 
 未來測試結構改為四層：
@@ -126,6 +132,7 @@ MCP hardening rollout 分兩階段：
 - 補 owner/member/guest 在 home/shared workspace 的 read matrix
 - 補 guest mutation 與 JWT scope matrix
 - 補 dashboard API vs MCP cross-surface consistency matrix
+- 清掉所有與 SSOT 衝突的 legacy permission regression case，避免錯誤行為被舊測試固化
 
 在 Phase 1 完成前，不以「permission isolation 現有案例很多」宣稱 MCP authorization coverage 足夠。
 

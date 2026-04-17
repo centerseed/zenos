@@ -32,8 +32,10 @@ CORS: allows requests from the Dashboard origin.
 from __future__ import annotations
 
 import asyncio
+import json
 import hashlib
 import logging
+import math
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -75,6 +77,16 @@ from zenos.interface.admin_api import (
 )
 
 logger = logging.getLogger(__name__)
+
+_GRAPH_CONTEXT_ALLOWED_STATUSES = {"active", "approved", "current"}
+_GRAPH_CONTEXT_DEFAULT_BUDGET = 1500
+_GRAPH_CONTEXT_MAX_L2 = 10
+_GRAPH_CONTEXT_MAX_DOCS_PER_L2 = 3
+_GRAPH_CONTEXT_MAX_DOCS_TOTAL = 20
+_GRAPH_CONTEXT_MAX_DOC_SUMMARY = 500
+_GRAPH_CONTEXT_REDUCED_DOC_SUMMARY = 180
+_GRAPH_CONTEXT_REDUCED_ENTITY_SUMMARY = 180
+_GRAPH_CONTEXT_MIN_ENTITY_SUMMARY = 48
 
 
 class RevisionConflictError(RuntimeError):
@@ -216,6 +228,254 @@ async def _compute_impact_chains_with_context(
         )
     finally:
         current_partner_id.reset(token)
+
+
+async def _list_children_with_context(
+    effective_id: str,
+    entity_id: str,
+) -> list[Entity]:
+    token = current_partner_id.set(effective_id)
+    try:
+        return await _entity_repo.list_by_parent(entity_id)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def _list_relationships_with_context(
+    effective_id: str,
+    entity_id: str,
+) -> list[Relationship]:
+    token = current_partner_id.set(effective_id)
+    try:
+        return await _relationship_repo.list_by_entity(entity_id)
+    finally:
+        current_partner_id.reset(token)
+
+
+def _graph_context_status_ok(entity: Entity | None) -> bool:
+    return bool(entity and str(entity.status or "").lower() in _GRAPH_CONTEXT_ALLOWED_STATUSES)
+
+
+def _graph_context_is_visible(entity: Entity, partner: dict) -> bool:
+    if is_guest(partner):
+        return entity.visibility == "public"
+    return OntologyService.is_entity_visible_for_partner(entity, partner)
+
+
+def _graph_context_tags(entity: Entity) -> dict:
+    what = entity.tags.what if isinstance(entity.tags.what, list) else [entity.tags.what] if entity.tags.what else []
+    who = entity.tags.who if isinstance(entity.tags.who, list) else [entity.tags.who] if entity.tags.who else []
+    return {
+        "what": [str(item).strip() for item in what if str(item).strip()],
+        "why": str(entity.tags.why or "").strip(),
+        "how": str(entity.tags.how or "").strip(),
+        "who": [str(item).strip() for item in who if str(item).strip()],
+    }
+
+
+def _truncate_graph_context_summary(text: str, limit: int) -> str:
+    value = str(text or "").strip()
+    if len(value) <= limit:
+        return value
+    return f"{value[: max(0, limit - 1)].rstrip()}…"
+
+
+def _estimate_graph_context_tokens(payload: dict) -> int:
+    return max(1, math.ceil(len(json.dumps(payload, ensure_ascii=False)) / 4))
+
+
+def _graph_context_entity_payload(entity: Entity) -> dict:
+    return {
+        "id": entity.id,
+        "name": entity.name,
+        "type": entity.type,
+        "level": entity.level,
+        "status": entity.status,
+        "summary": entity.summary or "",
+        "updated_at": entity.updated_at.isoformat() if entity.updated_at else None,
+        "tags": _graph_context_tags(entity),
+    }
+
+
+def _graph_context_doc_payload(entity: Entity) -> dict:
+    details = entity.details if isinstance(entity.details, dict) else {}
+    doc_type = (
+        details.get("type")
+        or details.get("doc_type")
+        or details.get("document_type")
+        or entity.type
+    )
+    return {
+        "id": entity.id,
+        "doc_id": entity.id,
+        "title": entity.name,
+        "type": str(doc_type or "document"),
+        "status": entity.status,
+        "summary": _truncate_graph_context_summary(entity.summary or "", _GRAPH_CONTEXT_MAX_DOC_SUMMARY),
+        "updated_at": entity.updated_at.isoformat() if entity.updated_at else None,
+    }
+
+
+def _apply_graph_context_budget(response: dict, budget_tokens: int) -> dict:
+    if budget_tokens <= 0:
+        budget_tokens = _GRAPH_CONTEXT_DEFAULT_BUDGET
+
+    working = json.loads(json.dumps(response))
+    truncation_details = {
+        "dropped_l2": 0,
+        "dropped_l3": 0,
+        "summary_truncated": 0,
+    }
+
+    def _refresh() -> int:
+        estimate = _estimate_graph_context_tokens(working)
+        working["estimated_tokens"] = estimate
+        return estimate
+
+    estimated = _refresh()
+    if estimated <= budget_tokens:
+        working["truncated"] = False
+        working["truncation_details"] = truncation_details
+        return working
+
+    seed_summary = str(working.get("seed", {}).get("summary") or "")
+    reduced_seed_summary = _truncate_graph_context_summary(seed_summary, _GRAPH_CONTEXT_REDUCED_ENTITY_SUMMARY)
+    if reduced_seed_summary != seed_summary:
+        working["seed"]["summary"] = reduced_seed_summary
+        truncation_details["summary_truncated"] += 1
+
+    for neighbor in working.get("neighbors", []):
+        summary = str(neighbor.get("summary") or "")
+        reduced = _truncate_graph_context_summary(summary, _GRAPH_CONTEXT_REDUCED_ENTITY_SUMMARY)
+        if reduced != summary:
+            neighbor["summary"] = reduced
+            truncation_details["summary_truncated"] += 1
+
+    for neighbor in working.get("neighbors", []):
+        for doc in neighbor.get("documents", []):
+            summary = str(doc.get("summary") or "")
+            reduced = _truncate_graph_context_summary(summary, _GRAPH_CONTEXT_REDUCED_DOC_SUMMARY)
+            if reduced != summary:
+                doc["summary"] = reduced
+                truncation_details["summary_truncated"] += 1
+    estimated = _refresh()
+
+    if estimated > budget_tokens:
+        for neighbor in working.get("neighbors", []):
+            for doc in neighbor.get("documents", []):
+                if doc.get("summary"):
+                    doc["summary"] = ""
+                    truncation_details["summary_truncated"] += 1
+        estimated = _refresh()
+
+    if estimated > budget_tokens:
+        for neighbor in reversed(working.get("neighbors", [])):
+            while neighbor.get("documents") and estimated > budget_tokens:
+                neighbor["documents"].pop()
+                truncation_details["dropped_l3"] += 1
+                estimated = _refresh()
+            if estimated <= budget_tokens:
+                break
+
+    if estimated > budget_tokens:
+        for neighbor in working.get("neighbors", []):
+            summary = str(neighbor.get("summary") or "")
+            reduced = _truncate_graph_context_summary(summary, _GRAPH_CONTEXT_MIN_ENTITY_SUMMARY)
+            if reduced != summary:
+                neighbor["summary"] = reduced
+                truncation_details["summary_truncated"] += 1
+        estimated = _refresh()
+
+    if estimated > budget_tokens:
+        while working.get("neighbors") and estimated > budget_tokens:
+            removed = working["neighbors"].pop()
+            truncation_details["dropped_l2"] += 1
+            truncation_details["dropped_l3"] += len(removed.get("documents", []))
+            estimated = _refresh()
+
+    if estimated > budget_tokens:
+        summary = str(working.get("seed", {}).get("summary") or "")
+        reduced = _truncate_graph_context_summary(summary, _GRAPH_CONTEXT_MIN_ENTITY_SUMMARY)
+        if reduced != summary:
+            working["seed"]["summary"] = reduced
+            truncation_details["summary_truncated"] += 1
+            estimated = _refresh()
+
+    if estimated > budget_tokens and working.get("seed", {}).get("summary"):
+        working["seed"]["summary"] = ""
+        truncation_details["summary_truncated"] += 1
+        estimated = _refresh()
+
+    working["truncated"] = any(truncation_details.values())
+    working["truncation_details"] = truncation_details
+    working["estimated_tokens"] = min(estimated, budget_tokens)
+    return working
+
+
+async def _resolve_graph_context_neighbors(
+    partner: dict,
+    effective_id: str,
+    seed: Entity,
+) -> tuple[list[Entity], list[str]]:
+    errors: list[str] = []
+    neighbors: list[Entity] = []
+    seen_ids: set[str] = set()
+
+    try:
+        direct_children = await _list_children_with_context(effective_id, seed.id)
+    except Exception as exc:
+        errors.append(f"list children failed: {exc}")
+        direct_children = []
+
+    for child in direct_children:
+        if (
+            child.id
+            and child.type != "document"
+            and child.level == 2
+            and _graph_context_status_ok(child)
+            and _graph_context_is_visible(child, partner)
+            and child.id not in seen_ids
+        ):
+            seen_ids.add(child.id)
+            neighbors.append(child)
+
+    try:
+        relationships = await _list_relationships_with_context(effective_id, seed.id)
+    except Exception as exc:
+        errors.append(f"list relationships failed: {exc}")
+        relationships = []
+
+    for rel in relationships:
+        other_id = rel.target_id if rel.source_entity_id == seed.id else rel.source_entity_id
+        if not other_id or other_id in seen_ids:
+            continue
+        candidate = await _get_entity_by_id_with_context(effective_id, other_id)
+        if not candidate or not _graph_context_is_visible(candidate, partner):
+            continue
+        if candidate.level == 2 and candidate.type != "document" and _graph_context_status_ok(candidate):
+            seen_ids.add(candidate.id)
+            neighbors.append(candidate)
+            continue
+        if candidate.level == 1 and _graph_context_status_ok(candidate):
+            try:
+                grand_children = await _list_children_with_context(effective_id, candidate.id)
+            except Exception as exc:
+                errors.append(f"list related children failed: {exc}")
+                continue
+            for grand_child in grand_children:
+                if (
+                    grand_child.id
+                    and grand_child.type != "document"
+                    and grand_child.level == 2
+                    and _graph_context_status_ok(grand_child)
+                    and _graph_context_is_visible(grand_child, partner)
+                    and grand_child.id not in seen_ids
+                ):
+                    seen_ids.add(grand_child.id)
+                    neighbors.append(grand_child)
+
+    neighbors.sort(key=lambda item: item.updated_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return neighbors[:_GRAPH_CONTEXT_MAX_L2], errors
 
 
 # ──────────────────────────────────────────────
@@ -885,6 +1145,92 @@ async def get_entity(request: Request) -> Response:
         },
         request=request,
     )
+
+
+# ──────────────────────────────────────────────
+# Endpoint: GET /api/cowork/graph-context
+# ──────────────────────────────────────────────
+
+
+async def get_cowork_graph_context(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("NOT_FOUND", "seed entity not found", 404, request=request)
+
+    seed_id = str(request.query_params.get("seed_id") or "").strip()
+    if not seed_id:
+        return _error_response("INVALID_INPUT", "seed_id is required", 400, request=request)
+
+    try:
+        budget_tokens = int(request.query_params.get("budget_tokens") or _GRAPH_CONTEXT_DEFAULT_BUDGET)
+    except ValueError:
+        return _error_response("INVALID_INPUT", "budget_tokens must be an integer", 400, request=request)
+    include_docs = str(request.query_params.get("include_docs") or "true").strip().lower() != "false"
+
+    await _ensure_repos()
+    seed = await _get_entity_by_id_with_context(effective_id, seed_id)
+    if not seed or not _graph_context_is_visible(seed, partner):
+        return _error_response("NOT_FOUND", f"Entity {seed_id} not found", 404, request=request)
+
+    neighbors, errors = await _resolve_graph_context_neighbors(partner, effective_id, seed)
+    l3_total = 0
+    neighbor_payloads: list[dict] = []
+
+    for neighbor in neighbors:
+        documents: list[dict] = []
+        if include_docs and l3_total < _GRAPH_CONTEXT_MAX_DOCS_TOTAL:
+            try:
+                children = await _list_children_with_context(effective_id, neighbor.id)
+            except Exception as exc:
+                errors.append(f"list documents failed for {neighbor.id}: {exc}")
+                children = []
+
+            docs = [
+                child for child in children
+                if child.type == "document"
+                and _graph_context_status_ok(child)
+                and _graph_context_is_visible(child, partner)
+            ]
+            docs.sort(key=lambda item: item.updated_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+            remaining = max(0, _GRAPH_CONTEXT_MAX_DOCS_TOTAL - l3_total)
+            selected_docs = docs[: min(_GRAPH_CONTEXT_MAX_DOCS_PER_L2, remaining)]
+            documents = [_graph_context_doc_payload(doc) for doc in selected_docs]
+            l3_total += len(documents)
+
+        payload = _graph_context_entity_payload(neighbor)
+        payload["distance"] = 1
+        payload["documents"] = documents
+        neighbor_payloads.append(payload)
+
+    fallback_mode = "normal"
+    if seed.level == 1 and (len(neighbor_payloads) <= 1 or (include_docs and bool(errors))):
+        fallback_mode = "l1_tags_only"
+
+    response = {
+        "seed": _graph_context_entity_payload(seed),
+        "fallback_mode": fallback_mode,
+        "neighbors": neighbor_payloads,
+        "partial": bool(errors),
+        "errors": errors,
+        "truncated": False,
+        "truncation_details": {
+            "dropped_l2": 0,
+            "dropped_l3": 0,
+            "summary_truncated": 0,
+        },
+        "estimated_tokens": 0,
+        "cached_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if response["fallback_mode"] == "l1_tags_only":
+        response["neighbors"] = neighbor_payloads[:1]
+
+    response = _apply_graph_context_budget(response, budget_tokens)
+    return _json_response(response, request=request)
 
 
 # ──────────────────────────────────────────────
@@ -2420,6 +2766,7 @@ dashboard_routes = [
     Route("/api/partner/me", get_partner_me, methods=["GET", "OPTIONS"]),
     Route("/api/partner/preferences", get_partner_preferences, methods=["GET", "OPTIONS"]),
     Route("/api/partner/preferences", update_partner_preferences, methods=["PATCH", "OPTIONS"]),
+    Route("/api/cowork/graph-context", get_cowork_graph_context, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities", list_entities, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities/{id}/children", get_entity_children, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities/{id}/relationships", get_entity_relationships, methods=["GET", "OPTIONS"]),

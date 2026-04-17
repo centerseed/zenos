@@ -8,6 +8,12 @@
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
     "cleanUrls": true,
     "trailingSlash": false,
+    "headers": [
+      {
+        "source": "/installers/**",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0" }]
+      }
+    ],
     "rewrites": [
       {
         "source": "/marketing",

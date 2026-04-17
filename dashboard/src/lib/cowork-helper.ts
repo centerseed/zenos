@@ -1,9 +1,17 @@
 const DEFAULT_HELPER_BASE_URL = "http://127.0.0.1:4317";
 const DEFAULT_HELPER_MODEL = "sonnet";
-const HELPER_BASE_STORAGE_KEY = "zenos.marketing.cowork.helperBaseUrl";
-const HELPER_TOKEN_STORAGE_KEY = "zenos.marketing.cowork.helperToken";
-const HELPER_CWD_STORAGE_KEY = "zenos.marketing.cowork.cwd";
-const HELPER_MODEL_STORAGE_KEY = "zenos.marketing.cowork.model";
+const HELPER_BASE_STORAGE_KEY = "zenos.copilot.helperBaseUrl";
+const HELPER_TOKEN_STORAGE_KEY = "zenos.copilot.helperToken";
+const HELPER_CWD_STORAGE_KEY = "zenos.copilot.cwd";
+const HELPER_MODEL_STORAGE_KEY = "zenos.copilot.model";
+const LEGACY_HELPER_BASE_STORAGE_KEY = "zenos.marketing.cowork.helperBaseUrl";
+const LEGACY_HELPER_TOKEN_STORAGE_KEY = "zenos.marketing.cowork.helperToken";
+const LEGACY_HELPER_CWD_STORAGE_KEY = "zenos.marketing.cowork.cwd";
+const LEGACY_HELPER_MODEL_STORAGE_KEY = "zenos.marketing.cowork.model";
+
+type LocalNetworkRequestInit = RequestInit & {
+  targetAddressSpace?: "local" | "loopback";
+};
 
 export interface CoworkCapabilityCheck {
   mcpOk: boolean;
@@ -29,13 +37,33 @@ export type CoworkStreamEvent =
   | { type: "stderr"; requestId?: string; text: string }
   | { type: "done"; requestId?: string; code?: number; signal?: string }
   | { type: "capability_check"; capability: CoworkCapabilityCheck }
+  | {
+      type: "graph_context_loaded";
+      payload: {
+        l2_count: number;
+        l3_count: number;
+        truncated: boolean;
+        fallback_mode: "normal" | "l1_tags_only";
+      };
+    }
   | { type: "permission_request"; request: CoworkPermissionRequest }
   | { type: "permission_result"; result: CoworkPermissionResult }
   | { type: "error"; message: string };
 
+function readStorageWithFallback(primaryKey: string, legacyKey: string): string | null {
+  if (typeof window === "undefined") return null;
+  const storage = window.localStorage;
+  const primaryValue = storage.getItem(primaryKey);
+  if (primaryValue) return primaryValue;
+  return storage.getItem(legacyKey);
+}
+
 export function getDefaultHelperBaseUrl(): string {
   if (typeof window === "undefined") return DEFAULT_HELPER_BASE_URL;
-  return window.localStorage.getItem(HELPER_BASE_STORAGE_KEY) || DEFAULT_HELPER_BASE_URL;
+  return (
+    readStorageWithFallback(HELPER_BASE_STORAGE_KEY, LEGACY_HELPER_BASE_STORAGE_KEY) ||
+    DEFAULT_HELPER_BASE_URL
+  );
 }
 
 export function setDefaultHelperBaseUrl(url: string): void {
@@ -45,7 +73,7 @@ export function setDefaultHelperBaseUrl(url: string): void {
 
 export function getDefaultHelperToken(): string {
   if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(HELPER_TOKEN_STORAGE_KEY) || "";
+  return readStorageWithFallback(HELPER_TOKEN_STORAGE_KEY, LEGACY_HELPER_TOKEN_STORAGE_KEY) || "";
 }
 
 export function setDefaultHelperToken(token: string): void {
@@ -60,7 +88,7 @@ export function setDefaultHelperToken(token: string): void {
 
 export function getDefaultHelperCwd(): string {
   if (typeof window === "undefined") return "";
-  return window.localStorage.getItem(HELPER_CWD_STORAGE_KEY) || "";
+  return readStorageWithFallback(HELPER_CWD_STORAGE_KEY, LEGACY_HELPER_CWD_STORAGE_KEY) || "";
 }
 
 export function setDefaultHelperCwd(cwd: string): void {
@@ -75,7 +103,10 @@ export function setDefaultHelperCwd(cwd: string): void {
 
 export function getDefaultHelperModel(): string {
   if (typeof window === "undefined") return DEFAULT_HELPER_MODEL;
-  return window.localStorage.getItem(HELPER_MODEL_STORAGE_KEY) || DEFAULT_HELPER_MODEL;
+  return (
+    readStorageWithFallback(HELPER_MODEL_STORAGE_KEY, LEGACY_HELPER_MODEL_STORAGE_KEY) ||
+    DEFAULT_HELPER_MODEL
+  );
 }
 
 export function setDefaultHelperModel(model: string): void {
@@ -90,6 +121,32 @@ export function setDefaultHelperModel(model: string): void {
 
 function normalizeBaseUrl(baseUrl: string): string {
   return baseUrl.trim().replace(/\/+$/, "");
+}
+
+function inferHelperAddressSpace(baseUrl: string): "local" | "loopback" {
+  try {
+    const host = new URL(baseUrl).hostname.trim().toLowerCase();
+    if (
+      host === "localhost" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      host.startsWith("127.")
+    ) {
+      return "loopback";
+    }
+  } catch {
+    // Fall back to local below if URL parsing fails.
+  }
+  return "local";
+}
+
+function buildHelperFetchInit(baseUrl: string, init: RequestInit): LocalNetworkRequestInit {
+  // Chrome's Local Network Access protection can block HTTPS dashboard -> localhost helper
+  // unless the request is explicitly annotated with the target address space.
+  return {
+    ...init,
+    targetAddressSpace: inferHelperAddressSpace(baseUrl),
+  };
 }
 
 async function parseJsonSafely<T>(res: Response): Promise<T | null> {
@@ -111,7 +168,10 @@ export async function checkCoworkHelperHealth(baseUrl: string, token?: string): 
   if (token?.trim()) headers["X-Local-Helper-Token"] = token.trim();
 
   try {
-    const res = await fetch(`${normalizedBaseUrl}/health`, { method: "GET", headers });
+    const res = await fetch(
+      `${normalizedBaseUrl}/health`,
+      buildHelperFetchInit(normalizedBaseUrl, { method: "GET", headers })
+    );
     const body = await parseJsonSafely<{
       status?: string;
       message?: string;
@@ -215,12 +275,15 @@ export async function streamCoworkChat(params: {
   if (cwd?.trim()) payload.cwd = cwd.trim();
   if (maxTurns && Number.isFinite(maxTurns)) payload.maxTurns = maxTurns;
 
-  const res = await fetch(`${normalizedBaseUrl}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-    signal,
-  });
+  const res = await fetch(
+    `${normalizedBaseUrl}${path}`,
+    buildHelperFetchInit(normalizedBaseUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    })
+  );
   if (!res.ok) {
     const body = await parseJsonSafely<{ message?: string; error?: string }>(res);
     throw new Error(body?.message || body?.error || `helper responded ${res.status}`);
@@ -317,11 +380,14 @@ export async function cancelCoworkRequest(params: {
   const normalizedBaseUrl = normalizeBaseUrl(params.baseUrl);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (params.token?.trim()) headers["X-Local-Helper-Token"] = params.token.trim();
-  const res = await fetch(`${normalizedBaseUrl}/v1/chat/cancel`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ requestId: params.requestId }),
-  });
+  const res = await fetch(
+    `${normalizedBaseUrl}/v1/chat/cancel`,
+    buildHelperFetchInit(normalizedBaseUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ requestId: params.requestId }),
+    })
+  );
   if (!res.ok) {
     const body = await parseJsonSafely<{ message?: string; error?: string }>(res);
     throw new Error(body?.message || body?.error || `helper responded ${res.status}`);

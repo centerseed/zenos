@@ -17,6 +17,7 @@ export function buildCopilotPromptEnvelope(
   userInput: string
 ): string {
   const promptBody = entry.build_prompt(userInput).trim();
+  const contextPack = entry.get_context_pack ? entry.get_context_pack() : entry.context_pack;
   return [
     "[AI_RAIL]",
     `intent_id=${entry.intent_id}`,
@@ -28,7 +29,7 @@ export function buildCopilotPromptEnvelope(
     ...renderScope(entry.scope),
     "",
     "[CONTEXT_PACK]",
-    JSON.stringify(entry.context_pack, null, 2),
+    JSON.stringify(contextPack, null, 2),
     "",
     "[USER_INPUT]",
     userInput.trim() || "(empty)",

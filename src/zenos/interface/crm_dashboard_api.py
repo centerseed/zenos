@@ -567,7 +567,7 @@ async def create_deal_activity(request: Request):
 
 
 async def get_deal_ai_entries(request: Request):
-    """GET /api/crm/deals/{id}/ai-entries — list debriefs and commitments for a deal."""
+    """GET /api/crm/deals/{id}/ai-entries — list briefings, debriefs, and commitments."""
     if request.method == "OPTIONS":
         return _handle_options(request)
 
@@ -582,6 +582,7 @@ async def get_deal_ai_entries(request: Request):
         entries = await svc.get_deal_ai_entries(effective_id, deal_id)
         return _json_response(
             {
+                "briefings": [_ai_insight_to_dict(i) for i in entries["briefings"]],
                 "debriefs": [_ai_insight_to_dict(i) for i in entries["debriefs"]],
                 "commitments": [_ai_insight_to_dict(i) for i in entries["commitments"]],
             },
@@ -647,6 +648,66 @@ async def patch_commitment_status(request: Request):
         return _error_response("BAD_REQUEST", str(exc), 400, request=request)
     except Exception as exc:
         return _internal_error_response(request, "patch_commitment_status", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def patch_briefing(request: Request):
+    """PATCH /api/crm/briefings/{id} — update a saved briefing snapshot."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        insight_id = request.path_params["id"]
+        body = await request.json()
+        if "content" not in body and "metadata" not in body:
+            return _error_response(
+                "BAD_REQUEST",
+                "content or metadata is required",
+                400,
+                request=request,
+            )
+
+        svc = await _ensure_crm_service()
+        insight = await svc.update_briefing(effective_id, insight_id, body)
+        if insight is None:
+            return _error_response("NOT_FOUND", "Briefing not found", 404, request=request)
+        return _json_response(_ai_insight_to_dict(insight), request=request)
+    except ValueError as exc:
+        return _error_response("BAD_REQUEST", str(exc), 400, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "patch_briefing", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
+async def delete_briefing(request: Request):
+    """DELETE /api/crm/briefings/{id} — delete a saved briefing snapshot."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        insight_id = request.path_params["id"]
+        svc = await _ensure_crm_service()
+        deleted = await svc.delete_briefing(effective_id, insight_id)
+        if not deleted:
+            return _error_response("NOT_FOUND", "Briefing not found", 404, request=request)
+        from starlette.responses import Response
+        return Response(status_code=204, headers=dict(_cors_headers(request)))
+    except ValueError as exc:
+        return _error_response("BAD_REQUEST", str(exc), 400, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "delete_briefing", exc)
     finally:
         current_partner_id.reset(token)
 
@@ -801,6 +862,8 @@ crm_dashboard_routes = [
     Route("/api/crm/deals/{id}/activities",       deal_activities_collection, methods=["GET", "POST", "OPTIONS"]),
     Route("/api/crm/deals/{id}/ai-entries",       get_deal_ai_entries,        methods=["GET", "OPTIONS"]),
     Route("/api/crm/deals/{id}/ai-insights",      create_deal_ai_insight,     methods=["POST", "OPTIONS"]),
+    Route("/api/crm/briefings/{id}",              patch_briefing,             methods=["PATCH", "OPTIONS"]),
+    Route("/api/crm/briefings/{id}",              delete_briefing,            methods=["DELETE", "OPTIONS"]),
     Route("/api/crm/commitments/{id}",            patch_commitment_status,    methods=["PATCH", "OPTIONS"]),
     Route("/api/crm/insights",                    get_insights,               methods=["GET", "OPTIONS"]),
     Route("/api/crm/settings/stale-thresholds",   stale_thresholds_handler,   methods=["GET", "PUT", "OPTIONS"]),

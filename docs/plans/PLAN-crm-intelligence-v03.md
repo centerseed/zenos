@@ -3,7 +3,7 @@ spec: SPEC-crm-intelligence.md
 adr: ADR-037-crm-intelligence-architecture.md
 plan_id: 251065f55b0449a99680e21bf0c66c53
 created: 2026-04-14
-status: in-progress
+status: done
 ---
 
 # PLAN: CRM Intelligence v0.3 — AI 洞察持久化 + 對話式 Briefing
@@ -54,4 +54,4 @@ S01 ──┬──→ S02 ──→ S03 ──→ S04
 
 ## Resume Point
 
-S01-S03 完成。QA CONDITIONAL PASS → 2 Major 修復後 PASS。下一步：部署。
+全部完成。Migration applied、Backend Cloud Run zenos-mcp-00157-zkw deployed、Frontend Firebase Hosting deployed。正式站 smoke 全 200。

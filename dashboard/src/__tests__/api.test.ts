@@ -470,6 +470,7 @@ describe("updatePartnerScope", () => {
     await updatePartnerScope(FAKE_TOKEN, "p-guest", {
       roles: ["engineering"],
       department: "all",
+      workspaceRole: "guest",
       accessMode: "scoped",
       authorizedEntityIds: ["entity-1", "entity-2"],
     });
@@ -481,8 +482,10 @@ describe("updatePartnerScope", () => {
         body: JSON.stringify({
           roles: ["engineering"],
           department: "all",
+          workspaceRole: "guest",
           accessMode: "scoped",
           authorizedEntityIds: ["entity-1", "entity-2"],
+          workspace_role: "guest",
           access_mode: "scoped",
           authorized_entity_ids: ["entity-1", "entity-2"],
         }),
@@ -743,6 +746,7 @@ describe("document delivery APIs", () => {
     vi.stubGlobal("fetch", fakeFetch);
 
     await saveDocumentMarkdown(FAKE_TOKEN, "doc-1", "# hello", {
+      base_revision_id: "rev-1",
       source_id: "manual-source",
       source_version_ref: "manual-v1",
     });
@@ -756,6 +760,7 @@ describe("document delivery APIs", () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          base_revision_id: "rev-1",
           content: "# hello",
           source_id: "manual-source",
           source_version_ref: "manual-v1",
@@ -808,7 +813,12 @@ describe("document delivery APIs", () => {
 
     await getSharedDocumentByToken("abc/def==");
 
-    expect(fakeFetch).toHaveBeenCalledWith(`${API_BASE}/s/abc%2Fdef%3D%3D`);
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/s/abc%2Fdef%3D%3D`,
+      expect.objectContaining({
+        headers: {},
+      })
+    );
   });
 });
 

@@ -13,6 +13,7 @@ All Firebase token verification and SQL repository calls are mocked.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -63,6 +64,27 @@ def _make_entity(eid: str = "e1") -> Entity:
         last_reviewed_at=None,
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+
+
+def _make_document(eid: str = "doc-1", parent_id: str = "e1", *, status: str = "approved", summary: str = "Doc summary") -> Entity:
+    return Entity(
+        id=eid,
+        name=f"Document {eid}",
+        type="document",
+        level=3,
+        parent_id=parent_id,
+        status=status,
+        summary=summary,
+        tags=Tags(what=["spec"], why="", how="", who=[]),
+        details={"doc_type": "SPEC"},
+        confirmed_by_user=False,
+        owner="Alice",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
     )
 
 
@@ -441,6 +463,116 @@ class TestGetEntity:
             resp = await get_entity(request)
 
         assert resp.status_code == 401
+
+
+class TestGetCoworkGraphContext:
+
+    async def test_returns_l2_neighbors_and_documents(self):
+        from zenos.interface.dashboard_api import get_cowork_graph_context
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            query_params={"seed_id": "prod-1", "budget_tokens": "1500"},
+        )
+        seed = _make_entity("prod-1")
+        seed.type = "product"
+        seed.level = 1
+        seed.name = "Paceriz"
+        child = _make_entity("module-1")
+        child.parent_id = "prod-1"
+        child.updated_at = datetime(2026, 1, 4, tzinfo=timezone.utc)
+        doc = _make_document("spec-1", parent_id="module-1", summary="A" * 620)
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._get_entity_by_id_with_context", new=AsyncMock(side_effect=[seed])), \
+             patch("zenos.interface.dashboard_api._list_children_with_context", new=AsyncMock(side_effect=[[child], [doc]])), \
+             patch("zenos.interface.dashboard_api._list_relationships_with_context", new=AsyncMock(return_value=[])):
+            resp = await get_cowork_graph_context(request)
+
+        assert resp.status_code == 200
+        body = json.loads(resp.body)
+        assert body["seed"]["id"] == "prod-1"
+        assert body["fallback_mode"] == "l1_tags_only"
+        assert len(body["neighbors"]) == 1
+        assert body["neighbors"][0]["id"] == "module-1"
+        assert len(body["neighbors"][0]["documents"]) == 1
+        assert body["neighbors"][0]["documents"][0]["doc_id"] == "spec-1"
+        assert len(body["neighbors"][0]["documents"][0]["summary"]) <= 500
+        assert body["estimated_tokens"] > 0
+
+    async def test_marks_partial_when_document_lookup_fails(self):
+        from zenos.interface.dashboard_api import get_cowork_graph_context
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            query_params={"seed_id": "prod-1"},
+        )
+        seed = _make_entity("prod-1")
+        seed.type = "product"
+        seed.level = 1
+        children = [_make_entity("module-1"), _make_entity("module-2")]
+        children[0].parent_id = "prod-1"
+        children[1].parent_id = "prod-1"
+
+        async def list_children(_effective_id, entity_id):
+            if entity_id == "prod-1":
+                return children
+            raise RuntimeError("timeout")
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._get_entity_by_id_with_context", new=AsyncMock(return_value=seed)), \
+             patch("zenos.interface.dashboard_api._list_children_with_context", new=AsyncMock(side_effect=list_children)), \
+             patch("zenos.interface.dashboard_api._list_relationships_with_context", new=AsyncMock(return_value=[])):
+            resp = await get_cowork_graph_context(request)
+
+        assert resp.status_code == 200
+        body = json.loads(resp.body)
+        assert body["partial"] is True
+        assert body["errors"]
+        assert len(body["neighbors"]) == 1
+
+    async def test_truncates_large_payload(self):
+        from zenos.interface.dashboard_api import get_cowork_graph_context
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            query_params={"seed_id": "prod-1", "budget_tokens": "40"},
+        )
+        seed = _make_entity("prod-1")
+        seed.type = "product"
+        seed.level = 1
+        children = []
+        docs_by_parent: dict[str, list[Entity]] = {}
+        for index in range(3):
+            child = _make_entity(f"module-{index}")
+            child.parent_id = "prod-1"
+            child.summary = "module summary " * 20
+            children.append(child)
+            docs_by_parent[child.id] = [
+                _make_document(f"doc-{index}-a", parent_id=child.id, summary="doc summary " * 50),
+                _make_document(f"doc-{index}-b", parent_id=child.id, summary="doc summary " * 50),
+            ]
+
+        async def list_children(_effective_id, entity_id):
+            if entity_id == "prod-1":
+                return children
+            return docs_by_parent.get(entity_id, [])
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._get_entity_by_id_with_context", new=AsyncMock(return_value=seed)), \
+             patch("zenos.interface.dashboard_api._list_children_with_context", new=AsyncMock(side_effect=list_children)), \
+             patch("zenos.interface.dashboard_api._list_relationships_with_context", new=AsyncMock(return_value=[])):
+            resp = await get_cowork_graph_context(request)
+
+        assert resp.status_code == 200
+        body = json.loads(resp.body)
+        assert body["truncated"] is True
+        assert body["truncation_details"]["dropped_l2"] >= 0
+        assert body["truncation_details"]["dropped_l3"] >= 0
+        assert body["estimated_tokens"] <= 40
 
 
 # ---------------------------------------------------------------------------

@@ -24,7 +24,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'npx serve out -s -l 3000',
+    command: 'npx serve out -l 3000',
     port: 3000,
     reuseExistingServer: !process.env.CI,
   },

@@ -37,6 +37,7 @@ export interface CopilotEntryConfig {
   suggested_skill?: string;
   scope: CopilotScopeEnvelope;
   context_pack: Record<string, unknown>;
+  get_context_pack?: () => Record<string, unknown>;
   write_targets?: string[];
   build_prompt: (input: string) => string;
   parse_structured_result?: (raw: string) => StructuredResult | null;

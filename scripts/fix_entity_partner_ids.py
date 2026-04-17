@@ -11,9 +11,9 @@ This script finds the admin partner (is_admin = true), then reassigns every
 row that belongs to a different partner_id to the admin partner_id.
 
 Tables updated (all partner_id columns):
-  entities, relationships, documents, document_entities,
-  protocols, blindspots, blindspot_entities,
-  tasks, task_entities, task_blockers
+  audit_events, entities, governance_health_cache, relationships,
+  documents, document_entities, protocols, blindspots, blindspot_entities,
+  tasks, task_entities, task_blockers, tool_events, work_journal
 
 The partners table itself is NOT modified.
 
@@ -60,7 +60,9 @@ SCHEMA = "zenos"
 # Order matters for FK satisfaction: join/leaf tables before their parents
 # is fine here because we defer all constraints.
 PARTNER_ID_TABLES: list[str] = [
+    "audit_events",
     "entities",
+    "governance_health_cache",
     "relationships",
     "documents",
     "document_entities",
@@ -70,6 +72,8 @@ PARTNER_ID_TABLES: list[str] = [
     "tasks",
     "task_entities",
     "task_blockers",
+    "tool_events",
+    "work_journal",
 ]
 
 
@@ -210,12 +214,22 @@ async def run_fix(
                 f"ALTER TABLE {SCHEMA}.{table} DROP CONSTRAINT IF EXISTS {constraint}"
             )
 
-        # Step 2: update all tables
+        # Step 2: migrate all tables
         for table in PARTNER_ID_TABLES:
-            result = await conn.execute(
-                f"UPDATE {SCHEMA}.{table} SET partner_id = $1 WHERE partner_id <> $1",
-                admin_id,
-            )
+            if table == "governance_health_cache":
+                # Cache rows are recomputable and keyed only by partner_id.
+                # If the admin row already exists, rewriting orphan rows to the
+                # admin id would violate the PK. Keep the admin cache row and
+                # drop stale non-admin cache rows instead.
+                result = await conn.execute(
+                    f"DELETE FROM {SCHEMA}.{table} WHERE partner_id <> $1",
+                    admin_id,
+                )
+            else:
+                result = await conn.execute(
+                    f"UPDATE {SCHEMA}.{table} SET partner_id = $1 WHERE partner_id <> $1",
+                    admin_id,
+                )
             count = _parse_command_tag_count(result)
             summary.record(table, count)
             logger.info("Updated %d rows in %s", count, table)

@@ -22,6 +22,7 @@ import {
   usesScopedResume,
 } from "@/lib/copilot/state";
 import { buildCopilotPromptEnvelope } from "@/lib/copilot/envelope";
+import { COWORK_MAX_TURNS } from "@/lib/cowork-knowledge";
 import { parseStructuredResult } from "@/lib/copilot/structured-result";
 import { parseStreamLine } from "@/lib/copilot/stream";
 
@@ -190,6 +191,7 @@ export function useCopilotChat(
           prompt,
           model,
           cwd,
+          maxTurns: COWORK_MAX_TURNS,
           signal: abortController.signal,
           onEvent: (event) => {
             switch (event.type) {

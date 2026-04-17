@@ -471,24 +471,20 @@ class TestBlindspotIsolationE2E:
 
 
 # ===========================================================================
-# E2E Scenario 6: Task 可見性（不受 entity visibility 過濾）
+# E2E Scenario 6: Guest task visibility follows linked entity visibility
 # ===========================================================================
 
 @pytest.mark.asyncio
-class TestTaskVisibilityIgnoresEntityVisibilityE2E:
-    """E2E: Tasks linked to restricted entity are still visible to scoped partner.
+class TestTaskVisibilityRespectsEntityVisibilityE2E:
+    """E2E: Scoped partner only sees public tasks inside the authorized subtree.
 
-    Per SPEC-permission-model requirement 4:
-    "Task 不使用 visibility 欄位控制客戶可見性。Scoped partner 在自己的 L1 內
-    預設能看到所有 task。"
+    Per the current identity/access spec, guest task visibility inherits the
+    linked entity visibility inside the authorized subtree: guest can see only
+    public tasks in scope.
     """
 
-    async def test_task_linked_to_restricted_entity_is_visible_to_scoped_partner(self):
-        """Scoped partner can see tasks whose linked entity has visibility=restricted.
-
-        The task is inside the authorized L1, so the partner can see it even though
-        the linked entity itself (restricted) would be filtered from entity lists.
-        """
+    async def test_task_linked_to_restricted_entity_is_hidden_from_scoped_partner(self):
+        """Scoped partner cannot see tasks whose linked entity is restricted."""
         from zenos.interface.dashboard_api import list_tasks
 
         request = _mock_request(headers={"authorization": "Bearer fake", "x-active-workspace-id": "p-admin-e2e"})
@@ -509,9 +505,8 @@ class TestTaskVisibilityIgnoresEntityVisibilityE2E:
         assert "task-in-l1" in task_ids, (
             "Task linked to public entity in authorized L1 must be visible"
         )
-        assert "task-linked-restricted" in task_ids, (
-            "Task linked to restricted entity (but inside authorized L1) must still be visible — "
-            "task visibility does not inherit entity visibility"
+        assert "task-linked-restricted" not in task_ids, (
+            "Task linked to restricted entity inside authorized L1 must stay hidden from guest"
         )
         assert "task-out-l1" not in task_ids, (
             "Task linked to entity in unauthorized L1 must not be visible"

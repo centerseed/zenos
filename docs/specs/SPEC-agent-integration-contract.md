@@ -31,6 +31,10 @@ ZenOS 想做的是公司的共享 context layer，而不是某一個特定 agent
 3. skill 應扮演什麼角色，才不會變成知識圖譜的唯一入口？
 4. 在半自動情境下，如何讓 reviewer、editor、owner 協作而不靠人肉傳話？
 
+> Detailed MCP tool payload / response / compatibility rules are governed by
+> `SPEC-mcp-tool-contract`. 本文件只定義 agent integration 原則與分層，不再作為
+> MCP tool 介面細節的權威來源。
+
 ---
 
 ## 目標

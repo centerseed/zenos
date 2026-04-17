@@ -1,53 +1,11 @@
-const API_BASE =
-  process.env.NEXT_PUBLIC_MCP_API_URL ||
-  "https://zenos-mcp-165893875709.asia-east1.run.app";
-
-const ACTIVE_WORKSPACE_STORAGE_KEY = "zenos.activeWorkspaceId";
-
-function getStoredActiveWorkspaceId(): string | null {
-  if (typeof window === "undefined") return null;
-  const storage = window.localStorage;
-  if (!storage || typeof storage.getItem !== "function") return null;
-  return storage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-}
+import { apiRequest } from "@/lib/api-client";
 
 async function apiFetch<T>(path: string, token: string, options?: RequestInit): Promise<T> {
-  const activeWorkspaceId = getStoredActiveWorkspaceId();
-  const headers = {
-    Authorization: `Bearer ${token}`,
-    ...(options?.body ? { "Content-Type": "application/json" } : {}),
-    ...(activeWorkspaceId ? { "X-Active-Workspace-Id": activeWorkspaceId } : {}),
-    ...options?.headers,
-  };
-  const requestOptions: RequestInit = {
+  return apiRequest<T>(path, {
     ...options,
-    headers,
-  };
-
-  let res: globalThis.Response;
-  try {
-    res = await fetch(`${API_BASE}${path}`, requestOptions);
-  } catch (error) {
-    const isNetworkFailure =
-      error instanceof TypeError &&
-      /failed to fetch|network/i.test(String(error.message || ""));
-    const shouldRetryWithSameOrigin = isNetworkFailure && API_BASE.startsWith("http");
-    if (!shouldRetryWithSameOrigin) {
-      throw error;
-    }
-    res = await fetch(path, requestOptions);
-  }
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const body = await res.json();
-      detail = body.message || body.error || "";
-    } catch {
-      detail = "";
-    }
-    throw new Error(`API ${path}: ${res.status}${detail ? ` - ${detail}` : ""}`);
-  }
-  return (await res.json()) as T;
+    body: options?.body ?? undefined,
+    token,
+  });
 }
 
 export interface Strategy {
@@ -62,6 +20,9 @@ export interface Strategy {
   campaignGoal: string;
   ctaStrategy: string;
   referenceMaterials: string[];
+  pendingFields?: string[];
+  sourceCitations?: Array<{ node_id: string; node_name: string; field_ids?: string[] }>;
+  confidence?: "high" | "medium" | "low" | "";
   summaryEntry?: string;
 }
 
@@ -228,6 +189,9 @@ export async function updateMarketingProjectStrategy(
     campaignGoal?: string;
     ctaStrategy?: string;
     referenceMaterials?: string[];
+    pendingFields?: string[];
+    sourceCitations?: Array<{ node_id: string; node_name: string; field_ids?: string[] }>;
+    confidence?: "high" | "medium" | "low";
     expectedUpdatedAt?: string;
   }
 ): Promise<MarketingProject> {

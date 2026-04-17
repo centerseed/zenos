@@ -17,6 +17,7 @@ const DATE_FIELDS = new Set([
   "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
   "summaryUpdatedAt", "highlightsUpdatedAt",
   "summary_updated_at", "highlights_updated_at", "last_published_at",
+  "updated_at", "cached_at",
 ]);
 
 /** Recursively convert ISO date strings to Date objects in-place */
@@ -125,6 +126,64 @@ export interface EntityContextResponse {
   reverse_impact_chain: ImpactChainHop[];
 }
 
+export interface GraphContextDocument {
+  id: string;
+  doc_id: string;
+  title: string;
+  type: string;
+  status: string;
+  summary: string;
+  updated_at?: Date | null;
+}
+
+export interface GraphContextNeighbor {
+  id: string;
+  name: string;
+  type: string;
+  level: number | null;
+  status: string;
+  summary: string;
+  updated_at?: Date | null;
+  distance: number;
+  tags: {
+    what: string[];
+    why: string;
+    how: string;
+    who: string[];
+  };
+  documents: GraphContextDocument[];
+}
+
+export interface GraphContextResponse {
+  seed: {
+    id: string;
+    name: string;
+    type: string;
+    level: number | null;
+    status: string;
+    summary: string;
+    updated_at?: Date | null;
+    tags: {
+      what: string[];
+      why: string;
+      how: string;
+      who: string[];
+    };
+  };
+  fallback_mode: "normal" | "l1_tags_only";
+  neighbors: GraphContextNeighbor[];
+  partial: boolean;
+  errors?: string[];
+  truncated: boolean;
+  truncation_details: {
+    dropped_l2: number;
+    dropped_l3: number;
+    summary_truncated: number;
+  };
+  estimated_tokens: number;
+  cached_at: Date;
+}
+
 /** Fetch a single entity together with impact chain context */
 export async function getEntityContext(
   token: string,
@@ -132,6 +191,28 @@ export async function getEntityContext(
 ): Promise<EntityContextResponse | null> {
   try {
     return await apiFetch<EntityContextResponse>(`/api/data/entities/${entityId}`, token);
+  } catch {
+    return null;
+  }
+}
+
+export async function getCoworkGraphContext(
+  token: string,
+  params: {
+    seedId: string;
+    budgetTokens?: number;
+    includeDocs?: boolean;
+  }
+): Promise<GraphContextResponse | null> {
+  const search = new URLSearchParams({ seed_id: params.seedId });
+  if (typeof params.budgetTokens === "number") {
+    search.set("budget_tokens", String(params.budgetTokens));
+  }
+  if (params.includeDocs === false) {
+    search.set("include_docs", "false");
+  }
+  try {
+    return await apiFetch<GraphContextResponse>(`/api/cowork/graph-context?${search.toString()}`, token);
   } catch {
     return null;
   }

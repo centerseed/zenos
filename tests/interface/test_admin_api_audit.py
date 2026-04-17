@@ -154,7 +154,7 @@ class TestActivatePartnerAudit:
 class TestUpdatePartnerRoleAudit:
     """Audit log: PUT /api/partners/{id}/role"""
 
-    async def test_audit_log_emitted_on_success(self):
+    async def test_audit_log_emitted_on_success_for_home_workspace_partner(self):
         from zenos.interface.admin_api import update_partner_role
         from datetime import datetime, timezone
 
@@ -168,14 +168,17 @@ class TestUpdatePartnerRoleAudit:
         mock_repo = AsyncMock()
         mock_repo.get_by_id = AsyncMock(return_value={
             "id": "partner-2", "email": "user@test.com", "displayName": "User",
-            "isAdmin": False, "status": "active", "sharedPartnerId": "p1",
+            "isAdmin": False, "status": "active", "sharedPartnerId": None,
             "invitedBy": None, "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
             "updatedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
         })
         mock_repo.update_fields = AsyncMock(return_value=None)
 
         with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
-             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch(
+                 "zenos.interface.admin_api._get_caller_partner",
+                 return_value=("partner-2", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": None}),
+             ), \
              patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
              patch("zenos.interface.admin_api.logger") as mock_logger:
 
@@ -187,6 +190,33 @@ class TestUpdatePartnerRoleAudit:
             assert extra["target_email"] == "user@test.com"
             assert extra["target_partner_id"] == "partner-2"
             assert extra["detail"] == "is_admin=True"
+
+    async def test_no_audit_log_when_shared_workspace_partner_rejected(self):
+        from zenos.interface.admin_api import update_partner_role
+
+        request = _mock_request(
+            method="PUT",
+            headers={"authorization": "Bearer fake-token"},
+            body={"isAdmin": True},
+            path_params={"id": "partner-2"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2", "email": "user@test.com", "displayName": "User",
+            "isAdmin": False, "status": "active", "sharedPartnerId": "p1",
+        })
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo), \
+             patch("zenos.interface.admin_api.logger") as mock_logger:
+
+            resp = await update_partner_role(request)
+
+            assert resp.status_code == 409
+            audit_calls = [c for c in mock_logger.info.call_args_list if c.args and c.args[0] == "audit"]
+            assert not audit_calls, "Audit log must not be emitted on rejected shared-workspace role changes"
 
     async def test_no_audit_log_when_partner_not_found(self):
         from zenos.interface.admin_api import update_partner_role

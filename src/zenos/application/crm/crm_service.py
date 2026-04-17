@@ -7,8 +7,9 @@ L1 entities, ensuring the knowledge graph stays consistent with CRM data.
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from zenos.domain.crm_models import (
     Activity,
@@ -25,6 +26,8 @@ from zenos.domain.knowledge import Entity, Relationship, Tags
 from zenos.domain.knowledge import EntityRepository, RelationshipRepository
 from zenos.domain.repositories import CrmRepository
 
+logger = logging.getLogger(__name__)
+
 
 def _new_id() -> str:
     return uuid.uuid4().hex
@@ -32,6 +35,27 @@ def _new_id() -> str:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _iso_dt(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
+
+def _iso_date(value: date | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _parse_iso_date(value: object) -> date | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.split("T", 1)[0])
+    except ValueError:
+        return None
 
 
 class CrmService:
@@ -51,6 +75,136 @@ class CrmService:
         self._crm = crm_repo
         self._entities = entity_repo
         self._relationships = relationship_repo
+
+    def _build_deal_projection(
+        self,
+        deal: Deal,
+        activities: list[Activity],
+        insights: list[AiInsight],
+    ) -> tuple[str, dict]:
+        manual_activities = [a for a in activities if not a.is_system]
+        latest_activity = max(
+            manual_activities,
+            key=lambda activity: activity.activity_at,
+            default=None,
+        )
+
+        def _insight_sort_key(insight: AiInsight) -> datetime:
+            metadata = insight.metadata if isinstance(insight.metadata, dict) else {}
+            saved_at = metadata.get("saved_at") if insight.insight_type == InsightType.BRIEFING else None
+            if isinstance(saved_at, str):
+                try:
+                    parsed = datetime.fromisoformat(saved_at.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=timezone.utc)
+                    return parsed
+                except ValueError:
+                    pass
+            return insight.created_at
+
+        briefings = sorted(
+            [i for i in insights if i.insight_type == InsightType.BRIEFING],
+            key=_insight_sort_key,
+            reverse=True,
+        )
+        debriefs = sorted(
+            [i for i in insights if i.insight_type == InsightType.DEBRIEF],
+            key=lambda insight: insight.created_at,
+            reverse=True,
+        )
+        commitments = [i for i in insights if i.insight_type == InsightType.COMMITMENT]
+
+        latest_debrief = debriefs[0] if debriefs else None
+        latest_briefing_at = _insight_sort_key(briefings[0]) if briefings else None
+
+        next_steps = (
+            latest_debrief.metadata.get("next_steps", [])
+            if latest_debrief and isinstance(latest_debrief.metadata, dict)
+            else []
+        )
+        if isinstance(next_steps, list):
+            latest_next_step = next(
+                (str(step).strip() for step in next_steps if str(step).strip()),
+                None,
+            )
+        elif isinstance(next_steps, str) and next_steps.strip():
+            latest_next_step = next_steps.strip()
+        else:
+            latest_next_step = None
+
+        raw_concerns = (
+            latest_debrief.metadata.get("customer_concerns", [])
+            if latest_debrief and isinstance(latest_debrief.metadata, dict)
+            else []
+        )
+        if isinstance(raw_concerns, list):
+            latest_customer_concerns = [str(item).strip() for item in raw_concerns if str(item).strip()]
+        elif isinstance(raw_concerns, str) and raw_concerns.strip():
+            latest_customer_concerns = [raw_concerns.strip()]
+        else:
+            latest_customer_concerns = []
+
+        open_commitments = [c for c in commitments if c.status != InsightStatus.DONE]
+        today = _now().date()
+        overdue_commitments = [
+            c for c in open_commitments
+            if _parse_iso_date(
+                c.metadata.get("deadline") if isinstance(c.metadata, dict) else None
+            ) is not None
+            and _parse_iso_date(
+                c.metadata.get("deadline") if isinstance(c.metadata, dict) else None
+            ) < today
+        ]
+
+        amount_str = f"NT${deal.amount_twd:,}" if deal.amount_twd is not None else "金額未定"
+        summary_parts = [deal.funnel_stage.value, amount_str]
+        if latest_activity is not None:
+            summary_parts.append(f"最後互動 {latest_activity.activity_at.date().isoformat()}")
+
+        snapshot = {
+            "funnel_stage": deal.funnel_stage.value,
+            "amount_twd": deal.amount_twd,
+            "last_activity_at": _iso_dt(latest_activity.activity_at if latest_activity else None),
+            "expected_close_date": _iso_date(deal.expected_close_date),
+            "open_commitments_count": len(open_commitments),
+            "overdue_commitments_count": len(overdue_commitments),
+            "latest_next_step": latest_next_step,
+            "latest_customer_concerns": latest_customer_concerns,
+            "latest_briefing_at": _iso_dt(latest_briefing_at),
+            "latest_debrief_at": _iso_dt(latest_debrief.created_at if latest_debrief else None),
+        }
+        return " · ".join(summary_parts), snapshot
+
+    async def sync_deal_projection(self, partner_id: str, deal_id: str) -> Entity | None:
+        deal = await self._crm.get_deal(partner_id, deal_id)
+        if deal is None or not deal.zenos_entity_id:
+            return None
+
+        entity = await self._entities.get_by_id(deal.zenos_entity_id)
+        if entity is None:
+            return None
+
+        activities = await self._crm.list_activities(partner_id, deal_id)
+        insights = await self._crm.list_ai_insights_by_deal(partner_id, deal_id)
+        summary, crm_snapshot = self._build_deal_projection(deal, activities, insights)
+
+        existing_details = dict(entity.details or {})
+        existing_details["crm_snapshot"] = crm_snapshot
+
+        entity.name = deal.title
+        entity.summary = summary
+        entity.details = existing_details
+        return await self._entities.upsert(entity)
+
+    async def _safe_sync_deal_projection(self, partner_id: str, deal_id: str) -> None:
+        try:
+            await self.sync_deal_projection(partner_id, deal_id)
+        except Exception:
+            logger.exception(
+                "Failed to sync CRM deal projection for partner=%s deal=%s",
+                partner_id,
+                deal_id,
+            )
 
     # ── Companies ──────────────────────────────────────────────────────
 
@@ -229,14 +383,14 @@ class CrmService:
         deal = await self._crm.create_deal(deal)
 
         # Bridge: create ZenOS L1 entity (type=deal)
-        amount_str = f"NT${deal.amount_twd:,}" if deal.amount_twd else "金額未定"
-        summary = f"{deal.funnel_stage.value} · {amount_str}"
+        summary, crm_snapshot = self._build_deal_projection(deal, [], [])
         entity = await self._entities.upsert(Entity(
             id=_new_id(),
             name=deal.title,
             type="deal",
             level=1,
             summary=summary,
+            details={"crm_snapshot": crm_snapshot},
             tags=Tags(what=["deal"], why="CRM 商機", how="crm", who=["業務"]),
             confirmed_by_user=True,
         ))
@@ -281,6 +435,7 @@ class CrmService:
             is_system=True,
         )
         await self._crm.create_activity(activity)
+        await self._safe_sync_deal_projection(partner_id, deal_id)
         return deal
 
     async def get_deal(self, partner_id: str, deal_id: str) -> Deal | None:
@@ -317,7 +472,9 @@ class CrmService:
             recorded_by=data.get("recorded_by", partner_id),
             is_system=False,
         )
-        return await self._crm.create_activity(activity)
+        created = await self._crm.create_activity(activity)
+        await self._safe_sync_deal_projection(partner_id, deal_id)
+        return created
 
     async def list_activities(self, partner_id: str, deal_id: str) -> list[Activity]:
         return await self._crm.list_activities(partner_id, deal_id)
@@ -325,26 +482,69 @@ class CrmService:
     # ── AI Insights ────────────────────────────────────────────────────
 
     async def get_deal_ai_entries(self, partner_id: str, deal_id: str) -> dict:
-        """Return AI insights for a deal, categorised into debriefs and commitments."""
+        """Return AI insights for a deal, categorised by briefing/debrief/commitment."""
         insights = await self._crm.list_ai_insights_by_deal(partner_id, deal_id)
+        briefings = [i for i in insights if i.insight_type == InsightType.BRIEFING]
         debriefs = [i for i in insights if i.insight_type == InsightType.DEBRIEF]
         commitments = [i for i in insights if i.insight_type == InsightType.COMMITMENT]
-        return {"debriefs": debriefs, "commitments": commitments}
+        return {
+            "briefings": briefings,
+            "debriefs": debriefs,
+            "commitments": commitments,
+        }
 
     async def create_ai_insight(self, partner_id: str, data: dict) -> AiInsight:
         """Create an AI insight from a data dict."""
         raw_type = data["insight_type"]
+        insight_type = InsightType(raw_type)
         insight = AiInsight(
             id=_new_id(),
             partner_id=partner_id,
             deal_id=data["deal_id"],
-            insight_type=InsightType(raw_type),
+            insight_type=insight_type,
             content=data.get("content", ""),
             metadata=data.get("metadata", {}),
             activity_id=data.get("activity_id"),
-            status=InsightStatus.ACTIVE,
+            status=(
+                InsightStatus.OPEN
+                if insight_type == InsightType.COMMITMENT
+                else InsightStatus.ACTIVE
+            ),
         )
-        return await self._crm.create_ai_insight(insight)
+        created = await self._crm.create_ai_insight(insight)
+        await self._safe_sync_deal_projection(partner_id, created.deal_id)
+        return created
+
+    async def update_briefing(
+        self, partner_id: str, insight_id: str, data: dict
+    ) -> AiInsight | None:
+        """Update a saved briefing snapshot."""
+        insight = await self._crm.get_ai_insight(partner_id, insight_id)
+        if insight is None:
+            return None
+        if insight.insight_type != InsightType.BRIEFING:
+            raise ValueError("Only briefing insights can be updated via this endpoint")
+
+        insight.content = data.get("content", insight.content)
+        metadata = data.get("metadata")
+        if metadata is not None:
+            insight.metadata = metadata
+        updated = await self._crm.update_ai_insight(insight)
+        if updated is not None:
+            await self._safe_sync_deal_projection(partner_id, updated.deal_id)
+        return updated
+
+    async def delete_briefing(self, partner_id: str, insight_id: str) -> bool:
+        """Delete a saved briefing snapshot."""
+        insight = await self._crm.get_ai_insight(partner_id, insight_id)
+        if insight is None:
+            return False
+        if insight.insight_type != InsightType.BRIEFING:
+            raise ValueError("Only briefing insights can be deleted via this endpoint")
+        deleted = await self._crm.delete_ai_insight(partner_id, insight_id)
+        if deleted:
+            await self._safe_sync_deal_projection(partner_id, insight.deal_id)
+        return deleted
 
     async def update_commitment_status(
         self, partner_id: str, insight_id: str, status: str
@@ -352,4 +552,7 @@ class CrmService:
         """Update commitment status. Only 'open' and 'done' are allowed."""
         if status not in ("open", "done"):
             raise ValueError(f"Invalid status '{status}': only 'open' and 'done' are allowed")
-        return await self._crm.update_ai_insight_status(partner_id, insight_id, status)
+        updated = await self._crm.update_ai_insight_status(partner_id, insight_id, status)
+        if updated is not None:
+            await self._safe_sync_deal_projection(partner_id, updated.deal_id)
+        return updated

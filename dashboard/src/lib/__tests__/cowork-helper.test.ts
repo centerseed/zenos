@@ -41,6 +41,8 @@ describe("checkCoworkHelperHealth", () => {
       allowedTools: [],
       redactionRulesVersion: "2026-04-14",
     });
+    const [, options] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit & { targetAddressSpace?: string }];
+    expect(options.targetAddressSpace).toBe("loopback");
   });
 });
 
@@ -133,6 +135,7 @@ describe("streamCoworkChat", () => {
     const [, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
     const payload = JSON.parse(String(options.body)) as Record<string, string>;
     expect(payload.model).toBe("sonnet");
+    expect((options as RequestInit & { targetAddressSpace?: string }).targetAddressSpace).toBe("loopback");
   });
 });
 
@@ -154,5 +157,6 @@ describe("cancelCoworkRequest", () => {
     expect(url).toBe("http://127.0.0.1:4317/v1/chat/cancel");
     expect(options.method).toBe("POST");
     expect(JSON.parse(String(options.body))).toEqual({ requestId: "req-1" });
+    expect((options as RequestInit & { targetAddressSpace?: string }).targetAddressSpace).toBe("loopback");
   });
 });

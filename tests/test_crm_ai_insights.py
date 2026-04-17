@@ -7,7 +7,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from zenos.domain.crm_models import AiInsight, InsightStatus, InsightType
+from zenos.domain.crm_models import AiInsight, Deal, FunnelStage, InsightStatus, InsightType
+from zenos.domain.knowledge import Entity, Tags
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -29,12 +30,44 @@ def _make_insight(**kwargs) -> AiInsight:
     return AiInsight(**defaults)
 
 
+def _make_deal(**kwargs) -> Deal:
+    defaults = dict(
+        id="d1",
+        partner_id="p1",
+        title="企業流程導入",
+        company_id="c1",
+        owner_partner_id="p1",
+        funnel_stage=FunnelStage.DISCOVERY,
+        amount_twd=500000,
+        zenos_entity_id="deal-entity-1",
+    )
+    defaults.update(kwargs)
+    return Deal(**defaults)
+
+
+def _make_entity(**kwargs) -> Entity:
+    defaults = dict(
+        id="deal-entity-1",
+        name="企業流程導入",
+        type="deal",
+        level=1,
+        summary="需求訪談 · NT$500,000",
+        details={},
+        tags=Tags(what=["deal"], why="CRM", how="crm", who=["業務"]),
+    )
+    defaults.update(kwargs)
+    return Entity(**defaults)
+
+
 @pytest.fixture
 def mock_crm_repo():
     repo = MagicMock()
     repo.create_ai_insight = AsyncMock()
+    repo.get_ai_insight = AsyncMock()
+    repo.update_ai_insight = AsyncMock()
     repo.list_ai_insights_by_deal = AsyncMock()
     repo.update_ai_insight_status = AsyncMock()
+    repo.delete_ai_insight = AsyncMock()
     # Existing methods used by CrmService constructor context
     repo.create_company = AsyncMock()
     repo.update_company = AsyncMock()
@@ -224,6 +257,46 @@ class TestCrmSqlRepositoryAiInsights:
         assert results == []
 
     @pytest.mark.asyncio
+    async def test_get_ai_insight_returns_single_entry(self):
+        from zenos.infrastructure.crm_sql_repo import CrmSqlRepository
+
+        row = _make_insight_row(insight_type="briefing")
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=row)
+        mock_pool = _make_mock_pool_with_conn(mock_conn)
+
+        repo = CrmSqlRepository(mock_pool)
+        result = await repo.get_ai_insight("p1", "ins-1")
+
+        assert result is not None
+        assert result.insight_type == InsightType.BRIEFING
+
+    @pytest.mark.asyncio
+    async def test_update_ai_insight_updates_content_and_metadata(self):
+        from zenos.infrastructure.crm_sql_repo import CrmSqlRepository
+
+        row = _make_insight_row(
+            insight_type="briefing",
+            content="updated briefing",
+            metadata={"title": "會議準備"},
+        )
+        mock_conn = AsyncMock()
+        mock_conn.fetchrow = AsyncMock(return_value=row)
+        mock_pool = _make_mock_pool_with_conn(mock_conn)
+
+        repo = CrmSqlRepository(mock_pool)
+        insight = _make_insight(
+            insight_type=InsightType.BRIEFING,
+            content="updated briefing",
+            metadata={"title": "會議準備"},
+        )
+        result = await repo.update_ai_insight(insight)
+
+        assert result is not None
+        assert result.content == "updated briefing"
+        assert result.metadata["title"] == "會議準備"
+
+    @pytest.mark.asyncio
     async def test_update_ai_insight_status_returns_updated_insight(self):
         from zenos.infrastructure.crm_sql_repo import CrmSqlRepository
 
@@ -256,6 +329,17 @@ class TestCrmSqlRepositoryAiInsights:
         result = await repo.update_ai_insight_status("p1", "nonexistent", "done")
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_delete_ai_insight_returns_true_when_deleted(self):
+        from zenos.infrastructure.crm_sql_repo import CrmSqlRepository
+
+        mock_conn = AsyncMock()
+        mock_conn.execute = AsyncMock(return_value="DELETE 1")
+        mock_pool = _make_mock_pool_with_conn(mock_conn)
+
+        repo = CrmSqlRepository(mock_pool)
+        assert await repo.delete_ai_insight("p1", "ins-1") is True
 
     def test_row_to_ai_insight_handles_string_metadata(self):
         """Metadata stored as JSON string (older asyncpg versions) is parsed correctly."""
@@ -301,24 +385,28 @@ class TestCrmSqlRepositoryAiInsights:
 class TestCrmServiceAiInsights:
     @pytest.mark.asyncio
     async def test_get_deal_ai_entries_categorises_by_type(self, svc, mock_crm_repo):
+        briefing = _make_insight(id="i0", insight_type=InsightType.BRIEFING)
         debrief = _make_insight(id="i1", insight_type=InsightType.DEBRIEF)
         commitment = _make_insight(id="i2", insight_type=InsightType.COMMITMENT)
-        mock_crm_repo.list_ai_insights_by_deal.return_value = [debrief, commitment]
+        mock_crm_repo.list_ai_insights_by_deal.return_value = [briefing, debrief, commitment]
 
         result = await svc.get_deal_ai_entries("p1", "d1")
 
+        assert len(result["briefings"]) == 1
+        assert result["briefings"][0].id == "i0"
         assert len(result["debriefs"]) == 1
         assert result["debriefs"][0].id == "i1"
         assert len(result["commitments"]) == 1
         assert result["commitments"][0].id == "i2"
 
     @pytest.mark.asyncio
-    async def test_get_deal_ai_entries_excludes_briefings(self, svc, mock_crm_repo):
+    async def test_get_deal_ai_entries_includes_briefings(self, svc, mock_crm_repo):
         briefing = _make_insight(id="i3", insight_type=InsightType.BRIEFING)
         mock_crm_repo.list_ai_insights_by_deal.return_value = [briefing]
 
         result = await svc.get_deal_ai_entries("p1", "d1")
 
+        assert result["briefings"] == [briefing]
         assert result["debriefs"] == []
         assert result["commitments"] == []
 
@@ -328,7 +416,7 @@ class TestCrmServiceAiInsights:
 
         result = await svc.get_deal_ai_entries("p1", "d1")
 
-        assert result == {"debriefs": [], "commitments": []}
+        assert result == {"briefings": [], "debriefs": [], "commitments": []}
 
     @pytest.mark.asyncio
     async def test_create_ai_insight_builds_and_calls_repo(self, svc, mock_crm_repo):
@@ -353,6 +441,34 @@ class TestCrmServiceAiInsights:
         assert len(passed_insight.id) > 0  # uuid4().hex was called
 
     @pytest.mark.asyncio
+    async def test_create_debrief_syncs_deal_projection(self, svc, mock_crm_repo, mock_entity_repo):
+        created = _make_insight(
+            insight_type=InsightType.DEBRIEF,
+            metadata={
+                "next_steps": ["寄報價單"],
+                "customer_concerns": ["預算有限"],
+            },
+        )
+        mock_crm_repo.create_ai_insight.return_value = created
+        mock_crm_repo.get_deal.return_value = _make_deal()
+        mock_crm_repo.list_activities.return_value = []
+        mock_crm_repo.list_ai_insights_by_deal.return_value = [created]
+        mock_entity_repo.get_by_id.return_value = _make_entity()
+
+        await svc.create_ai_insight("p1", {
+            "deal_id": "d1",
+            "insight_type": "debrief",
+            "content": "Sales debrief",
+            "metadata": created.metadata,
+        })
+
+        synced = mock_entity_repo.upsert.call_args[0][0]
+        snapshot = synced.details["crm_snapshot"]
+        assert snapshot["latest_next_step"] == "寄報價單"
+        assert snapshot["latest_customer_concerns"] == ["預算有限"]
+        assert snapshot["latest_debrief_at"] == created.created_at.isoformat()
+
+    @pytest.mark.asyncio
     async def test_create_ai_insight_sets_activity_id_when_provided(self, svc, mock_crm_repo):
         created = _make_insight(activity_id="act-42")
         mock_crm_repo.create_ai_insight.return_value = created
@@ -365,6 +481,34 @@ class TestCrmServiceAiInsights:
 
         passed = mock_crm_repo.create_ai_insight.call_args[0][0]
         assert passed.activity_id == "act-42"
+
+    @pytest.mark.asyncio
+    async def test_create_commitment_defaults_open_and_syncs_counts(self, svc, mock_crm_repo, mock_entity_repo):
+        created = _make_insight(
+            id="c1",
+            insight_type=InsightType.COMMITMENT,
+            status=InsightStatus.OPEN,
+            metadata={"content": "提供報價單", "deadline": "2020-01-01"},
+        )
+        mock_crm_repo.create_ai_insight.return_value = created
+        mock_crm_repo.get_deal.return_value = _make_deal()
+        mock_crm_repo.list_activities.return_value = []
+        mock_crm_repo.list_ai_insights_by_deal.return_value = [created]
+        mock_entity_repo.get_by_id.return_value = _make_entity()
+
+        await svc.create_ai_insight("p1", {
+            "deal_id": "d1",
+            "insight_type": "commitment",
+            "content": "提供報價單",
+            "metadata": {"content": "提供報價單", "deadline": "2020-01-01"},
+        })
+
+        passed = mock_crm_repo.create_ai_insight.call_args[0][0]
+        assert passed.status == InsightStatus.OPEN
+        synced = mock_entity_repo.upsert.call_args[0][0]
+        snapshot = synced.details["crm_snapshot"]
+        assert snapshot["open_commitments_count"] == 1
+        assert snapshot["overdue_commitments_count"] == 1
 
     @pytest.mark.asyncio
     async def test_update_commitment_status_allows_open(self, svc, mock_crm_repo):
@@ -406,6 +550,80 @@ class TestCrmServiceAiInsights:
 
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_update_commitment_status_syncs_projection_counts(self, svc, mock_crm_repo, mock_entity_repo):
+        updated = _make_insight(
+            id="c1",
+            insight_type=InsightType.COMMITMENT,
+            status=InsightStatus.DONE,
+            metadata={"content": "提供報價單", "deadline": "2020-01-01"},
+        )
+        mock_crm_repo.update_ai_insight_status.return_value = updated
+        mock_crm_repo.get_deal.return_value = _make_deal()
+        mock_crm_repo.list_activities.return_value = []
+        mock_crm_repo.list_ai_insights_by_deal.return_value = [updated]
+        mock_entity_repo.get_by_id.return_value = _make_entity()
+
+        await svc.update_commitment_status("p1", "c1", "done")
+
+        synced = mock_entity_repo.upsert.call_args[0][0]
+        snapshot = synced.details["crm_snapshot"]
+        assert snapshot["open_commitments_count"] == 0
+        assert snapshot["overdue_commitments_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_update_briefing_updates_existing_briefing(self, svc, mock_crm_repo):
+        existing = _make_insight(id="b1", insight_type=InsightType.BRIEFING)
+        updated = _make_insight(
+            id="b1",
+            insight_type=InsightType.BRIEFING,
+            content="updated",
+            metadata={"title": "會議準備"},
+        )
+        mock_crm_repo.get_ai_insight.return_value = existing
+        mock_crm_repo.update_ai_insight.return_value = updated
+
+        result = await svc.update_briefing("p1", "b1", {
+            "content": "updated",
+            "metadata": {"title": "會議準備"},
+        })
+
+        assert result is updated
+        mock_crm_repo.update_ai_insight.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_update_briefing_syncs_latest_briefing_at(self, svc, mock_crm_repo, mock_entity_repo):
+        existing = _make_insight(id="b1", insight_type=InsightType.BRIEFING)
+        updated = _make_insight(
+            id="b1",
+            insight_type=InsightType.BRIEFING,
+            metadata={"saved_at": "2026-04-15T09:45:00+00:00"},
+        )
+        mock_crm_repo.get_ai_insight.return_value = existing
+        mock_crm_repo.update_ai_insight.return_value = updated
+        mock_crm_repo.get_deal.return_value = _make_deal()
+        mock_crm_repo.list_activities.return_value = []
+        mock_crm_repo.list_ai_insights_by_deal.return_value = [updated]
+        mock_entity_repo.get_by_id.return_value = _make_entity()
+
+        await svc.update_briefing("p1", "b1", {"metadata": updated.metadata})
+
+        synced = mock_entity_repo.upsert.call_args[0][0]
+        assert synced.details["crm_snapshot"]["latest_briefing_at"] == "2026-04-15T09:45:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_delete_briefing_returns_true_for_existing_briefing(self, svc, mock_crm_repo):
+        mock_crm_repo.get_ai_insight.return_value = _make_insight(
+            id="b1",
+            insight_type=InsightType.BRIEFING,
+        )
+        mock_crm_repo.delete_ai_insight.return_value = True
+
+        result = await svc.delete_briefing("p1", "b1")
+
+        assert result is True
+        mock_crm_repo.delete_ai_insight.assert_called_once_with("p1", "b1")
+
 
 # ── API endpoint unit tests ────────────────────────────────────────────
 
@@ -431,16 +649,21 @@ def _make_request(method="GET", path_params=None, headers=None, body_data=None):
 
 class TestCrmDashboardApiAiInsights:
     @pytest.mark.asyncio
-    async def test_get_deal_ai_entries_returns_debriefs_and_commitments(self):
+    async def test_get_deal_ai_entries_returns_briefings_debriefs_and_commitments(self):
         from unittest.mock import patch, AsyncMock
         from zenos.interface.crm_dashboard_api import get_deal_ai_entries
 
+        briefing = _make_insight(id="b1", insight_type=InsightType.BRIEFING)
         debrief = _make_insight(id="i1", insight_type=InsightType.DEBRIEF)
         commitment = _make_insight(id="i2", insight_type=InsightType.COMMITMENT)
 
         mock_svc = MagicMock()
         mock_svc.get_deal_ai_entries = AsyncMock(
-            return_value={"debriefs": [debrief], "commitments": [commitment]}
+            return_value={
+                "briefings": [briefing],
+                "debriefs": [debrief],
+                "commitments": [commitment],
+            }
         )
 
         request = _make_request(path_params={"id": "d1"})
@@ -453,8 +676,10 @@ class TestCrmDashboardApiAiInsights:
 
         import json
         body = json.loads(resp.body)
+        assert "briefings" in body
         assert "debriefs" in body
         assert "commitments" in body
+        assert body["briefings"][0]["id"] == "b1"
         assert body["debriefs"][0]["id"] == "i1"
         assert body["commitments"][0]["id"] == "i2"
 
@@ -604,3 +829,52 @@ class TestCrmDashboardApiAiInsights:
             resp = await patch_commitment_status(request)
 
         assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_patch_briefing_returns_updated_briefing(self):
+        from unittest.mock import patch, AsyncMock
+        from zenos.interface.crm_dashboard_api import patch_briefing
+
+        updated = _make_insight(
+            id="b1",
+            insight_type=InsightType.BRIEFING,
+            content="updated briefing",
+            metadata={"title": "會議準備"},
+        )
+        mock_svc = MagicMock()
+        mock_svc.update_briefing = AsyncMock(return_value=updated)
+
+        request = _make_request(
+            method="PATCH",
+            path_params={"id": "b1"},
+            body_data={"content": "updated briefing", "metadata": {"title": "會議準備"}},
+        )
+
+        with patch("zenos.interface.crm_dashboard_api._crm_auth", return_value=("p1", "p1")), \
+             patch("zenos.interface.crm_dashboard_api._ensure_crm_service", return_value=mock_svc), \
+             patch("zenos.interface.crm_dashboard_api.current_partner_id") as mock_ctx:
+            mock_ctx.set.return_value = "token"
+            resp = await patch_briefing(request)
+
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_delete_briefing_returns_204(self):
+        from unittest.mock import patch, AsyncMock
+        from zenos.interface.crm_dashboard_api import delete_briefing
+
+        mock_svc = MagicMock()
+        mock_svc.delete_briefing = AsyncMock(return_value=True)
+
+        request = _make_request(
+            method="DELETE",
+            path_params={"id": "b1"},
+        )
+
+        with patch("zenos.interface.crm_dashboard_api._crm_auth", return_value=("p1", "p1")), \
+             patch("zenos.interface.crm_dashboard_api._ensure_crm_service", return_value=mock_svc), \
+             patch("zenos.interface.crm_dashboard_api.current_partner_id") as mock_ctx:
+            mock_ctx.set.return_value = "token"
+            resp = await delete_briefing(request)
+
+        assert resp.status_code == 204

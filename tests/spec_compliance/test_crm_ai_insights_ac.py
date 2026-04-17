@@ -40,8 +40,11 @@ def _make_insight(**kwargs) -> AiInsight:
 def mock_crm_repo():
     repo = MagicMock()
     repo.create_ai_insight = AsyncMock()
+    repo.get_ai_insight = AsyncMock()
+    repo.update_ai_insight = AsyncMock()
     repo.list_ai_insights_by_deal = AsyncMock()
     repo.update_ai_insight_status = AsyncMock()
+    repo.delete_ai_insight = AsyncMock()
     repo.create_company = AsyncMock()
     repo.update_company = AsyncMock()
     repo.get_company = AsyncMock()
@@ -76,7 +79,7 @@ def svc(mock_crm_repo):
 class TestAcP04BackendApi:
     """
     AC: POST /api/crm/deals/{id}/ai-insights returns 201
-    AC: GET /api/crm/deals/{id}/ai-entries returns {debriefs, commitments}
+    AC: GET /api/crm/deals/{id}/ai-entries returns {briefings, debriefs, commitments}
     AC: PATCH /api/crm/commitments/{id} updates commitment status
     AC: Migration SQL is syntactically correct (verified by file read)
     """
@@ -118,12 +121,13 @@ class TestAcP04BackendApi:
     @pytest.mark.asyncio
     async def test_ac_get_ai_entries_response_shape(self):
         """
-        AC: GET /api/crm/deals/{id}/ai-entries returns {debriefs: [...], commitments: [...]}.
+        AC: GET /api/crm/deals/{id}/ai-entries returns {briefings: [...], debriefs: [...], commitments: [...]}.
         Spec defines this exact key structure.
         """
         from unittest.mock import patch, AsyncMock as AM
         from zenos.interface.crm_dashboard_api import get_deal_ai_entries
 
+        briefing = _make_insight(id="b1", insight_type=InsightType.BRIEFING)
         debrief = _make_insight(id="d1", insight_type=InsightType.DEBRIEF)
         commitment = _make_insight(id="c1", insight_type=InsightType.COMMITMENT,
                                    status=InsightStatus.OPEN,
@@ -131,7 +135,11 @@ class TestAcP04BackendApi:
 
         mock_svc = MagicMock()
         mock_svc.get_deal_ai_entries = AM(
-            return_value={"debriefs": [debrief], "commitments": [commitment]}
+            return_value={
+                "briefings": [briefing],
+                "debriefs": [debrief],
+                "commitments": [commitment],
+            }
         )
 
         class Req:
@@ -149,8 +157,10 @@ class TestAcP04BackendApi:
         import json
         body = json.loads(resp.body)
         # Spec-defined keys
+        assert "briefings" in body, "response must have 'briefings' key"
         assert "debriefs" in body, "response must have 'debriefs' key"
         assert "commitments" in body, "response must have 'commitments' key"
+        assert isinstance(body["briefings"], list)
         assert isinstance(body["debriefs"], list)
         assert isinstance(body["commitments"], list)
         # Each debrief must have metadata with key_decisions (AC: debrief structure)
@@ -193,11 +203,9 @@ class TestAcP04BackendApi:
         assert body["status"] == "done"
 
     @pytest.mark.asyncio
-    async def test_ac_get_ai_entries_categorises_briefing_excluded(self, svc, mock_crm_repo):
+    async def test_ac_get_ai_entries_categorises_briefing_separately(self, svc, mock_crm_repo):
         """
-        AC: GET ai-entries returns debriefs and commitments only — briefing entries excluded.
-        Spec: 'GET /api/crm/deals/{id}/ai-entries returns all crm_debrief and crm_commitment entries'.
-        briefing type should not appear in either list.
+        AC: GET ai-entries returns briefings in their own list, not mixed into debrief/commitment.
         """
         briefing = _make_insight(id="b1", insight_type=InsightType.BRIEFING)
         debrief = _make_insight(id="d1", insight_type=InsightType.DEBRIEF)
@@ -205,6 +213,7 @@ class TestAcP04BackendApi:
 
         result = await svc.get_deal_ai_entries("p1", "d1")
 
+        assert result["briefings"] == [briefing]
         assert all(i.insight_type != InsightType.BRIEFING for i in result["debriefs"]), \
             "briefing entries must not appear in debriefs"
         assert all(i.insight_type != InsightType.BRIEFING for i in result["commitments"]), \
@@ -285,12 +294,13 @@ class TestAcP03DealAiPanel:
     async def test_ac_cold_start_returns_empty_lists(self, svc, mock_crm_repo):
         """
         AC: 'Given deal 尚無任何 debrief entry, When 面板載入, Then 顯示引導文字'
-        Backend: returns empty debriefs and commitments for new deal.
+        Backend: returns empty briefings, debriefs and commitments for new deal.
         """
         mock_crm_repo.list_ai_insights_by_deal.return_value = []
 
         result = await svc.get_deal_ai_entries("p1", "brand-new-deal")
 
+        assert result["briefings"] == [], "new deal should have no briefings"
         assert result["debriefs"] == [], "new deal should have no debriefs"
         assert result["commitments"] == [], "new deal should have no commitments"
 
@@ -386,7 +396,7 @@ class TestRegressionSilentFailure:
         import re
 
         with open(
-            "/Users/wubaizong/clients/ZenOS/dashboard/src/app/clients/deals/[id]/CrmAiPanel.tsx"
+            "/Users/wubaizong/clients/ZenOS/dashboard/src/features/crm/CrmAiPanel.tsx"
         ) as f:
             source = f.read()
 
@@ -417,7 +427,7 @@ class TestRegressionSilentFailure:
         instead of moving to a separate collapsed '已完成' section at the bottom.
         """
         with open(
-            "/Users/wubaizong/clients/ZenOS/dashboard/src/app/clients/deals/[id]/DealInsightsPanel.tsx"
+            "/Users/wubaizong/clients/ZenOS/dashboard/src/features/crm/DealInsightsPanel.tsx"
         ) as f:
             source = f.read()
 

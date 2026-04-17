@@ -61,7 +61,7 @@ mcp__zenos__search(query="test", collection="entities")
 mcp__zenos__search(
     query="dogfood 評估測試任務",
     collection="tasks",
-    status="todo,in_progress,review,blocked"
+    status="todo,in_progress,review"
 )
 ```
 

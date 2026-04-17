@@ -161,7 +161,7 @@ afterEach(() => {
 describe("S06: /setup route guard", () => {
   it("home workspace owner can access /setup — no redirect", async () => {
     mockPartner = HOME_OWNER;
-    const { default: Page } = await import("@/app/setup/page");
+    const { default: Page } = await import("@/app/(protected)/setup/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -171,7 +171,7 @@ describe("S06: /setup route guard", () => {
 
   it("shared workspace guest accessing /setup → redirected to /tasks", async () => {
     mockPartner = SHARED_GUEST;
-    const { default: Page } = await import("@/app/setup/page");
+    const { default: Page } = await import("@/app/(protected)/setup/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -181,7 +181,7 @@ describe("S06: /setup route guard", () => {
 
   it("shared workspace member accessing /setup → redirected to /tasks", async () => {
     mockPartner = SHARED_MEMBER;
-    const { default: Page } = await import("@/app/setup/page");
+    const { default: Page } = await import("@/app/(protected)/setup/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -199,7 +199,7 @@ describe("S06: /setup route guard", () => {
       isAdmin: false,
       sharedPartnerId: null,
     };
-    const { default: Page } = await import("@/app/setup/page");
+    const { default: Page } = await import("@/app/(protected)/setup/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -213,7 +213,7 @@ describe("S06: /setup route guard", () => {
 describe("S06: /team route guard", () => {
   it("home workspace owner can access /team — no redirect", async () => {
     mockPartner = HOME_OWNER;
-    const { default: Page } = await import("@/app/team/page");
+    const { default: Page } = await import("@/app/(protected)/team/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -223,7 +223,7 @@ describe("S06: /team route guard", () => {
 
   it("shared workspace guest accessing /team → redirected to /tasks", async () => {
     mockPartner = SHARED_GUEST;
-    const { default: Page } = await import("@/app/team/page");
+    const { default: Page } = await import("@/app/(protected)/team/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -233,7 +233,7 @@ describe("S06: /team route guard", () => {
 
   it("shared workspace member accessing /team → redirected to /tasks", async () => {
     mockPartner = SHARED_MEMBER;
-    const { default: Page } = await import("@/app/team/page");
+    const { default: Page } = await import("@/app/(protected)/team/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -248,7 +248,7 @@ describe("S06: /team route guard", () => {
       workspaceRole: "owner" as const,
       sharedPartnerId: "some-other-workspace",
     };
-    const { default: Page } = await import("@/app/team/page");
+    const { default: Page } = await import("@/app/(protected)/team/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -262,7 +262,7 @@ describe("S06: /team route guard", () => {
 describe("S06: /clients route guard", () => {
   it("home workspace owner can access /clients — no redirect", async () => {
     mockPartner = HOME_OWNER;
-    const { default: Page } = await import("@/app/clients/page");
+    const { default: Page } = await import("@/app/(protected)/clients/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -277,7 +277,7 @@ describe("S06: /clients route guard", () => {
       isAdmin: false,
       sharedPartnerId: null,
     };
-    const { default: Page } = await import("@/app/clients/page");
+    const { default: Page } = await import("@/app/(protected)/clients/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -287,7 +287,7 @@ describe("S06: /clients route guard", () => {
 
   it("shared workspace guest accessing /clients → redirected to /tasks", async () => {
     mockPartner = SHARED_GUEST;
-    const { default: Page } = await import("@/app/clients/page");
+    const { default: Page } = await import("@/app/(protected)/clients/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -297,7 +297,7 @@ describe("S06: /clients route guard", () => {
 
   it("shared workspace member accessing /clients → redirected to /tasks", async () => {
     mockPartner = SHARED_MEMBER;
-    const { default: Page } = await import("@/app/clients/page");
+    const { default: Page } = await import("@/app/(protected)/clients/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -313,7 +313,7 @@ describe("S06: /clients route guard", () => {
       workspaceRole: "owner" as const,
       sharedPartnerId: "foreign-workspace-id",
     };
-    const { default: Page } = await import("@/app/clients/page");
+    const { default: Page } = await import("@/app/(protected)/clients/page");
     render(<Page />);
 
     await waitFor(() => {

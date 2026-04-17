@@ -4,7 +4,7 @@ id: SPEC-document-bundle
 status: Draft
 ontology_entity: L3 文件治理
 created: 2026-04-09
-updated: 2026-04-16
+updated: 2026-04-17
 supersedes:
   - SPEC-doc-source-governance
 ---
@@ -566,6 +566,60 @@ doc entity
 - **排程爬取外部系統** — 所有治理操作 on-demand
 - **MCP 設定管理** — ZenOS 不管使用者掛了哪些 MCP，只在 read_source 失敗時附帶 setup_hint
 - **強制建立 mcp_not_configured status** — 不引入新的 source_status 值，沿用現有 stale/unresolvable 機制
+- **Server 端 LLM 依賴於 bundle 主路徑** — 依 `ADR-039`，server 不得在 write / add_source / update_source 的主路徑上呼叫 LLM；`bundle_highlights` 與 `change_summary` 的語意內容一律由 agent 端 LLM 產生並透過 payload 傳入
+
+---
+
+## 新增需求（2026-04-17 — LLM 依賴清除與 deterministic suggestion）
+
+### P0-12: bundle_highlights 的 deterministic suggestion（Server 端，不使用 LLM）
+
+- **描述**：`write(add_source)` / `write(update_source)` / `write({sources: [...]})` 完成後，server 必須在 response 的 `suggestions` 欄位回傳 deterministic 計算的 `bundle_highlights_suggestion`。Server **不得**呼叫任何 LLM 產生此 suggestion。
+- **演算法**：
+  1. 若某 source `is_primary=true` → suggestion 中該 source 的 `priority="primary"`
+  2. 否則依 `doc_type` 分級對照表：
+
+     | doc_type | priority |
+     |----------|----------|
+     | `SPEC` / `DECISION` / `CONTRACT` | `primary` |
+     | `DESIGN` / `TEST` / `PLAN` | `important` |
+     | 其他（`REPORT` / `GUIDE` / `MEETING` / `REFERENCE` / `OTHER`） | `supporting` |
+
+  3. `headline`：取 caller 傳入的 `source.label`；若 label 空或等於 type 字串，回傳空字串由 agent 端補
+  4. `reason_to_read`：留空。此欄位**只能由 agent 端 LLM 填寫**，server 不生成
+- **硬規則**：
+  - Server 的 suggestion 是建議值；agent 可覆寫
+  - 若 bundle 已有 agent 寫入的 `bundle_highlights`，server 的 suggestion 僅回傳 diff（新增的 source 才建議 highlight），不覆寫既有 highlights
+  - Server 端不得因為 LLM 不可用（Gemini / 其他 provider 故障）而拒絕 `write` — 此路徑必須 0 LLM 依賴
+- **Acceptance Criteria**：
+  - `AC-P0-12-1` Given `write(add_source)` 傳入 `doc_type="SPEC"` 的 source，When server 處理，Then `suggestions` 包含該 source 的 highlight suggestion 且 `priority="primary"`
+  - `AC-P0-12-2` Given 所有可能的 LLM provider 全部不可達，When `write(add_source)` 執行，Then write 成功，`suggestions` 中 deterministic highlight 仍被計算
+  - `AC-P0-12-3` Given bundle 已有 agent 寫入的 3 筆 highlights，When add 第 4 個 source，Then suggestion 只含第 4 個 source 的建議，不覆寫前 3 筆
+  - `AC-P0-12-4` Given server 端 code path，When 靜態分析，Then `bundle_highlights` 相關 code 不呼叫 LLM（用 `analyze(check_type="llm_health")` 驗證）
+
+### P0-13: change_summary 的 LLM-free 路徑
+
+- **描述**：change_summary 的生成、改寫完全由 agent 端負責。server 只做：
+  1. 存儲 caller 傳入的 change_summary 原文
+  2. 維護 `summary_updated_at` timestamp
+  3. 偵測過時（>90 天未更新 + 期間有 source mutation）
+- **硬規則**：
+  - Server 不得自動生成 change_summary
+  - Server 不得在 Gemini / 其他 LLM 故障時拒絕任何 document 相關 write
+- **Acceptance Criteria**：
+  - `AC-P0-13-1` Given `write(update_source)` 執行且 caller 未傳 change_summary，When server 處理，Then 不產生新 change_summary，僅回 `suggestions`「建議更新 change_summary」
+  - `AC-P0-13-2` Given LLM provider 全部故障，When 任何 document write，Then 寫入成功，server 不阻擋
+
+### P0-14: bundle_highlights_coverage KPI
+
+- **描述**：`analyze(check_type="health")` 新增 KPI：`bundle_highlights_coverage = 已有 highlights 的 index doc 數 / 所有 index doc 數`
+- **門檻**：
+  - `>= 80%` → green
+  - `50% ~ 80%` → yellow
+  - `< 50%` → red
+- **用途**：作為 Gemini 修好後是否需要 agent 主動補齊的指標。不做 backfill，等 agent 自然 sync。
+- **Acceptance Criteria**：
+  - `AC-P0-14-1` Given `analyze(check_type="health")` 執行，Then `data.kpis` 包含 `bundle_highlights_coverage` 欄位（含 value 與 level）
 
 ## 技術約束（給 Architect 參考）
 

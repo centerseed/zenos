@@ -21,6 +21,11 @@ from zenos.interface.mcp import ApiKeyMiddleware
 VALID_KEY = "valid-key-matrix"
 
 
+def _ok_data(result: dict) -> dict:
+    assert result["status"] == "ok"
+    return result["data"]
+
+
 def _make_entity(
     *,
     eid: str,
@@ -210,8 +215,8 @@ class TestMcpWorkspaceAuthorizationMatrix:
                 },
             ).json()
 
-        home_ids = {e["id"] for e in home["entities"]}
-        shared_ids = {e["id"] for e in shared["entities"]}
+        home_ids = {e["id"] for e in _ok_data(home)["entities"]}
+        shared_ids = {e["id"] for e in _ok_data(shared)["entities"]}
 
         assert home["workspace_context"]["is_home_workspace"] is True
         assert home["debug"]["workspace_role"] == "owner"
@@ -234,8 +239,8 @@ class TestMcpWorkspaceAuthorizationMatrix:
                 },
             ).json()
 
-        home_ids = {e["id"] for e in home["entities"]}
-        shared_ids = {e["id"] for e in shared["entities"]}
+        home_ids = {e["id"] for e in _ok_data(home)["entities"]}
+        shared_ids = {e["id"] for e in _ok_data(shared)["entities"]}
 
         assert home["workspace_context"]["is_home_workspace"] is True
         assert home["debug"]["workspace_role"] == "owner"
@@ -251,7 +256,7 @@ class TestMcpWorkspaceAuthorizationMatrix:
     @pytest.mark.parametrize(
         ("role", "expected_task_ids"),
         [
-            ("guest", {"t-a-public", "t-a-restricted", "t-a-confidential"}),
+            ("guest", {"t-a-public"}),
             ("member", {"t-a-public", "t-a-restricted", "t-b-public", "t-unlinked"}),
         ],
     )
@@ -269,7 +274,7 @@ class TestMcpWorkspaceAuthorizationMatrix:
                 },
             ).json()
 
-        task_ids = {t["id"] for t in shared["tasks"]}
+        task_ids = {t["id"] for t in _ok_data(shared)["tasks"]}
         assert shared["workspace_context"]["is_home_workspace"] is False
         assert shared["debug"]["workspace_role"] == role
         assert task_ids == expected_task_ids
@@ -300,8 +305,8 @@ async def test_dashboard_and_mcp_consistency_in_shared_workspace(role: str):
             },
         ).json()
 
-    mcp_entity_ids = {e["id"] for e in mcp_entities["entities"]}
-    mcp_task_ids = {t["id"] for t in mcp_tasks["tasks"]}
+    mcp_entity_ids = {e["id"] for e in _ok_data(mcp_entities)["entities"]}
+    mcp_task_ids = {t["id"] for t in _ok_data(mcp_tasks)["tasks"]}
 
     request = _make_dashboard_request(
         headers={

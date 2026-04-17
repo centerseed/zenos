@@ -192,6 +192,23 @@ ZenOS 的 ontology 有多層治理：L2 知識節點、L3 文件、Task（Action
 3. **傳播完成前，治理 spec 不得標為 Approved；可停留在 Under Review。**
 4. **本傳播契約本身也是治理規則——修改本契約時，同樣適用此契約。**
 
+### Reject Gate 升級（2026-04-17 — ADR-038）
+
+以下兩層從 checklist 升級為**強制 reject gate**：
+
+- **Layer 2（Server 端驗證，MCP tools）**：若 write/task/confirm 等 tool 的驗證邏輯未對應新規則，治理 spec 不得轉 `Approved`
+- **Layer 3（governance_guide 內容）**：若 `src/zenos/interface/governance_rules.py` 對應 topic 未更新，CI lint 失敗，PR 不得 merge
+
+其餘四層（Protocols / Analyze / 下游 Spec / Ontology Entity）仍為 checklist，缺任一為 P1 問題但非 reject。
+
+完整 contract 見 `SPEC-governance-guide-contract`。
+
+#### Acceptance Criteria
+
+- `AC-propagation-1` Given 治理 spec PR 修改規則文字但未改 `governance_rules.py`，When CI 執行，Then lint fail
+- `AC-propagation-2` Given 治理 spec 處 `Under Review` 且 Layer 2/3 均同步，When reviewer approve，Then 可轉 `Approved`
+- `AC-propagation-3` Given `analyze(check_type="governance_ssot")` 執行，Then 可列出所有 Layer 2/3 不同步的治理 spec
+
 ---
 
 ## 治理規則的演進路徑

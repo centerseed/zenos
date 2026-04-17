@@ -290,6 +290,9 @@ def _strategy_payload(strategy_doc: Entity | None, entries: list[EntityEntry] | 
         "campaignGoal": str(strategy.get("campaign_goal") or strategy.get("campaignGoal") or "").strip(),
         "ctaStrategy": str(strategy.get("cta_strategy") or strategy.get("ctaStrategy") or "").strip(),
         "referenceMaterials": _as_text_list(strategy.get("reference_materials") or strategy.get("referenceMaterials")),
+        "pendingFields": _as_text_list(strategy.get("pending_fields") or strategy.get("pendingFields")),
+        "sourceCitations": strategy.get("source_citations") if isinstance(strategy.get("source_citations"), list) else [],
+        "confidence": str(strategy.get("confidence") or "").strip(),
         "content": str(marketing.get("strategy_content") or ""),
     }
     if project_type == "short_term":
@@ -1033,6 +1036,10 @@ def _strategy_request(body: dict) -> tuple[dict, str]:
     campaign_goal = str(body.get("campaign_goal") or body.get("campaignGoal") or "").strip()
     cta_strategy = str(body.get("cta_strategy") or body.get("ctaStrategy") or "").strip()
     reference_materials = _as_text_list(body.get("reference_materials") or body.get("referenceMaterials"))
+    pending_fields = _as_text_list(body.get("pending_fields") or body.get("pendingFields"))
+    source_citations_raw = body.get("source_citations") or body.get("sourceCitations")
+    source_citations = source_citations_raw if isinstance(source_citations_raw, list) else []
+    confidence = str(body.get("confidence") or "").strip().lower()
     strategy = {
         "audience": audience,
         "tone": tone,
@@ -1043,6 +1050,9 @@ def _strategy_request(body: dict) -> tuple[dict, str]:
         "campaign_goal": campaign_goal,
         "cta_strategy": cta_strategy,
         "reference_materials": reference_materials,
+        "pending_fields": pending_fields,
+        "source_citations": source_citations,
+        "confidence": confidence if confidence in {"high", "medium", "low"} else "",
     }
     return strategy, project_type
 

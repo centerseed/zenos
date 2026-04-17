@@ -475,6 +475,34 @@ class CrmSqlRepository:
             )
         return insight
 
+    async def get_ai_insight(
+        self, partner_id: str, insight_id: str
+    ) -> AiInsight | None:
+        """Return a single AI insight by id within partner scope."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""SELECT * FROM {CRM_SCHEMA}.ai_insights
+                    WHERE partner_id=$1 AND id=$2""",
+                partner_id, insight_id,
+            )
+        return self._row_to_ai_insight(row) if row else None
+
+    async def update_ai_insight(self, insight: AiInsight) -> AiInsight | None:
+        """Update mutable AI insight fields and return the updated row."""
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""UPDATE {CRM_SCHEMA}.ai_insights
+                    SET content=$3, metadata=$4::jsonb, status=$5
+                    WHERE partner_id=$1 AND id=$2
+                    RETURNING *""",
+                insight.partner_id,
+                insight.id,
+                insight.content,
+                json.dumps(insight.metadata),
+                insight.status.value,
+            )
+        return self._row_to_ai_insight(row) if row else None
+
     async def list_ai_insights_by_deal(
         self, partner_id: str, deal_id: str, insight_type: str | None = None
     ) -> list[AiInsight]:
@@ -509,3 +537,13 @@ class CrmSqlRepository:
                 partner_id, insight_id, status,
             )
         return self._row_to_ai_insight(row) if row else None
+
+    async def delete_ai_insight(self, partner_id: str, insight_id: str) -> bool:
+        """Delete an AI insight by id. Returns True when a row was deleted."""
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""DELETE FROM {CRM_SCHEMA}.ai_insights
+                    WHERE partner_id=$1 AND id=$2""",
+                partner_id, insight_id,
+            )
+        return result.endswith("1")

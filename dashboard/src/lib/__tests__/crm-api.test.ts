@@ -10,6 +10,8 @@ import {
   createActivity,
   fetchDealAiEntries,
   createAiInsight,
+  deleteBriefing,
+  updateBriefing,
   updateCommitmentStatus,
 } from "@/lib/crm-api";
 import type { Deal, Company, Activity, AiInsight, DealAiEntries } from "@/lib/crm-api";
@@ -145,7 +147,7 @@ describe("patchDealStage", () => {
     expect(result.funnelStage).toBe("合約議價");
   });
 
-  it("sends Content-Type: application/json header", async () => {
+  it("sends serialized stage payload", async () => {
     vi.stubGlobal(
       "fetch",
       mockFetch({ id: "d-1", funnelStage: "結案", deliverables: [], isClosedLost: false, isOnHold: false })
@@ -155,9 +157,7 @@ describe("patchDealStage", () => {
 
     const [, options] = (vi.mocked(fetch) as ReturnType<typeof vi.fn>).mock
       .calls[0] as [string, RequestInit];
-    expect(
-      (options.headers as Record<string, string>)["Content-Type"]
-    ).toBe("application/json");
+    expect(options.body).toBe(JSON.stringify({ stage: "結案" }));
   });
 
   it("throws when API returns non-ok status", async () => {
@@ -381,9 +381,23 @@ const fakeCommitment: AiInsight = {
   createdAt: "2026-03-15T10:00:00Z",
 };
 
+const fakeBriefing: AiInsight = {
+  id: "ins-0",
+  dealId: "d-1",
+  activityId: null,
+  insightType: "briefing",
+  content: "這是一份已存 briefing",
+  metadata: {
+    title: "會議準備 2026/03/15 10:00",
+    chat_history: [{ role: "assistant", content: "這是一份已存 briefing" }],
+  },
+  status: "active",
+  createdAt: "2026-03-15T09:00:00Z",
+};
+
 describe("fetchDealAiEntries", () => {
   it("calls GET /api/crm/deals/{dealId}/ai-entries", async () => {
-    const fakeFetch = mockFetch({ debriefs: [], commitments: [] });
+    const fakeFetch = mockFetch({ briefings: [], debriefs: [], commitments: [] });
     vi.stubGlobal("fetch", fakeFetch);
 
     await fetchDealAiEntries(FAKE_TOKEN, "d-1");
@@ -392,14 +406,17 @@ describe("fetchDealAiEntries", () => {
     expect(url).toBe(`${API_BASE}/api/crm/deals/d-1/ai-entries`);
   });
 
-  it("returns debriefs and commitments from response", async () => {
+  it("returns briefings, debriefs and commitments from response", async () => {
     const body: DealAiEntries = {
+      briefings: [fakeBriefing],
       debriefs: [fakeDebrief],
       commitments: [fakeCommitment],
     };
     vi.stubGlobal("fetch", mockFetch(body));
 
     const result = await fetchDealAiEntries(FAKE_TOKEN, "d-1");
+    expect(result.briefings).toHaveLength(1);
+    expect(result.briefings[0].id).toBe("ins-0");
     expect(result.debriefs).toHaveLength(1);
     expect(result.debriefs[0].id).toBe("ins-1");
     expect(result.commitments).toHaveLength(1);
@@ -407,7 +424,7 @@ describe("fetchDealAiEntries", () => {
   });
 
   it("sends Authorization header with Bearer token", async () => {
-    const fakeFetch = mockFetch({ debriefs: [], commitments: [] });
+    const fakeFetch = mockFetch({ briefings: [], debriefs: [], commitments: [] });
     vi.stubGlobal("fetch", fakeFetch);
 
     await fetchDealAiEntries(FAKE_TOKEN, "d-1");
@@ -498,6 +515,47 @@ describe("createAiInsight", () => {
         metadata: {},
       })
     ).rejects.toThrow("422");
+  });
+});
+
+// ─── updateBriefing ──────────────────────────────────────────────────────────
+
+describe("updateBriefing", () => {
+  it("calls PATCH /api/crm/briefings/{insightId}", async () => {
+    const fakeFetch = mockFetch(fakeBriefing);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await updateBriefing(FAKE_TOKEN, "ins-0", {
+      content: "updated briefing",
+      metadata: { title: "新標題" },
+    });
+
+    const [url, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${API_BASE}/api/crm/briefings/ins-0`);
+    expect(options.method).toBe("PATCH");
+    expect(JSON.parse(options.body as string)).toEqual({
+      content: "updated briefing",
+      metadata: { title: "新標題" },
+    });
+  });
+});
+
+// ─── deleteBriefing ──────────────────────────────────────────────────────────
+
+describe("deleteBriefing", () => {
+  it("calls DELETE /api/crm/briefings/{insightId}", async () => {
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: vi.fn(),
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await deleteBriefing(FAKE_TOKEN, "ins-0");
+
+    const [url, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(`${API_BASE}/api/crm/briefings/ins-0`);
+    expect(options.method).toBe("DELETE");
   });
 });
 

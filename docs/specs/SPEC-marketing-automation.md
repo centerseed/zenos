@@ -146,6 +146,7 @@ Dashboard 行銷總覽（按產品分組，可展開收合）
 | 文件 | 關係 | 處理 |
 |------|------|------|
 | **ADR-001 行銷自動化技術架構** | **有衝突** | ADR-001 假設 Firestore + VM crontab + 一人使用。新方案改為 ZenOS PostgreSQL + MCP write + Claude Code cowork。ADR-001 的技術驗證仍有效，但儲存層和觸發機制需更新。**建議：ADR-001 標記為 superseded，由新 ADR 取代** |
+| **SPEC-cowork-knowledge-context** | 引用 | 策略設定的欄位級漸進預填走該 spec 的通用 flow。本 spec 只負責定義「哪些欄位算 graph_derivable / user_required」與最終寫回格式；圖遍歷、context pack 結構、漸進對話規則以 SPEC-cowork-knowledge-context 為 SSOT |
 | **ADR-033 Marketing Automation Runtime 與 Skill Packages 決策** | 已銜接 | Dashboard 讀取走 `/api/marketing/*` 聚合 read model；發佈 v1 走 skill-driven Postiz 整合；package 採可選安裝 |
 | **SPEC-zenos-core** | 無衝突 | 行銷模組屬於 Application Layer，不改 Core。使用 Core 的 Knowledge Layer 和 Action Layer |
 | **SPEC-product-vision** | 無衝突，高度契合 | 行銷場景完美驗證「AI Context Layer」價值 |
@@ -228,11 +229,16 @@ Dashboard 行銷總覽（按產品分組，可展開收合）
 | 參考素材 | | ✓ | ✓ | 競品連結、爆款文範例、內部素材 |
 
 - **Acceptance Criteria**：
-  - Given 使用者進入新項目的策略設定，When 透過 AI 對話討論並套用結果，Then 系統解析結構化資料並填入策略欄位
-  - Given 使用者直接手動填寫策略欄位，When 儲存，Then 寫入 ZenOS（strategy document + summary entry）
-  - Given 策略被更新，When 下次 AI 生成文案時，Then 自動使用最新版策略
-  - Given 長期經營項目，When 顯示策略表單，Then 顯示發文頻率和內容比例欄位
-  - Given 短期活動項目，When 顯示策略表單，Then 隱藏發文頻率和內容比例，顯示活動目標欄位
+  - `AC-MKTG-STRATEGY-01`: Given 使用者進入新項目的策略設定，When 透過 AI 對話討論並套用結果，Then 系統解析結構化資料並填入策略欄位
+  - `AC-MKTG-STRATEGY-02`: Given 使用者直接手動填寫策略欄位，When 儲存，Then 寫入 ZenOS（strategy document + summary entry）
+  - `AC-MKTG-STRATEGY-03`: Given 策略被更新，When 下次 AI 生成文案時，Then 自動使用最新版策略
+  - `AC-MKTG-STRATEGY-04`: Given 長期經營項目，When 顯示策略表單，Then 顯示發文頻率和內容比例欄位
+  - `AC-MKTG-STRATEGY-05`: Given 短期活動項目，When 顯示策略表單，Then 隱藏發文頻率和內容比例，顯示活動目標欄位
+  - **圖譜驅動漸進預填（引用 SPEC-cowork-knowledge-context）**：
+  - `AC-MKTG-STRATEGY-10`: Given 使用者在策略區塊按「討論這段」，When cowork 啟動，Then 觸發 SPEC-cowork-knowledge-context 的完整 flow，seed_entity = 該行銷項目的產品 entity
+  - `AC-MKTG-STRATEGY-11`: Given context pack 組裝，When 標註 target_fields 的 source_preference，Then 受眾 / 品牌語氣 / 核心訊息 = `graph_derivable`；發文平台 / 發文頻率 / 內容比例 / CTA 策略 = `user_required`；活動目標（若短期活動）= `user_required`
+  - `AC-MKTG-STRATEGY-12`: Given 對話結束使用者按「套用到欄位」，When 前端寫回 ZenOS，Then 7 個策略欄位（長期經營）或對應短期活動欄位組全部有值或明確 pending，符合 SPEC-cowork-knowledge-context `AC-CKC-62` 的驗收
+  - `AC-MKTG-STRATEGY-13`: Given 產品 entity 只有 L1 沒有 L2 模組，When 使用者觸發討論，Then 行為遵循 SPEC-cowork-knowledge-context 的 `AC-CKC-40~42` L1-only fallback，不得直接阻擋使用者完成策略設定
 
 #### 文風 Skill 體系
 

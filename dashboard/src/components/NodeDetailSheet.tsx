@@ -480,13 +480,28 @@ export default function NodeDetailSheet({
 
   // Reference Layer: Documents + Sources (ADR-022 Document Bundle)
   const categorizedDocs = useMemo(() => {
-    if (!entity) return { specs: [] as Entity[], adrs: [] as Entity[], sources: [] as Entity["sources"], isIndex: false, sourcesByDocType: {} as Record<string, Entity["sources"]> };
-    const childDocs = entities.filter((e) => e.parentId === entity.id && e.type === "document");
-    const specs = childDocs.filter((d) => d.name.startsWith("SPEC-"));
-    const adrs = childDocs.filter((d) => d.name.startsWith("ADR-"));
-    const otherDocs = childDocs.filter((d) => !d.name.startsWith("SPEC-") && !d.name.startsWith("ADR-"));
+    if (!entity) {
+      return {
+        bundleDocs: [] as Entity[],
+        specs: [] as Entity[],
+        adrs: [] as Entity[],
+        sources: [] as Entity["sources"],
+        isIndex: false,
+        sourcesByDocType: {} as Record<string, Entity["sources"]>,
+      };
+    }
+    const bundleDocs =
+      entity.type === "document"
+        ? [entity]
+        : entities.filter((e) => e.parentId === entity.id && e.type === "document");
+    const specs = bundleDocs.filter((d) => d.name.startsWith("SPEC-"));
+    const adrs = bundleDocs.filter((d) => d.name.startsWith("ADR-"));
+    const otherDocs = bundleDocs.filter((d) => !d.name.startsWith("SPEC-") && !d.name.startsWith("ADR-"));
 
-    const allSources = [...(entity.sources || []), ...otherDocs.flatMap(d => d.sources || [])];
+    const allSources =
+      entity.type === "document"
+        ? [...(entity.sources || [])]
+        : [...(entity.sources || []), ...otherDocs.flatMap((d) => d.sources || [])];
     const isIndex = entity.docRole === "index";
 
     // For index-type documents, group sources by doc_type
@@ -499,11 +514,15 @@ export default function NodeDetailSheet({
       }
     }
 
-    return { specs, adrs, sources: allSources, isIndex, sourcesByDocType };
+    return { bundleDocs, specs, adrs, sources: allSources, isIndex, sourcesByDocType };
   }, [entity, entities]);
 
   const hasTasks = categorizedTasks.inProgress.length > 0 || categorizedTasks.review.length > 0 || categorizedTasks.backlog.length > 0;
-  const hasDocs = categorizedDocs.specs.length > 0 || categorizedDocs.adrs.length > 0 || categorizedDocs.sources.length > 0;
+  const hasDocs =
+    categorizedDocs.bundleDocs.length > 0 ||
+    categorizedDocs.specs.length > 0 ||
+    categorizedDocs.adrs.length > 0 ||
+    categorizedDocs.sources.length > 0;
 
   return (
     <Sheet open={!!entity} onOpenChange={(open) => !open && onClose()} modal={false}>
@@ -568,6 +587,47 @@ export default function NodeDetailSheet({
                       Updated {entity.summaryUpdatedAt.toLocaleDateString()}
                     </div>
                   )}
+                </div>
+              )}
+              {entity.type === "document" && entity.bundleHighlights && entity.bundleHighlights.length > 0 && (
+                <div className="mt-3 rounded-md border border-cyan-500/20 bg-cyan-500/5 p-2.5">
+                  <div className="text-[10px] font-semibold text-cyan-400/70 uppercase mb-2">What To Read First</div>
+                  <div className="space-y-2">
+                    {entity.bundleHighlights.map((highlight) => {
+                      const source = (entity.sources || []).find((src) => src.source_id === highlight.source_id);
+                      const url = source ? getSourceUrl(source) : null;
+                      return (
+                        <div key={`${highlight.source_id}-${highlight.headline}`} className="rounded-md border border-border/40 bg-background/30 p-2">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className={highlight.priority === "primary" ? "border-cyan-400/40 text-cyan-300 text-[9px] py-0 px-1 h-4" : "border-foreground/20 text-foreground/50 text-[9px] py-0 px-1 h-4"}>
+                              {highlight.priority === "primary" ? "先讀這份" : highlight.priority}
+                            </Badge>
+                            {source?.label && (
+                              <span className="text-[10px] text-foreground/35 truncate">{source.label}</span>
+                            )}
+                          </div>
+                          <div className="text-xs text-foreground/85 mt-1">{highlight.headline}</div>
+                          <div className="text-[11px] text-foreground/55 mt-1">{highlight.reason_to_read}</div>
+                          {entity.id && (
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <Link href={`/docs?docId=${encodeURIComponent(entity.id)}`} className="text-[10px] text-cyan-400/70 hover:text-cyan-300 underline underline-offset-2">
+                                Reader
+                              </Link>
+                              {url && (
+                                <button
+                                  type="button"
+                                  onClick={() => window.open(url, "_blank")}
+                                  className="text-[10px] text-foreground/45 hover:text-foreground/70 underline underline-offset-2"
+                                >
+                                  Source
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
@@ -747,8 +807,79 @@ export default function NodeDetailSheet({
                   <p className="text-xs text-foreground/30 italic">No reference documents</p>
                 ) : (
                   <div className="space-y-4">
+                    {entity.type !== "document" && categorizedDocs.bundleDocs.length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-semibold uppercase mb-2 text-cyan-400/70">
+                          Doc Bundles
+                        </div>
+                        <div className="space-y-3">
+                          {categorizedDocs.bundleDocs.map((doc) => (
+                            <div key={doc.id} className="rounded-lg border border-border/50 bg-foreground/[0.03] p-3">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <div className="text-xs font-medium text-foreground/85 truncate">{doc.name}</div>
+                                    {doc.docRole === "index" && (
+                                      <Badge variant="outline" className="border-cyan-500/30 text-cyan-400/60 text-[9px] py-0 px-1 h-4">index</Badge>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-foreground/50 leading-relaxed mt-1">{doc.summary}</p>
+                                </div>
+                                {doc.id && (
+                                  <Link href={`/docs?docId=${encodeURIComponent(doc.id)}`} className="text-[10px] text-cyan-400/70 hover:text-cyan-300 underline underline-offset-2 shrink-0">
+                                    Reader
+                                  </Link>
+                                )}
+                              </div>
+                              {doc.bundleHighlights && doc.bundleHighlights.length > 0 ? (
+                                <div className="space-y-2 mt-3">
+                                  {doc.bundleHighlights.map((highlight) => {
+                                    const source = (doc.sources || []).find((src) => src.source_id === highlight.source_id);
+                                    const url = source ? getSourceUrl(source) : null;
+                                    return (
+                                      <div key={`${doc.id}-${highlight.source_id}-${highlight.headline}`} className="rounded-md border border-cyan-500/15 bg-cyan-500/[0.04] p-2">
+                                        <div className="flex items-center gap-2">
+                                          <Badge variant="outline" className={highlight.priority === "primary" ? "border-cyan-400/40 text-cyan-300 text-[9px] py-0 px-1 h-4" : "border-foreground/20 text-foreground/50 text-[9px] py-0 px-1 h-4"}>
+                                            {highlight.priority === "primary" ? "先讀這份" : highlight.priority}
+                                          </Badge>
+                                          {source?.label && (
+                                            <span className="text-[10px] text-foreground/35 truncate">{source.label}</span>
+                                          )}
+                                        </div>
+                                        <div className="text-xs text-foreground/85 mt-1">{highlight.headline}</div>
+                                        <div className="text-[11px] text-foreground/55 mt-1">{highlight.reason_to_read}</div>
+                                        {url && (
+                                          <button
+                                            type="button"
+                                            onClick={() => window.open(url, "_blank")}
+                                            className="mt-1.5 text-[10px] text-foreground/45 hover:text-foreground/70 underline underline-offset-2"
+                                          >
+                                            Open source
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              ) : (
+                                <div className="mt-3 rounded-md border border-dashed border-amber-500/25 bg-amber-500/5 px-3 py-2 text-[11px] text-amber-300/80">
+                                  治理缺口：這個 doc bundle 還沒有 bundle highlights，現在很難從 L2 判斷先讀哪份。
+                                </div>
+                              )}
+                              {doc.changeSummary && (
+                                <div className="mt-3 rounded-md border border-border/40 bg-background/20 p-2">
+                                  <div className="text-[10px] font-semibold uppercase text-foreground/35 mb-1">Recent Changes</div>
+                                  <div className="text-[11px] text-foreground/55 leading-relaxed">{doc.changeSummary}</div>
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Child document entities (Specs, Decisions) */}
-                    {[
+                    {entity.type === "document" && [
                       { label: "Core Specs", items: categorizedDocs.specs },
                       { label: "Decisions", items: categorizedDocs.adrs },
                     ].map((group) => group.items.length > 0 && (

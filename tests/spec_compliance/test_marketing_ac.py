@@ -244,9 +244,15 @@ def _http_json(method: str, url: str, *, headers: dict[str, str] | None = None, 
         return exc.code, json.loads(exc.read().decode("utf-8"))
 
 
+def _normalize_vitest_path(test_path: str) -> str:
+    if test_path.startswith("src/app/marketing/"):
+        return test_path.replace("src/app/marketing/", "src/app/(protected)/marketing/", 1)
+    return test_path
+
+
 def _run_vitest(test_path: str, test_name: str) -> None:
     result = subprocess.run(
-        ["npm", "exec", "vitest", "run", test_path, "-t", test_name],
+        ["npm", "exec", "--", "vitest", "run", _normalize_vitest_path(test_path), "-t", test_name],
         cwd=REPO_ROOT / "dashboard",
         capture_output=True,
         text=True,

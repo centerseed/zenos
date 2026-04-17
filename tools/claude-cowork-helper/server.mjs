@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
 
@@ -10,7 +11,7 @@ const HOST = "127.0.0.1";
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "").split(",").map((x) => x.trim()).filter(Boolean);
 const LOCAL_HELPER_TOKEN = (process.env.LOCAL_HELPER_TOKEN || "").trim();
 const ALLOWED_CWDS = (process.env.ALLOWED_CWDS || "").split(",").map((x) => x.trim()).filter(Boolean);
-const DEFAULT_CWD = (process.env.DEFAULT_CWD || process.cwd()).trim();
+const DEFAULT_CWD = (process.env.DEFAULT_CWD || ALLOWED_CWDS[0] || process.cwd()).trim();
 const ALLOWED_MODELS = new Set(["sonnet", "opus", "haiku"]);
 const DEFAULT_MODEL = ALLOWED_MODELS.has(String(process.env.DEFAULT_MODEL || "").trim().toLowerCase())
   ? String(process.env.DEFAULT_MODEL || "").trim().toLowerCase()
@@ -21,6 +22,11 @@ const CLAUDE_BIN_ARGS = String(process.env.CLAUDE_BIN_ARGS || "")
   .map((item) => item.trim())
   .filter(Boolean);
 const HELPER_TOOLS = process.env.HELPER_TOOLS ?? "";
+const ZENOS_API_KEY = String(process.env.ZENOS_API_KEY || "").trim();
+const ZENOS_PROJECT = String(process.env.ZENOS_PROJECT || "").trim();
+const ZENOS_MCP_URL = String(
+  process.env.ZENOS_MCP_URL || "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
+).trim();
 const SESSION_STATE_FILE = path.join(homedir(), ".zenos-cowork-helper", "sessions.json");
 const PERMISSION_TIMEOUT_SECONDS = Math.max(
   1,
@@ -194,6 +200,117 @@ function buildEnv() {
   return env;
 }
 
+// ── Workspace Bootstrap ─────────────────────────────────────────────────────
+// On startup, if ZENOS_API_KEY is set, auto-generate .claude/mcp.json and
+// .claude/settings.local.json in every ALLOWED_CWDS workspace so spawned
+// Claude CLI sessions have MCP access and tool permissions out of the box.
+// No manual file copying needed — any new user just sets ZENOS_API_KEY.
+
+// Both local MCP (mcp__zenos__*) and Claude.ai MCP (mcp__claude_ai_zenos__*)
+// prefixes — CLI may use either depending on which server connects first.
+const ZENOS_TOOL_NAMES = [
+  "search", "get", "write", "confirm", "analyze", "task", "plan",
+  "journal_read", "journal_write", "read_source", "setup", "governance_guide",
+  "list_workspaces", "find_gaps", "suggest_policy", "common_neighbors",
+  "batch_update_sources", "upload_attachment",
+];
+const ZENOS_MCP_TOOLS = [
+  ...ZENOS_TOOL_NAMES.map((t) => `mcp__zenos__${t}`),
+  ...ZENOS_TOOL_NAMES.map((t) => `mcp__claude_ai_zenos__${t}`),
+];
+
+// Helper's own ZenOS project root (2 levels up from tools/claude-cowork-helper/)
+const HELPER_PROJECT_ROOT = path.resolve(new URL(".", import.meta.url).pathname, "../..");
+
+function bootstrapWorkspace(cwd) {
+  if (!ZENOS_API_KEY) return;
+  const claudeDir = path.join(cwd, ".claude");
+  mkdirSync(claudeDir, { recursive: true });
+
+  // 1. MCP config — copy from ZenOS project root if workspace has none
+  const mcpPath = path.join(claudeDir, "mcp.json");
+  const existingMcp = safeReadJson(mcpPath);
+  if (!existingMcp?.mcpServers?.zenos) {
+    // Try to copy from the ZenOS project's own MCP config (has correct API key + project)
+    const projectMcpPath = path.join(HELPER_PROJECT_ROOT, ".claude", "mcp.json");
+    const projectMcp = safeReadJson(projectMcpPath);
+    if (projectMcp?.mcpServers?.zenos) {
+      const desiredMcp = { mcpServers: { zenos: projectMcp.mcpServers.zenos } };
+      writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
+      console.log(`[bootstrap] Copied MCP config from project root → ${mcpPath}`);
+    } else {
+      // Fallback: build URL from env vars (API key is scoped to the project)
+      const mcpUrl = `${ZENOS_MCP_URL}?api_key=${ZENOS_API_KEY}`;
+      const desiredMcp = { mcpServers: { zenos: { type: "http", url: mcpUrl } } };
+      writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
+      console.log(`[bootstrap] Created ${mcpPath} from env vars`);
+    }
+  }
+
+  // 2. Permissions — auto-approve ZenOS MCP tools
+  const settingsLocalPath = path.join(claudeDir, "settings.local.json");
+  const existingSettings = safeReadJson(settingsLocalPath) || {};
+  const existingAllow = existingSettings?.permissions?.allow || [];
+  const missing = ZENOS_MCP_TOOLS.filter((t) => !existingAllow.includes(t));
+  if (missing.length > 0) {
+    existingSettings.permissions = existingSettings.permissions || {};
+    existingSettings.permissions.allow = [...new Set([...existingAllow, ...ZENOS_MCP_TOOLS])];
+    writeFileSync(settingsLocalPath, JSON.stringify(existingSettings, null, 2), "utf8");
+    console.log(`[bootstrap] Updated ${settingsLocalPath} — added ${missing.length} tools`);
+  }
+
+  // 3. allowedTools for helper's own permission interception
+  const settingsPath = path.join(claudeDir, "settings.json");
+  const existingHelperSettings = safeReadJson(settingsPath) || {};
+  const existingAllowed = existingHelperSettings?.allowedTools || [];
+  const helperMissing = ZENOS_MCP_TOOLS.filter((t) => !existingAllowed.includes(t));
+  if (helperMissing.length > 0) {
+    existingHelperSettings.allowedTools = [...new Set([...existingAllowed, ...ZENOS_MCP_TOOLS])];
+    writeFileSync(settingsPath, JSON.stringify(existingHelperSettings, null, 2), "utf8");
+    console.log(`[bootstrap] Updated ${settingsPath} — added ${helperMissing.length} tools`);
+  }
+
+  // 4. Ensure skill files exist in workspace
+  const allSkills = [...EXPECTED_MARKETING_SKILLS, ...EXPECTED_CRM_SKILLS];
+  const srcSkillsBase = path.join(HELPER_PROJECT_ROOT, "skills", "release", "workflows");
+  const dstSkillsBase = path.join(cwd, "skills", "release", "workflows");
+  const SKILLS_BASE_URL = "https://zenos-naruvia.web.app/installers/skills";
+  for (const skill of allSkills) {
+    const folderName = skill.replace(/^\//, "");
+    const dstDir = path.join(dstSkillsBase, folderName);
+    if (existsSync(path.join(dstDir, "SKILL.md"))) continue;
+    // Try 1: copy from local ZenOS project
+    const srcDir = path.join(srcSkillsBase, folderName);
+    if (existsSync(srcDir)) {
+      mkdirSync(dstDir, { recursive: true });
+      cpSync(srcDir, dstDir, { recursive: true });
+      console.log(`[bootstrap] Copied skill ${folderName} (local)`);
+      continue;
+    }
+    // Try 2: download from hosting
+    try {
+      mkdirSync(dstDir, { recursive: true });
+      const url = `${SKILLS_BASE_URL}/${folderName}/SKILL.md`;
+      execSync(`curl -fsSL "${url}" -o "${path.join(dstDir, "SKILL.md")}"`, { timeout: 10000 });
+      console.log(`[bootstrap] Downloaded skill ${folderName} (remote)`);
+    } catch {
+      console.warn(`[bootstrap] Could not get skill ${folderName} — skipping`);
+    }
+  }
+}
+
+// Bootstrap all configured workspaces on startup
+if (ZENOS_API_KEY) {
+  const dirs = ALLOWED_CWDS.length > 0 ? ALLOWED_CWDS : [DEFAULT_CWD];
+  for (const dir of dirs) {
+    try { bootstrapWorkspace(dir); } catch (e) { console.error(`[bootstrap] Failed for ${dir}:`, e.message); }
+  }
+} else {
+  console.warn("[bootstrap] ZENOS_API_KEY not set — skipping workspace bootstrap. MCP tools will not be available.");
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
 function safeReadJson(filePath) {
   try {
     return JSON.parse(readFileSync(filePath, "utf8"));
@@ -211,10 +328,13 @@ function loadAllowedTools(cwd) {
 }
 
 function loadSkills(cwd, expectedSkills) {
-  const baseDir = path.join(cwd, "skills", "release", "workflows");
+  const searchDirs = [
+    path.join(cwd, "skills", "release", "workflows"),
+    path.join(HELPER_PROJECT_ROOT, "skills", "release", "workflows"),
+  ];
   return expectedSkills.filter((skillName) => {
     const folderName = skillName.replace(/^\//, "");
-    return existsSync(path.join(baseDir, folderName, "SKILL.md"));
+    return searchDirs.some((dir) => existsSync(path.join(dir, folderName, "SKILL.md")));
   });
 }
 
@@ -233,7 +353,7 @@ function isAllowedTool(toolName, allowedTools) {
 
 function buildCapabilitySnapshot(cwd) {
   const allowedTools = loadAllowedTools(cwd);
-  const allExpected = [...EXPECTED_MARKETING_SKILLS, ...EXPECTED_CRM_SKILLS];
+  const allExpected = [...EXPECTED_MARKETING_SKILLS];
   const skillsLoaded = loadSkills(cwd, allExpected);
   const missingSkills = allExpected.filter((skill) => !skillsLoaded.includes(skill));
   const mcpOk = allowedTools.some((tool) => tool.startsWith("mcp__zenos__"));
@@ -506,7 +626,7 @@ const server = createServer(async (req, res) => {
         prompt,
         model,
         cwd,
-        maxTurns: Number.isFinite(body.maxTurns) ? Number(body.maxTurns) : 6,
+        maxTurns: Number.isFinite(body.maxTurns) ? Number(body.maxTurns) : 10,
       });
       return;
     } catch (error) {

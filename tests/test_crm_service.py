@@ -71,6 +71,12 @@ def mock_crm_repo():
     repo.list_deals = AsyncMock()
     repo.create_activity = AsyncMock()
     repo.list_activities = AsyncMock()
+    repo.create_ai_insight = AsyncMock()
+    repo.get_ai_insight = AsyncMock()
+    repo.update_ai_insight = AsyncMock()
+    repo.list_ai_insights_by_deal = AsyncMock()
+    repo.update_ai_insight_status = AsyncMock()
+    repo.delete_ai_insight = AsyncMock()
     return repo
 
 
@@ -335,6 +341,29 @@ class TestCreateDeal:
         upserted = mock_entity_repo.upsert.call_args[0][0]
         assert "金額未定" in upserted.summary
 
+    @pytest.mark.asyncio
+    async def test_entity_details_include_initial_crm_snapshot(
+        self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo
+    ):
+        deal = _make_deal(funnel_stage=FunnelStage.DISCOVERY, amount_twd=300000)
+        entity = _make_entity(id="deal-entity-1", type="deal")
+        company = _make_company(zenos_entity_id="company-entity-1")
+        mock_crm_repo.create_deal.return_value = deal
+        mock_entity_repo.upsert.return_value = entity
+        mock_crm_repo.get_company.return_value = company
+        mock_crm_repo.update_deal.return_value = deal
+
+        await svc.create_deal(
+            "p1",
+            {"title": "AI 導入案", "company_id": "c1", "funnel_stage": "需求訪談", "amount_twd": 300000},
+        )
+
+        upserted = mock_entity_repo.upsert.call_args[0][0]
+        snapshot = upserted.details["crm_snapshot"]
+        assert snapshot["funnel_stage"] == "需求訪談"
+        assert snapshot["amount_twd"] == 300000
+        assert snapshot["open_commitments_count"] == 0
+
 
 # ── update_deal_stage ──────────────────────────────────────────────────
 
@@ -385,6 +414,33 @@ class TestUpdateDealStage:
         assert result.funnel_stage == FunnelStage.PROPOSAL
         mock_crm_repo.update_deal.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_syncs_linked_deal_entity_projection(self, svc, mock_crm_repo, mock_entity_repo):
+        deal = _make_deal(
+            funnel_stage=FunnelStage.PROSPECT,
+            amount_twd=500000,
+            zenos_entity_id="deal-entity-1",
+        )
+        mock_crm_repo.get_deal.return_value = deal
+        mock_crm_repo.update_deal.return_value = deal
+        mock_crm_repo.create_activity.return_value = MagicMock()
+        mock_crm_repo.list_activities.return_value = []
+        mock_crm_repo.list_ai_insights_by_deal.return_value = []
+        mock_entity_repo.get_by_id.return_value = _make_entity(
+            id="deal-entity-1",
+            type="deal",
+            name="舊標題",
+            details={"existing": "keep"},
+        )
+
+        await svc.update_deal_stage("p1", "d1", "需求訪談", "p1")
+
+        synced = mock_entity_repo.upsert.call_args[0][0]
+        assert synced.name == "AI 導入案"
+        assert synced.summary.startswith("需求訪談 · NT$500,000")
+        assert synced.details["existing"] == "keep"
+        assert synced.details["crm_snapshot"]["funnel_stage"] == "需求訪談"
+
 
 # ── list_deals ─────────────────────────────────────────────────────────
 
@@ -428,3 +484,40 @@ class TestCreateActivity:
 
         created = mock_crm_repo.create_activity.call_args[0][0]
         assert created.activity_type == ActivityType.NOTE
+
+    @pytest.mark.asyncio
+    async def test_syncs_linked_deal_projection_last_activity_at(
+        self, svc, mock_crm_repo, mock_entity_repo
+    ):
+        activity_at = datetime(2026, 4, 15, 9, 30, tzinfo=timezone.utc)
+        created_activity = Activity(
+            id="act-1",
+            partner_id="p1",
+            deal_id="d1",
+            activity_type=ActivityType.MEETING,
+            activity_at=activity_at,
+            summary="會議摘要",
+            recorded_by="p1",
+            is_system=False,
+        )
+        mock_crm_repo.create_activity.return_value = created_activity
+        mock_crm_repo.get_deal.return_value = _make_deal(
+            zenos_entity_id="deal-entity-1",
+            funnel_stage=FunnelStage.DISCOVERY,
+        )
+        mock_crm_repo.list_activities.return_value = [created_activity]
+        mock_crm_repo.list_ai_insights_by_deal.return_value = []
+        mock_entity_repo.get_by_id.return_value = _make_entity(
+            id="deal-entity-1",
+            type="deal",
+            details={},
+        )
+
+        await svc.create_activity(
+            "p1",
+            "d1",
+            {"summary": "會議摘要", "activity_type": "會議", "activity_at": activity_at.isoformat()},
+        )
+
+        synced = mock_entity_repo.upsert.call_args[0][0]
+        assert synced.details["crm_snapshot"]["last_activity_at"] == activity_at.isoformat()

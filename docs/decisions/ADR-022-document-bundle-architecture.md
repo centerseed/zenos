@@ -192,6 +192,13 @@ Legacy alias 持續接受：
 - server 不應引入 LLM 自動摘要依賴
 - 真正有價值的 bundle 摘要需要語境理解，應由 agent 撰寫
 
+**2026-04-17 強化（see ADR-039）**：D7 的範圍擴及整個 bundle 主路徑，不只是 change_summary：
+
+- `bundle_highlights` 的 `reason_to_read` 同樣由 agent 端 LLM 產生；server 的 `bundle_highlights_suggestion` 僅以 deterministic 規則（doc_type 分級 + is_primary）產出
+- Server 端 write / add_source / update_source 路徑**禁止任何 LLM call**
+- 任一 LLM provider（含 Gemini）故障時，document/bundle 寫入必須仍可成功
+- Gemini 修復後**不對歷史 document 做 backfill**；依 D8 自然演進
+
 ### D8. 遷移採自然演進，不做一次性主動合併
 
 既有 `single` 文件不做批次自動合併為 `index`。升級路徑如下：

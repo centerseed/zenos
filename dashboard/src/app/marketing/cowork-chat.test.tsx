@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mockCheckCoworkHelperHealth = vi.fn();
 const mockStreamCoworkChat = vi.fn();
 const mockCancelCoworkRequest = vi.fn();
+const mockFetchGraphContext = vi.fn();
 
 vi.mock("@/lib/cowork-helper", () => ({
   cancelCoworkRequest: (...args: unknown[]) => mockCancelCoworkRequest(...args),
@@ -19,7 +20,20 @@ vi.mock("@/lib/cowork-helper", () => ({
   setDefaultHelperModel: vi.fn(),
 }));
 
-import { CoworkChatSheet } from "@/app/marketing/page";
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    partner: { id: "partner-1" },
+    user: {
+      getIdToken: vi.fn(async () => "test-token"),
+    },
+  }),
+}));
+
+vi.mock("@/lib/graph-context", () => ({
+  fetchGraphContext: (...args: unknown[]) => mockFetchGraphContext(...args),
+}));
+
+import { CoworkChatSheet } from "@/app/(protected)/marketing/page";
 
 afterEach(() => {
   cleanup();
@@ -44,6 +58,25 @@ beforeEach(() => {
   Object.defineProperty(window.navigator, "clipboard", {
     value: { writeText: vi.fn(async () => {}) },
     configurable: true,
+  });
+  mockFetchGraphContext.mockResolvedValue({
+    seed: {
+      id: "proj-1",
+      name: "Paceriz",
+      type: "product",
+      level: 1,
+      status: "active",
+      summary: "跑步產品",
+      tags: { what: ["跑步"], why: "建立習慣", how: "", who: ["新手"] },
+    },
+    fallback_mode: "normal",
+    neighbors: [],
+    partial: false,
+    errors: [],
+    truncated: false,
+    truncation_details: { dropped_l2: 0, dropped_l3: 0, summary_truncated: 0 },
+    estimated_tokens: 12,
+    cached_at: new Date("2026-04-15T00:00:00Z"),
   });
 });
 
@@ -74,9 +107,9 @@ function renderSheet(overrides?: Record<string, unknown>) {
 describe("CoworkChatSheet", () => {
   it("shows loaded context for field discussion", async () => {
     renderSheet();
-    expect(screen.getByText(/像用 Claude Code 一樣直接聊/)).toBeInTheDocument();
-    expect(screen.getByText(/已載入 策略設定 背景/)).toBeInTheDocument();
-    expect(screen.getByText("查看這輪帶入的 prompt / context")).toBeInTheDocument();
+    expect(screen.getByText("討論這段：策略設定")).toBeInTheDocument();
+    expect(screen.getByText("策略設定 / 已載入範圍")).toBeInTheDocument();
+    expect(screen.getByText("查看 prompt / context")).toBeInTheDocument();
   });
 
   it("opens as a drawer dialog on mobile-sized interaction entry", async () => {
@@ -92,11 +125,11 @@ describe("CoworkChatSheet", () => {
       capability: null,
     });
     renderSheet();
-    await waitFor(() => expect(screen.getByRole("button", { name: "檢查 helper" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "檢查 helper" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connector 未連線" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Connector 未連線" }));
     await waitFor(() => {
-      expect(screen.getByText(/helper 目前不可用/)).toBeInTheDocument();
-      expect(screen.getByText("啟動 helper")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "收起引導" })).toBeInTheDocument();
+      expect(screen.getByText("複製啟動指令")).toBeInTheDocument();
     });
   });
 
@@ -111,11 +144,7 @@ describe("CoworkChatSheet", () => {
       },
     });
     renderSheet();
-    await waitFor(() => expect(screen.getByRole("button", { name: "檢查 helper" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "檢查 helper" }));
-    await waitFor(() => {
-      expect(screen.getByText(/缺 skill：\/marketing-generate/)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText(/缺 skill：\/marketing-generate/)).toBeInTheDocument());
   });
 
   it("degrades gracefully when MCP is unavailable", async () => {
@@ -129,14 +158,10 @@ describe("CoworkChatSheet", () => {
       },
     });
     renderSheet();
-    await waitFor(() => expect(screen.getByRole("button", { name: "檢查 helper" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("button", { name: "檢查 helper" }));
-    await waitFor(() => {
-      expect(screen.getByText(/ZenOS 連線失敗/)).toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.getByText(/ZenOS 連線失敗/)).toBeInTheDocument());
   });
 
-  it("auto-applies structured output and writes back", async () => {
+  it("shows apply button for structured output and writes back", async () => {
     mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: "capability_check", capability: { mcpOk: true, skillsLoaded: ["/marketing-plan"] } });
       onEvent({
@@ -147,11 +172,15 @@ describe("CoworkChatSheet", () => {
       onEvent({ type: "done", requestId: "req-1", code: 0 });
     });
     const { onApply } = renderSheet();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connector 已連線" })).toBeInTheDocument());
     fireEvent.click(screen.getByText("開始討論"));
+    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
+    expect(screen.getByText("語氣")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("套用到欄位"));
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
   });
 
-  it("allows summarizing the conversation into a structured result and auto-applies", async () => {
+  it("allows summarizing the conversation into a structured result", async () => {
     const { onApply } = renderSheet();
     mockStreamCoworkChat
       .mockImplementationOnce(async ({ onEvent }) => {
@@ -168,9 +197,12 @@ describe("CoworkChatSheet", () => {
         onEvent({ type: "done", requestId: "req-2", code: 0 });
       });
 
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connector 已連線" })).toBeInTheDocument());
     fireEvent.click(screen.getByText("開始討論"));
     await waitFor(() => expect(screen.getByText("整理結果")).toBeInTheDocument());
     fireEvent.click(screen.getByText("整理結果"));
+    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("套用到欄位"));
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
     expect(mockStreamCoworkChat).toHaveBeenCalledTimes(2);
   });
@@ -178,12 +210,12 @@ describe("CoworkChatSheet", () => {
   it("enters the dialog with field-level context already loaded", async () => {
     renderSheet();
     expect(screen.getByText(/討論這段：策略設定/)).toBeInTheDocument();
-    expect(screen.getByText(/直接開始聊，不用先填設定/)).toBeInTheDocument();
-    fireEvent.click(screen.getByText("診斷與設定"));
+    expect(screen.getByText(/這裡會自動帶入 project scope、ZenOS context、helper 狀態/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("查看 prompt / context"));
     expect(screen.getByText("已載入上下文清單")).toBeInTheDocument();
   });
 
-  it("detects conflict during auto-apply", async () => {
+  it("detects conflict before apply", async () => {
     mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: "capability_check", capability: { mcpOk: true, skillsLoaded: ["/marketing-plan"] } });
       onEvent({
@@ -213,12 +245,13 @@ describe("CoworkChatSheet", () => {
       <CoworkChatSheet {...baseProps} fieldContext={{ ...baseFieldContext, conflictVersion: "v1" }} />
     );
     fireEvent.click(screen.getByText("AI 討論（Beta）"));
-    // Simulate external update: conflictVersion changes to v2 while chat is open
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connector 已連線" })).toBeInTheDocument());
+    fireEvent.click(screen.getByText("開始討論"));
+    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
     rerender(
       <CoworkChatSheet {...baseProps} fieldContext={{ ...baseFieldContext, conflictVersion: "v2" }} />
     );
-    fireEvent.click(screen.getByText("開始討論"));
-    // Auto-apply triggers → conflict detected (baseline v1 !== current v2) → window.confirm
+    fireEvent.click(screen.getByText("套用到欄位"));
     await waitFor(() => expect(confirmSpy).toHaveBeenCalled());
     expect(onApply).not.toHaveBeenCalled();
   });
@@ -226,16 +259,17 @@ describe("CoworkChatSheet", () => {
   it("shows retry action after stream failure", async () => {
     mockStreamCoworkChat.mockRejectedValueOnce(new Error("helper unavailable"));
     renderSheet();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connector 已連線" })).toBeInTheDocument());
     fireEvent.click(screen.getByText("開始討論"));
     await waitFor(() => {
       expect(screen.getByText(/對話中斷或寫回失敗/)).toBeInTheDocument();
       expect(screen.getByText("重試上一輪")).toBeInTheDocument();
     });
     fireEvent.click(screen.getByText("重試上一輪"));
-    expect(mockStreamCoworkChat).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(mockStreamCoworkChat).toHaveBeenCalledTimes(2));
   });
 
-  it("shows retry action after auto-apply writeback failure", async () => {
+  it("shows retry action after writeback failure", async () => {
     mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
       onEvent({ type: "capability_check", capability: { mcpOk: true, skillsLoaded: ["/marketing-plan"] } });
       onEvent({
@@ -266,13 +300,15 @@ describe("CoworkChatSheet", () => {
       />
     );
     fireEvent.click(screen.getByText("AI 討論（Beta）"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connector 已連線" })).toBeInTheDocument());
     fireEvent.click(screen.getByText("開始討論"));
-    // Auto-apply triggers, but onApply throws → error state
+    await waitFor(() => expect(screen.getByText("套用到欄位")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("套用到欄位"));
     await waitFor(() => {
       expect(onApply).toHaveBeenCalledTimes(1);
     });
     await waitFor(() => {
-      expect(screen.getByText("重試")).toBeInTheDocument();
+      expect(screen.getByText("重試上一輪")).toBeInTheDocument();
     });
     expect(onError).toHaveBeenCalledWith("ZenOS write failed");
   });

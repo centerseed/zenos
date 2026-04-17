@@ -49,6 +49,8 @@ vi.mock("@/lib/firebase", () => ({
 // ── Mock useAuth ─────────────────────────────────────────────────────────────
 const mockGetIdToken = vi.fn().mockResolvedValue("fake-id-token");
 const getPartnersMock = vi.hoisted(() => vi.fn());
+const updatePartnerScopeMock = vi.hoisted(() => vi.fn());
+const deletePartnerMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
@@ -72,7 +74,8 @@ vi.mock("@/lib/api", () => ({
   createDepartment: vi.fn(),
   deleteDepartment: vi.fn(),
   renameDepartment: vi.fn(),
-  updatePartnerScope: vi.fn(),
+  updatePartnerScope: (...args: unknown[]) => updatePartnerScopeMock(...args),
+  deletePartner: (...args: unknown[]) => deletePartnerMock(...args),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -98,11 +101,32 @@ const INVITED_PARTNER = {
   sharedPartnerId: "admin-partner-id",
 };
 
+const ACTIVE_GUEST_PARTNER = {
+  id: "active-guest-id",
+  email: "guest@test.com",
+  displayName: "Guest User",
+  isAdmin: false,
+  workspaceRole: "guest" as const,
+  status: "active" as const,
+  accessMode: "scoped" as const,
+  authorizedEntityIds: ["entity-1"],
+  invitedBy: "admin@test.com",
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+  sharedPartnerId: "admin-partner-id",
+  roles: [],
+  department: "all",
+};
+
 getPartnersMock.mockResolvedValue([INVITED_PARTNER]);
 
 beforeEach(() => {
   vi.stubGlobal("fetch", mockFetch({ partners: [INVITED_PARTNER] }));
   vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
+  deletePartnerMock.mockReset();
+  deletePartnerMock.mockResolvedValue(undefined);
+  updatePartnerScopeMock.mockReset();
+  updatePartnerScopeMock.mockResolvedValue(ACTIVE_GUEST_PARTNER);
 });
 
 afterEach(() => {
@@ -112,7 +136,7 @@ afterEach(() => {
 
 // Lazy import to avoid module-level issues
 async function renderTeamPage() {
-  const { default: Page } = await import("@/app/team/page");
+  const { default: Page } = await import("@/app/(protected)/team/page");
   return render(<Page />);
 }
 
@@ -214,22 +238,6 @@ describe("Team page — invited partner actions", () => {
   });
 
   it("Delete button calls DELETE /api/partners/{id} on confirm", async () => {
-    const getCall = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: vi.fn().mockResolvedValue({ partners: [INVITED_PARTNER] }),
-    });
-    const deleteCall = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 204,
-      json: vi.fn().mockResolvedValue({}),
-    });
-
-    const fetchSpy = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
-      if (opts?.method === "DELETE") return deleteCall(url, opts);
-      return getCall(url, opts);
-    });
-    vi.stubGlobal("fetch", fetchSpy);
     vi.stubGlobal("confirm", vi.fn().mockReturnValue(true));
 
     await renderTeamPage();
@@ -238,10 +246,7 @@ describe("Team page — invited partner actions", () => {
     fireEvent.click(deleteBtn);
 
     await waitFor(() => {
-      expect(deleteCall).toHaveBeenCalledWith(
-        expect.stringContaining(`/api/partners/${INVITED_PARTNER.id}`),
-        expect.objectContaining({ method: "DELETE" })
-      );
+      expect(deletePartnerMock).toHaveBeenCalledWith("fake-id-token", INVITED_PARTNER.id);
     });
   });
 
@@ -268,6 +273,36 @@ describe("Team page — invited partner actions", () => {
     // Button should be disabled immediately after click
     await waitFor(() => {
       expect(deleteBtn).toBeDisabled();
+    });
+  });
+});
+
+describe("Team page — workspace role editor", () => {
+  it("saves member role through updatePartnerScope", async () => {
+    getPartnersMock.mockResolvedValueOnce([ACTIVE_GUEST_PARTNER]).mockResolvedValue([ACTIVE_GUEST_PARTNER]);
+
+    await renderTeamPage();
+
+    const editButton = await screen.findByRole("button", { name: /編輯 guest@test\.com 的權限範圍/i });
+    fireEvent.click(editButton);
+
+    fireEvent.change(screen.getByLabelText("成員工作區角色"), {
+      target: { value: "member" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "儲存範圍" }));
+
+    await waitFor(() => {
+      expect(updatePartnerScopeMock).toHaveBeenCalledWith(
+        "fake-id-token",
+        "active-guest-id",
+        expect.objectContaining({
+          roles: [],
+          department: "all",
+          workspaceRole: "member",
+          accessMode: "internal",
+          authorizedEntityIds: [],
+        })
+      );
     });
   });
 });

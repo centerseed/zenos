@@ -121,7 +121,9 @@ describe("createTask", () => {
     const fakeFetch = mockFetch({}, false, 400);
     vi.stubGlobal("fetch", fakeFetch);
 
-    await expect(createTask(FAKE_TOKEN, { title: "x" })).rejects.toThrow("Create task failed: 400");
+    await expect(createTask(FAKE_TOKEN, { title: "x" })).rejects.toThrow(
+      "API /api/data/tasks: 400"
+    );
   });
 });
 
@@ -169,7 +171,9 @@ describe("updateTask", () => {
     const fakeFetch = mockFetch({}, false, 404);
     vi.stubGlobal("fetch", fakeFetch);
 
-    await expect(updateTask(FAKE_TOKEN, "task-1", { status: "done" })).rejects.toThrow("Update task failed: 404");
+    await expect(updateTask(FAKE_TOKEN, "task-1", { status: "done" })).rejects.toThrow(
+      "API /api/data/tasks/task-1: 404"
+    );
   });
 });
 
@@ -216,7 +220,9 @@ describe("confirmTask", () => {
     const fakeFetch = mockFetch({}, false, 403);
     vi.stubGlobal("fetch", fakeFetch);
 
-    await expect(confirmTask(FAKE_TOKEN, "task-1", { action: "approve" })).rejects.toThrow("Confirm task failed: 403");
+    await expect(confirmTask(FAKE_TOKEN, "task-1", { action: "approve" })).rejects.toThrow(
+      "API /api/data/tasks/task-1/confirm: 403"
+    );
   });
 });
 

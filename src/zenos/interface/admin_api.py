@@ -594,7 +594,13 @@ async def delete_partner(request: Request) -> Response:
 
 
 async def update_partner_role(request: Request) -> Response:
-    """Update partner isAdmin flag. Admin only."""
+    """Update legacy home-workspace owner flag.
+
+    This endpoint is intentionally blocked for shared-workspace members/guests.
+    Shared workspace access must be managed via ``/api/partners/{id}/scope``
+    so the caller cannot accidentally destroy the active shared-workspace link
+    by mutating the global ``isAdmin`` flag.
+    """
     if request.method == "OPTIONS":
         return _handle_options(request)
 
@@ -638,13 +644,17 @@ async def update_partner_role(request: Request) -> Response:
         if active_admin_count <= 1:
             return _error_response("last_admin_cannot_demote", "Cannot demote the last admin in the tenant", 400, request=request)
 
+    if target.get("sharedPartnerId"):
+        return _error_response(
+            "LEGACY_ROLE_ENDPOINT_DISABLED",
+            "Shared workspace roles must be managed via /api/partners/{id}/scope. "
+            "Do not use /role to promote or demote a shared member/guest.",
+            409,
+            request=request,
+        )
+
     now = datetime.now(timezone.utc)
     update_fields = {"isAdmin": is_admin, "updatedAt": now}
-    # Promoting a shared-workspace member/guest to admin makes them the owner of
-    # their own home workspace view. Their old tenant link must be cleared or
-    # the frontend will continue treating them as a shared-workspace user.
-    if is_admin:
-        update_fields["sharedPartnerId"] = None
     await repo.update_fields(partner_id, update_fields)
 
     logger.info(
@@ -668,7 +678,7 @@ async def update_partner_role(request: Request) -> Response:
         "invitedBy": target.get("invitedBy"),
         "createdAt": target.get("createdAt"),
         "updatedAt": now,
-        "sharedPartnerId": None if is_admin else target.get("sharedPartnerId"),
+        "sharedPartnerId": target.get("sharedPartnerId"),
     }, request=request)
 
 

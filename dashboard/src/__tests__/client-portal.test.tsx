@@ -218,7 +218,7 @@ describe("SetupPage — owner guard", () => {
       authorizedEntityIds: [],
     };
 
-    const { default: Page } = await import("@/app/setup/page");
+    const { default: Page } = await import("@/app/(protected)/setup/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -236,7 +236,7 @@ describe("SetupPage — owner guard", () => {
     };
     mockRouterReplace.mockClear();
 
-    const { default: Page } = await import("@/app/setup/page");
+    const { default: Page } = await import("@/app/(protected)/setup/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -261,7 +261,7 @@ describe("TasksPage — empty scope prompt", () => {
       json: vi.fn().mockResolvedValue({ partners: [] }),
     }));
 
-    const { TasksPage } = await import("@/app/tasks/page");
+    const { TasksPage } = await import("@/app/(protected)/tasks/page");
     render(<TasksPage />);
 
     await waitFor(() => {
@@ -285,7 +285,7 @@ describe("TasksPage — empty scope prompt", () => {
       json: vi.fn().mockResolvedValue({ partners: [] }),
     }));
 
-    const { TasksPage } = await import("@/app/tasks/page");
+    const { TasksPage } = await import("@/app/(protected)/tasks/page");
     render(<TasksPage />);
 
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -307,7 +307,7 @@ describe("TasksPage — empty scope prompt", () => {
       json: vi.fn().mockResolvedValue({ partners: [] }),
     }));
 
-    const { TasksPage } = await import("@/app/tasks/page");
+    const { TasksPage } = await import("@/app/(protected)/tasks/page");
     render(<TasksPage />);
 
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -342,7 +342,7 @@ describe("TeamPage — workspaceRole badge", () => {
     };
     getPartnersMock.mockResolvedValueOnce([externalPartner]);
 
-    const { default: Page } = await import("@/app/team/page");
+    const { default: Page } = await import("@/app/(protected)/team/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -365,7 +365,7 @@ describe("TeamPage — workspaceRole badge", () => {
     // even if called multiple times (e.g. React strict mode double invoke).
     getPartnersMock.mockResolvedValue([internalPartner]);
 
-    const { default: Page } = await import("@/app/team/page");
+    const { default: Page } = await import("@/app/(protected)/team/page");
     render(<Page />);
 
     await waitFor(() => {
@@ -379,5 +379,6 @@ describe("TeamPage — workspaceRole badge", () => {
     );
     expect(badgeSpan).toBeInTheDocument();
     expect(screen.queryByText(/授權 \d+ 個專案空間/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /設為擁有者/i })).not.toBeInTheDocument();
   });
 });
