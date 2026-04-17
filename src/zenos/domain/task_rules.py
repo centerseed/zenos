@@ -6,7 +6,7 @@ business rules from spec.md Part 7.1.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from .action import Task, TaskPriority, TaskStatus
 from .knowledge import Blindspot, Entity, EntityStatus, Severity
@@ -81,8 +81,15 @@ def recommend_priority(
     Returns (priority, reason_text).
     The caller can override the priority; the reason is always stored.
     """
+    def _ensure_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     if now is None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
+    else:
+        now = _ensure_utc(now)
 
     score = 0
     reasons: list[str] = []
@@ -116,6 +123,7 @@ def recommend_priority(
 
     # Rule 4: due date < 3 days
     if due_date:
+        due_date = _ensure_utc(due_date)
         days_left = (due_date - now).days
         if days_left < 3:
             score += 3

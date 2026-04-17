@@ -279,8 +279,10 @@ class SqlTaskRepository:
             params.append(priority)
             idx += 1
         if project is not None:
-            conditions.append(f"t.project = ${idx}")
-            params.append(project)
+            conditions.append(
+                f"(LOWER(BTRIM(COALESCE(t.project, ''))) = LOWER(BTRIM(${idx})) OR t.project_id = ${idx})"
+            )
+            params.append(str(project).strip())
             idx += 1
         if plan_id is not None:
             conditions.append(f"t.plan_id = ${idx}")

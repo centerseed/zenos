@@ -20,6 +20,16 @@ from zenos.domain.knowledge import Blindspot, Entity, Tags
 from zenos.infrastructure.context import current_partner_department, current_partner_roles
 
 
+def _ok_data(result: dict) -> dict:
+    assert result["status"] == "ok"
+    return result["data"]
+
+
+def _non_ok_data(result: dict, status: str) -> dict:
+    assert result["status"] == status
+    return result["data"]
+
+
 # ---------------------------------------------------------------------------
 # Shared test data
 # ---------------------------------------------------------------------------
@@ -458,7 +468,7 @@ class TestMcpTaskIsolation:
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_entity_get_by_id)
                 result = await search(collection="tasks")
 
-        task_ids = [t["id"] for t in result["tasks"]]
+        task_ids = [t["id"] for t in _ok_data(result)["tasks"]]
         assert "task-pub" in task_ids
         assert "task-restricted" in task_ids, "Finance member can see restricted task in their dept (SPEC §4.1)"
         assert "task-confidential" not in task_ids
@@ -473,7 +483,7 @@ class TestMcpTaskIsolation:
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_entity_get_by_id)
                 result = await search(collection="tasks")
 
-        task_ids = [t["id"] for t in result["tasks"]]
+        task_ids = [t["id"] for t in _ok_data(result)["tasks"]]
         assert len(task_ids) == 4
 
     async def test_mcp_write_blocked_for_invisible_entity(self):
@@ -488,7 +498,7 @@ class TestMcpTaskIsolation:
                     data={"id": "ent-confidential", "summary": "hacked"},
                 )
 
-        assert result["error"] == "FORBIDDEN"
+        assert _non_ok_data(result, "error")["error"] == "FORBIDDEN"
 
 
 # ===========================================================================
@@ -515,7 +525,7 @@ class TestCrossLayerConsistency:
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_entity_get_by_id)
                 mcp_result = await mcp_search(collection="tasks")
 
-        mcp_task_ids = set(t["id"] for t in mcp_result["tasks"])
+        mcp_task_ids = set(t["id"] for t in _ok_data(mcp_result)["tasks"])
 
         # Dashboard API layer
         request = _make_request(headers={"authorization": "Bearer fake"})
@@ -711,7 +721,7 @@ class TestScopedPartnerBlindspotIsolation:
                 mock_repo.get_by_id = AsyncMock(side_effect=_mock_scoped_entity_get_by_id)
                 result = await search(collection="blindspots")
 
-        assert result["blindspots"] == [], "Scoped partner should see no blindspots via MCP"
+        assert _ok_data(result)["blindspots"] == [], "Scoped partner should see no blindspots via MCP"
 
     async def test_mcp_unassigned_partner_sees_no_blindspots(self):
         from zenos.interface.mcp import search
@@ -721,7 +731,7 @@ class TestScopedPartnerBlindspotIsolation:
                 mock_os.list_blindspots = AsyncMock(return_value=ALL_BLINDSPOTS)
                 result = await search(collection="blindspots")
 
-        assert result["blindspots"] == []
+        assert _ok_data(result)["blindspots"] == []
 
 
 @pytest.mark.asyncio
@@ -762,7 +772,7 @@ class TestScopedPartnerTaskIsolation:
                 mock_repo.list_all = AsyncMock(return_value=list(SCOPED_ALL_ENTITIES))
                 result = await search(collection="tasks")
 
-        task_ids = [t["id"] for t in result["tasks"]]
+        task_ids = [t["id"] for t in _ok_data(result)["tasks"]]
         assert "task-in-l1" in task_ids, "Task in authorized L1 should be visible via MCP"
         assert "task-out-l1" not in task_ids, "Task outside authorized L1 should be hidden via MCP"
         assert "task-no-link" not in task_ids, "Unlinked task should not be visible to scoped partner via MCP"
@@ -790,7 +800,7 @@ class TestScopedPartnerTaskIsolation:
                 mock_ts.list_tasks = AsyncMock(return_value=ALL_SCOPED_TASKS)
                 result = await search(collection="tasks")
 
-        assert result["tasks"] == []
+        assert _ok_data(result)["tasks"] == []
 
 
 @pytest.mark.asyncio
@@ -903,7 +913,7 @@ class TestLegacyRoleRestrictedCompatibility:
 
 
 # ===========================================================================
-# Part 6: DC-1 fix — MCP _is_task_visible scoped partner ignores entity visibility
+# Part 6: Guest task visibility follows entity visibility inside authorized subtree
 # ===========================================================================
 
 # A restricted entity that lives inside the scoped partner's L1 subtree
@@ -931,15 +941,11 @@ SCOPED_ALL_ENTITIES_WITH_RESTRICTED = [
 
 
 @pytest.mark.asyncio
-class TestScopedPartnerTaskVisibilityIgnoresEntityVisibility:
-    """DC-1: MCP _is_task_visible scoped partner path must not filter by entity visibility.
+class TestScopedPartnerTaskVisibilityRespectsEntityVisibility:
+    """Guest should only see public tasks inside the authorized subtree."""
 
-    A task linked to a restricted entity that is inside the scoped partner's L1 subtree
-    MUST be visible to the scoped partner.
-    """
-
-    async def test_mcp_scoped_partner_sees_task_linked_to_restricted_entity_in_l1(self):
-        """DC-1: task linked to restricted entity in L1 scope is visible to scoped partner."""
+    async def test_mcp_scoped_partner_hides_task_linked_to_restricted_entity_in_l1(self):
+        """Task linked to restricted entity in L1 scope stays hidden from scoped partner."""
         from zenos.interface.mcp import search
 
         tasks = [SCOPED_TASK_RESTRICTED_IN_L1, SCOPED_TASK_OUT_L1, SCOPED_TASK_NO_LINK]
@@ -949,17 +955,18 @@ class TestScopedPartnerTaskVisibilityIgnoresEntityVisibility:
                  patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=tasks)
                 mock_repo.list_all = AsyncMock(return_value=SCOPED_ALL_ENTITIES_WITH_RESTRICTED)
+                mock_repo.get_by_id = AsyncMock(side_effect=lambda eid: next((e for e in SCOPED_ALL_ENTITIES_WITH_RESTRICTED if e.id == eid), None))
                 result = await search(collection="tasks")
 
-        task_ids = [t["id"] for t in result["tasks"]]
-        assert "task-restricted-in-l1" in task_ids, (
-            "Scoped partner must see tasks linked to restricted entities within their L1 scope"
+        task_ids = [t["id"] for t in _ok_data(result)["tasks"]]
+        assert "task-restricted-in-l1" not in task_ids, (
+            "Scoped partner must not see tasks linked to restricted entities within their L1 scope"
         )
         assert "task-out-l1" not in task_ids, "Task outside L1 scope remains hidden"
         assert "task-no-link" not in task_ids, "Unlinked task remains hidden"
 
     async def test_mcp_scoped_partner_and_dashboard_api_task_visibility_consistent_for_restricted_entity(self):
-        """DC-2: MCP and Dashboard API agree on task visibility for restricted entity in L1 scope."""
+        """MCP and Dashboard API agree that restricted in-scope tasks stay hidden."""
         from zenos.interface.mcp import search as mcp_search
         from zenos.interface.dashboard_api import list_tasks as api_list_tasks
 
@@ -971,9 +978,10 @@ class TestScopedPartnerTaskVisibilityIgnoresEntityVisibility:
                  patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_ts.list_tasks = AsyncMock(return_value=tasks)
                 mock_repo.list_all = AsyncMock(return_value=SCOPED_ALL_ENTITIES_WITH_RESTRICTED)
+                mock_repo.get_by_id = AsyncMock(side_effect=lambda eid: next((e for e in SCOPED_ALL_ENTITIES_WITH_RESTRICTED if e.id == eid), None))
                 mcp_result = await mcp_search(collection="tasks")
 
-        mcp_task_ids = set(t["id"] for t in mcp_result["tasks"])
+        mcp_task_ids = set(t["id"] for t in _ok_data(mcp_result)["tasks"])
 
         # Dashboard API layer
         request = _make_request(headers={"authorization": "Bearer fake"})
@@ -984,6 +992,12 @@ class TestScopedPartnerTaskVisibilityIgnoresEntityVisibility:
              patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo:
             mock_task_repo.list_all = AsyncMock(return_value=tasks)
             mock_entity_repo.list_all = AsyncMock(return_value=SCOPED_ALL_ENTITIES_WITH_RESTRICTED)
+            mock_entity_repo.get_by_id = AsyncMock(
+                side_effect=lambda eid: next(
+                    (e for e in SCOPED_ALL_ENTITIES_WITH_RESTRICTED if e.id == eid),
+                    None,
+                )
+            )
             api_resp = await api_list_tasks(request)
 
         api_body = json.loads(api_resp.body)
@@ -993,7 +1007,7 @@ class TestScopedPartnerTaskVisibilityIgnoresEntityVisibility:
             f"MCP and Dashboard API must agree on task visibility for scoped partner. "
             f"MCP: {mcp_task_ids}, API: {api_task_ids}"
         )
-        assert "task-restricted-in-l1" in mcp_task_ids, "Both layers should expose task"
+        assert "task-restricted-in-l1" not in mcp_task_ids, "Both layers should hide restricted in-scope task from guest"
 
 
 # ===========================================================================
@@ -1224,7 +1238,7 @@ class TestS04QuerySlicingGuestMemberOwner:
                 # Default entity_level is L1+L2, so L3 is excluded from this assertion
                 result = await search(collection="entities")
 
-        entity_ids = [e["id"] for e in result["entities"]]
+        entity_ids = [e["id"] for e in _ok_data(result)["entities"]]
         # Owner sees all L1+L2 entities (default max_level=2 excludes L3)
         assert "s04-l1-a" in entity_ids, "Owner sees L1-A"
         assert "s04-l1-b" in entity_ids, "Owner sees L1-B"
@@ -1242,7 +1256,7 @@ class TestS04QuerySlicingGuestMemberOwner:
                 mock_os.list_entities = AsyncMock(return_value=S04_ALL_ENTITIES)
                 result = await search(collection="entities")
 
-        entity_ids = [e["id"] for e in result["entities"]]
+        entity_ids = [e["id"] for e in _ok_data(result)["entities"]]
         assert "s04-l1-a" in entity_ids
         assert "s04-l1-b" in entity_ids
         assert "s04-restricted-a" in entity_ids, "Member can see restricted via MCP (SPEC §4.1)"
@@ -1260,7 +1274,7 @@ class TestS04QuerySlicingGuestMemberOwner:
                 mock_os._entities.list_all = AsyncMock(return_value=S04_ALL_ENTITIES)
                 result = await search(collection="entities")
 
-        entity_ids = [e["id"] for e in result["entities"]]
+        entity_ids = [e["id"] for e in _ok_data(result)["entities"]]
         assert "s04-l1-a" in entity_ids, "Guest sees authorized L1-A via MCP"
         assert "s04-l2-a" in entity_ids, "Guest sees L2-A under authorized L1-A via MCP"
         assert "s04-l1-b" not in entity_ids, "Guest cannot see unauthorized L1-B via MCP"

@@ -242,6 +242,7 @@ async def _ensure_services() -> None:
             protocol_repo=protocol_repo,
             blindspot_repo=blindspot_repo,
             task_repo=task_repo,
+            usage_log_repo=_usage_log_repo,
             governance_ai=_governance_ai,
         )
     if source_service is None:

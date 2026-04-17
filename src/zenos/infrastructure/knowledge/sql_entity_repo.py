@@ -21,6 +21,12 @@ from zenos.infrastructure.sql_common import (
 
 
 def _row_to_entity(row: asyncpg.Record) -> Entity:
+    def _optional(key: str, default: Any = None) -> Any:
+        try:
+            return row[key]
+        except (KeyError, IndexError):
+            return default
+
     tags_raw = _json_loads_safe(row["tags_json"]) or {}
     return Entity(
         id=row["id"],
@@ -41,16 +47,18 @@ def _row_to_entity(row: asyncpg.Record) -> Entity:
         owner=row["owner"],
         sources=_json_loads_safe(row["sources_json"]) or [],
         visibility=row["visibility"],
-        visible_to_roles=list(row["visible_to_roles"] or []) if "visible_to_roles" in row else [],
-        visible_to_members=list(row["visible_to_members"] or []) if "visible_to_members" in row else [],
-        visible_to_departments=list(row["visible_to_departments"] or []) if "visible_to_departments" in row else [],
+        visible_to_roles=list(_optional("visible_to_roles") or []),
+        visible_to_members=list(_optional("visible_to_members") or []),
+        visible_to_departments=list(_optional("visible_to_departments") or []),
         last_reviewed_at=_to_dt(row["last_reviewed_at"]),
         created_at=_to_dt(row["created_at"]) or _now(),
         updated_at=_to_dt(row["updated_at"]) or _now(),
         # ADR-022 Document Bundle fields
-        doc_role=row["doc_role"] if "doc_role" in row.keys() else None,
-        change_summary=row["change_summary"] if "change_summary" in row.keys() else None,
-        summary_updated_at=_to_dt(row["summary_updated_at"]) if "summary_updated_at" in row.keys() else None,
+        doc_role=_optional("doc_role"),
+        bundle_highlights=_json_loads_safe(_optional("bundle_highlights_json")) or [],
+        highlights_updated_at=_to_dt(_optional("highlights_updated_at")),
+        change_summary=_optional("change_summary"),
+        summary_updated_at=_to_dt(_optional("summary_updated_at")),
     )
 
 
@@ -116,8 +124,8 @@ class SqlEntityRepository:
                     tags_json, details_json, confirmed_by_user, owner, sources_json,
                     visibility, visible_to_roles, visible_to_members,
                     visible_to_departments, last_reviewed_at, created_at, updated_at,
-                    doc_role, change_summary, summary_updated_at
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+                    doc_role, bundle_highlights_json, highlights_updated_at, change_summary, summary_updated_at
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13::jsonb,$14,$15,$16,$17,$18,$19,$20,$21,$22::jsonb,$23,$24,$25)
                 ON CONFLICT (id) DO UPDATE SET
                     name=EXCLUDED.name, type=EXCLUDED.type, level=EXCLUDED.level,
                     parent_id=EXCLUDED.parent_id, status=EXCLUDED.status,
@@ -132,6 +140,8 @@ class SqlEntityRepository:
                     last_reviewed_at=EXCLUDED.last_reviewed_at,
                     updated_at=EXCLUDED.updated_at,
                     doc_role=EXCLUDED.doc_role,
+                    bundle_highlights_json=EXCLUDED.bundle_highlights_json,
+                    highlights_updated_at=EXCLUDED.highlights_updated_at,
                     change_summary=EXCLUDED.change_summary,
                     summary_updated_at=EXCLUDED.summary_updated_at
                 WHERE entities.partner_id = EXCLUDED.partner_id
@@ -146,7 +156,8 @@ class SqlEntityRepository:
                 entity.visible_to_members, entity.visible_to_departments,
                 entity.last_reviewed_at,
                 entity.created_at, entity.updated_at,
-                entity.doc_role, entity.change_summary, entity.summary_updated_at,
+                entity.doc_role, _dumps(entity.bundle_highlights), entity.highlights_updated_at,
+                entity.change_summary, entity.summary_updated_at,
             )
         return entity
 

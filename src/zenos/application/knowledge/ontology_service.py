@@ -59,6 +59,75 @@ def _sync_bundle_source_status(source: dict, status: str) -> None:
     source["source_status"] = status
 
 
+def _bundle_highlight_priority(source: dict) -> str:
+    """Return deterministic priority for a bundle source."""
+    if bool(source.get("is_primary")):
+        return "primary"
+
+    doc_type = str(source.get("doc_type", "")).strip().upper()
+    if doc_type in {"SPEC", "DECISION", "CONTRACT"}:
+        return "primary"
+    if doc_type in {"DESIGN", "TEST", "PLAN"}:
+        return "important"
+    return "supporting"
+
+
+def _bundle_highlight_headline(source: dict) -> str:
+    """Use label as deterministic headline when it is meaningfully descriptive."""
+    label = str(source.get("label", "")).strip()
+    source_type = str(source.get("type", "")).strip()
+    if not label:
+        return ""
+    if source_type and label.lower() == source_type.lower():
+        return ""
+    return label
+
+
+def _build_bundle_highlights_suggestion(
+    sources: list[dict],
+    existing_highlights: list[dict] | None,
+    candidate_source_ids: list[str] | None,
+) -> dict | None:
+    """Build deterministic highlight suggestions for missing source-linked entries."""
+    if not candidate_source_ids:
+        return None
+
+    candidate_set = {
+        str(source_id).strip()
+        for source_id in candidate_source_ids
+        if str(source_id).strip()
+    }
+    if not candidate_set:
+        return None
+
+    existing_source_ids = {
+        str(item.get("source_id", "")).strip()
+        for item in (existing_highlights or [])
+        if isinstance(item, dict)
+    }
+    items: list[dict] = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        source_id = str(source.get("source_id", "")).strip()
+        if not source_id or source_id not in candidate_set or source_id in existing_source_ids:
+            continue
+        items.append({
+            "source_id": source_id,
+            "headline": _bundle_highlight_headline(source),
+            "reason_to_read": "",
+            "priority": _bundle_highlight_priority(source),
+        })
+
+    if not items:
+        return None
+
+    return {
+        "type": "bundle_highlights_suggestion",
+        "items": items,
+    }
+
+
 @dataclass
 class UpsertEntityResult:
     """Result of upsert_entity, including optional governance advice."""
@@ -80,6 +149,21 @@ class DocumentSyncResult:
     relationship_changes: dict
     warnings: list[str] | None = None
     document: Entity | None = None
+
+
+class DocumentLinkageValidationError(ValueError):
+    """Structured validation error for document linked_entity_ids contract."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        missing_entity_ids: list[str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.missing_entity_ids = missing_entity_ids or []
 
 
 def _build_ancestors(entity_id: str, entity_map: dict[str, Entity], max_depth: int = 5) -> list[dict]:
@@ -563,6 +647,30 @@ class OntologyService:
             return [text]
 
         raise ValueError("linked_entity_ids must be list[str] or JSON array string")
+
+    async def _validate_document_linked_entity_ids(self, raw: object) -> list[str]:
+        """Enforce the required document linkage contract."""
+        linked_entity_ids = self._normalize_linked_entity_ids(raw)
+        if not linked_entity_ids:
+            raise DocumentLinkageValidationError(
+                "LINKED_ENTITY_IDS_REQUIRED",
+                "linked_entity_ids 為必填；請先 search(collection='entities') 找到合法 entity IDs 後再寫入 document。",
+            )
+
+        missing_entity_ids: list[str] = []
+        for eid in linked_entity_ids:
+            entity = await self._entities.get_by_id(eid)
+            if entity is None:
+                missing_entity_ids.append(eid)
+
+        if missing_entity_ids:
+            raise DocumentLinkageValidationError(
+                "LINKED_ENTITY_NOT_FOUND",
+                "linked_entity_ids 包含不存在的 entity ID；請確認後重試。",
+                missing_entity_ids=missing_entity_ids,
+            )
+
+        return linked_entity_ids
 
     async def _load_document_linkage_state(self, doc_id: str) -> tuple[str | None, list[str]]:
         """Return (primary_parent_id, related_entity_ids) from relationships."""
@@ -1585,7 +1693,7 @@ class OntologyService:
             split_rec = check_split_criteria(saved, related_docs, dependencies)
 
         # --- GovernanceAI: unified inference (rels + doc links) ---
-        if self._governance_ai and saved.id:
+        if self._governance_ai and saved.id and saved.type != EntityType.DOCUMENT:
             all_entities = await self._entities.list_all()
             entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
                 all_entities=all_entities,
@@ -1819,14 +1927,28 @@ class OntologyService:
         scope_product: limit to entities under a specific product name
         """
         results: list[dict] = []
+        all_entities = await self._entities.list_all()
+        entity_map = {entity.id: entity for entity in all_entities if entity.id}
+
+        def _is_in_scope(entity) -> bool:
+            if not scope_product:
+                return True
+            current = entity
+            visited: set[str] = set()
+            while current is not None and current.id not in visited:
+                visited.add(current.id)
+                if current.type == "product":
+                    return current.name == scope_product
+                parent_id = getattr(current, "parent_id", None)
+                current = entity_map.get(parent_id) if parent_id else None
+            return False
 
         if gap_type in ("all", "orphan_entities"):
             orphans = await self._relationships.find_orphan_entities()
             for o in orphans:
-                if scope_product:
-                    entity = await self._entities.get_by_id(o["id"])
-                    if entity and entity.product != scope_product:
-                        continue
+                entity = entity_map.get(o["id"])
+                if entity is not None and not _is_in_scope(entity):
+                    continue
                 results.append({
                     "type": "orphan",
                     "entity_id": o["id"],
@@ -1837,12 +1959,11 @@ class OntologyService:
                 })
 
         if gap_type in ("all", "weak_semantics"):
-            all_entities = await self._entities.list_all()
             weak_types = {"related_to"}
             for ent in all_entities:
                 if ent.status == "archived" or ent.type in ("product", "project"):
                     continue
-                if scope_product and ent.product != scope_product:
+                if not _is_in_scope(ent):
                     continue
                 if not ent.id:
                     continue
@@ -1863,11 +1984,10 @@ class OntologyService:
                     })
 
         if gap_type in ("all", "underconnected"):
-            all_entities = await self._entities.list_all()
             for ent in all_entities:
                 if ent.status == "archived" or ent.type in ("product", "project"):
                     continue
-                if scope_product and ent.product != scope_product:
+                if not _is_in_scope(ent):
                     continue
                 if not ent.id:
                     continue
@@ -2012,29 +2132,9 @@ class OntologyService:
                     existing = d
                     break
 
-        linked_entity_ids_raw = data.get("linked_entity_ids")
-        linked_entity_ids = self._normalize_linked_entity_ids(linked_entity_ids_raw)
-        for eid in linked_entity_ids:
-            entity = await self._entities.get_by_id(eid)
-            if entity is None:
-                raise ValueError(
-                    f"Entity '{eid}' in linked_entity_ids not found. "
-                    f"Verify the entity ID."
-                )
-
-        # --- GovernanceAI: auto-link to entities if caller didn't specify ---
-        if not linked_entity_ids and self._governance_ai:
-            all_entities = await self._entities.list_all()
-            if all_entities:
-                entity_dicts = [
-                    {"id": e.id, "name": e.name, "type": e.type}
-                    for e in all_entities if e.id
-                ]
-                inferred = self._governance_ai.infer_doc_entities(
-                    data.get("title", ""), data.get("summary", ""), entity_dicts
-                )
-                valid_ids = {e.id for e in all_entities}
-                linked_entity_ids = [eid for eid in inferred if eid in valid_ids]
+        linked_entity_ids = await self._validate_document_linked_entity_ids(
+            data.get("linked_entity_ids")
+        )
 
         # Map fields to entity format (merge semantics for sparse updates)
         parent_id = (
@@ -2106,7 +2206,9 @@ class OntologyService:
             summary_updated_at = existing.summary_updated_at
 
         # Build sources list — bundle operations take priority over legacy source field
+        sources_payload = data.get("sources")
         suggestions = []
+        suggestion_source_ids: list[str] = []
         if has_bundle_op and existing:
             sources: list[dict] = list(existing.sources) if existing.sources else []
             for src in sources:
@@ -2147,6 +2249,7 @@ class OntologyService:
                         f"REPORT, CONTRACT, GUIDE, MEETING, REFERENCE, TEST."
                     )
                 sources.append(new_source)
+                suggestion_source_ids = [new_source["source_id"]]
                 suggestions.append("change_summary 可能需要更新")
 
             elif update_source_data:
@@ -2172,6 +2275,7 @@ class OntologyService:
                     raise ValueError(
                         f"source_id '{target_sid}' not found in this document"
                     )
+                suggestion_source_ids = [str(target_sid).strip()]
                 suggestions.append("change_summary 可能需要更新")
 
             elif remove_source_data:
@@ -2200,7 +2304,6 @@ class OntologyService:
 
         else:
             # Check for plural "sources" payload first (ADR-022 bundle creation)
-            sources_payload = data.get("sources")
             if sources_payload and isinstance(sources_payload, list):
                 # Honor explicit sources array from caller
                 sources: list[dict] = []
@@ -2241,9 +2344,24 @@ class OntologyService:
             if isinstance(src, dict):
                 _sync_bundle_source_status(src, _bundle_source_status(src))
         ensure_source_ids(sources)
+        if not has_bundle_op and sources_payload and isinstance(sources_payload, list):
+            suggestion_source_ids = [
+                str(src.get("source_id", "")).strip()
+                for src in sources
+                if isinstance(src, dict)
+            ]
 
         if has_bundle_op:
             suggestions.append("bundle_highlights 可能需要更新")
+
+        if doc_role == "index":
+            suggestion = _build_bundle_highlights_suggestion(
+                sources=sources,
+                existing_highlights=bundle_highlights if isinstance(bundle_highlights, list) else [],
+                candidate_source_ids=suggestion_source_ids,
+            )
+            if suggestion is not None:
+                suggestions.append(suggestion)
 
         if doc_role == "index":
             if bundle_highlights:

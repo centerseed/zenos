@@ -116,9 +116,9 @@ async def _is_task_visible(task: object) -> bool:
     """Task visibility check.
 
     - Admin: always visible.
-    - Guest: requires at least one linked entity in their authorized L1 subtree.
-      Entity visibility (public/restricted) is NOT checked — any entity in scope
-      makes the task visible. Tasks with no linked entities are NOT visible.
+    - Guest: requires at least one linked entity in their authorized L1 subtree
+      and that linked entity must itself be visible to the guest. In the current
+      spec this means ``public`` only. Tasks with no linked entities are NOT visible.
     - Member: task hidden if ANY linked entity is invisible.
       Tasks with no linked entities are always visible (fail-open).
     """
@@ -136,8 +136,8 @@ async def _is_task_visible(task: object) -> bool:
             return False
 
         if is_guest(partner):
-            # Guest: visible if at least one linked entity is in allowed_ids.
-            # Entity visibility is NOT applied here — scope membership is sufficient.
+            # Guest: visible if at least one linked entity is both in scope and
+            # itself visible to the guest.
             if not linked:
                 return False
             authorized_ids = describe_partner_access(partner)["authorized_l1_ids"]
@@ -149,7 +149,8 @@ async def _is_task_visible(task: object) -> bool:
             for eid in linked:
                 if isinstance(eid, dict):
                     eid = eid.get("id", "")
-                if eid and eid in allowed:
+                entity = entity_map.get(eid) if eid else None
+                if eid and eid in allowed and entity and _is_entity_visible(entity):
                     return True
             return False
 
@@ -281,7 +282,10 @@ def _guest_write_rejection(collection: str) -> dict | None:
     if collection in {"protocols", "blindspots", "relationships", "entries"}:
         return {
             "status": "rejected",
-            "data": {},
+            "data": {
+                "error": "FORBIDDEN",
+                "message": "Guests cannot create or modify ontology content.",
+            },
             "rejection_reason": "Guests cannot create or modify ontology content.",
         }
     return None

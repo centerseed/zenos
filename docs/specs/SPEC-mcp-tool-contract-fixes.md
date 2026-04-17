@@ -1,13 +1,17 @@
 ---
-doc_id: SPEC-mcp-tool-contract-fixes
-title: 功能規格：MCP 工具行為契約修正集
 type: SPEC
+id: SPEC-mcp-tool-contract-fixes
+status: Superseded
 ontology_entity: MCP 介面設計
-status: approved
-version: "0.1"
-date: 2026-04-05
-supersedes: null
+created: 2026-04-05
+updated: 2026-04-15
+superseded_by: SPEC-mcp-tool-contract
 ---
+
+# Feature Spec: MCP 工具行為契約修正集
+
+> 本文件已被 [`SPEC-mcp-tool-contract`](/Users/wubaizong/clients/ZenOS/docs/specs/SPEC-mcp-tool-contract.md) 吸收。
+> 自 2026-04-15 起，MCP tool 的唯一權威來源為 `SPEC-mcp-tool-contract`。
 
 ## 背景
 

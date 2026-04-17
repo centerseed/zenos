@@ -14,6 +14,16 @@ import pytest
 from zenos.domain.knowledge import Entity, Tags
 
 
+def _ok_data(result: dict) -> dict:
+    assert result["status"] == "ok"
+    return result["data"]
+
+
+def _non_ok_data(result: dict, status: str) -> dict:
+    assert result["status"] == status
+    return result["data"]
+
+
 def _make_doc_entity(sources: list[dict], **overrides) -> Entity:
     """Create a minimal Entity with the given sources list."""
     defaults = dict(
@@ -85,9 +95,10 @@ class TestAutoSelectSkipsStalePrimary:
             mock_ss.read_source = AsyncMock(return_value="secondary content")
 
             result = await read_source(doc_id="doc-1")
+            data = _ok_data(result)
 
-            assert result["content"] == "secondary content"
-            assert result["source_id"] == "s2"
+            assert data["content"] == "secondary content"
+            assert data["source_id"] == "s2"
             # Verify the valid URI was passed, not the stale one
             mock_ss.read_source.assert_called_once_with("doc-1", source_uri="valid-secondary.md")
 
@@ -126,9 +137,10 @@ class TestAutoSelectSkipsStalePrimary:
             mock_ss.read_source = AsyncMock(return_value="primary content")
 
             result = await read_source(doc_id="doc-1")
+            data = _ok_data(result)
 
-            assert result["content"] == "primary content"
-            assert result["source_id"] == "s1"
+            assert data["content"] == "primary content"
+            assert data["source_id"] == "s1"
             mock_ss.read_source.assert_called_once_with("doc-1", source_uri="valid-primary.md")
 
     @pytest.mark.asyncio
@@ -164,9 +176,10 @@ class TestAutoSelectSkipsStalePrimary:
             mock_os.get_document = AsyncMock(return_value=doc)
 
             result = await read_source(doc_id="doc-1")
+            data = _non_ok_data(result, "error")
 
-            assert result["error"] == "SOURCE_UNAVAILABLE"
-            assert result["source_status"] == "stale"
+            assert data["error"] == "SOURCE_UNAVAILABLE"
+            assert data["source_status"] == "stale"
 
     @pytest.mark.asyncio
     async def test_source_status_alias_also_drives_selection(self):
@@ -203,9 +216,10 @@ class TestAutoSelectSkipsStalePrimary:
             mock_ss.read_source = AsyncMock(return_value="secondary content")
 
             result = await read_source(doc_id="doc-1")
+            data = _ok_data(result)
 
-            assert result["content"] == "secondary content"
-            assert result["source_id"] == "s2"
+            assert data["content"] == "secondary content"
+            assert data["source_id"] == "s2"
             mock_ss.read_source.assert_called_once_with("doc-1", source_uri="valid-secondary.md")
 
 
@@ -252,9 +266,10 @@ class TestSourceIdPassedToService:
             mock_ss.read_source = AsyncMock(return_value="second content")
 
             result = await read_source(doc_id="doc-1", source_id="s2")
+            data = _ok_data(result)
 
-            assert result["content"] == "second content"
-            assert result["source_id"] == "s2"
+            assert data["content"] == "second content"
+            assert data["source_id"] == "s2"
             # The critical assertion: the correct URI was passed to the service
             mock_ss.read_source.assert_called_once_with("doc-1", source_uri="second.md")
 
@@ -294,9 +309,10 @@ class TestSourceIdPassedToService:
             )
 
             result = await read_source(doc_id="doc-1", source_id="s2")
+            data = _ok_data(result)
 
-            assert result["content"] == "recovered second"
-            assert result["source_id"] == "s2"
+            assert data["content"] == "recovered second"
+            assert data["source_id"] == "s2"
             mock_ss.read_source_with_recovery.assert_called_once_with(
                 "doc-1", source_uri="second.md"
             )

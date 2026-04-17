@@ -26,6 +26,13 @@ from zenos.domain.task_rules import (
 )
 
 
+def _normalize_project_scope(value: object) -> str:
+    """Normalize partner-level project scope strings for stable storage/filtering."""
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
 def _parse_due_date(value: object) -> datetime | None:
     """Convert a due_date value to a timezone-aware datetime or None.
 
@@ -227,7 +234,7 @@ class TaskService:
             blocked_by=blocked_by,
             blocked_reason=blocked_reason,
             acceptance_criteria=data.get("acceptance_criteria") or [],
-            project=data.get("project") or "",
+            project=_normalize_project_scope(data.get("project")),
             attachments=data.get("attachments") or [],
         )
 

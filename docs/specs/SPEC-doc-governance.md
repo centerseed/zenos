@@ -5,6 +5,7 @@ status: Approved
 ontology_entity: documentation-governance
 created: 2026-03-26
 updated: 2026-04-17
+amended: 2026-04-17-linked-entity-required
 ---
 
 # Feature Spec: ZenOS-Enabled 專案文件治理規則
@@ -12,6 +13,8 @@ updated: 2026-04-17
 > **治理定位：External（Doc 治理模組）**
 > 本 spec 定義 agent 和用戶在管理文件時必須遵循的規則。屬於可疊加的 Doc 治理模組，可獨立於 Task 治理模組啟用。
 > 規則內容透過 `governance_guide("document")` 提供給任何 MCP client。
+>
+> **SSOT note（ADR-038）：** Agent runtime 取得治理規則的 SSOT 是 `governance_guide(topic="document", level=2)` MCP tool。本 spec 是人讀權威；`skills/governance/document-governance.md` 已降為 reference-only。Spec 修訂必須同步更新 `src/zenos/interface/governance_rules.py["document"]`，否則不得轉 `Approved`（見 `SPEC-governance-guide-contract`）。
 > 內部智慧邏輯（過時偵測演算法、關聯推斷、去重匹配）不在本 spec 範圍，見 `SPEC-governance-feedback-loop`。
 > 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
 >
@@ -240,7 +243,15 @@ superseded_by: {id}   # 僅當 status: Superseded 時填寫
 
 - 文件治理的同步操作必須採用局部更新語意。當 caller 只更新 `source.uri`、`status`、frontmatter 或分類結果時，未明示修改的欄位不得被清空。
 - L3 document entity 的主要掛載點以 `parent_id` 為準；若系統另外物化 `part_of` 或其他 relationship 作為圖譜邊，必須保證與 `parent_id` 一致，不可一邊存在一邊脫落。
-- `linked_entity_ids` 若作為文件同步輸入，必須定義為 `list[str]`。第一個 ID 代表 primary parent，其餘代表額外關聯；不得接受會造成逐字元解析的模糊字串格式。
+- `linked_entity_ids` **為建立 document 時的必填欄位（required）**，型別為 `list[str]`，至少 1 個、至多 5 個合法 entity ID。第一個 ID 代表 primary parent（映射為 `parent_id`），其餘代表額外關聯。
+  - Server 端強制驗證：缺少 `linked_entity_ids` 或為空陣列 → `status="rejected"`，`data.error.code="LINKED_ENTITY_IDS_REQUIRED"`，錯誤訊息指引 caller 先 `search(collection="entities")` 找 ID
+  - 任一 ID 不存在 → `status="rejected"`，`data.error.code="LINKED_ENTITY_NOT_FOUND"`，列出哪些 ID 不存在
+  - 不得接受會造成逐字元解析的模糊字串格式（例如逗號分隔字串）
+  - 向後相容：既有未帶 `linked_entity_ids` 的 document 可讀取，但下次 update 時必須補上（update reject 相同規則）
+  - **Acceptance Criteria**：
+    - `AC-linked-1` Given agent 呼叫 `write(collection="documents")` 且缺少 `linked_entity_ids`，When server 處理，Then 回傳 `status="rejected"` + `LINKED_ENTITY_IDS_REQUIRED`
+    - `AC-linked-2` Given agent 傳入包含 1 個不存在的 entity ID，When server 處理，Then 回傳 `status="rejected"` + `LINKED_ENTITY_NOT_FOUND`，並列出該 ID
+    - `AC-linked-3` Given agent 傳入有效的 `linked_entity_ids=["e1", "e2"]`，When server 處理，Then document 寫入成功，`parent_id="e1"`，`"e2"` 建立為額外 relationship
 - 對 rename、reclassify、archive、supersede 這類批次治理操作，系統應提供專用 sync 模式或等價流程，一次處理路徑更新、掛載修復、狀態調整與追溯關係，而不是要求 caller 手動拆成多次危險 write。
 - 對 `doc_role=index` 的文件同步，除 `sources` 外還必須同步維護 `bundle_highlights`、primary source 與 L2 掛載入口。不得只更新 source 清單而忽略文件入口層。
 

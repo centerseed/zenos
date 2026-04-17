@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from zenos.interface.mcp._common import _unified_response, _error_response
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,13 @@ async def suggest_policy(
     import zenos.interface.mcp as _mcp
     from zenos.application.identity.policy_suggestion_service import PolicySuggestionService
 
-    await _ensure_services()
-    svc = PolicySuggestionService(entity_repo=_mcp.ontology_service._entities)
-    return await svc.suggest(entity_id)
+    try:
+        await _ensure_services()
+        svc = PolicySuggestionService(entity_repo=_mcp.ontology_service._entities)
+        return _unified_response(data=await svc.suggest(entity_id))
+    except ValueError as e:
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message=str(e),
+        )

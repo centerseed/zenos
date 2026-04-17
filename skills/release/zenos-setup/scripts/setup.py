@@ -16,7 +16,25 @@ from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlencode, urlparse
 
 CLOUD_RUN_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
-MCP_CONFIG_PATH = ".claude/mcp.json"
+DEFAULT_CLAUDE_MCP_CONFIG_PATH = ".claude/mcp.json"
+DEFAULT_CODEX_MCP_CONFIG_PATH = ".mcp.json"
+# Backward-compatible constant for older tests and callers.
+MCP_CONFIG_PATH = DEFAULT_CLAUDE_MCP_CONFIG_PATH
+
+
+def resolve_mcp_config_path(platform: str) -> str:
+    if platform in {"auto", "claude"} and MCP_CONFIG_PATH:
+        return MCP_CONFIG_PATH
+    if platform == "codex":
+        return DEFAULT_CODEX_MCP_CONFIG_PATH
+    if platform == "claude":
+        return DEFAULT_CLAUDE_MCP_CONFIG_PATH
+
+    if os.path.exists(DEFAULT_CODEX_MCP_CONFIG_PATH):
+        return DEFAULT_CODEX_MCP_CONFIG_PATH
+    if os.path.exists(DEFAULT_CLAUDE_MCP_CONFIG_PATH):
+        return DEFAULT_CLAUDE_MCP_CONFIG_PATH
+    return DEFAULT_CLAUDE_MCP_CONFIG_PATH
 
 
 def load_existing(path: str) -> dict:
@@ -27,7 +45,9 @@ def load_existing(path: str) -> dict:
 
 
 def save(path: str, config: dict) -> None:
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     with open(path, "w") as f:
         json.dump(config, f, indent=2)
         f.write("\n")
@@ -56,26 +76,37 @@ def _parse_existing_url(url: str) -> Tuple[str, str, str]:
     return base_url, token, project
 
 
-def setup_cloud(token: str, url: str, project: str = "") -> None:
-    config = load_existing(MCP_CONFIG_PATH)
+def setup_cloud(
+    token: str,
+    url: str,
+    project: str = "",
+    config_path: str | None = None,
+) -> None:
+    config_path = config_path or MCP_CONFIG_PATH
+    config = load_existing(config_path)
     config["mcpServers"]["zenos"] = {
         "type": "http",
         "url": _build_cloud_url(url, token, project),
     }
-    save(MCP_CONFIG_PATH, config)
+    save(config_path, config)
     print("OK ZenOS Cloud MCP config written")
     print(f"   Server: {url}")
     if project:
         print(f"   Project: {project}")
-    print(f"   Config: {MCP_CONFIG_PATH}")
+    print(f"   Config: {config_path}")
 
 
-def update_cloud(token: Optional[str], project: Optional[str]) -> None:
+def update_cloud(
+    token: Optional[str],
+    project: Optional[str],
+    config_path: str | None = None,
+) -> None:
     """Update existing cloud MCP config, preserving unspecified values."""
-    config = load_existing(MCP_CONFIG_PATH)
+    config_path = config_path or MCP_CONFIG_PATH
+    config = load_existing(config_path)
     zenos = config.get("mcpServers", {}).get("zenos")
     if not zenos or "url" not in zenos:
-        print("ERROR: No existing zenos server found in .claude/mcp.json")
+        print(f"ERROR: No existing zenos server found in {config_path}")
         sys.exit(1)
 
     base_url, existing_token, existing_project = _parse_existing_url(zenos["url"])
@@ -87,16 +118,22 @@ def update_cloud(token: Optional[str], project: Optional[str]) -> None:
         sys.exit(1)
 
     zenos["url"] = _build_cloud_url(base_url, final_token, final_project)
-    save(MCP_CONFIG_PATH, config)
+    save(config_path, config)
     print("OK ZenOS Cloud MCP config updated")
     print(f"   Server: {base_url}")
     if final_project:
         print(f"   Project: {final_project}")
-    print(f"   Config: {MCP_CONFIG_PATH}")
+    print(f"   Config: {config_path}")
 
 
-def setup_local(gcp_project: str, github_token: str, venv_python: str) -> None:
-    config = load_existing(MCP_CONFIG_PATH)
+def setup_local(
+    gcp_project: str,
+    github_token: str,
+    venv_python: str,
+    config_path: str | None = None,
+) -> None:
+    config_path = config_path or MCP_CONFIG_PATH
+    config = load_existing(config_path)
     config["mcpServers"]["zenos-local"] = {
         "type": "stdio",
         "command": venv_python,
@@ -108,10 +145,10 @@ def setup_local(gcp_project: str, github_token: str, venv_python: str) -> None:
         },
         "cwd": os.getcwd(),
     }
-    save(MCP_CONFIG_PATH, config)
+    save(config_path, config)
     print("OK ZenOS Local MCP config written")
     print(f"   GCP Project: {gcp_project}")
-    print(f"   Config: {MCP_CONFIG_PATH}")
+    print(f"   Config: {config_path}")
 
 
 def main() -> None:
@@ -123,31 +160,38 @@ def main() -> None:
     parser.add_argument("--cloud-run-url", default=CLOUD_RUN_BASE,
                         help=f"Cloud Run URL (default: {CLOUD_RUN_BASE})")
     parser.add_argument("--local", action="store_true", help="Local MCP setup (dev)")
+    parser.add_argument(
+        "--platform",
+        choices=["auto", "claude", "codex"],
+        default="auto",
+        help="Target MCP config style (default: auto-detect)",
+    )
     parser.add_argument("--gcp-project", help="Google Cloud Project ID")
     parser.add_argument("--github-token", help="GitHub Personal Access Token")
     parser.add_argument("--venv-python", default=".venv/bin/python",
                         help="Python venv path (default: .venv/bin/python)")
     args = parser.parse_args()
+    config_path = resolve_mcp_config_path(args.platform)
 
     if args.update:
         if not args.token and not args.project:
             print("ERROR: --update requires at least one of --token or --project")
             sys.exit(1)
-        update_cloud(args.token, args.project)
+        update_cloud(args.token, args.project, config_path)
     elif args.token:
-        setup_cloud(args.token, args.cloud_run_url, args.project or "")
+        setup_cloud(args.token, args.cloud_run_url, args.project or "", config_path)
     elif args.local:
         if not args.gcp_project or not args.github_token:
             print("ERROR: --local requires --gcp-project and --github-token")
             sys.exit(1)
-        setup_local(args.gcp_project, args.github_token, args.venv_python)
+        setup_local(args.gcp_project, args.github_token, args.venv_python, config_path)
     else:
         print("ERROR: Provide --token, --update, or --local")
         parser.print_help()
         sys.exit(1)
 
     print()
-    print("Next: Restart Claude Code for MCP config to take effect")
+    print("Next: Restart your agent client for MCP config to take effect")
 
 
 if __name__ == "__main__":

@@ -16,6 +16,8 @@ from zenos.interface.mcp._common import (
     _parse_entity_level,
     _inject_workspace_context,
     _enrich_task_result,
+    _unified_response,
+    _error_response,
 )
 from zenos.interface.mcp._visibility import (
     _is_entity_visible,
@@ -24,8 +26,16 @@ from zenos.interface.mcp._visibility import (
     _is_document_like_entity_visible_for_guest,
 )
 from zenos.interface.mcp._audit import _schedule_tool_event
+from zenos.domain.task_rules import normalize_task_status
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_project_scope(value: object) -> str:
+    """Normalize partner project scope input for stable task filtering."""
+    if value is None:
+        return ""
+    return str(value).strip().lower()
 
 
 async def search(
@@ -101,15 +111,20 @@ async def search(
             return err
     await _ensure_services()
     results: dict = {}
+    warnings: list[str] = []
 
     # Resolve product name → product_id (product takes priority over product_id)
     if product is not None:
         resolved = await _mcp.entity_repo.get_by_name(product)
         if resolved is None:
-            return {
-                "error": f"找不到名為 '{product}' 的產品。請確認名稱是否正確。",
-                "hint": "用 search(collection='entities', status='product') 查看所有產品。",
-            }
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"找不到名為 '{product}' 的產品。請確認名稱是否正確。",
+                extra_data={
+                    "hint": "用 search(collection='entities', status='product') 查看所有產品。",
+                },
+            )
         product_id = resolved.id
 
     # Parse entity_level → max_level int for domain layer
@@ -129,7 +144,9 @@ async def search(
         # Also search tasks by title/description keyword
         # Auto-fill project from partner context if caller omits it
         _partner_ctx = _current_partner.get()
-        effective_project_kw = project or (_partner_ctx.get("defaultProject", "") if _partner_ctx else "")
+        effective_project_kw = _normalize_project_scope(project) or _normalize_project_scope(
+            _partner_ctx.get("defaultProject", "") if _partner_ctx else ""
+        )
         all_tasks = await _mcp.task_service.list_tasks(limit=200, project=effective_project_kw or None)
         query_lower = query.lower()
         matched_tasks = [
@@ -172,7 +189,7 @@ async def search(
             if eid:
                 _schedule_tool_event("search", eid, query, exposed_count)
 
-        return _inject_workspace_context(results)
+        return _unified_response(data=_inject_workspace_context(results), warnings=warnings)
 
     # Collection-specific listing
     collections = (
@@ -276,10 +293,25 @@ async def search(
             results["blindspots"] = [_serialize(b) for b in visible_bs[offset:offset + limit]]
 
         elif col == "tasks":
-            status_list = status.split(",") if status else None
+            status_list = None
+            if status:
+                raw_statuses = [s.strip() for s in status.split(",") if s.strip()]
+                normalized_statuses = [normalize_task_status(s) for s in raw_statuses]
+                legacy_used = [
+                    raw for raw, normalized in zip(raw_statuses, normalized_statuses, strict=False)
+                    if raw != normalized
+                ]
+                if legacy_used:
+                    warnings.append(
+                        "legacy task status alias 已自動改寫："
+                        + ", ".join(f"{raw}->{normalize_task_status(raw)}" for raw in legacy_used)
+                    )
+                status_list = normalized_statuses
             # Auto-fill project from partner context if caller omits it
             _partner = _current_partner.get()
-            effective_project = project or (_partner.get("defaultProject", "") if _partner else "")
+            effective_project = _normalize_project_scope(project) or _normalize_project_scope(
+                _partner.get("defaultProject", "") if _partner else ""
+            )
             tasks = await _mcp.task_service.list_tasks(
                 assignee=assignee,
                 created_by=created_by,
@@ -302,10 +334,11 @@ async def search(
 
         elif col == "entries":
             if not query.strip():
-                return {
-                    "error": "INVALID_INPUT",
-                    "message": "search(collection='entries') 目前需要提供 query 關鍵字",
-                }
+                return _error_response(
+                    status="rejected",
+                    error_code="INVALID_INPUT",
+                    message="search(collection='entries') 目前需要提供 query 關鍵字",
+                )
             partner_department = str(current_partner_department.get() or "all")
             entry_hits = await _mcp.entry_repo.search_content(
                 query,
@@ -325,4 +358,4 @@ async def search(
         if eid:
             _schedule_tool_event("search", eid, query or None, total_count)
 
-    return _inject_workspace_context(results)
+    return _unified_response(data=_inject_workspace_context(results), warnings=warnings)

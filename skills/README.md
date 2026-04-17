@@ -16,8 +16,13 @@ ZenOS 的治理能力與操作流程。任何 AI agent 都可以讀取這些 ski
 | Codex | `setup(platform="codex")` |
 | 其他 | `setup(platform="claude_web")` 取得 governance 內容 |
 
-回傳的 `payload.skill_files` 是一個 dict，key 為相對路徑，value 為內容。
-將每個 key-value 寫入專案根目錄對應路徑，完成後你的專案會有 `skills/` 目錄。
+Claude Code / Codex 目前的 setup tool 不再直接回傳 `payload.skill_files`。
+正確流程是：
+- 呼叫 `setup(platform=...)`
+- 讀 `manifest.skills` 取得 skill 清單
+- 依 `instructions` 從 GitHub raw URL 下載 release skill
+- 將 `skills/governance/*.md`、`skills/workflows/*.md` 寫入**專案根目錄**
+- 將 role skill 寫入 `~/.claude/skills/` 或 `~/.codex/skills/`
 
 ### Step 2：在專案的 agent 設定中加入載入指示
 
@@ -47,7 +52,7 @@ ZenOS 的治理能力與操作流程。任何 AI agent 都可以讀取這些 ski
 
 ### 更新 skills
 
-SSOT 有新版時，重跑 Step 1 的 setup tool 呼叫，重新寫入 skill_files 即可覆蓋更新。
+SSOT 有新版時，重跑 Step 1 的 setup tool 呼叫，依最新 `instructions` 重新下載並覆蓋安裝。
 
 ---
 
@@ -57,6 +62,8 @@ SSOT 有新版時，重跑 Step 1 的 setup tool 呼叫，重新寫入 skill_fil
 
 | 檔案 | 用途 | 載入時機 |
 |------|------|---------|
+| `bootstrap-protocol.md` | Step 0 context establishment，先找 product/project/L2/doc 脈絡 | 任何 capture / sync / 治理操作開始前 |
+| `shared-rules.md` | linked_entities、去重、共通治理規則 | 建票、治理掃描、跨 skill 共用規則時 |
 | `document-governance.md` | L3 文件治理合規流程、文件模板、生命週期 | 寫 SPEC / ADR / TD 或任何正式文件前 |
 | `l2-knowledge-governance.md` | L2 三問判斷、impacts 撰寫、生命週期 | 建立或審查 L2 知識節點時 |
 | `task-governance.md` | Task 建票品質、驗收、知識反饋閉環 | 建票、管票、驗收任務時 |
@@ -168,7 +175,8 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
 
 ```
 1. 取得 skills：
-   呼叫 setup(platform="codex")，將 payload.skill_files 的每個 key-value
+   呼叫 setup(platform="codex")，依 `manifest` + `instructions`
+   從 GitHub 下載 release skill，並把 `skills/governance/`、`skills/workflows/`
    寫入專案根目錄對應路徑。
 
 2. 在 agent 的 system prompt / Instructions 加入：

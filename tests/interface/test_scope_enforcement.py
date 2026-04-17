@@ -63,7 +63,7 @@ class TestRequireScopeDecorator:
             result = await write_tool()
             assert result["status"] == "error"
             assert result["data"]["error"] == "FORBIDDEN"
-            assert "write" in result["warnings"][0]
+            assert "write" in result["data"]["message"]
         finally:
             _current_scopes.reset(token)
 

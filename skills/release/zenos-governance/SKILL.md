@@ -5,7 +5,7 @@ description: >
   「掃描結果不滿意，請自動修復」時使用。此 skill 會編排 zenos-setup、
   zenos-capture、zenos-sync 與 MCP tools（search/get/write/task/confirm/analyze），
   以最少人工介入完成治理閉環。適用於 Claude/ChatGPT/Gemini 等 agent 流程。
-version: 2.0.0
+version: 2.1.1
 ---
 
 # zenos-governance
@@ -19,14 +19,19 @@ version: 2.0.0
 - 增量優先：除首次建構外，禁止重複全量掃描。
 - 任務閉環：治理問題要轉成 task，交付後用 confirm 驗收。
 
-## 0.5) Server 端治理能力（Phase 1 — Breaking Change）
+## 0.5) MCP SSOT（必守）
 
-**統一回傳格式**：所有 write/confirm/task 回傳改為：
+依 `docs/specs/SPEC-mcp-tool-contract.md`：
+
+- 所有 MCP tool 都走統一 envelope：
 ```json
-{"status": "ok|rejected", "data": {...}, "warnings": [], "suggestions": [], "similar_items": [], "context_bundle": {}, "governance_hints": {}}
+{"status":"ok|rejected|error","data":{...},"warnings":[],"suggestions":[],"similar_items":[],"context_bundle":{},"governance_hints":{}}
 ```
-- 資料在 `response["data"]` 下（不再是 top-level）
-- 錯誤用 `response["status"] == "rejected"` + `response["rejection_reason"]` 判斷
+- 成功只讀 `response["data"]`
+- caller 可修正的錯誤：`status=="rejected"`，看 `data.error` / `data.message`
+- 系統錯誤：`status=="error"`
+- 不要再假設只有 `write/confirm/task` 才包 `data`
+- `setup` 的 payload 也在 `response["data"]`，不是 top-level
 
 **Server 端驗證（強制 reject）：**
 - L2 confirm 時 impacts≥1
@@ -36,6 +41,10 @@ version: 2.0.0
 **回饋引擎：**
 - `confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates` 列出下游需更新的 entity
 - write 回傳 `similar_items` 列出相似項目
+
+**Task 狀態 canonical 值：**
+- `todo` / `in_progress` / `review` / `done` / `cancelled`
+- `backlog`、`blocked`、`archived` 僅為 legacy alias；server 會相容，但 skill 不應再主動使用
 
 Agent 應解析統一格式，讀取回傳欄位據此行動。
 
@@ -126,7 +135,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
 5. `linked_entities` 真的是最相關的 1-3 個節點嗎？
 6. title 是否動詞開頭且描述單一行動？
 7. description 是否交代背景、問題、期望結果？
-8. backlog 裡確認沒有重複票嗎？
+8. todo / in_progress / review 中確認沒有重複票嗎？
 
 **若有 2 題以上答案為否，不應直接建票。**
 
@@ -140,7 +149,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
 
 **linked_entities**：先 search 找 ID 再填（詳見 `skills/governance/shared-rules.md`）。1-3 個；找不到時標注 `[Ontology Gap]`。
 
-**status**：建票只用 `backlog` 或 `todo`，不得在 create 時設 `in_progress` / `review` / `done`。
+**status**：建票只用 `todo`，不得在 create 時設 `in_progress` / `review` / `done` / `cancelled`。
 
 **owner / assignee**：必須滿足其一。禁止建立 owner 未定且無指派條件的 task。
 

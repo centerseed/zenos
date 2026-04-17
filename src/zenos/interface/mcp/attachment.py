@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from zenos.interface.mcp._auth import _current_partner
 from zenos.interface.mcp._audit import _audit_log
+from zenos.interface.mcp._common import _unified_response, _error_response
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +41,21 @@ async def upload_attachment(
     try:
         partner = _current_partner.get()
         if not partner or not partner.get("id"):
-            return {"error": "UNAUTHORIZED", "message": "Authentication required"}
+            return _error_response(
+                error_code="UNAUTHORIZED",
+                message="Authentication required",
+            )
 
         await _ensure_services()
 
         # Validate task exists and belongs to current partner
         task_obj = await _mcp.task_service._tasks.get_by_id(task_id)
         if task_obj is None:
-            return {"error": "NOT_FOUND", "message": f"Task '{task_id}' not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Task '{task_id}' not found",
+            )
 
         from zenos.infrastructure.gcs_client import (
             get_default_bucket,
@@ -86,10 +94,17 @@ async def upload_attachment(
             target={"task_id": task_id, "attachment_id": attachment_id},
             changes={"filename": filename, "content_type": content_type, "mode": "signed_url"},
         )
-        return result
+        return _unified_response(data=result)
 
     except ValueError as e:
-        return {"error": "INVALID_INPUT", "message": str(e)}
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message=str(e),
+        )
     except Exception as e:
         logger.exception("upload_attachment failed")
-        return {"error": "INTERNAL_ERROR", "message": str(e)}
+        return _error_response(
+            error_code="INTERNAL_ERROR",
+            message=str(e),
+        )

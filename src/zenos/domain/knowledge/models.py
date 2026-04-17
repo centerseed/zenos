@@ -50,6 +50,8 @@ class Entity:
     updated_at: datetime = field(default_factory=datetime.utcnow)
     # ADR-022 Document Bundle fields (only meaningful for type="document")
     doc_role: str | None = None  # DocRole value: "single" | "index"
+    bundle_highlights: list[dict] = field(default_factory=list)  # [{source_id, headline, reason_to_read, priority}]
+    highlights_updated_at: datetime | None = None  # When bundle_highlights was last updated
     change_summary: str | None = None  # Human-authored summary of recent doc changes
     summary_updated_at: datetime | None = None  # When change_summary was last updated
 

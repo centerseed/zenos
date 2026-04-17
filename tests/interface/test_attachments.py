@@ -15,6 +15,16 @@ import pytest
 from zenos.domain.action import Task
 
 
+def _ok_data(result: dict) -> dict:
+    assert result["status"] == "ok"
+    return result["data"]
+
+
+def _non_ok_data(result: dict, status: str) -> dict:
+    assert result["status"] == status
+    return result["data"]
+
+
 def _make_task(**overrides) -> Task:
     defaults = dict(
         id="task-1",
@@ -40,8 +50,9 @@ class TestValidateAttachments:
     def test_link_attachment_requires_url(self):
         from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments([{"type": "link"}], "partner-1")
-        assert isinstance(result, dict) and result["error"] == "INVALID_INPUT"
-        assert "url" in result["message"]
+        data = _non_ok_data(result, "rejected")
+        assert data["error"] == "INVALID_INPUT"
+        assert "url" in data["message"]
 
     def test_link_attachment_valid(self):
         from zenos.interface.mcp import _validate_attachments
@@ -57,8 +68,9 @@ class TestValidateAttachments:
     def test_image_attachment_requires_id(self):
         from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments([{"type": "image"}], "partner-1")
-        assert isinstance(result, dict) and result["error"] == "INVALID_INPUT"
-        assert "attachment_id" in result["message"]
+        data = _non_ok_data(result, "rejected")
+        assert data["error"] == "INVALID_INPUT"
+        assert "attachment_id" in data["message"]
 
     def test_file_attachment_with_id(self):
         from zenos.interface.mcp import _validate_attachments
@@ -73,8 +85,9 @@ class TestValidateAttachments:
     def test_invalid_type_rejected(self):
         from zenos.interface.mcp import _validate_attachments
         result = _validate_attachments([{"type": "video"}], "partner-1")
-        assert isinstance(result, dict) and result["error"] == "INVALID_INPUT"
-        assert "video" in result["message"]
+        data = _non_ok_data(result, "rejected")
+        assert data["error"] == "INVALID_INPUT"
+        assert "video" in data["message"]
 
     def test_server_sets_uploaded_by(self):
         """uploaded_by is always set from server partner context."""
@@ -152,10 +165,11 @@ class TestUploadAttachment:
                     filename="photo.jpg",
                     content_type="image/jpeg",
                 )
+                data = _ok_data(result)
 
-                assert "attachment_id" in result
-                assert result["signed_put_url"] == "https://signed.url"
-                assert result["proxy_url"].startswith("/attachments/")
+                assert "attachment_id" in data
+                assert data["signed_put_url"] == "https://signed.url"
+                assert data["proxy_url"].startswith("/attachments/")
                 mock_sign.assert_called_once()
         finally:
             _current_partner.reset(token)
@@ -177,8 +191,7 @@ class TestUploadAttachment:
                     filename="test.txt",
                     content_type="text/plain",
                 )
-
-                assert result["error"] == "NOT_FOUND"
+                assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
         finally:
             _current_partner.reset(token)
 
@@ -192,7 +205,7 @@ class TestUploadAttachment:
                 filename="test.txt",
                 content_type="text/plain",
             )
-            assert result["error"] == "UNAUTHORIZED"
+            assert _non_ok_data(result, "error")["error"] == "UNAUTHORIZED"
         finally:
             _current_partner.reset(token)
 
@@ -235,13 +248,14 @@ class TestTaskWithAttachments:
 
         token = _current_partner.set({"id": "partner-1", "defaultProject": "zenos"})
         try:
-            result = await _task_handler(
-                action="create",
-                title="Bad task",
-                created_by="partner-1",
-                attachments=[{"type": "video"}],
-            )
-            assert result["error"] == "INVALID_INPUT"
+            with patch("zenos.interface.mcp._ensure_services"):
+                result = await _task_handler(
+                    action="create",
+                    title="Bad task",
+                    created_by="partner-1",
+                    attachments=[{"type": "video"}],
+                )
+            assert _non_ok_data(result, "rejected")["error"] == "INVALID_INPUT"
         finally:
             _current_partner.reset(token)
 

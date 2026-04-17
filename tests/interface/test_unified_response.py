@@ -195,6 +195,7 @@ class TestWriteEntitiesUnifiedFormat:
                     "source": {"type": "github", "uri": "http://x.com", "adapter": "github"},
                     "tags": {"what": [], "why": "", "how": "", "who": []},
                     "summary": "A spec",
+                    "linked_entity_ids": ["module-1"],
                 },
             )
 

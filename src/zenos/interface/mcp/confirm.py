@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 async def confirm(
     collection: str,
     id: str,
-    accepted: bool = True,
+    accepted: bool | None = None,
+    accept: bool | None = None,
     rejection_reason: str | None = None,
     mark_stale_entity_ids: list[str] | None = None,
     new_blindspot: dict | None = None,
@@ -69,6 +70,13 @@ async def confirm(
             return err
     await _ensure_services()
     try:
+        warnings: list[str] = []
+        if accepted is None:
+            if accept is not None:
+                accepted = accept
+                warnings.append("參數 alias 'accept' 已自動改寫為 'accepted'")
+            else:
+                accepted = True
         if collection == "tasks":
             result = await _mcp.task_service.confirm_task(
                 task_id=id,
@@ -140,6 +148,7 @@ async def confirm(
             )
             return _unified_response(
                 data=task_data,
+                warnings=warnings,
                 suggestions=cascade_suggestions,
                 context_bundle=context_bundle,
                 governance_hints=_build_governance_hints(
@@ -157,6 +166,7 @@ async def confirm(
             )
             return _unified_response(
                 data=confirm_data,
+                warnings=warnings,
                 context_bundle=await _build_context_bundle(
                     linked_entity_ids=[id] if collection == "entities" else []
                 ),

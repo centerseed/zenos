@@ -102,6 +102,13 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _normalize_project_scope(value: object) -> str:
+    """Normalize partner project scope strings for client-side filtering."""
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
 def _to_dt(val: Any) -> datetime | None:
     """Coerce a Firestore timestamp or datetime to a tz-aware datetime."""
     if val is None:
@@ -763,6 +770,7 @@ class FirestoreTaskRepository:
         project: str | None = None,
     ) -> list[Task]:
         q: Any = self._get_col()
+        normalized_project = _normalize_project_scope(project)
 
         if assignee is not None:
             q = q.where("assignee", "==", assignee)
@@ -784,6 +792,11 @@ class FirestoreTaskRepository:
                 continue
             if not include_archived and task.status == "archived":
                 continue
+            if normalized_project:
+                task_project = _normalize_project_scope(getattr(task, "project", ""))
+                task_project_id = str(getattr(task, "project_id", "") or "").strip()
+                if task_project != normalized_project and task_project_id != str(project).strip():
+                    continue
             results.append(task)
 
         return results

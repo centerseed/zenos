@@ -186,3 +186,25 @@ async def test_non_body_events_forwarded_unchanged():
     assert sent_events[0] == header_event
     body_text = sent_events[1]["body"].decode("utf-8")
     assert "&api_key=testkey" in body_text
+
+
+@pytest.mark.asyncio
+async def test_propagates_project_query_param_when_present():
+    """SSE endpoint URL should preserve project query param across /messages hop."""
+    original_body = b"event: endpoint\ndata: /messages/?session_id=abc-123\n\n"
+    inner_app = _CapturingApp(
+        [{"type": "http.response.body", "body": original_body, "more_body": False}]
+    )
+    propagator = SseApiKeyPropagator(inner_app)
+
+    sent_events: list[dict] = []
+
+    async def capture_send(event):
+        sent_events.append(event)
+
+    scope = _make_scope(query_string=b"api_key=testkey&project=Paceriz")
+    await propagator(scope, None, capture_send)
+
+    body_text = sent_events[0]["body"].decode("utf-8")
+    assert "&api_key=testkey" in body_text
+    assert "&project=paceriz" in body_text

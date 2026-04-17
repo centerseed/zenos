@@ -349,7 +349,10 @@ class TestWriteToolWorkspaceId:
         partner = _make_partner("home-1")
         token = _current_partner.set(partner)
         try:
-            with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_repo:
+                mock_repo.get_by_id = AsyncMock(return_value=None)
+                mock_repo.get_by_name = AsyncMock(return_value=None)
                 mock_os.upsert_entity = AsyncMock(return_value=upsert_result)
                 result = await write(
                     collection="entities",

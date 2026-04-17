@@ -55,6 +55,28 @@ async def test_create_accepts_plan_fields_when_valid():
 
 
 @pytest.mark.asyncio
+async def test_create_accepts_due_date_string_without_datetime_timezone_error():
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=None)
+    blindspot_repo = AsyncMock()
+
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    result = await svc.create_task(
+        {
+            "title": "Implement analytics tracking",
+            "created_by": "pm",
+            "due_date": "2026-05-15",
+        }
+    )
+
+    assert result.task.due_date is not None
+    assert result.task.due_date.tzinfo == timezone.utc
+
+
+@pytest.mark.asyncio
 async def test_update_rejects_plan_order_without_plan_id():
     existing = Task(
         id="task-1",

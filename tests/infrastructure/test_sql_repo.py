@@ -861,6 +861,21 @@ class TestSqlTaskRepository:
         assert "confirmed_by_creator" in sql
         assert PARTNER_ID == conn.fetch.call_args_list[0][0][1]
 
+    def test_list_all_project_filter_matches_case_insensitively_and_by_project_id(self):
+        """project filter should survive case drift and future project_id-backed rows."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        import asyncio
+
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlTaskRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.list_all(project="  Paceriz  "))
+
+        sql = conn.fetch.call_args_list[0][0][0]
+        project_param = conn.fetch.call_args_list[0][0][2]
+        assert "LOWER(BTRIM(COALESCE(t.project, ''))) = LOWER(BTRIM($2))" in sql
+        assert "t.project_id = $2" in sql
+        assert project_param == "Paceriz"
+
     def test_upsert_new_task_generates_id(self):
         """upsert() with id=None generates a new id."""
         from zenos.infrastructure.action import SqlTaskRepository
@@ -1024,6 +1039,48 @@ class TestSqlTaskRepository:
             f"project should be '' but got {task.project!r} — "
             "None would cause NOT NULL violation in PostgreSQL"
         )
+
+    def test_task_service_create_task_normalizes_project_scope(self):
+        """create_task() should store partner project scope as trimmed lowercase slug."""
+        from zenos.application.action.task_service import TaskService
+        from zenos.domain.action import Task
+        from unittest.mock import AsyncMock
+        import asyncio
+
+        captured: list[Task] = []
+
+        async def fake_upsert(task: Task) -> Task:
+            captured.append(task)
+            return task
+
+        task_repo_mock = AsyncMock()
+        task_repo_mock.upsert = AsyncMock(side_effect=fake_upsert)
+
+        entity_repo_mock = AsyncMock()
+        entity_repo_mock.list_all = AsyncMock(return_value=[])
+        entity_repo_mock.get_by_id = AsyncMock(return_value=None)
+
+        blindspot_repo_mock = AsyncMock()
+        blindspot_repo_mock.get_by_id = AsyncMock(return_value=None)
+
+        svc = TaskService(
+            task_repo=task_repo_mock,
+            entity_repo=entity_repo_mock,
+            blindspot_repo=blindspot_repo_mock,
+        )
+
+        asyncio.get_event_loop().run_until_complete(
+            svc.create_task(
+                {
+                    "title": "test task",
+                    "project": "  Paceriz  ",
+                    "created_by": PARTNER_ID,
+                }
+            )
+        )
+
+        assert len(captured) == 1
+        assert captured[0].project == "paceriz"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1376,6 +1433,7 @@ class TestSqlUsageLogRepository:
                 tokens_in=500,
                 tokens_out=120,
                 model="gpt-4o",
+                outcome="success",
             )
         )
 
@@ -1388,6 +1446,7 @@ class TestSqlUsageLogRepository:
         assert args[2] == "gpt-4o"   # model
         assert args[3] == 500         # tokens_in
         assert args[4] == 120         # tokens_out
+        assert args[5] == "success"   # outcome
 
     def test_skips_insert_for_empty_partner_id(self):
         """write_usage_log silently returns without querying when partner_id is empty."""

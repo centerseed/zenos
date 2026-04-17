@@ -22,6 +22,16 @@ from zenos.domain.knowledge import Blindspot, Entity, Protocol, Tags
 from zenos.infrastructure.context import current_partner_department, current_partner_roles
 
 
+def _ok_data(result: dict) -> dict:
+    assert result["status"] == "ok"
+    return result["data"]
+
+
+def _non_ok_data(result: dict, status: str) -> dict:
+    assert result["status"] == status
+    return result["data"]
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -179,7 +189,7 @@ class TestWriteAuth:
                     collection="entities",
                     data={"id": "ent-1", "summary": "hacked"},
                 )
-        assert result["error"] == "FORBIDDEN"
+        assert _non_ok_data(result, "error")["error"] == "FORBIDDEN"
 
     async def test_write_visible_entity_succeeds(self):
         """User who can see the entity can update it."""
@@ -240,7 +250,7 @@ class TestWriteAuth:
                     data={"id": "ent-1", "visibility": "public"},
                 )
         # Under new model: confidential is admin-only, non-admin cannot see it at all
-        assert result["error"] == "FORBIDDEN"
+        assert _non_ok_data(result, "error")["error"] == "FORBIDDEN"
 
     async def test_admin_can_change_confidential_visibility(self):
         """Admin can modify visibility on confidential entity."""
@@ -356,7 +366,7 @@ class TestTaskVisibility:
                 mock_repo.get_by_id = AsyncMock(return_value=secret)
                 result = await search(collection="tasks")
 
-        task_ids = [t["id"] for t in result["tasks"]]
+        task_ids = [t["id"] for t in _ok_data(result)["tasks"]]
         assert "t-vis" in task_ids
         assert "t-hid" not in task_ids
 
@@ -376,7 +386,7 @@ class TestTaskVisibility:
                 mock_repo.get_by_id = AsyncMock(return_value=secret)
                 result = await get(collection="tasks", id="task-1")
 
-        assert result["error"] == "NOT_FOUND"
+        assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
 
 
 # ===========================================================================
@@ -431,7 +441,7 @@ class TestProtocolVisibility:
                 mock_repo.get_by_id = AsyncMock(return_value=entity)
                 result = await get(collection="protocols", id="proto-1")
 
-        assert result["error"] == "NOT_FOUND"
+        assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
 
 
 # ===========================================================================
@@ -491,7 +501,7 @@ class TestBlindspotVisibility:
                 mock_repo.get_by_id = AsyncMock(return_value=secret)
                 result = await get(collection="blindspots", id="bs-1")
 
-        assert result["error"] == "NOT_FOUND"
+        assert _non_ok_data(result, "rejected")["error"] == "NOT_FOUND"
 
 
 # ===========================================================================

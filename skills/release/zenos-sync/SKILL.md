@@ -8,7 +8,7 @@ description: >
   或在一批 commits 後想讓 ontology 跟上，或說「幫我同步 {專案名}」時使用。
   注意：第一次為某個專案建立 ontology 請用 /zenos-capture {目錄}，
   /zenos-sync 是為已有 ontology 的專案做增量同步。
-version: 3.2.0
+version: 3.2.1
 ---
 
 # /zenos-sync — Git 增量同步
@@ -19,8 +19,9 @@ version: 3.2.0
 **適用時機**：已有 ontology 的專案，需要跟上最近的 commits。
 **首次建構**：請改用 `/zenos-capture {目錄路徑}`。
 
-> **啟動前必須完成 [Step 0: Context Establishment](../../governance/bootstrap-protocol.md)**。
+> **啟動前先讀 `skills/governance/bootstrap-protocol.md`，完成 Step 0: Context Establishment。**
 > 跳過 Step 0 就開始寫入 ontology = 違規操作。
+> 若 `skills/governance/bootstrap-protocol.md` 不存在：直接回報「ZenOS 安裝不完整，請先重新執行 /zenos-setup」，不要自行補 Step 0，也不要繼續 ideate。
 > 完成 Step 0 後你會有：`PRODUCT_ID`、`PRODUCT_NAME`、`PROJECT_NAME`、`L2_ENTITIES`、`EXISTING_DOCS`。
 > 後續所有 `search` / `write` 都帶 `product_id=PRODUCT_ID`。
 

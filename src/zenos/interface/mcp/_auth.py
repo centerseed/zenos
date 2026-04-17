@@ -64,6 +64,13 @@ _partner_validator = PartnerKeyValidator()
 _jwt_service: object | None = None
 
 
+def _normalize_project_scope(value: object) -> str:
+    """Normalize project scope from MCP query params for request-local defaults."""
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
 def _get_jwt_service():
     """Lazily initialise JwtService singleton."""
     global _jwt_service  # noqa: PLW0603
@@ -103,6 +110,9 @@ class ApiKeyMiddleware:
                     current_partner_id,
                     current_partner_authorized_entity_ids,
                 )
+                project_override = self._extract_project(scope)
+                if project_override:
+                    partner = {**partner, "defaultProject": project_override}
                 # Preserve original shared_partner_id before active_partner_view strips it
                 _original_shared_partner_id.set(
                     str(partner["sharedPartnerId"]) if partner.get("sharedPartnerId") else None
@@ -184,6 +194,10 @@ class ApiKeyMiddleware:
             response = JSONResponse({"error": "UNAUTHORIZED"}, status_code=401)
             return await response(scope, receive, send)
 
+        project_override = self._extract_project(scope)
+        if project_override:
+            partner = {**partner, "defaultProject": project_override}
+
         ws_header = self._extract_workspace_id(scope)
         jwt_workspace_ids = payload.get("workspace_ids")
         allowed_ws: set[str] | None = None
@@ -256,6 +270,13 @@ class ApiKeyMiddleware:
         ws = headers.get(b"x-active-workspace-id", b"").decode().strip()
         return ws or None
 
+    @staticmethod
+    def _extract_project(scope) -> str | None:
+        """Extract project override from query string for request-local defaultProject."""
+        qs = parse_qs(scope.get("query_string", b"").decode())
+        project = _normalize_project_scope(qs.get("project", [None])[0])
+        return project or None
+
 
 class SseApiKeyPropagator:
     """Inject api_key into the SSE endpoint event so clients preserve auth.
@@ -276,6 +297,7 @@ class SseApiKeyPropagator:
 
         qs = parse_qs(scope.get("query_string", b"").decode())
         api_key = qs.get("api_key", [None])[0]
+        project = _normalize_project_scope(qs.get("project", [None])[0])
 
         if not api_key:
             return await self.app(scope, receive, send)
@@ -287,7 +309,9 @@ class SseApiKeyPropagator:
                     text = body.decode("utf-8", errors="replace")
                     text = re.sub(
                         r"(data: /messages/\?session_id=[^\s&]+)",
-                        lambda m: m.group(0) + f"&api_key={api_key}",
+                        lambda m: m.group(0)
+                        + f"&api_key={api_key}"
+                        + (f"&project={project}" if project else ""),
                         text,
                     )
                     event = {**event, "body": text.encode("utf-8")}

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from zenos.interface.mcp._common import _unified_response, _error_response
+
 logger = logging.getLogger(__name__)
 
 _VALID_PLATFORMS = frozenset({"claude_code", "claude_web", "codex"})
@@ -52,39 +54,45 @@ async def setup(
     # Step 1：無 platform → 回傳平台清單
     if platform is None:
         bundle_version = get_bundle_version()
-        return {
-            "action": "ask_platform",
-            "bundle_version": bundle_version,
-            "question": "你使用哪個 AI agent 平台？",
-            "options": [
-                {"id": "claude_code", "label": "Claude Code（CLI 或 IDE 擴充套件）"},
-                {"id": "claude_web", "label": "Claude Web UI（claude.ai 網頁版）"},
-                {"id": "codex", "label": "OpenAI Codex / ChatGPT"},
-                {"id": "other", "label": "其他"},
-            ],
-            "next_step": "呼叫 setup(platform='<id>') 繼續安裝",
-        }
+        return _unified_response(
+            data={
+                "action": "ask_platform",
+                "bundle_version": bundle_version,
+                "question": "你使用哪個 AI agent 平台？",
+                "options": [
+                    {"id": "claude_code", "label": "Claude Code（CLI 或 IDE 擴充套件）"},
+                    {"id": "claude_web", "label": "Claude Web UI（claude.ai 網頁版）"},
+                    {"id": "codex", "label": "OpenAI Codex / ChatGPT"},
+                    {"id": "other", "label": "其他"},
+                ],
+                "next_step": "呼叫 setup(platform='<id>') 繼續安裝",
+            }
+        )
 
     # Step 2：驗證 skill_selection
     if skill_selection not in _VALID_SKILL_SELECTIONS:
-        return {
-            "error": "invalid_skill_selection",
-            "message": "skill_selection 必須是 full / doc_task / task_only",
-        }
+        return _error_response(
+            status="rejected",
+            error_code="invalid_skill_selection",
+            message="skill_selection 必須是 full / doc_task / task_only",
+        )
 
     # Step 3：依 platform 委派 adapter
     if platform == "claude_code":
-        return build_claude_code_payload(skill_selection, skip_overview)
+        return _unified_response(data=build_claude_code_payload(skill_selection, skip_overview))
     if platform == "claude_web":
-        return build_claude_web_payload(skill_selection, skip_overview)
+        return _unified_response(data=build_claude_web_payload(skill_selection, skip_overview))
     if platform == "codex":
-        return build_codex_payload(skill_selection, skip_overview)
+        return _unified_response(data=build_codex_payload(skill_selection, skip_overview))
 
     # Step 4：不支援的平台
     bundle_version = get_bundle_version()
-    return {
-        "error": "unsupported_platform",
-        "message": "目前不支援此平台，請聯繫 ZenOS 管理員或到 https://github.com/centerseed/zenos 查看最新文件",
-        "supported_platforms": sorted(_VALID_PLATFORMS),
-        "bundle_version": bundle_version,
-    }
+    return _error_response(
+        status="rejected",
+        error_code="unsupported_platform",
+        message="目前不支援此平台，請聯繫 ZenOS 管理員或到 https://github.com/centerseed/zenos 查看最新文件",
+        extra_data={
+            "supported_platforms": sorted(_VALID_PLATFORMS),
+            "bundle_version": bundle_version,
+        },
+    )

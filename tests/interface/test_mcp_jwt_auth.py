@@ -53,7 +53,8 @@ def _build_token(
 
 def _make_app() -> ApiKeyMiddleware:
     async def ping(_request):
-        return JSONResponse({"ok": True})
+        partner = mcp._auth._current_partner.get() or {}
+        return JSONResponse({"ok": True, "defaultProject": partner.get("defaultProject")})
 
     async def call_write(_request):
         result = await mcp.write(
@@ -219,3 +220,14 @@ class TestMcpJwtMiddlewareIntegration:
         body = resp.json()
         assert body["status"] == "error"
         assert body["data"]["error"] == "FORBIDDEN"
+
+    def test_query_project_overrides_default_project_for_jwt_request(self):
+        jwt_service = JwtService(secret=TEST_SECRET)
+        token = _build_token()
+        with _jwt_client(partner=ACTIVE_PARTNER, jwt_service=jwt_service) as client:
+            resp = client.get(
+                "/ping?project=  Paceriz  ",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["defaultProject"] == "paceriz"

@@ -17,6 +17,7 @@ from starlette.routing import Route
 from starlette.testclient import TestClient
 
 from zenos.interface.mcp import ApiKeyMiddleware
+from zenos.interface.mcp._auth import _current_partner
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +43,8 @@ def _make_test_app() -> Starlette:
     """Build a Starlette app with ApiKeyMiddleware guarding a /ping route."""
 
     async def ping(request):
-        return JSONResponse({"ok": True})
+        partner = _current_partner.get() or {}
+        return JSONResponse({"ok": True, "defaultProject": partner.get("defaultProject")})
 
     inner = Starlette(routes=[Route("/ping", ping)])
     return ApiKeyMiddleware(inner)
@@ -108,6 +110,15 @@ class TestApiKeyAuth:
         resp = client.get("/ping", headers={"Authorization": f"Bearer {ACTIVE_PARTNER['apiKey']}"})
         # Should reach the inner app (200 OK)
         assert resp.status_code == 200
+
+    def test_query_project_overrides_default_project_for_request(self, client):
+        """project query param should become request-local defaultProject."""
+        resp = client.get(
+            "/ping?project=  Paceriz  ",
+            headers={"Authorization": f"Bearer {ACTIVE_PARTNER['apiKey']}"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["defaultProject"] == "paceriz"
 
     def test_response_body_does_not_leak_internals(self, client):
         """401 response must not contain stack trace or internal details."""

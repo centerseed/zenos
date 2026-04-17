@@ -410,6 +410,27 @@ class TestLayerDecisionGate:
         with pytest.raises(ValueError, match="IMPACTS_DRAFT_REQUIRED"):
             await svc.upsert_entity(data)
 
+    async def test_dc16c_layer_decision_accepts_impacts_draft_list(self):
+        """DC-16c: layer_decision accepts list[str] impacts_draft from capture flow."""
+        svc, _ = _make_ontology_service()
+        layer_decision = {
+            "q1_persistent": True,
+            "q2_cross_role": True,
+            "q3_company_consensus": True,
+            "impacts_draft": [
+                "定價模型 改了費率結構 → 合約模板 的計費條款需更新",
+                "定價模型 新增方案 → 產品功能門檻 的解鎖邏輯需更新",
+            ],
+        }
+        data = {**_VALID_MODULE_DATA, "layer_decision": layer_decision}
+        result = await svc.upsert_entity(data)
+        assert result.entity is not None
+        assert (
+            result.entity.details["layer_decision"]["impacts_draft"]
+            == "定價模型 改了費率結構 → 合約模板 的計費條款需更新\n"
+               "定價模型 新增方案 → 產品功能門檻 的解鎖邏輯需更新"
+        )
+
     async def test_dc13_force_with_reason_bypasses_layer_decision(self):
         """DC-13: force=True + manual_override_reason → bypass succeeds, warning contains bypass message."""
         svc, _ = _make_ontology_service()

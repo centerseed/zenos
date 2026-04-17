@@ -8,17 +8,26 @@ import re
 import uuid
 from datetime import datetime, timezone
 
+from zenos.domain.task_rules import normalize_task_status
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
     _serialize,
     _unified_response,
     _enrich_task_result,
+    _error_response,
 )
 from zenos.interface.mcp._audit import _audit_log
 
 logger = logging.getLogger(__name__)
 
 _VALID_ATTACHMENT_TYPES = {"image", "file", "link"}
+
+
+def _normalize_project_scope(value: object) -> str:
+    """Normalize partner project scope input from MCP callers."""
+    if value is None:
+        return ""
+    return str(value).strip().lower()
 
 
 def _validate_attachments(
@@ -42,13 +51,18 @@ def _validate_attachments(
     for att in attachments:
         att_type = att.get("type", "file")
         if att_type not in _VALID_ATTACHMENT_TYPES:
-            return {
-                "error": "INVALID_INPUT",
-                "message": f"Invalid attachment type '{att_type}'. Must be one of: {', '.join(_VALID_ATTACHMENT_TYPES)}",
-            }
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message=f"Invalid attachment type '{att_type}'. Must be one of: {', '.join(_VALID_ATTACHMENT_TYPES)}",
+            )
         if att_type == "link":
             if not att.get("url"):
-                return {"error": "INVALID_INPUT", "message": "Link attachment requires 'url' field"}
+                return _error_response(
+                    status="rejected",
+                    error_code="INVALID_INPUT",
+                    message="Link attachment requires 'url' field",
+                )
             item = {
                 "id": att.get("id") or uuid.uuid4().hex,
                 "type": "link",
@@ -61,10 +75,11 @@ def _validate_attachments(
         else:
             # image or file: must have attachment_id from prior upload
             if not att.get("attachment_id") and not att.get("id"):
-                return {
-                    "error": "INVALID_INPUT",
-                    "message": f"'{att_type}' attachment requires 'attachment_id' (from upload_attachment)",
-                }
+                return _error_response(
+                    status="rejected",
+                    error_code="INVALID_INPUT",
+                    message=f"'{att_type}' attachment requires 'attachment_id' (from upload_attachment)",
+                )
             # Start from caller's data
             item = dict(att)
             if "attachment_id" in item and "id" not in item:
@@ -182,6 +197,16 @@ async def _task_handler(
             merged["actor_partner_id"] = partner_ctx["id"]
         return merged
 
+    def _normalize_status_with_warning(raw_status: str | None, warning_bucket: list[str]) -> str | None:
+        if raw_status is None:
+            return None
+        normalized = normalize_task_status(raw_status)
+        if normalized != raw_status:
+            warning_bucket.append(
+                f"legacy task status alias 已自動改寫：{raw_status}->{normalized}"
+            )
+        return normalized
+
     def _normalize_str_list(value: list[str] | str | None, field: str) -> list[str] | dict:  # dict = _unified_response(status="rejected")
         if value is None:
             return []
@@ -208,7 +233,10 @@ async def _task_handler(
     try:
         # Resolve partner context once — used for auto-filling created_by and project
         partner = _current_partner.get()
-        partner_default_project = partner.get("defaultProject", "") if partner else ""
+        partner_default_project = _normalize_project_scope(
+            partner.get("defaultProject", "") if partner else ""
+        )
+        mutation_warnings: list[str] = []
 
         if action == "create":
             if not title:
@@ -224,7 +252,7 @@ async def _task_handler(
                 return _unified_response(status="rejected", data={}, rejection_reason="created_by is required for create")
 
             # Auto-fill project from partner's default_project if caller omits it
-            effective_project = project or partner_default_project
+            effective_project = _normalize_project_scope(project) or partner_default_project
 
             # Parse due_date string to datetime
             parsed_due = None
@@ -255,7 +283,7 @@ async def _task_handler(
                 "description": normalized_description,
                 "assignee": assignee,
                 "priority": priority,
-                "status": status or "todo",
+                "status": _normalize_status_with_warning(status or "todo", mutation_warnings) or "todo",
                 "linked_entities": normalized_linked_entities,
                 "linked_protocol": linked_protocol,
                 "linked_blindspot": linked_blindspot,
@@ -275,7 +303,7 @@ async def _task_handler(
             # Validate and process attachments
             if attachments:
                 validated = _validate_attachments(attachments, (partner or {}).get("id"))
-                if isinstance(validated, dict) and "error" in validated:
+                if isinstance(validated, dict) and validated.get("status") != "ok":
                     return validated
                 data["attachments"] = validated
 
@@ -288,7 +316,7 @@ async def _task_handler(
                 target={"collection": "tasks", "id": task_data.get("id")},
                 changes={"input": data},
             )
-            create_warnings: list[str] = []
+            create_warnings: list[str] = list(mutation_warnings)
             if not task_result.task.linked_entities:
                 create_warnings.append(
                     "linked_entities 為空：任務缺少 ontology context，governance_hints 將無法產生有效建議"
@@ -305,7 +333,7 @@ async def _task_handler(
 
             updates: dict = {}
             if status is not None:
-                updates["status"] = status
+                updates["status"] = _normalize_status_with_warning(status, mutation_warnings)
             actor_id = (partner or {}).get("id")
             if actor_id:
                 updates["updated_by"] = actor_id
@@ -361,7 +389,7 @@ async def _task_handler(
                 validated = _validate_attachments(
                     attachments, (partner or {}).get("id"), existing_attachments=existing_atts
                 )
-                if isinstance(validated, dict) and "error" in validated:
+                if isinstance(validated, dict) and validated.get("status") != "ok":
                     return validated
                 updates["attachments"] = validated
 
@@ -394,6 +422,7 @@ async def _task_handler(
             from zenos.interface.mcp._common import _build_governance_hints
             return _unified_response(
                 data=task_data,
+                warnings=mutation_warnings,
                 suggestions=cascade_suggestions,
                 governance_hints=_build_governance_hints(
                     suggested_follow_up_tasks=cascade_suggestions,

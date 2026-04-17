@@ -18,15 +18,21 @@ version: 2.0.0
 - 先結構後內容：先修 entity/relationship，再修摘要與標籤。
 - 增量優先：除首次建構外，禁止重複全量掃描。
 - 任務閉環：治理問題要轉成 task，交付後用 confirm 驗收。
+- 文件 bundle-first：L3 document 預設視為 `doc_role=index`，治理完成必須包含 `bundle_highlights` 與 L2 可達入口。
 
-## 0.5) Server 端治理能力（Phase 1 — Breaking Change）
+## 0.5) MCP SSOT（必守）
 
-**統一回傳格式**：所有 write/confirm/task 回傳改為：
+依 `docs/specs/SPEC-mcp-tool-contract.md`：
+
+- 所有 MCP tool 都走統一 envelope：
 ```json
-{"status": "ok|rejected", "data": {...}, "warnings": [], "suggestions": [], "similar_items": [], "context_bundle": {}, "governance_hints": {}}
+{"status":"ok|rejected|error","data":{...},"warnings":[],"suggestions":[],"similar_items":[],"context_bundle":{},"governance_hints":{}}
 ```
-- 資料在 `response["data"]` 下（不再是 top-level）
-- 錯誤用 `response["status"] == "rejected"` + `response["rejection_reason"]` 判斷
+- 成功只讀 `response["data"]`
+- caller 可修正的錯誤：`status=="rejected"`，看 `data.error` / `data.message`
+- 系統錯誤：`status=="error"`
+- 不要再假設只有 `write/confirm/task` 才包 `data`
+- `setup` 的 payload 也在 `response["data"]`，不是 top-level
 
 **Server 端驗證（強制 reject）：**
 - L2 confirm 時 impacts≥1
@@ -36,6 +42,10 @@ version: 2.0.0
 **回饋引擎：**
 - `confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates` 列出下游需更新的 entity
 - write 回傳 `similar_items` 列出相似項目
+
+**Task 狀態 canonical 值：**
+- `todo` / `in_progress` / `review` / `done` / `cancelled`
+- `backlog`、`blocked`、`archived` 僅為 legacy alias；server 會相容，但 skill 不應再主動使用
 
 Agent 應解析統一格式，讀取回傳欄位據此行動。
 
@@ -69,6 +79,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - `analyze(check_type="blindspot")`
 2. 分類問題
    - 結構問題：命名混亂、L1/L2 掛錯、孤兒節點、關聯缺失。
+   - 文件問題：legacy `single` 過多、缺少 `bundle_highlights`、L2 找不到 doc bundle、source 重複或入口錯誤。
    - 內容問題：summary 技術噪音、tags 不完整、文件重複。
    - 流程問題：治理動作沒 task、完成後沒 confirm。
 3. 轉任務
@@ -76,7 +87,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - **必須先走第 5 節「Task 治理規範」再建票**。
 4. 執行修復
    - 結構修復：`write(entities/relationships)`
-   - 文件修復：`write(documents)` 或 append_sources
+   - 文件修復：`write(documents)` 做 bundle-first 重整；必要時批量升級 legacy `single` → `index`
 5. 驗收回寫
    - task 進 review 後 `confirm(collection="tasks", accepted=True)`
    - 必要時 `mark_stale_entity_ids` 或新增 blindspot。
@@ -93,7 +104,9 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - 每個核心 L2 至少一條高價值 relationship（優先 impacts/depends_on）。
 4. 文件降噪
    - 低價值文件轉 stale 或只保留 source，不建立獨立節點。
-5. 最後才修文案
+5. 文件 bundle 重整
+   - 先把同主題 L3 收斂成單一 doc bundle，補 `bundle_highlights`，再決定哪些 source 應 stale / archive。
+6. 最後才修文案
    - 統一 summary/tags 語言，避免先改文案後又被結構改動推翻。
 
 ### 4.2 驗收門檻（預設）
@@ -101,7 +114,28 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
 - 孤兒節點 = 0
 - 重複/歧義命名顯著下降（由 analyze quality 反映）
 - 核心 L2 皆有關聯
+- 核心 L2 皆能直接看到對應 doc bundle，且 bundle 有 `primary` highlight
 - 治理任務全部進入 review 或 done
+
+### 4.3 L3 Document 大範圍重整（bundle-first remediation）
+
+以下情境直接啟用批量重整，而不是逐筆補：
+
+- 同一產品存在大量 legacy `doc_role=single`
+- 多個 L3 其實在描述同一個 L2 主題
+- agent 常常搜到文件名，但不知道先讀哪份
+
+執行順序：
+1. 先盤點當前產品所有 document entity，按 `parent_id + 主題` 分群
+2. 將 legacy `single` 優先升級成 `index`
+3. 對每個 bundle 補最少 1 筆 `primary` highlight
+4. 標記 merge candidates，人工或後續 task 決定是否合併 entity
+5. 重整後再跑 `analyze(check_type="quality")` 與 L2 spot-check
+
+完成定義：
+- 新建 document 不再預設 `single`
+- 現有 active/current document 不再缺少 `bundle_highlights`
+- L2 detail 10 秒內可定位要先讀哪份文件
 
 ## 5) Task 治理規範（SPEC-task-governance）
 
@@ -126,7 +160,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
 5. `linked_entities` 真的是最相關的 1-3 個節點嗎？
 6. title 是否動詞開頭且描述單一行動？
 7. description 是否交代背景、問題、期望結果？
-8. backlog 裡確認沒有重複票嗎？
+8. todo / in_progress / review 裡確認沒有重複票嗎？
 
 **若有 2 題以上答案為否，不應直接建票。**
 
@@ -140,7 +174,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
 
 **linked_entities**：先 search 找 ID 再填（詳見 `skills/governance/shared-rules.md`）。1-3 個；找不到時標注 `[Ontology Gap]`。
 
-**status**：建票只用 `backlog` 或 `todo`，不得在 create 時設 `in_progress` / `review` / `done`。
+**status**：建票只用 `todo`，不得在 create 時設 `in_progress` / `review` / `done` / `cancelled`。
 
 **owner / assignee**：必須滿足其一。禁止建立 owner 未定且無指派條件的 task。
 

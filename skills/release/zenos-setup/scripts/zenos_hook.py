@@ -2,7 +2,7 @@
 """
 ZenOS PreToolUse Hook (matcher: Agent)
 每次啟動 subagent 前，自動把 ZenOS 脈絡注入進 agent 的 prompt。
-URL 從 .claude/mcp.json 自動讀取，無需手動配置。
+URL 從 `.claude/mcp.json` 或 `.mcp.json` 自動讀取，無需手動配置。
 """
 
 import json
@@ -18,15 +18,22 @@ HEADERS = {
 
 
 def get_zenos_url() -> str | None:
-    mcp_path = os.path.join(os.getcwd(), ".claude", "mcp.json")
-    try:
-        with open(mcp_path) as f:
-            config = json.load(f)
-        servers = config.get("mcpServers", {})
-        zenos = servers.get("zenos", {})
-        return zenos.get("url")
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
-        return None
+    candidates = [
+        os.path.join(os.getcwd(), ".mcp.json"),
+        os.path.join(os.getcwd(), ".claude", "mcp.json"),
+    ]
+    for mcp_path in candidates:
+        try:
+            with open(mcp_path) as f:
+                config = json.load(f)
+            servers = config.get("mcpServers", {})
+            zenos = servers.get("zenos", {})
+            url = zenos.get("url")
+            if url:
+                return url
+        except (FileNotFoundError, json.JSONDecodeError, KeyError):
+            continue
+    return None
 
 
 def call_mcp(url: str, method_name: str, arguments: dict) -> dict | None:
@@ -95,7 +102,10 @@ def build_context(url: str) -> str:
     )
     l2_entities = []
     if entities_result:
-        all_entities = entities_result.get("entities", [])
+        all_entities = (
+            entities_result.get("data", {}).get("entities")
+            or entities_result.get("entities", [])
+        )
         l2_entities = [e for e in all_entities if e.get("level") == 2]
 
     project_label = f"（{project} 專案）" if project else ""

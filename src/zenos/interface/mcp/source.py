@@ -8,7 +8,12 @@ import logging
 from zenos.domain.partner_access import is_guest
 
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
-from zenos.interface.mcp._common import _serialize, _unified_response, _build_governance_hints
+from zenos.interface.mcp._common import (
+    _serialize,
+    _unified_response,
+    _build_governance_hints,
+    _error_response,
+)
 from zenos.interface.mcp._visibility import (
     _is_entity_visible,
     _guest_allowed_entity_ids,
@@ -55,16 +60,32 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
     try:
         doc_record = await _mcp.ontology_service.get_document(doc_id)
         if doc_record is None:
-            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Document '{doc_id}' not found",
+            )
         partner = _current_partner.get() or {}
         if partner and is_guest(partner):
             allowed_ids = await _guest_allowed_entity_ids()
             if not allowed_ids or not _is_document_like_entity_visible_for_guest(doc_record, allowed_ids):
-                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message=f"Document '{doc_id}' not found",
+                )
             if hasattr(doc_record, "visibility") and not _is_entity_visible(doc_record):
-                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message=f"Document '{doc_id}' not found",
+                )
         elif hasattr(doc_record, "visibility") and not _is_entity_visible(doc_record):
-            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Document '{doc_id}' not found",
+            )
 
         # --- ADR-022: source_id-aware source selection ---
         sources = doc_record.sources or []
@@ -83,11 +104,12 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             # Find specific source by source_id
             target_source = next((s for s in sources if s.get("source_id") == source_id), None)
             if target_source is None:
-                return {
-                    "error": "NOT_FOUND",
-                    "message": f"source_id '{source_id}' not found in this document",
-                    "available_sources": all_source_info,
-                }
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message=f"source_id '{source_id}' not found in this document",
+                    extra_data={"available_sources": all_source_info},
+                )
         else:
             # Primary fallback logic (D6) — prefer primary+valid, then any valid
             # 1. is_primary=true AND valid
@@ -104,7 +126,11 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                 target_source = stale_sources[-1] if stale_sources else sources[-1]
 
         if target_source is None:
-            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' has no sources"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Document '{doc_id}' has no sources",
+            )
 
         uri = target_source.get("uri", "")
         source_type = target_source.get("type", "")
@@ -119,17 +145,20 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
 
         # If target source is stale/unresolvable, return info with setup_hint
         if source_status in ("stale", "unresolvable"):
-            return {
-                "error": "SOURCE_UNAVAILABLE",
-                "doc_id": doc_id,
-                "source_id": current_sid,
-                "source_type": source_type,
-                "source_status": source_status,
-                "uri": uri,
-                "setup_hint": _SETUP_HINTS.get(source_type, ""),
-                "alternative_sources": alternative_sources,
-                "all_sources_status": all_source_info,
-            }
+            return _error_response(
+                error_code="SOURCE_UNAVAILABLE",
+                message=f"Source '{current_sid or uri}' is currently {source_status}",
+                extra_data={
+                    "doc_id": doc_id,
+                    "source_id": current_sid,
+                    "source_type": source_type,
+                    "source_status": source_status,
+                    "uri": uri,
+                    "setup_hint": _SETUP_HINTS.get(source_type, ""),
+                    "alternative_sources": alternative_sources,
+                    "all_sources_status": all_source_info,
+                },
+            )
 
         # Read the actual content via adapter — pass selected URI so the
         # service reads the correct source, not always sources[0].
@@ -147,25 +176,42 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                 resp["source_id"] = current_sid
             if alternative_sources:
                 resp["alternative_sources"] = alternative_sources
-            return resp
+            return _unified_response(data=resp)
         if "content" in result:
             resp = {"doc_id": doc_id, "content": result["content"]}
             if current_sid:
                 resp["source_id"] = current_sid
             if alternative_sources:
                 resp["alternative_sources"] = alternative_sources
-            return resp
+            return _unified_response(data=resp)
         # Error result from read_source_with_recovery — enrich with setup_hint
         if "error" in result:
-            result["setup_hint"] = _SETUP_HINTS.get(result.get("source_type", source_type), "")
-            result["alternative_sources"] = alternative_sources
-        return result
+            return _error_response(
+                error_code=str(result.get("error", "ADAPTER_ERROR")),
+                message=str(result.get("message", "Failed to read source")),
+                extra_data={
+                    **{k: v for k, v in result.items() if k not in {"error", "message"}},
+                    "setup_hint": _SETUP_HINTS.get(result.get("source_type", source_type), ""),
+                    "alternative_sources": alternative_sources,
+                },
+            )
+        return _unified_response(data=result)
     except (ValueError, FileNotFoundError):
-        return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+        return _error_response(
+            status="rejected",
+            error_code="NOT_FOUND",
+            message=f"Document '{doc_id}' not found",
+        )
     except PermissionError:
-        return {"error": "ADAPTER_ERROR", "message": "Permission denied while reading source"}
+        return _error_response(
+            error_code="ADAPTER_ERROR",
+            message="Permission denied while reading source",
+        )
     except RuntimeError as e:
-        return {"error": "ADAPTER_ERROR", "message": str(e)}
+        return _error_response(
+            error_code="ADAPTER_ERROR",
+            message=str(e),
+        )
 
 
 async def batch_update_sources(

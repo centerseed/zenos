@@ -7,7 +7,13 @@ import logging
 from zenos.domain.partner_access import is_guest
 
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
-from zenos.interface.mcp._common import _serialize, _inject_workspace_context, _enrich_task_result
+from zenos.interface.mcp._common import (
+    _serialize,
+    _inject_workspace_context,
+    _enrich_task_result,
+    _unified_response,
+    _error_response,
+)
 from zenos.interface.mcp._visibility import (
     _is_entity_visible,
     _is_protocol_visible,
@@ -57,7 +63,11 @@ async def get(
             return err
     await _ensure_services()
     if not name and not id:
-        return {"error": "INVALID_INPUT", "message": "Must provide either name or id"}
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message="Must provide either name or id",
+        )
 
     partner = _current_partner.get() or {}
 
@@ -67,22 +77,42 @@ async def get(
         elif id:
             entity = await _mcp.entity_repo.get_by_id(id)
             if entity is None:
-                return {"error": "NOT_FOUND", "message": f"Entity '{id}' not found"}
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message=f"Entity '{id}' not found",
+                )
             rels = await _mcp.relationship_repo.list_by_entity(id)
             from zenos.application.knowledge.ontology_service import EntityWithRelationships
             result = EntityWithRelationships(entity=entity, relationships=rels)
         else:
             result = None
         if result is None:
-            return {"error": "NOT_FOUND", "message": f"Entity not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message="Entity not found",
+            )
         if partner and is_guest(partner):
             allowed_ids = await _guest_allowed_entity_ids()
             if not allowed_ids or not _is_document_like_entity_visible_for_guest(result.entity, allowed_ids):
-                return {"error": "NOT_FOUND", "message": "Entity not found"}
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message="Entity not found",
+                )
             if not _is_entity_visible(result.entity):
-                return {"error": "NOT_FOUND", "message": "Entity not found"}
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message="Entity not found",
+                )
         elif not _is_entity_visible(result.entity):
-            return {"error": "NOT_FOUND", "message": "Entity not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message="Entity not found",
+            )
         response = _serialize(result)
         # Split relationships into outgoing/incoming for clearer graph navigation
         eid = result.entity.id
@@ -119,7 +149,7 @@ async def get(
             response["impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="forward")
             response["reverse_impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="reverse")
         _schedule_tool_event("get", eid, None, None)
-        return _inject_workspace_context(response)
+        return _unified_response(data=_inject_workspace_context(response))
 
     elif collection == "protocols":
         if name:
@@ -133,59 +163,114 @@ async def get(
         else:
             result = None
         if result is None:
-            return {"error": "NOT_FOUND", "message": "Protocol not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message="Protocol not found",
+            )
         if not await _is_protocol_visible(result):
-            return {"error": "NOT_FOUND", "message": "Protocol not found"}
-        return _inject_workspace_context(_serialize(result))
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message="Protocol not found",
+            )
+        return _unified_response(data=_inject_workspace_context(_serialize(result)))
 
     elif collection == "documents":
         doc_id = id or name
         if not doc_id:
-            return {"error": "INVALID_INPUT", "message": "Provide id for documents"}
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message="Provide id for documents",
+            )
         # Try entity(type=document) first, then legacy documents
         result = await _mcp.ontology_service.get_document(doc_id)
         if result is None:
-            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Document '{doc_id}' not found",
+            )
         if partner and is_guest(partner):
             allowed_ids = await _guest_allowed_entity_ids()
             if not allowed_ids or not _is_document_like_entity_visible_for_guest(result, allowed_ids):
-                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message=f"Document '{doc_id}' not found",
+                )
             if hasattr(result, "visibility") and not _is_entity_visible(result):
-                return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message=f"Document '{doc_id}' not found",
+                )
         elif not _is_entity_visible(result):
-            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Document '{doc_id}' not found",
+            )
         serialized = _serialize(result)
         # ADR-022: enrich sources with canonical_type
         from zenos.domain.doc_types import canonical_type as compute_canonical_type
         for src in (serialized.get("sources") or []):
             if src.get("doc_type"):
                 src["canonical_type"] = compute_canonical_type(src["doc_type"])
-        return _inject_workspace_context(serialized)
+        return _unified_response(data=_inject_workspace_context(serialized))
 
     elif collection == "blindspots":
         if not id:
-            return {"error": "INVALID_INPUT", "message": "Provide id for blindspots"}
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message="Provide id for blindspots",
+            )
         result = await _mcp.blindspot_repo.get_by_id(id)
         if result is None:
-            return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Blindspot '{id}' not found",
+            )
         if not await _is_blindspot_visible(result):
-            return {"error": "NOT_FOUND", "message": f"Blindspot '{id}' not found"}
-        return _inject_workspace_context(_serialize(result))
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Blindspot '{id}' not found",
+            )
+        return _unified_response(data=_inject_workspace_context(_serialize(result)))
 
     elif collection == "tasks":
         if not id:
-            return {"error": "INVALID_INPUT", "message": "Provide id for tasks"}
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message="Provide id for tasks",
+            )
         enriched = await _mcp.task_service.get_task_enriched(id)
         if enriched is None:
-            return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Task '{id}' not found",
+            )
         task_obj, _ = enriched
         if not await _is_task_visible(task_obj):
-            return {"error": "NOT_FOUND", "message": f"Task '{id}' not found"}
-        return _inject_workspace_context(await _enrich_task_result(task_obj))
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Task '{id}' not found",
+            )
+        return _unified_response(data=_inject_workspace_context(await _enrich_task_result(task_obj)))
 
     else:
-        return {
-            "error": "INVALID_INPUT",
-            "message": f"Unknown collection '{collection}'. "
-            f"Use: entities, documents, protocols, blindspots, tasks",
-        }
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message=(
+                f"Unknown collection '{collection}'. "
+                f"Use: entities, documents, protocols, blindspots, tasks"
+            ),
+        )

@@ -51,6 +51,7 @@ def require_scope(scope: str):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
             from zenos.interface.mcp._auth import _current_scopes
+            from zenos.interface.mcp._common import _error_response
             current = _current_scopes.get()
             # None means full access (API key path)
             if current is not None and scope not in current:
@@ -58,11 +59,14 @@ def require_scope(scope: str):
                     "Scope denied: required=%s granted=%s tool=%s",
                     scope, current, func.__name__,
                 )
-                return {
-                    "status": "error",
-                    "data": {"error": "FORBIDDEN"},
-                    "warnings": [f"This operation requires '{scope}' scope. Your credential only has: {sorted(current)}"],
-                }
+                return _error_response(
+                    error_code="FORBIDDEN",
+                    message=f"This operation requires '{scope}' scope.",
+                    warnings=[
+                        f"Your credential only has: {sorted(current)}",
+                        f"Required scope: {scope}",
+                    ],
+                )
             return await func(*args, **kwargs)
         return wrapper
     return decorator

@@ -201,6 +201,6 @@ cat {TARGET}/.zenos-project.json 2>/dev/null
 各 skill 在開頭加上：
 
 ```markdown
-> **啟動前必須完成 [Step 0: Context Establishment](../../governance/bootstrap-protocol.md)**。
+> **啟動前先讀 `skills/governance/bootstrap-protocol.md`，完成 Step 0: Context Establishment。**
 > 跳過 Step 0 就開始寫入 ontology = 違規操作。
 ```

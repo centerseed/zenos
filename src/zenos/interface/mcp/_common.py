@@ -74,7 +74,7 @@ def _add_proxy_urls(attachments: list[dict]) -> list[dict]:
 def _unified_response(
     *,
     status: str = "ok",
-    data: dict,
+    data: object,
     warnings: list[str] | None = None,
     suggestions: list[dict] | None = None,
     similar_items: list[dict] | None = None,
@@ -110,6 +110,36 @@ def _unified_response(
         )
 
     return resp
+
+
+def _error_response(
+    *,
+    error_code: str,
+    message: str,
+    status: str = "error",
+    warnings: list[str] | None = None,
+    suggestions: list[dict] | None = None,
+    similar_items: list[dict] | None = None,
+    context_bundle: dict | None = None,
+    governance_hints: dict | None = None,
+    extra_data: dict | None = None,
+) -> dict:
+    """Build a unified non-ok response with machine-readable error fields."""
+    data = {
+        "error": error_code,
+        "message": message,
+        **(extra_data or {}),
+    }
+    return _unified_response(
+        status=status,
+        data=data,
+        warnings=warnings,
+        suggestions=suggestions,
+        similar_items=similar_items,
+        context_bundle=context_bundle,
+        governance_hints=governance_hints,
+        rejection_reason=message if status == "rejected" else None,
+    )
 
 
 def _inject_workspace_context(result: dict) -> dict:

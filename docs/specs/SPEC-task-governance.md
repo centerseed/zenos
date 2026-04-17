@@ -178,6 +178,8 @@ Step 3：上傳成功後，將 `{ type, name, attachment_id }` 帶入 `task(acti
 > **治理定位：External（Task 治理模組）**
 > 本 spec 定義 agent 和用戶在建立與管理 task 時必須遵循的規則。屬於可疊加的 Task 治理模組，可獨立於 Doc 治理模組啟用。
 > 規則內容透過 `governance_guide("task")` 提供給任何 MCP client。
+>
+> **SSOT note（ADR-038）：** Agent runtime 取得治理規則的 SSOT 是 `governance_guide(topic="task", level=2)` MCP tool。本 spec 是人讀權威；`skills/governance/task-governance.md` 和 `skills/governance/shared-rules.md` 已降為 reference-only（可能落後於 SSOT）。Spec 修訂必須同步更新 `src/zenos/interface/governance_rules.py["task"]`，否則不得轉 `Approved`（見 `SPEC-governance-guide-contract` AC-P0-4-*）。
 > 內部智慧邏輯（task 信號→blindspot 轉換、linked_entities 推薦、anti-pattern 偵測）不在本 spec 範圍，見 `SPEC-governance-feedback-loop`。
 > 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
 >

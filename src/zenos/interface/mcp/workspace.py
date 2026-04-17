@@ -22,7 +22,7 @@ async def list_workspaces() -> dict:
     if not partner:
         return _unified_response(
             status="error",
-            data={"error": "UNAUTHORIZED"},
+            data={"error": "UNAUTHORIZED", "message": "Authentication required"},
         )
 
     # Use async version with DB lookup for proper display names
@@ -62,4 +62,4 @@ async def list_workspaces() -> dict:
                 f"workspace_id=\"{inactive[0]['id']}\""
             )
 
-    return _unified_response(status="success", data=result)
+    return _unified_response(status="ok", data=result)

@@ -257,7 +257,7 @@ class TestRunFixDryRun:
 class TestRunFixLive:
     @pytest.mark.asyncio
     async def test_live_calls_execute_for_each_table(self):
-        """Live mode must issue one UPDATE per table."""
+        """Live mode must issue one DML statement per table."""
         async def fetchrow_side_effect(query, admin_id):
             return {"n": 2}
 
@@ -274,9 +274,11 @@ class TestRunFixLive:
 
         await run_fix(conn, ADMIN_ID, dry_run=False)
 
-        # All calls should be UPDATE statements — one per table
-        update_calls = [c for c in execute_calls if "UPDATE" in c[0]]
-        assert len(update_calls) == len(PARTNER_ID_TABLES)
+        dml_calls = [
+            c for c in execute_calls
+            if c[0].strip().startswith("UPDATE") or c[0].strip().startswith("DELETE")
+        ]
+        assert len(dml_calls) == len(PARTNER_ID_TABLES)
 
     @pytest.mark.asyncio
     async def test_live_update_uses_admin_id_param(self):
@@ -307,11 +309,12 @@ class TestRunFixLive:
         update_index = {"i": 0}
 
         async def execute_side_effect(query, *args):
-            # Only return meaningful counts for UPDATE statements;
+            # Only return meaningful counts for DML statements;
             # DROP/ADD CONSTRAINT calls also hit execute but don't affect summary.
-            if query.strip().startswith("UPDATE"):
+            if query.strip().startswith("UPDATE") or query.strip().startswith("DELETE"):
                 update_index["i"] += 1
-                return f"UPDATE {update_index['i']}"
+                verb = "DELETE" if query.strip().startswith("DELETE") else "UPDATE"
+                return f"{verb} {update_index['i']}"
             return ""
 
         conn = _make_conn(

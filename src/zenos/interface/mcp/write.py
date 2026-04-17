@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from zenos.application.knowledge.ontology_service import DocumentLinkageValidationError
 from zenos.infrastructure.github_adapter import GitHubAdapter
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.sql_common import SCHEMA, get_pool
@@ -30,6 +31,30 @@ from zenos.interface.mcp._visibility import (
 from zenos.interface.mcp._audit import _audit_log
 
 logger = logging.getLogger(__name__)
+
+
+def _document_linkage_rejection(exc: DocumentLinkageValidationError) -> dict:
+    suggestions = []
+    if exc.code == "LINKED_ENTITY_IDS_REQUIRED":
+        suggestions.append("先用 search(collection='entities') 找到要掛載的 entity IDs")
+    elif exc.code == "LINKED_ENTITY_NOT_FOUND":
+        suggestions.append("請重新 search(collection='entities') 確認每個 linked_entity_id 都存在")
+
+    data = {
+        "error": {
+            "code": exc.code,
+        },
+        "message": str(exc),
+    }
+    if exc.missing_entity_ids:
+        data["error"]["missing_entity_ids"] = exc.missing_entity_ids
+
+    return _unified_response(
+        status="rejected",
+        data=data,
+        suggestions=suggestions,
+        rejection_reason=str(exc),
+    )
 
 
 def _payload_explicit_formal_entry(data: dict) -> bool:
@@ -284,7 +309,7 @@ async def write(
                     — 錯誤（不要這樣傳）：
                       layer_decision="{\"q1_persistent\":true,...}"
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
-               summary。更新語意為 merge update（未提供欄位不清空）。
+               summary, linked_entity_ids（必填）。更新語意為 merge update（未提供欄位不清空）。
                linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
                可用 sync_mode 做文件治理批次同步：
                  - rename: 文件改名
@@ -441,7 +466,13 @@ async def write(
                     governance_hints=_build_governance_hints(warnings=preflight_warnings),
                     rejection_reason=rejection_reason,
                 )
-            result = await _mcp.ontology_service.upsert_document(data, partner=_current_partner.get())
+            try:
+                result = await _mcp.ontology_service.upsert_document(
+                    data,
+                    partner=_current_partner.get(),
+                )
+            except DocumentLinkageValidationError as exc:
+                return _document_linkage_rejection(exc)
             serialized = _serialize(result)
             _audit_log(
                 event_type="ontology.document.upsert",
