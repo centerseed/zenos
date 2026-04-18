@@ -14,7 +14,6 @@ from pathlib import Path
 from typing import Any
 
 
-from zenos.application.knowledge.governance_ssot_audit import run_governance_ssot_audit
 from zenos.domain.governance import (
     _L2_TECH_TERMS,
     _blindspot_threshold,
@@ -136,26 +135,6 @@ class GovernanceService:
             return 1.0
         covered = sum(1 for doc in index_docs if list(getattr(doc, "bundle_highlights", []) or []))
         return cls._rate(covered, len(index_docs))
-
-    @classmethod
-    def _merge_governance_ssot_signal(cls, signal: dict, governance_ssot: dict) -> dict:
-        merged = dict(signal)
-        findings = governance_ssot.get("findings", [])
-        ssot_level = governance_ssot.get("overall_level", "green")
-        red_count = sum(1 for item in findings if item.get("severity") == "red")
-        merged.setdefault("kpis", {})
-        merged["kpis"]["governance_ssot"] = {"value": red_count, "level": ssot_level}
-        merged["governance_ssot"] = governance_ssot
-        merged["overall_level"] = cls._worse_level(merged.get("overall_level", "green"), ssot_level)
-        merged["recommended_action"] = determine_recommended_action(merged["overall_level"])
-        merged.setdefault("red_reasons", [])
-        if ssot_level == "red":
-            merged["red_reasons"].append({
-                "kpi": "governance_ssot",
-                "value": red_count,
-                "reason": "governance SSOT drift is red",
-            })
-        return merged
 
     @classmethod
     def _worse_level(cls, left: str, right: str) -> str:
@@ -630,10 +609,6 @@ class GovernanceService:
             signal = self._merge_llm_health_signal(signal, llm_health)
         except Exception:
             logger.warning("compute_health_signal: llm health enrichment failed", exc_info=True)
-        try:
-            signal = self._merge_governance_ssot_signal(signal, run_governance_ssot_audit())
-        except Exception:
-            logger.warning("compute_health_signal: governance ssot enrichment failed", exc_info=True)
         return signal
 
     async def run_staleness_check(self) -> dict:

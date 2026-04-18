@@ -201,7 +201,7 @@ async def test_compute_health_signal_includes_bundle_highlights_coverage(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_compute_health_signal_includes_governance_ssot(monkeypatch):
+async def test_compute_health_signal_excludes_governance_ssot(monkeypatch):
     entity_repo = AsyncMock()
     relationship_repo = AsyncMock()
     protocol_repo = AsyncMock()
@@ -230,24 +230,13 @@ async def test_compute_health_signal_includes_governance_ssot(monkeypatch):
         "zenos.infrastructure.context.current_partner_id",
         SimpleNamespace(get=lambda: "partner-1"),
     )
-    monkeypatch.setattr(
-        "zenos.application.knowledge.governance_service.run_governance_ssot_audit",
-        lambda: {
-            "check_type": "governance_ssot",
-            "findings": [{
-                "severity": "red",
-                "type": "spec_server_rules_drift",
-                "diff_summary": "drift",
-            }],
-            "overall_level": "red",
-        },
-    )
 
     result = await service.compute_health_signal()
 
-    assert result["kpis"]["governance_ssot"]["level"] == "red"
-    assert result["governance_ssot"]["overall_level"] == "red"
-    assert any(item["kpi"] == "governance_ssot" for item in result["red_reasons"])
+    # governance_ssot audit has been removed from server runtime (CI-only)
+    assert "governance_ssot" not in result.get("kpis", {})
+    assert "governance_ssot" not in result
+    assert not any(item.get("kpi") == "governance_ssot" for item in result.get("red_reasons", []))
 
 
 @pytest.mark.asyncio

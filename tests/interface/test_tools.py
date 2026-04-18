@@ -2152,19 +2152,13 @@ class TestAnalyzeTool:
             assert data["kpis"]["duplicate_blindspot_rate"] == 0.5
             assert data["kpis"]["bundle_highlights_coverage"] == 0.5
 
-    async def test_analyze_governance_ssot(self):
+    async def test_analyze_governance_ssot_returns_invalid_input(self):
         from zenos.interface.mcp import analyze
 
-        with patch("zenos.interface.mcp.analyze.run_governance_ssot_audit", return_value={
-            "check_type": "governance_ssot",
-            "findings": [],
-            "overall_level": "green",
-        }):
-            result = await analyze(check_type="governance_ssot")
-            data = _ok_data(result)
-
-            assert data["governance_ssot"]["overall_level"] == "green"
-            assert data["governance_ssot"]["findings"] == []
+        result = await analyze(check_type="governance_ssot")
+        data = _non_ok_data(result, "rejected")
+        assert data["error"] == "INVALID_INPUT"
+        assert "Unknown check_type" in data["message"]
 
     async def test_analyze_invalid_type(self):
         from zenos.interface.mcp import analyze

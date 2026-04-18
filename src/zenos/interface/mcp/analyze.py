@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 
-from zenos.application.knowledge.governance_ssot_audit import run_governance_ssot_audit
 from zenos.domain.governance import (
     compute_search_unused_signals,
     detect_invalid_document_titles,
@@ -36,8 +35,6 @@ async def analyze(
     - 找無效文件條目 → analyze(check_type="invalid_documents")
     - 清理孤立關聯 → analyze(check_type="orphaned_relationships")
     - 檢查 server 端 LLM 依賴與 provider 健康 → analyze(check_type="llm_health")
-    - 稽核治理規則 SSOT 漂移 → analyze(check_type="governance_ssot")
-
     不要用這個工具的情境：
     - 搜尋或列出條目 → 用 search
     - 更新 ontology 內容 → 用 write
@@ -45,7 +42,7 @@ async def analyze(
     Args:
         check_type: "all" / "health" / "quality" / "staleness" / "blindspot" / "impacts" /
                     "document_consistency" / "permission_risk" / "invalid_documents" /
-                    "orphaned_relationships" / "llm_health" / "governance_ssot"
+                    "orphaned_relationships" / "llm_health"
 
     Returns:
         dict — 各 check_type 對應的子結構：
@@ -59,7 +56,6 @@ async def analyze(
         - invalid_documents: {items[{entity_id, current_title, source_uri, linked_entity_ids,
                              proposed_title, action}], count}
         - llm_health: {provider_status[{...}], dependency_points[{...}], findings[{...}], overall_level}
-        - governance_ssot: {findings[{...}], overall_level}
         - kpis: {total_items, unconfirmed_items, unconfirmed_ratio, blindspot_total,
                  duplicate_blindspots, duplicate_blindspot_rate, median_confirm_latency_days,
                  active_l2_missing_impacts, weekly_review_required}（check_type="all" 時包含）
@@ -208,9 +204,6 @@ async def analyze(
         results["llm_health"] = await _mcp.governance_service.analyze_llm_health(
             _current_partner_id.get()
         )
-
-    if check_type in ("all", "governance_ssot"):
-        results["governance_ssot"] = run_governance_ssot_audit()
 
     if check_type in ("all", "quality"):
         # Gather entry counts per entity for sparsity check
@@ -435,7 +428,7 @@ async def analyze(
                 f"Unknown check_type '{check_type}'. "
                 "Use: all, health, quality, staleness, blindspot, impacts, "
                 "document_consistency, permission_risk, invalid_documents, "
-                "orphaned_relationships, llm_health, governance_ssot"
+                "orphaned_relationships, llm_health"
             ),
         )
 
