@@ -7,11 +7,12 @@ dashboard/node_modules
 dashboard/.next
 dashboard/out
 .venv
-docs
+docs/*
 threads-*
 *.md
 !skills/**/*.md
-!docs/specs/*.md
+!docs/specs/
+!docs/specs/**
 tests/
 scripts/
 __pycache__
