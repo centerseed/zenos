@@ -626,7 +626,6 @@ async def write(
                 target_id=data["target_entity_id"],
                 rel_type=data["type"],
                 description=data["description"],
-                verb=data.get("verb"),
             )
             serialized = _serialize(result)
             _audit_log(
@@ -634,19 +633,6 @@ async def write(
                 target={"collection": collection, "id": serialized.get("id")},
                 changes={"input": data},
             )
-            # Suggest verbs when caller did not provide one
-            if result.verb is None and _mcp.governance_service is not None:
-                src_entity = await _mcp.entity_repo.get_by_id(data["source_entity_id"])
-                tgt_entity = await _mcp.entity_repo.get_by_id(data["target_entity_id"])
-                if src_entity is not None and tgt_entity is not None:
-                    suggested_verbs = await _mcp.governance_service.suggest_relationship_verb(
-                        src_entity, tgt_entity
-                    )
-                    serialized["suggested_verbs"] = suggested_verbs
-                else:
-                    serialized["suggested_verbs"] = []
-            else:
-                serialized["suggested_verbs"] = []
             return _unified_response(
                 data=serialized,
                 context_bundle=await _build_context_bundle(

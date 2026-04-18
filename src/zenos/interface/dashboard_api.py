@@ -897,7 +897,6 @@ def _relationship_to_dict(r: Relationship) -> dict:
         "type": r.type,
         "description": r.description,
         "confirmedByUser": r.confirmed_by_user,
-        "verb": r.verb,
     }
 
 

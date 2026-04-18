@@ -65,7 +65,6 @@ class Relationship:
     description: str
     id: str | None = None
     confirmed_by_user: bool = False
-    verb: str | None = None
 
 
 # ──────────────────────────────────────────────

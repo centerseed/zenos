@@ -657,7 +657,7 @@ export default function NodeDetailSheet({
                             </button>
                             {index < selectedPathEntities.length - 1 && (
                               <span className="text-[10px] text-fuchsia-300/50">
-                                {selectedPathRelationships[index]?.verb ?? "→"}
+                                {selectedPathRelationships[index]?.type ?? "→"}
                               </span>
                             )}
                           </div>
@@ -678,7 +678,7 @@ export default function NodeDetailSheet({
                             <div key={`${hop.from_id}-${hop.to_id}-${index}`} className="rounded-md border border-emerald-500/20 bg-emerald-500/5 p-2">
                               <div className="flex flex-wrap items-center gap-1.5 text-xs text-foreground/75">
                                 <span className="text-foreground/45">{hop.from_name}</span>
-                                <span className="text-[10px] text-emerald-300/60">{hop.verb ?? hop.type}</span>
+                                <span className="text-[10px] text-emerald-300/60">{hop.type}</span>
                                 {target ? (
                                   <button
                                     onClick={() => onFocusNode?.(target.id)}
@@ -725,7 +725,7 @@ export default function NodeDetailSheet({
                                 ) : (
                                   <span className="italic text-foreground/40">{hop.from_name}</span>
                                 )}
-                                <span className="text-[10px] text-blue-300/60">{hop.verb ?? hop.type}</span>
+                                <span className="text-[10px] text-blue-300/60">{hop.type}</span>
                                 {target ? (
                                   <button
                                     onClick={() => onFocusNode?.(target.id)}
@@ -1028,7 +1028,7 @@ export default function NodeDetailSheet({
                         return (
                           <div key={rel.id} className="rounded-md border border-amber-500/20 bg-amber-500/5 p-2.5 space-y-1.5">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-[10px] text-amber-400/60 font-medium">{rel.verb ?? "影響"}</span>
+                              <span className="text-[10px] text-amber-400/60 font-medium">{rel.type}</span>
                               {target ? (
                                 <button
                                   onClick={() => onFocusNode?.(target.id)}
@@ -1067,7 +1067,7 @@ export default function NodeDetailSheet({
                               ) : (
                                 <span className="text-xs text-foreground/40 italic">未知節點</span>
                               )}
-                              <span className="text-[10px] text-blue-400/60 font-medium">{rel.verb ? `${rel.verb}此節點` : "影響此節點"}</span>
+                              <span className="text-[10px] text-blue-400/60 font-medium">影響此節點</span>
                             </div>
                             {rel.description && (
                               <p className="text-[11px] text-foreground/60 leading-relaxed">{rel.description}</p>

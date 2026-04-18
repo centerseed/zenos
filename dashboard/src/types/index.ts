@@ -110,7 +110,6 @@ export interface Relationship {
   sourceEntityId: string;
   targetId: string;
   type: "depends_on" | "serves" | "owned_by" | "part_of" | "blocks" | "related_to" | "impacts" | "enables";
-  verb?: string | null;
   description: string;
   confirmedByUser: boolean;
 }
@@ -121,7 +120,6 @@ export interface ImpactChainHop {
   to_id: string;
   to_name: string;
   type: Relationship["type"];
-  verb?: string | null;
 }
 
 export interface Blindspot {

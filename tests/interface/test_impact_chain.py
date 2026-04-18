@@ -34,7 +34,6 @@ def _make_rel(
     src: str,
     tgt: str,
     rel_type: str = RelationshipType.IMPACTS,
-    verb: str | None = None,
 ) -> Relationship:
     return Relationship(
         id=f"{src}->{tgt}",
@@ -42,7 +41,6 @@ def _make_rel(
         target_id=tgt,
         type=rel_type,
         description="test",
-        verb=verb,
     )
 
 
@@ -89,7 +87,7 @@ class TestComputeImpactChain:
         """A → B returns one hop entry with correct fields."""
         a = _make_entity("a", "Alpha")
         b = _make_entity("b", "Beta")
-        rel_ab = _make_rel("a", "b", verb="校準")
+        rel_ab = _make_rel("a", "b")
 
         entities = {"a": a, "b": b}
         rels_by_entity = {"a": [rel_ab], "b": []}
@@ -102,7 +100,6 @@ class TestComputeImpactChain:
         assert hop["from_name"] == "Alpha"
         assert hop["to_id"] == "b"
         assert hop["to_name"] == "Beta"
-        assert hop["verb"] == "校準"
         assert hop["type"] == RelationshipType.IMPACTS
 
     @pytest.mark.asyncio
@@ -111,8 +108,8 @@ class TestComputeImpactChain:
         a = _make_entity("a", "Alpha")
         b = _make_entity("b", "Beta")
         c = _make_entity("c", "Gamma")
-        rel_ab = _make_rel("a", "b", verb="觸發")
-        rel_bc = _make_rel("b", "c", verb="驅動")
+        rel_ab = _make_rel("a", "b")
+        rel_bc = _make_rel("b", "c")
 
         entities = {"a": a, "b": b, "c": c}
         rels_by_entity = {
@@ -126,10 +123,8 @@ class TestComputeImpactChain:
         assert len(result) == 2
         assert result[0]["from_id"] == "a"
         assert result[0]["to_id"] == "b"
-        assert result[0]["verb"] == "觸發"
         assert result[1]["from_id"] == "b"
         assert result[1]["to_id"] == "c"
-        assert result[1]["verb"] == "驅動"
 
     @pytest.mark.asyncio
     async def test_cycle_does_not_loop_infinitely(self):
@@ -179,7 +174,7 @@ class TestComputeImpactChain:
     async def test_deleted_entity_falls_back_to_id(self):
         """When target entity is deleted (None), to_name falls back to entity_id."""
         a = _make_entity("a", "Alpha")
-        rel_ab = _make_rel("a", "missing-id", verb="觸發")
+        rel_ab = _make_rel("a", "missing-id")
 
         entities: dict[str, Entity | None] = {"a": a, "missing-id": None}
         rels_by_entity = {"a": [rel_ab], "missing-id": []}
@@ -206,21 +201,6 @@ class TestComputeImpactChain:
         result = await svc.compute_impact_chain("a")
         assert result == []
 
-    @pytest.mark.asyncio
-    async def test_verb_none_preserved_in_result(self):
-        """Relationships without a verb are represented with verb=None in the result."""
-        a = _make_entity("a", "Alpha")
-        b = _make_entity("b", "Beta")
-        rel_ab = _make_rel("a", "b", verb=None)
-
-        entities = {"a": a, "b": b}
-        rels_by_entity = {"a": [rel_ab], "b": []}
-        svc = _build_service(entities, rels_by_entity)
-
-        result = await svc.compute_impact_chain("a")
-        assert result[0]["verb"] is None
-
-
 class TestReverseImpactChain:
 
     @pytest.mark.asyncio
@@ -228,7 +208,7 @@ class TestReverseImpactChain:
         """B has incoming edge from A → reverse chain from B returns A."""
         a = _make_entity("a", "Alpha")
         b = _make_entity("b", "Beta")
-        rel_ab = _make_rel("a", "b", verb="校準")
+        rel_ab = _make_rel("a", "b")
 
         entities = {"a": a, "b": b}
         rels_by_entity = {
@@ -243,7 +223,6 @@ class TestReverseImpactChain:
         assert result[0]["from_name"] == "Alpha"
         assert result[0]["to_id"] == "b"
         assert result[0]["to_name"] == "Beta"
-        assert result[0]["verb"] == "校準"
 
     @pytest.mark.asyncio
     async def test_reverse_multi_hop(self):
@@ -251,8 +230,8 @@ class TestReverseImpactChain:
         a = _make_entity("a", "Alpha")
         b = _make_entity("b", "Beta")
         c = _make_entity("c", "Gamma")
-        rel_ab = _make_rel("a", "b", verb="觸發")
-        rel_bc = _make_rel("b", "c", verb="驅動")
+        rel_ab = _make_rel("a", "b")
+        rel_bc = _make_rel("b", "c")
 
         entities = {"a": a, "b": b, "c": c}
         rels_by_entity = {

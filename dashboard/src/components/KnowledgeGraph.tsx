@@ -23,7 +23,6 @@ interface GraphLink {
   source: string;
   target: string;
   type: Relationship["type"];
-  verb?: string | null;
 }
 
 interface KnowledgeGraphProps {
@@ -173,7 +172,6 @@ export default function KnowledgeGraph({
         source: r.sourceEntityId,
         target: r.targetId,
         type: r.type,
-        verb: r.verb ?? null,
       }));
 
     // Also draw parent→child edges from parentId hierarchy

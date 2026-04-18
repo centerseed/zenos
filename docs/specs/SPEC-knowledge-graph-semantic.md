@@ -3,7 +3,7 @@ doc_id: SPEC-knowledge-graph-semantic
 title: 功能規格：知識地圖語意增強與圖遍歷能力
 type: SPEC
 ontology_entity: TBD
-status: under_review
+status: partially_accepted
 version: "0.1"
 date: 2026-04-03
 supersedes: null
@@ -51,15 +51,21 @@ supersedes: null
 ### P0（必須有）
 
 #### 1. 關聯語意動詞
+
+**REJECTED 2026-04-18** — 實作後生產環境填寫率 8.8%（388 個 relationship 只有 34 個填），description 欄位已承擔語意表達，無 downstream consumer。已從 codebase 移除 verb 使用（DB schema 中 verb column 保留以避免 migration 風險）。
+
 - **描述**：建立或編輯關聯時，可以填寫一個短語意動詞（2–5 字，例：校準、觸發、驅動、限制）。知識地圖的邊上顯示此動詞。
 - **Acceptance Criteria**：
   - Given 一條已有 verb 的關聯，When 用戶開啟知識地圖，Then 邊上顯示該動詞
   - Given 一條沒有 verb 的關聯，When 用戶開啟知識地圖，Then 邊仍正常顯示（verb 可選填）
 
 #### 2. 影響鏈遍歷 API
-- **描述**：給定任一節點，系統能回傳其完整下游影響鏈（多跳），每條邊帶動詞。供 agent 消費 context 時使用，不需要 UI。
+
+**ACCEPTED — shipped in commit 0ede9cf (2026-04-03)**. Consumer: dashboard knowledge-map, NodeDetailSheet, MCP get entity response.
+
+- **描述**：給定任一節點，系統能回傳其完整下游影響鏈（多跳），每條邊帶 type。供 agent 消費 context 時使用，不需要 UI。
 - **Acceptance Criteria**：
-  - Given 節點 A → B → C 的關聯鏈，When agent 查詢 A 的影響鏈，Then 回傳 `[A →校準→ B →觸發→ C]`
+  - Given 節點 A → B → C 的關聯鏈，When agent 查詢 A 的影響鏈，Then 回傳 `[A --impacts--> B --enables--> C]`
   - Given 無下游的節點，When 查詢影響鏈，Then 回傳空列表（不報錯）
   - Given 有循環依賴的圖，When 查詢影響鏈，Then 不陷入無限迴圈
 
@@ -68,6 +74,9 @@ supersedes: null
 ### P1（應該有）
 
 #### 3. 圖拓撲自動 Blindspot
+
+**REJECTED 2026-04-18** — 實作後生產環境產生 51 筆拓撲 blindspot（佔總數 89%），大量 false positive（BNI 聯絡人被標 isolated、root 節點被標 leverage、Paceriz 閉環設計被標 circular），且無 UI consumer。已從 codebase 移除。
+
 - **描述**：governance 分析時，從整體圖結構偵測系統性問題，自動產生新型態 Blindspot。偵測項目：
   - **孤立節點**：沒有任何關聯的節點
   - **槓桿點**：有 3 條以上出邊（任何 type）的節點，代表影響面廣但可能缺少文件
@@ -79,12 +88,18 @@ supersedes: null
   - Given A → B → C → A 的循環，When 執行 governance analyze，Then 產生「循環依賴」Blindspot，附上完整路徑
 
 #### 4. 建立關聯時 AI 建議動詞
+
+**REJECTED 2026-04-18** — 依附於 P0.1 verb，一併移除。
+
 - **描述**：建立新關聯時，系統根據兩個節點的 tags（what / who / why）自動建議 2–3 個動詞候選，用戶可選用或自行填寫。
 - **Acceptance Criteria**：
   - Given 兩個節點各有 tags，When 用戶建立關聯，Then 系統提供至少 1 個動詞建議
   - Given 用戶不採用建議，When 用戶自行填寫動詞，Then 系統接受自定義值
 
 #### 5. 治理評分納入語意動詞完整度
+
+**REJECTED 2026-04-18** — 依附於 P0.1 verb，一併移除。
+
 - **描述**：governance 品質評分新增「關聯語意完整度」維度。有關聯但缺少 verb 的節點，評分扣分；verb 填寫比例越高，分數越高。
 - **Acceptance Criteria**：
   - Given 一個節點有 3 條關聯全部填寫了 verb，When 執行 governance analyze，Then 該節點的語意完整度分項得滿分

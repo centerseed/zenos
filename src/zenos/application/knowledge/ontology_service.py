@@ -1778,7 +1778,6 @@ class OntologyService:
         target_id: str,
         rel_type: str,
         description: str,
-        verb: str | None = None,
     ) -> Relationship:
         """Add a directed relationship between two entities.
 
@@ -1823,16 +1822,11 @@ class OntologyService:
                     target_id=target_id,
                     type=rel_type,
                     description=description,
-                    verb=verb,
                 )
 
         # --- Dedup check ---
         existing = await self._relationships.find_duplicate(source_id, target_id, rel_type)
         if existing is not None:
-            # If caller provided a verb that differs from stored, patch verb and re-save
-            if verb is not None and existing.verb != verb:
-                existing.verb = verb
-                return await self._relationships.add(existing)
             return existing
 
         rel = Relationship(
@@ -1840,7 +1834,6 @@ class OntologyService:
             target_id=target_id,
             type=rel_type,
             description=description,
-            verb=verb,
         )
         return await self._relationships.add(rel)
 
@@ -1855,7 +1848,7 @@ class OntologyService:
                        or "both" (union of forward + reverse).
 
         Returns an ordered list of hops, each as a dict:
-            {from_id, from_name, verb, type, to_id, to_name}
+            {from_id, from_name, type, to_id, to_name}
 
         Cycle-safe via a visited set of entity IDs.
         Gracefully handles deleted entities by substituting the entity ID as name.
@@ -1898,7 +1891,6 @@ class OntologyService:
                     result.append({
                         "from_id": current_id,
                         "from_name": current_name,
-                        "verb": rel.verb,
                         "type": rel.type,
                         "to_id": next_id,
                         "to_name": next_name,
@@ -1907,7 +1899,6 @@ class OntologyService:
                     result.append({
                         "from_id": next_id,
                         "from_name": next_name,
-                        "verb": rel.verb,
                         "type": rel.type,
                         "to_id": current_id,
                         "to_name": current_name,
