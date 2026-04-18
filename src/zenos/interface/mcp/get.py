@@ -14,6 +14,12 @@ from zenos.interface.mcp._common import (
     _unified_response,
     _error_response,
 )
+from zenos.interface.mcp._include import (
+    VALID_ENTITY_INCLUDES,
+    validate_include,
+    log_deprecation_warning,
+    build_entity_response,
+)
 from zenos.interface.mcp._visibility import (
     _is_entity_visible,
     _is_protocol_visible,
@@ -32,6 +38,7 @@ async def get(
     name: str | None = None,
     id: str | None = None,
     workspace_id: str | None = None,
+    include: list[str] | None = None,
 ) -> dict:
     """取得一個特定項目的完整資訊。
 
@@ -48,11 +55,29 @@ async def get(
     - 不確定名稱 → 用 search
     - 要讀文件原始內容 → 先用這個拿 metadata，再用 read_source
 
+    include 參數（僅對 collection="entities" 有效）：
+    - include=["summary"]        → 快速辨識 / capture：只回傳 entity 本體 + source_count，token 用量最小
+    - include=["relationships"]  → 沿圖找鄰居：加回 outgoing/incoming relationships 陣列
+    - include=["impact_chain"]   → 影響範圍分析：加回 impact_chain + reverse_impact_chain
+    - include=["sources"]        → 找 L3 關聯文件：加回完整 sources 陣列（取代 source_count）
+    - include=["entries"]        → 最近 decision / insight：加回最新 5 條 active_entries
+    - include=["all"]            → 完整 payload：等同不傳 include 的 eager dump，但不 log warning
+
+    可以組合多個值，例如：
+    - include=["summary", "relationships"] → entity 本體 + outgoing/incoming
+    - include=["summary", "impact_chain"]  → entity 本體 + 影響鏈
+
+    不傳 include（預設）行為等同 include=["all"]，但會 log deprecation warning。
+    ADR-040 Phase B 將把預設改為 include=["summary"]。
+
     Args:
         collection: entities/documents/protocols/blindspots/tasks
         name: 項目名稱（entities 和 protocols 支援按名稱查詢）
         id: 項目 ID（所有集合都支援）
         workspace_id: 選填。切換到指定 workspace 執行查詢（必須在你的可用列表內）。
+        include: 選填。控制回傳欄位集合（僅 entities 有效）。
+            支援值：summary / relationships / entries / impact_chain / sources / all
+            範例：include=["summary"]、include=["all"]
     """
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
@@ -72,6 +97,11 @@ async def get(
     partner = _current_partner.get() or {}
 
     if collection == "entities":
+        # Validate include before doing any DB work — fail fast on bad input
+        include_set, include_err = validate_include(include, VALID_ENTITY_INCLUDES)
+        if include_err is not None:
+            return include_err
+
         if name:
             result = await _mcp.ontology_service.get_entity(name)
         elif id:
@@ -113,9 +143,10 @@ async def get(
                 error_code="NOT_FOUND",
                 message="Entity not found",
             )
-        response = _serialize(result)
-        # Split relationships into outgoing/incoming for clearer graph navigation
+
         eid = result.entity.id
+
+        # Resolve visible relationships (needed for both paths)
         if result.relationships:
             allowed_ids = await _guest_allowed_entity_ids() if partner and is_guest(partner) else set()
             visible_relationships = []
@@ -132,22 +163,74 @@ async def get(
                 elif not _is_entity_visible(other_entity):
                     continue
                 visible_relationships.append(rel)
-            response["outgoing_relationships"] = [
-                _serialize(r) for r in visible_relationships
-                if r.source_entity_id == eid
-            ]
-            response["incoming_relationships"] = [
-                _serialize(r) for r in visible_relationships
-                if r.source_entity_id != eid
-            ]
-            # Remove flat list to avoid payload duplication
-            response.pop("relationships", None)
-        # Attach active entries so callers see the entity as a knowledge container
-        active_entries = await _mcp.entry_repo.list_by_entity(eid) if eid else []
-        response["active_entries"] = [_serialize(e) for e in active_entries]
-        if eid:
-            response["impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="forward")
-            response["reverse_impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="reverse")
+        else:
+            visible_relationships = []
+
+        if include_set is None or "all" in include_set:
+            # Eager-dump path.
+            # include=None  → deprecation warning (caller bypassing include)
+            # include=["all"] → explicit full payload, no warning
+            if include_set is None:
+                caller_id = partner.get("id") if partner else None
+                log_deprecation_warning("get", "entities", str(caller_id) if caller_id else None)
+
+            response = _serialize(result)
+            if visible_relationships:
+                response["outgoing_relationships"] = [
+                    _serialize(r) for r in visible_relationships
+                    if r.source_entity_id == eid
+                ]
+                response["incoming_relationships"] = [
+                    _serialize(r) for r in visible_relationships
+                    if r.source_entity_id != eid
+                ]
+                response.pop("relationships", None)
+            active_entries = await _mcp.entry_repo.list_by_entity(eid) if eid else []
+            response["active_entries"] = [_serialize(e) for e in active_entries]
+            if eid:
+                response["impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="forward")
+                response["reverse_impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="reverse")
+            _schedule_tool_event("get", eid, None, None)
+            return _unified_response(data=_inject_workspace_context(response))
+
+        # Selective include path: only fetch what is requested
+        entity_dict = _serialize(result.entity)
+
+        # Fetch data only for requested sections
+        rel_dicts: list[dict] | None = None
+        if "relationships" in include_set:
+            rel_dicts = []
+            for r in visible_relationships:
+                d = _serialize(r)
+                d["_direction"] = "outgoing" if r.source_entity_id == eid else "incoming"
+                rel_dicts.append(d)
+
+        entries_dicts: list[dict] | None = None
+        if "entries" in include_set:
+            raw_entries = await _mcp.entry_repo.list_by_entity(eid) if eid else []
+            # Sort by updated_at DESC (newest first)
+            raw_entries_sorted = sorted(
+                raw_entries,
+                key=lambda e: getattr(e, "updated_at", None) or getattr(e, "created_at", None),
+                reverse=True,
+            )
+            entries_dicts = [_serialize(e) for e in raw_entries_sorted]
+
+        fwd_impact: list[dict] | None = None
+        rev_impact: list[dict] | None = None
+        if "impact_chain" in include_set:
+            if eid:
+                fwd_impact = await _mcp.ontology_service.compute_impact_chain(eid, direction="forward")
+                rev_impact = await _mcp.ontology_service.compute_impact_chain(eid, direction="reverse")
+
+        response = build_entity_response(
+            entity_dict=entity_dict,
+            relationships=rel_dicts,
+            entries=entries_dicts,
+            forward_impact=fwd_impact,
+            reverse_impact=rev_impact,
+            include_set=include_set,
+        )
         _schedule_tool_event("get", eid, None, None)
         return _unified_response(data=_inject_workspace_context(response))
 

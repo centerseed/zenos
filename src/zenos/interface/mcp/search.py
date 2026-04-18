@@ -26,6 +26,12 @@ from zenos.interface.mcp._visibility import (
     _is_document_like_entity_visible_for_guest,
 )
 from zenos.interface.mcp._audit import _schedule_tool_event
+from zenos.interface.mcp._include import (
+    VALID_SEARCH_INCLUDES,
+    validate_include,
+    log_deprecation_warning,
+    build_search_result,
+)
 from zenos.domain.task_rules import normalize_task_status
 
 logger = logging.getLogger(__name__)
@@ -55,6 +61,7 @@ async def search(
     product: str | None = None,
     entity_level: str | None = None,
     workspace_id: str | None = None,
+    include: list[str] | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -76,6 +83,19 @@ async def search(
     - 要搜尋任務 → collection="tasks"（在這裡，不需要用 task 工具）
 
     限制：關鍵字搜尋，非語意搜尋。query 最長 200 字。
+
+    include 參數（僅對 collection="entities" 有效）：
+    - include=["summary"]  → 快速識別 / capture：每筆回傳 {id, name, type, level, summary_short, score}，token 用量最小
+    - include=["tags"]     → 快速分類：在 summary 基礎上加回 tags
+    - include=["full"]     → 完整 payload：等同不傳 include 的 eager dump，但不 log warning
+
+    可以組合多個值，例如 include=["summary", "tags"]。
+    不傳 include（預設）等同 include=["full"]，但會 log deprecation warning。
+    ADR-040 Phase B 將把預設改為 include=["summary"]。
+
+    範例：
+    - search(collection="entities", include=["summary"]) → 快速列出所有 entity（低 token）
+    - search(collection="entities", include=["full"]) → 完整 payload（等同不傳 include）
 
     Args:
         query: 搜尋關鍵字（空字串 = 列出全部）
@@ -107,6 +127,9 @@ async def search(
             ⚠️ project / goal / role 屬 level=3，需要 entity_level="all" 才看得到。
             回傳 response 的 `applied_filters.entity_level` 會 echo 實際套用的 max_level。
         workspace_id: 選填。切換到指定 workspace 執行搜尋（必須在你的可用列表內）。
+        include: 選填。控制每筆 entity result 的欄位集合（僅 entities 有效）。
+            支援值：summary / tags / full
+            範例：include=["summary"]、include=["full"]
     """
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
@@ -116,6 +139,13 @@ async def search(
         if err is not None:
             return err
     await _ensure_services()
+
+    # Validate include early — only applies to entities collection, but we reject
+    # unknown values regardless so callers get fast feedback.
+    include_set, include_err = validate_include(include, VALID_SEARCH_INCLUDES)
+    if include_err is not None:
+        return include_err
+
     results: dict = {}
     warnings: list[str] = []
 
@@ -271,7 +301,18 @@ async def search(
                     if e.confirmed_by_user == confirmed_only
                 ]
             paginated_entities = entities[offset:offset + limit]
-            items = [_serialize(e) for e in paginated_entities]
+            if include_set is None:
+                # Default legacy path: eager dump + deprecation warning (once per call)
+                _partner_ctx_for_warn = _current_partner.get()
+                _caller_id = str(_partner_ctx_for_warn.get("id")) if _partner_ctx_for_warn else None
+                log_deprecation_warning("search", "entities", _caller_id)
+                items = [_serialize(e) for e in paginated_entities]
+            else:
+                # Opt-in include path
+                items = [
+                    build_search_result(_serialize(e), score=0.0, include_set=include_set)
+                    for e in paginated_entities
+                ]
             results["entities"] = items
 
         elif col == "documents":
