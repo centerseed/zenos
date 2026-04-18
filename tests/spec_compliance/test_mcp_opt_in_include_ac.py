@@ -292,7 +292,7 @@ async def test_ac_mcpinc_05_get_summary_plus_impact_chain():
 
     mock_os = AsyncMock()
     mock_os.get_entity = AsyncMock(return_value=ewr)
-    mock_os.compute_impact_chain = AsyncMock(side_effect=lambda eid, direction: (
+    mock_os.compute_impact_chain = AsyncMock(side_effect=lambda eid, direction, **kwargs: (
         fwd_chain if direction == "forward" else rev_chain
     ))
     mock_entry = AsyncMock()

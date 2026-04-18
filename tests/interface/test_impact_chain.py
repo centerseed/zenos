@@ -63,6 +63,7 @@ def _build_service(
 
     svc._entities = entity_repo
     svc._relationships = rel_repo
+    svc._embedding_service = None
     return svc
 
 

@@ -60,6 +60,8 @@ from zenos.application.knowledge.governance_ai import GovernanceAI
 from zenos.application.knowledge.governance_service import GovernanceService
 from zenos.application.knowledge.ontology_service import OntologyService
 from zenos.application.knowledge.source_service import SourceService
+from zenos.application.knowledge.embedding_service import EmbeddingService
+from zenos.application.knowledge.search_service import SearchService as _SearchService
 from zenos.application.action.plan_service import PlanService
 from zenos.application.action.task_service import TaskService
 from zenos.infrastructure.llm_client import create_llm_client
@@ -218,13 +220,53 @@ governance_service: GovernanceService | None = None
 source_service: SourceService | None = None
 task_service: TaskService | None = None
 plan_service: PlanService | None = None
+embedding_service: EmbeddingService | None = None
+search_service: _SearchService | None = None
+
+# Keep a strong reference to background embed tasks to prevent GC-initiated cancellation.
+_background_tasks: set = set()
+
+
+def _schedule_embed(eid: str) -> None:
+    """Fire-and-forget async embed hook.
+
+    Schedules compute_and_store(eid) as a background asyncio task.
+    Failures are logged at WARNING and never bubble to the caller.
+    Uses a strong-reference set to prevent the task from being GC'd mid-flight.
+    """
+    import asyncio
+
+    if embedding_service is None:
+        return
+
+    async def _run() -> None:
+        try:
+            await embedding_service.compute_and_store(eid)  # type: ignore[union-attr]
+        except Exception as exc:
+            logger.warning(
+                "embed failed in background",
+                extra={"entity_id": eid, "error": str(exc)},
+            )
+
+    try:
+        task = asyncio.create_task(_run())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
+    except RuntimeError:
+        # No running event loop in this context — skip silently.
+        logger.debug("_schedule_embed: no running event loop, skipping embed for %s", eid)
 
 
 async def _ensure_services() -> None:
     """Wire services once repos are ready."""
-    global ontology_service, governance_service, source_service, task_service, plan_service
+    global ontology_service, governance_service, source_service, task_service, plan_service, embedding_service, search_service
     await _ensure_repos()
     await _ensure_governance_ai()
+    if embedding_service is None:
+        _llm_client = create_llm_client()
+        embedding_service = EmbeddingService(entity_repo=entity_repo, llm_client=_llm_client)
+    if search_service is None:
+        search_service = _SearchService(entity_repo=entity_repo, embedding_service=embedding_service)
     if ontology_service is None:
         ontology_service = OntologyService(
             entity_repo=entity_repo,
@@ -234,6 +276,7 @@ async def _ensure_services() -> None:
             blindspot_repo=blindspot_repo,
             governance_ai=_governance_ai,
             source_adapter=source_adapter,
+            embedding_service=embedding_service,
         )
     if governance_service is None:
         governance_service = GovernanceService(
@@ -366,6 +409,7 @@ __all__ = [
     "source_service",
     "task_service",
     "plan_service",
+    "search_service",
     "_governance_ai",
     "_tool_event_repo",
     "_journal_repo",

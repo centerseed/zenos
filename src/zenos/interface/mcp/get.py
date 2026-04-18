@@ -39,6 +39,8 @@ async def get(
     id: str | None = None,
     workspace_id: str | None = None,
     include: list[str] | None = None,
+    intent: str | None = None,
+    top_k_per_hop: int | None = None,
 ) -> dict:
     """取得一個特定項目的完整資訊。
 
@@ -70,6 +72,12 @@ async def get(
     不傳 include（預設）行為等同 include=["all"]，但會 log deprecation warning。
     ADR-040 Phase B 將把預設改為 include=["summary"]。
 
+    額外參數（僅對 include=["impact_chain"] 或 include=["all"] 有效，其他情況忽略）：
+    - intent: str | None — 要找什麼？用它的語意 embedding 排序 neighbor。
+      範例：get(name="MCP 介面設計", include=["impact_chain"], intent="治理 audit")
+    - top_k_per_hop: int | None — 每層 BFS 只保留相關度前 K 名，省 token。
+      範例：get(..., include=["impact_chain"], top_k_per_hop=3)
+
     Args:
         collection: entities/documents/protocols/blindspots/tasks
         name: 項目名稱（entities 和 protocols 支援按名稱查詢）
@@ -78,6 +86,10 @@ async def get(
         include: 選填。控制回傳欄位集合（僅 entities 有效）。
             支援值：summary / relationships / entries / impact_chain / sources / all
             範例：include=["summary"]、include=["all"]
+        intent: 選填。語意排序意圖（僅對 include=[impact_chain] 或 include=[all] 有效）。
+            傳入自然語言描述，用來對 impact_chain neighbor 按語意相關度排序。
+        top_k_per_hop: 選填。每層 BFS 最多保留幾名 neighbor（僅對 include=[impact_chain] 或 include=[all] 有效）。
+            用來限制 impact_chain 的大小，搭配 intent 使用可大幅降低 payload。
     """
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
@@ -188,8 +200,12 @@ async def get(
             active_entries = await _mcp.entry_repo.list_by_entity(eid) if eid else []
             response["active_entries"] = [_serialize(e) for e in active_entries]
             if eid:
-                response["impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="forward")
-                response["reverse_impact_chain"] = await _mcp.ontology_service.compute_impact_chain(eid, direction="reverse")
+                response["impact_chain"] = await _mcp.ontology_service.compute_impact_chain(
+                    eid, direction="forward", intent=intent, top_k_per_hop=top_k_per_hop,
+                )
+                response["reverse_impact_chain"] = await _mcp.ontology_service.compute_impact_chain(
+                    eid, direction="reverse", intent=intent, top_k_per_hop=top_k_per_hop,
+                )
             _schedule_tool_event("get", eid, None, None)
             return _unified_response(data=_inject_workspace_context(response))
 
@@ -220,8 +236,12 @@ async def get(
         rev_impact: list[dict] | None = None
         if "impact_chain" in include_set:
             if eid:
-                fwd_impact = await _mcp.ontology_service.compute_impact_chain(eid, direction="forward")
-                rev_impact = await _mcp.ontology_service.compute_impact_chain(eid, direction="reverse")
+                fwd_impact = await _mcp.ontology_service.compute_impact_chain(
+                    eid, direction="forward", intent=intent, top_k_per_hop=top_k_per_hop,
+                )
+                rev_impact = await _mcp.ontology_service.compute_impact_chain(
+                    eid, direction="reverse", intent=intent, top_k_per_hop=top_k_per_hop,
+                )
 
         response = build_entity_response(
             entity_dict=entity_dict,

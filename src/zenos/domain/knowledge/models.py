@@ -54,6 +54,11 @@ class Entity:
     highlights_updated_at: datetime | None = None  # When bundle_highlights was last updated
     change_summary: str | None = None  # Human-authored summary of recent doc changes
     summary_updated_at: datetime | None = None  # When change_summary was last updated
+    # ADR-041 Pillar A — embedding metadata (summary_embedding itself is NOT here;
+    # it is a 768-float vector fetched only via get_embeddings_by_ids / search_by_vector)
+    embedded_summary_hash: str | None = None  # sha256(summary) hex, or 'EMPTY'/'FAILED' sentinel
+    embedding_model: str | None = None        # e.g. "gemini/gemini-embedding-001"
+    embedded_at: datetime | None = None       # UTC timestamp of last successful embed
 
 
 @dataclass

@@ -1,4 +1,4 @@
-"""LLM Client — thin wrapper around litellm for structured output.
+"""LLM Client — thin wrapper around litellm for structured output and embedding.
 
 Mirrors the interface of naru_agent's LiteLLMProvider.chat_structured()
 without requiring naru_agent as a dependency (its pyproject.toml lacks
@@ -8,11 +8,23 @@ a build-system, so pip cannot install it).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
 import litellm
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
+
+
+class EmbeddingAPIError(Exception):
+    """Raised when the embedding API is wholly unavailable (connection error, quota exhausted).
+
+    Callers (EmbeddingService) catch this to apply retry / FAILED-marker logic.
+    Per-text failures that do not affect the whole batch return None in the result
+    list rather than raising.
+    """
 
 
 def _normalize_api_key(value: str | None) -> str | None:
@@ -144,6 +156,54 @@ class LLMClient:
                 cleaned = "\n".join(lines).strip()
             parsed = json.loads(cleaned)
             return response_schema.model_validate(parsed)
+
+
+    async def embed(self, texts: list[str]) -> list[list[float] | None]:
+        """Embed a batch of texts via litellm (gemini/gemini-embedding-001, 768 dim via Matryoshka).
+
+        Args:
+            texts: Input strings to embed.  Empty list returns empty list immediately.
+
+        Returns:
+            Parallel list of 768-dim float vectors.  A single-text failure that
+            does not crash the whole API call returns None at that position.
+
+        Raises:
+            EmbeddingAPIError: When the API is wholly unavailable (network error,
+                quota exceeded, etc.) and no result can be retrieved for any text.
+                Callers should apply retry logic and write a FAILED marker after
+                exhausting retries.
+        """
+        if not texts:
+            return []
+
+        embed_model = "gemini/gemini-embedding-001"
+        params: dict[str, Any] = {
+            "model": embed_model,
+            "input": texts,
+            "output_dimensionality": 768,
+        }
+        if self.api_key:
+            params["api_key"] = self.api_key
+
+        try:
+            response = litellm.embedding(**params)
+        except Exception as exc:
+            raise EmbeddingAPIError(f"Embedding API unavailable: {exc}") from exc
+
+        # litellm embedding response: response.data is a list of EmbeddingObject,
+        # each with an .embedding attribute (list[float]) and an .index attribute.
+        data = getattr(response, "data", None)
+        if not data:
+            raise EmbeddingAPIError("Embedding API returned empty data")
+
+        results: list[list[float] | None] = [None] * len(texts)
+        for item in data:
+            idx = getattr(item, "index", None)
+            vec = getattr(item, "embedding", None)
+            if idx is not None and vec is not None:
+                results[idx] = list(vec)
+        return results
 
 
 def create_llm_client() -> LLMClient:

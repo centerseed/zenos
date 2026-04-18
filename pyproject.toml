@@ -34,6 +34,7 @@ asyncio_mode = "auto"
 pythonpath = ["src"]
 markers = [
     "spec(id): marketing/spec compliance acceptance criterion",
+    "integration: requires real infrastructure (DB, APIs)",
 ]
 
 [tool.importlinter]

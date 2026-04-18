@@ -238,6 +238,7 @@ class OntologyService:
         blindspot_repo: BlindspotRepository,
         governance_ai: object | None = None,
         source_adapter: GitHubAdapter | None = None,
+        embedding_service: object | None = None,
     ) -> None:
         self._entities = entity_repo
         self._relationships = relationship_repo
@@ -246,6 +247,7 @@ class OntologyService:
         self._blindspots = blindspot_repo
         self._governance_ai = governance_ai
         self._source_adapter = source_adapter
+        self._embedding_service = embedding_service
 
     # ──────────────────────────────────────────
     # Internal helpers
@@ -1837,77 +1839,246 @@ class OntologyService:
         )
         return await self._relationships.add(rel)
 
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        """Compute cosine similarity between two equal-length vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = sum(x * x for x in a) ** 0.5
+        norm_b = sum(x * x for x in b) ** 0.5
+        if norm_a == 0.0 or norm_b == 0.0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
     async def compute_impact_chain(
-        self, entity_id: str, max_depth: int = 5,
+        self,
+        entity_id: str,
+        max_depth: int = 5,
         direction: str = "forward",
+        intent: str | None = None,
+        top_k_per_hop: int | None = None,
     ) -> list[dict]:
         """BFS traverse relationship edges from entity_id.
 
         Args:
             direction: "forward" (outgoing, default), "reverse" (incoming),
                        or "both" (union of forward + reverse).
+            intent: Optional query string to embed and use as ranking signal.
+                    If provided, neighbors are ranked by cosine similarity to
+                    the intent embedding.  If None, uses root entity's
+                    summary_embedding as query vector (root-self mode).
+            top_k_per_hop: If set, retain only the top-K neighbors per BFS hop.
+                    Neighbors with embeddings are ranked first; those without
+                    appear last (alphabetical).  If None, all neighbors kept.
 
         Returns an ordered list of hops, each as a dict:
-            {from_id, from_name, type, to_id, to_name}
+            {from_id, from_name, type, to_id, to_name, relevance_score}
 
         Cycle-safe via a visited set of entity IDs.
         Gracefully handles deleted entities by substituting the entity ID as name.
         """
         if direction == "both":
-            fwd = await self.compute_impact_chain(entity_id, max_depth, "forward")
-            rev = await self.compute_impact_chain(entity_id, max_depth, "reverse")
+            fwd = await self.compute_impact_chain(
+                entity_id, max_depth, "forward", intent=intent, top_k_per_hop=top_k_per_hop,
+            )
+            rev = await self.compute_impact_chain(
+                entity_id, max_depth, "reverse", intent=intent, top_k_per_hop=top_k_per_hop,
+            )
             return fwd + rev
 
+        # ------------------------------------------------------------------
+        # Determine query vector
+        # ------------------------------------------------------------------
+        query_vec: list[float] | None = None
+        use_semantic = False
+
+        if self._embedding_service is not None:
+            if intent:
+                # Intent mode: embed the intent string
+                query_vec = await self._embedding_service.embed_query(intent)
+                # If API returned None, fall back to root-self mode below
+                if query_vec is not None:
+                    use_semantic = True
+
+            if not use_semantic:
+                # Root-self mode: use root entity embedding from DB
+                if hasattr(self._entities, "get_embeddings_by_ids"):
+                    embeddings = await self._entities.get_embeddings_by_ids([entity_id])
+                    root_vec = embeddings.get(entity_id)
+                    if root_vec is not None:
+                        query_vec = root_vec
+                        use_semantic = True
+                    # else: root has no embedding → full alphabetical fallback
+
+        # use_semantic=False means full alphabetical fallback (AC-17)
+        # In fallback mode we do NOT call any embedding API for neighbors.
+
+        # ------------------------------------------------------------------
+        # BFS
+        # ------------------------------------------------------------------
         result: list[dict] = []
         visited: set[str] = {entity_id}
-        queue: list[tuple[str, int]] = [(entity_id, 0)]
+        # Queue entries: (entity_id, depth, from_id, from_name, rel_type, hop_direction)
+        # We batch-collect all candidates at each depth level before ranking.
+        # Use a two-phase approach: collect candidates per depth level, rank, prune.
 
-        while queue:
-            current_id, depth = queue.pop(0)
-            if depth >= max_depth:
-                continue
+        # Level-aware BFS: process one depth level at a time.
+        current_level: list[tuple[str, int]] = [(entity_id, 0)]
 
-            current_entity = await self._entities.get_by_id(current_id)
-            current_name = current_entity.name if current_entity else current_id
+        while current_level:
+            next_level_candidates: list[tuple[str, str, str, str, str]] = []
+            # (next_id, current_id, current_name, rel_type, next_name)
 
-            rels = await self._relationships.list_by_entity(current_id)
-            for rel in rels:
-                if direction == "forward":
-                    if rel.source_entity_id != current_id:
-                        continue
-                    next_id = rel.target_id
-                else:  # reverse
-                    if rel.target_id != current_id:
-                        continue
-                    next_id = rel.source_entity_id
-
-                if next_id in visited:
+            for current_id, depth in current_level:
+                if depth >= max_depth:
                     continue
 
-                next_entity = await self._entities.get_by_id(next_id)
-                next_name = next_entity.name if next_entity else next_id
+                current_entity = await self._entities.get_by_id(current_id)
+                current_name = current_entity.name if current_entity else current_id
 
-                if direction == "forward":
-                    result.append({
-                        "from_id": current_id,
-                        "from_name": current_name,
-                        "type": rel.type,
-                        "to_id": next_id,
-                        "to_name": next_name,
-                    })
-                else:
-                    result.append({
-                        "from_id": next_id,
-                        "from_name": next_name,
-                        "type": rel.type,
-                        "to_id": current_id,
-                        "to_name": current_name,
-                    })
+                rels = await self._relationships.list_by_entity(current_id)
+                for rel in rels:
+                    if direction == "forward":
+                        if rel.source_entity_id != current_id:
+                            continue
+                        next_id = rel.target_id
+                    else:  # reverse
+                        if rel.target_id != current_id:
+                            continue
+                        next_id = rel.source_entity_id
 
-                visited.add(next_id)
-                queue.append((next_id, depth + 1))
+                    if next_id in visited:
+                        continue
+
+                    next_entity = await self._entities.get_by_id(next_id)
+                    next_name = next_entity.name if next_entity else next_id
+
+                    visited.add(next_id)
+                    next_level_candidates.append((next_id, current_id, current_name, rel.type, next_name))
+
+            if not next_level_candidates:
+                break
+
+            # ------------------------------------------------------------------
+            # Rank candidates for this level
+            # ------------------------------------------------------------------
+            ranked = await self._rank_hop_candidates(
+                candidates=next_level_candidates,
+                query_vec=query_vec if use_semantic else None,
+                top_k=top_k_per_hop,
+                direction=direction,
+            )
+
+            for hop in ranked:
+                result.append(hop)
+
+            # Advance to next level: only enqueue entities that survived pruning
+            surviving_ids = {hop["to_id"] if direction == "forward" else hop["from_id"] for hop in ranked}
+            current_depth = current_level[0][1]
+            current_level = [
+                (nid, current_depth + 1)
+                for nid in surviving_ids
+            ]
 
         return result
+
+    async def _rank_hop_candidates(
+        self,
+        candidates: list[tuple[str, str, str, str, str]],
+        query_vec: list[float] | None,
+        top_k: int | None,
+        direction: str,
+    ) -> list[dict]:
+        """Rank one BFS hop's candidate neighbors and return hop dicts.
+
+        Args:
+            candidates: list of (next_id, from_id, from_name, rel_type, next_name)
+            query_vec: query embedding (None = full alphabetical fallback)
+            top_k: prune to top K after ranking; None means no pruning
+            direction: "forward" or "reverse" (controls dict key layout)
+
+        Returns:
+            list of hop dicts with relevance_score field
+        """
+        if query_vec is None:
+            # Full alphabetical fallback — no embedding API call
+            sorted_candidates = sorted(candidates, key=lambda c: c[4])  # sort by next_name
+            pruned = sorted_candidates[:top_k] if top_k is not None else sorted_candidates
+            return [
+                self._make_hop_dict(c, direction, relevance_score=None)
+                for c in pruned
+            ]
+
+        # Batch-fetch embeddings for all candidates
+        candidate_ids = [c[0] for c in candidates]
+        if hasattr(self._entities, "get_embeddings_by_ids"):
+            id_to_vec = await self._entities.get_embeddings_by_ids(candidate_ids)
+        else:
+            id_to_vec = {}
+
+        # Split into scored and unscored
+        scored: list[tuple[float, tuple]] = []
+        unscored: list[tuple] = []
+
+        for c in candidates:
+            next_id = c[0]
+            vec = id_to_vec.get(next_id)
+            if vec is not None:
+                score = self._cosine_similarity(vec, query_vec)
+                scored.append((score, c))
+            else:
+                unscored.append(c)
+
+        # Sort scored descending by score
+        scored.sort(key=lambda x: x[0], reverse=True)
+        # Sort unscored alphabetically by next_name (c[4])
+        unscored.sort(key=lambda c: c[4])
+
+        # Apply top_k: prefer scored, then fill from unscored
+        if top_k is not None:
+            scored_take = scored[:top_k]
+            remaining = top_k - len(scored_take)
+            unscored_take = unscored[:remaining] if remaining > 0 else []
+        else:
+            scored_take = scored
+            unscored_take = unscored
+
+        result: list[dict] = []
+        for score, c in scored_take:
+            result.append(self._make_hop_dict(c, direction, relevance_score=score))
+        for c in unscored_take:
+            result.append(self._make_hop_dict(c, direction, relevance_score=None))
+
+        return result
+
+    @staticmethod
+    def _make_hop_dict(
+        candidate: tuple[str, str, str, str, str],
+        direction: str,
+        relevance_score: float | None,
+    ) -> dict:
+        """Build a hop result dict from a candidate tuple.
+
+        candidate = (next_id, from_id, from_name, rel_type, next_name)
+        """
+        next_id, current_id, current_name, rel_type, next_name = candidate
+        if direction == "forward":
+            return {
+                "from_id": current_id,
+                "from_name": current_name,
+                "type": rel_type,
+                "to_id": next_id,
+                "to_name": next_name,
+                "relevance_score": relevance_score,
+            }
+        else:
+            return {
+                "from_id": next_id,
+                "from_name": next_name,
+                "type": rel_type,
+                "to_id": current_id,
+                "to_name": current_name,
+                "relevance_score": relevance_score,
+            }
 
     async def find_gaps(
         self, gap_type: str = "all", scope_product: str | None = None,

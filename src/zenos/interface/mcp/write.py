@@ -388,6 +388,8 @@ async def write(
             result = await _mcp.ontology_service.upsert_entity(data, partner=_current_partner.get())
             serialized = _serialize(result)
             entity_id = serialized.get("entity", {}).get("id")
+            if entity_id:
+                _mcp._schedule_embed(entity_id)
             _audit_log(
                 event_type="ontology.entity.upsert",
                 target={"collection": collection, "id": entity_id},

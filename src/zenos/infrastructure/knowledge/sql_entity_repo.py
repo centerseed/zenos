@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg  # type: ignore[import-untyped]
@@ -17,6 +18,21 @@ from zenos.infrastructure.sql_common import (
     _new_id,
     _now,
     _to_dt,
+)
+
+
+# Explicit column list for general entity reads.
+# summary_embedding is intentionally excluded: it is a 768-float vector that
+# callers retrieve only via get_embeddings_by_ids() or search_by_vector().
+# Including it in every SELECT * would bloat every list_all / get_by_id response.
+_ENTITY_COLS = (
+    "id, partner_id, name, type, level, parent_id, status, summary, "
+    "tags_json, details_json, confirmed_by_user, owner, sources_json, "
+    "visibility, visible_to_roles, visible_to_members, visible_to_departments, "
+    "last_reviewed_at, created_at, updated_at, "
+    "doc_role, bundle_highlights_json, highlights_updated_at, "
+    "change_summary, summary_updated_at, "
+    "embedding_model, embedded_at, embedded_summary_hash"
 )
 
 
@@ -59,6 +75,10 @@ def _row_to_entity(row: asyncpg.Record) -> Entity:
         highlights_updated_at=_to_dt(_optional("highlights_updated_at")),
         change_summary=_optional("change_summary"),
         summary_updated_at=_to_dt(_optional("summary_updated_at")),
+        # ADR-041 Pillar A — embedding metadata
+        embedded_summary_hash=_optional("embedded_summary_hash"),
+        embedding_model=_optional("embedding_model"),
+        embedded_at=_to_dt(_optional("embedded_at")),
     )
 
 
@@ -72,7 +92,7 @@ class SqlEntityRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT * FROM {SCHEMA}.entities WHERE id = $1 AND partner_id = $2",
+                f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities WHERE id = $1 AND partner_id = $2",
                 entity_id, pid,
             )
         return _row_to_entity(row) if row else None
@@ -81,7 +101,7 @@ class SqlEntityRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT * FROM {SCHEMA}.entities WHERE LOWER(name) = LOWER($1) AND partner_id = $2 LIMIT 1",
+                f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities WHERE LOWER(name) = LOWER($1) AND partner_id = $2 LIMIT 1",
                 name, pid,
             )
         return _row_to_entity(row) if row else None
@@ -91,12 +111,12 @@ class SqlEntityRepository:
         async with self._pool.acquire() as conn:
             if type_filter is not None:
                 rows = await conn.fetch(
-                    f"SELECT * FROM {SCHEMA}.entities WHERE partner_id = $1 AND type = $2",
+                    f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities WHERE partner_id = $1 AND type = $2",
                     pid, type_filter,
                 )
             else:
                 rows = await conn.fetch(
-                    f"SELECT * FROM {SCHEMA}.entities WHERE partner_id = $1",
+                    f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities WHERE partner_id = $1",
                     pid,
                 )
         return [_row_to_entity(r) for r in rows]
@@ -165,7 +185,7 @@ class SqlEntityRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                f"SELECT * FROM {SCHEMA}.entities WHERE confirmed_by_user = false AND partner_id = $1",
+                f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities WHERE confirmed_by_user = false AND partner_id = $1",
                 pid,
             )
         return [_row_to_entity(r) for r in rows]
@@ -176,7 +196,7 @@ class SqlEntityRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                f"SELECT * FROM {SCHEMA}.entities WHERE id = ANY($1) AND partner_id = $2",
+                f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities WHERE id = ANY($1) AND partner_id = $2",
                 entity_ids, pid,
             )
         return [_row_to_entity(r) for r in rows]
@@ -185,7 +205,7 @@ class SqlEntityRepository:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                f"SELECT * FROM {SCHEMA}.entities WHERE parent_id = $1 AND partner_id = $2",
+                f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities WHERE parent_id = $1 AND partner_id = $2",
                 parent_id, pid,
             )
         return [_row_to_entity(r) for r in rows]
@@ -391,3 +411,148 @@ class SqlEntityRepository:
                     WHERE id = $1 AND partner_id = $2""",
                 entity_id, pid,
             )
+
+    # -------------------------------------------------------------------------
+    # Embedding support (ADR-041 Pillar A, Phase 1)
+    # summary_embedding is intentionally excluded from SELECT * reads;
+    # it is a large vector payload that callers request explicitly via these methods.
+    # -------------------------------------------------------------------------
+
+    async def update_embedding(
+        self,
+        entity_id: str,
+        embedding: list[float] | None,
+        model: str,
+        hash: str,
+    ) -> None:
+        """Atomically update the four embedding columns for an entity.
+
+        Args:
+            entity_id: The entity whose embedding columns are updated.
+            embedding: 768-dim vector, or None when embedding failed / is empty.
+            model: Model name (e.g. "gemini/gemini-embedding-001"), or "FAILED"/"EMPTY".
+            hash: sha256(summary) hex string, or sentinel "FAILED" / "EMPTY".
+
+        Note: partner_id scoping is applied; embedded_at is set to now() when
+        embedding is not None and hash is not a sentinel value.
+        """
+        pid = _get_partner_id()
+        embedded_at: datetime | None = (
+            datetime.now(tz=timezone.utc)
+            if (embedding is not None and hash not in ("FAILED", "EMPTY"))
+            else None
+        )
+        # pgvector accepts a stringified literal "[v1,v2,...]" via asyncpg without
+        # needing a custom codec; None maps to SQL NULL.
+        embedding_lit: str | None = (
+            "[" + ",".join(repr(float(v)) for v in embedding) + "]"
+            if embedding is not None
+            else None
+        )
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                f"""UPDATE {SCHEMA}.entities
+                    SET summary_embedding = $1::zenos.vector,
+                        embedding_model   = $2,
+                        embedded_at       = $3,
+                        embedded_summary_hash = $4,
+                        updated_at        = now()
+                    WHERE id = $5 AND partner_id = $6""",
+                embedding_lit,
+                model,
+                embedded_at,
+                hash,
+                entity_id,
+                pid,
+            )
+
+    async def get_embeddings_by_ids(
+        self,
+        ids: list[str],
+    ) -> dict[str, list[float] | None]:
+        """Batch-read summary_embedding for a list of entity IDs.
+
+        Used by S04 neighbor ranking to avoid N+1 queries when scoring hop candidates.
+
+        Returns:
+            Mapping of entity_id -> 768-dim vector (or None if not yet embedded).
+            IDs not found in the DB are omitted from the result dict.
+        """
+        if not ids:
+            return {}
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT id, summary_embedding
+                    FROM {SCHEMA}.entities
+                    WHERE id = ANY($1) AND partner_id = $2""",
+                ids,
+                pid,
+            )
+        def _parse(v: Any) -> list[float] | None:
+            if v is None:
+                return None
+            if isinstance(v, str):
+                # pgvector returns "[1.0,2.0,...]" as string without codec registered
+                return [float(x) for x in v.strip("[]").split(",") if x]
+            return list(v)
+        return {row["id"]: _parse(row["summary_embedding"]) for row in rows}
+
+    async def search_by_vector(
+        self,
+        query_vec: list[float],
+        limit: int,
+        filters: dict | None = None,
+    ) -> list[tuple[Entity, float]]:
+        """Run pgvector cosine top-K search on summary_embedding.
+
+        Used by S05 search semantic / hybrid mode.
+
+        Args:
+            query_vec: 768-dim query embedding.
+            limit: Maximum number of results to return.
+            filters: Optional WHERE conditions.  Supported keys:
+                - "visibility": str  (equality match)
+                - "workspace_id": str  (equality match on partner_id)
+
+        Returns:
+            List of (entity, cosine_similarity_score) pairs, ordered by score DESC.
+            Only entities with a non-null summary_embedding are included.
+        """
+        pid = _get_partner_id()
+
+        where_clauses = ["partner_id = $2", "summary_embedding IS NOT NULL"]
+        query_lit = "[" + ",".join(repr(float(v)) for v in query_vec) + "]"
+        params: list[Any] = [query_lit, pid]
+        param_idx = 3
+
+        if filters:
+            if "visibility" in filters:
+                where_clauses.append(f"visibility = ${param_idx}")
+                params.append(filters["visibility"])
+                param_idx += 1
+
+        where_sql = " AND ".join(where_clauses)
+        # pgvector cosine distance operator <=> returns distance (1 - similarity);
+        # we convert to similarity score for caller convenience.
+        # _ENTITY_COLS excludes summary_embedding from the entity payload while
+        # still using it in the ORDER BY / score computation.
+        sql = f"""
+            SELECT {_ENTITY_COLS},
+                   1 - (summary_embedding OPERATOR(zenos.<=>) $1::zenos.vector) AS cosine_score
+            FROM {SCHEMA}.entities
+            WHERE {where_sql}
+            ORDER BY summary_embedding OPERATOR(zenos.<=>) $1::zenos.vector
+            LIMIT ${param_idx}
+        """
+        params.append(limit)
+
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(sql, *params)
+
+        results: list[tuple[Entity, float]] = []
+        for row in rows:
+            entity = _row_to_entity(row)
+            score: float = float(row["cosine_score"])
+            results.append((entity, score))
+        return results

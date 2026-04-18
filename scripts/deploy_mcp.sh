@@ -44,7 +44,7 @@ DEPLOY_CMD=(
   --platform=managed \
   --source="$SOURCE_DIR" \
   --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,MCP_TRANSPORT=$MCP_TRANSPORT,GOOGLE_SERVICE_ACCOUNT_EMAIL=165893875709-compute@developer.gserviceaccount.com" \
-  --update-secrets="GITHUB_TOKEN=github-token:latest,ZENOS_JWT_SECRET=zenos-jwt-secret:latest" # pragma: allowlist secret
+  --update-secrets="GITHUB_TOKEN=github-token:latest,ZENOS_JWT_SECRET=zenos-jwt-secret:latest,GEMINI_API_KEY=gemini-api-key:latest" # pragma: allowlist secret
 )
 
 if [ "$ALLOW_UNAUTHENTICATED" = "true" ]; then

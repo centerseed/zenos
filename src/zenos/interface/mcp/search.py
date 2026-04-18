@@ -62,6 +62,7 @@ async def search(
     entity_level: str | None = None,
     workspace_id: str | None = None,
     include: list[str] | None = None,
+    mode: str = "hybrid",
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -82,7 +83,13 @@ async def search(
     - 要讀原始文件內容 → 用 read_source
     - 要搜尋任務 → collection="tasks"（在這裡，不需要用 task 工具）
 
-    限制：關鍵字搜尋，非語意搜尋。query 最長 200 字。
+    query 最長 200 字。
+
+    mode 參數：
+    - mode="keyword"  → 純關鍵字 substring（backward compat）
+    - mode="semantic" → 語意相似度（query embed + cosine），適合口語化 query
+    - mode="hybrid"（預設）→ 0.7 semantic + 0.3 keyword，綜合召回與精確
+    範例：search(collection="entities", query="治理怎麼做", mode="semantic")
 
     include 參數（僅對 collection="entities" 有效）：
     - include=["summary"]  → 快速識別 / capture：每筆回傳 {id, name, type, level, summary_short, score}，token 用量最小
@@ -272,47 +279,113 @@ async def search(
 
     for col in collections:
         if col == "entities":
-            type_filter = status if status in (
-                "product", "module", "goal", "role", "project"
-            ) else None
-            entities = await _mcp.ontology_service.list_entities(type_filter=type_filter)
-            entities = [e for e in entities if _is_entity_visible(e)]
-            # Apply L1 scope filter for guests
-            _partner_ctx = _current_partner.get() or {}
-            _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
-            if _access and _access["is_guest"]:
-                all_entities_for_map = await _mcp.ontology_service._entities.list_all()
-                _entity_map = {e.id: e for e in all_entities_for_map if e.id}
-                _allowed: set[str] = set()
-                for _l1_id in _access["authorized_l1_ids"]:
-                    _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
-                entities = [e for e in entities if e.id in _allowed]
-            # Apply level filter
-            if max_level is not None:
-                entities = [e for e in entities if (e.level or 1) <= max_level]
-            # Apply product_id filter
-            if product_id is not None:
-                entity_map = {e.id: e for e in entities if e.id}
-                subtree_ids = _collect_subtree_ids(product_id, entity_map)
-                entities = [e for e in entities if e.id in subtree_ids]
-            if confirmed_only is not None:
-                entities = [
-                    e for e in entities
-                    if e.confirmed_by_user == confirmed_only
-                ]
-            paginated_entities = entities[offset:offset + limit]
-            if include_set is None:
-                # Default legacy path: eager dump + deprecation warning (once per call)
-                _partner_ctx_for_warn = _current_partner.get()
-                _caller_id = str(_partner_ctx_for_warn.get("id")) if _partner_ctx_for_warn else None
-                log_deprecation_warning("search", "entities", _caller_id)
-                items = [_serialize(e) for e in paginated_entities]
+            # mode parameter is only relevant for collection="entities".
+            # For all other collections, mode is silently ignored.
+            if _mcp.search_service is not None:
+                # S05: use SearchService for keyword / semantic / hybrid modes
+                raw_results = await _mcp.search_service.search_entities(
+                    query,
+                    mode=mode,
+                    limit=limit + offset + 500,  # fetch extra to allow for visibility filtering
+                    filters=None,
+                )
+                # Extract entities from result dicts and apply visibility + other filters
+                entities_with_scores: list[tuple] = []
+                for r in raw_results:
+                    e = r["_entity"]
+                    if not _is_entity_visible(e):
+                        continue
+                    entities_with_scores.append((e, r["score"], r["score_breakdown"]))
+
+                # Apply L1 scope filter for guests
+                _partner_ctx = _current_partner.get() or {}
+                _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
+                if _access and _access["is_guest"]:
+                    all_entities_for_map = await _mcp.ontology_service._entities.list_all()
+                    _entity_map = {e.id: e for e in all_entities_for_map if e.id}
+                    _allowed: set[str] = set()
+                    for _l1_id in _access["authorized_l1_ids"]:
+                        _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
+                    entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.id in _allowed]
+
+                # Apply type filter (status used as type for entities)
+                type_filter = status if status in (
+                    "product", "module", "goal", "role", "project"
+                ) else None
+                if type_filter is not None:
+                    entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.type == type_filter]
+
+                # Apply level filter
+                if max_level is not None:
+                    entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if (e.level or 1) <= max_level]
+
+                # Apply product_id filter
+                if product_id is not None:
+                    all_e = await _mcp.ontology_service._entities.list_all()
+                    entity_map = {e.id: e for e in all_e if e.id}
+                    subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                    entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.id in subtree_ids]
+
+                if confirmed_only is not None:
+                    entities_with_scores = [
+                        (e, sc, bd) for e, sc, bd in entities_with_scores
+                        if e.confirmed_by_user == confirmed_only
+                    ]
+
+                paginated = entities_with_scores[offset:offset + limit]
+
+                if include_set is None:
+                    # Default legacy path: eager dump + deprecation warning (once per call)
+                    _partner_ctx_for_warn = _current_partner.get()
+                    _caller_id = str(_partner_ctx_for_warn.get("id")) if _partner_ctx_for_warn else None
+                    log_deprecation_warning("search", "entities", _caller_id)
+                    items = []
+                    for e, score, score_breakdown in paginated:
+                        item = _serialize(e)
+                        item["score"] = score
+                        item["score_breakdown"] = score_breakdown
+                        items.append(item)
+                else:
+                    items = []
+                    for e, score, score_breakdown in paginated:
+                        item = build_search_result(_serialize(e), score=score, include_set=include_set)
+                        item["score_breakdown"] = score_breakdown
+                        items.append(item)
             else:
-                # Opt-in include path
-                items = [
-                    build_search_result(_serialize(e), score=0.0, include_set=include_set)
-                    for e in paginated_entities
-                ]
+                # Fallback path when search_service is not yet wired (should not happen in production)
+                type_filter = status if status in (
+                    "product", "module", "goal", "role", "project"
+                ) else None
+                entities = await _mcp.ontology_service.list_entities(type_filter=type_filter)
+                entities = [e for e in entities if _is_entity_visible(e)]
+                _partner_ctx = _current_partner.get() or {}
+                _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
+                if _access and _access["is_guest"]:
+                    all_entities_for_map = await _mcp.ontology_service._entities.list_all()
+                    _entity_map = {e.id: e for e in all_entities_for_map if e.id}
+                    _allowed: set[str] = set()
+                    for _l1_id in _access["authorized_l1_ids"]:
+                        _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
+                    entities = [e for e in entities if e.id in _allowed]
+                if max_level is not None:
+                    entities = [e for e in entities if (e.level or 1) <= max_level]
+                if product_id is not None:
+                    entity_map = {e.id: e for e in entities if e.id}
+                    subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                    entities = [e for e in entities if e.id in subtree_ids]
+                if confirmed_only is not None:
+                    entities = [e for e in entities if e.confirmed_by_user == confirmed_only]
+                paginated_entities = entities[offset:offset + limit]
+                if include_set is None:
+                    _partner_ctx_for_warn = _current_partner.get()
+                    _caller_id = str(_partner_ctx_for_warn.get("id")) if _partner_ctx_for_warn else None
+                    log_deprecation_warning("search", "entities", _caller_id)
+                    items = [_serialize(e) for e in paginated_entities]
+                else:
+                    items = [
+                        build_search_result(_serialize(e), score=0.0, include_set=include_set)
+                        for e in paginated_entities
+                    ]
             results["entities"] = items
 
         elif col == "documents":

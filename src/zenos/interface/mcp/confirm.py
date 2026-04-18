@@ -159,6 +159,8 @@ async def confirm(
         else:
             result = await _mcp.ontology_service.confirm(collection, id)
             confirm_data = dict(result) if isinstance(result, dict) else result
+            if collection == "entities":
+                _mcp._schedule_embed(id)
             _audit_log(
                 event_type="ontology.confirm",
                 target={"collection": collection, "id": id},
