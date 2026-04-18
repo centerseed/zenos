@@ -486,12 +486,17 @@ def analyze_blindspots(
             continue
         linked = docs_by_entity.get(entity.id, [])
         current_docs = [d for d in linked if _d_status(d) != DocumentStatus.ARCHIVED]
-        if len(current_docs) < 2:
+        external_sources_count = len(
+            [s for s in (entity.sources or []) if s.get("uri")]
+        )
+        total_coverage = len(current_docs) + external_sources_count
+        if total_coverage < 2:
             blindspots.append(Blindspot(
                 description=(
-                    f"Core entity '{entity.name}' ({entity.type}) has only "
-                    f"{len(current_docs)} current document(s), below the "
-                    f"minimum of 2 for adequate coverage"
+                    f"Core entity '{entity.name}' ({entity.type}) has "
+                    f"{len(current_docs)} current document(s) + "
+                    f"{external_sources_count} external source(s), "
+                    f"combined coverage below minimum of 2"
                 ),
                 severity=Severity.RED,
                 related_entity_ids=[entity.id],

@@ -11,6 +11,7 @@ docs
 threads-*
 *.md
 !skills/**/*.md
+!docs/specs/*.md
 tests/
 scripts/
 __pycache__
