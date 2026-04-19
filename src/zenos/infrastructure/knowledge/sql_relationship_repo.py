@@ -153,3 +153,20 @@ class SqlRelationshipRepository:
                 source_entity_id, target_id, rel_type, pid,
             )
         return int(result.split()[-1])
+
+    async def remove_by_id(self, rel_id: str) -> int:
+        """Delete a single relationship by ID. Returns rowcount (0 or 1).
+
+        Used by dogfooding cleanup and governance audit to remove cross-subtree
+        auto-link contamination where the source/target/type tuple is not
+        known upfront. Hard delete is acceptable because relationships are
+        edges (not knowledge units); archival is handled via entity lifecycle.
+        """
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"""DELETE FROM {SCHEMA}.relationships
+                    WHERE id = $1 AND partner_id = $2""",
+                rel_id, pid,
+            )
+        return int(result.split()[-1])

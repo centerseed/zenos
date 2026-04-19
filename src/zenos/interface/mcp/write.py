@@ -623,6 +623,29 @@ async def write(
             )
 
         elif collection == "relationships":
+            # Delete path: write(collection="relationships", id=<rel_id>,
+            # data={"action": "delete", "reason": "..."}) removes a single
+            # edge (used by governance cleanup to drop cross-subtree
+            # auto-link contamination; DF-20260419-6 F14 fix).
+            if id and data.get("action") == "delete":
+                reason = data.get("reason") or "unspecified"
+                rowcount = await _mcp.relationship_repo.remove_by_id(id)
+                if rowcount == 0:
+                    return _unified_response(
+                        status="rejected",
+                        data={},
+                        rejection_reason=f"Relationship '{id}' not found",
+                    )
+                _audit_log(
+                    event_type="ontology.relationship.delete",
+                    target={"collection": collection, "id": id},
+                    changes={"reason": reason},
+                )
+                return _unified_response(
+                    data={"id": id, "deleted": True, "reason": reason},
+                    governance_hints=_build_governance_hints(),
+                )
+
             result = await _mcp.ontology_service.add_relationship(
                 source_id=data["source_entity_id"],
                 target_id=data["target_entity_id"],
