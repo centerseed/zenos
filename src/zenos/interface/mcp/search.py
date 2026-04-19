@@ -336,6 +336,17 @@ async def search(
                     subtree_ids = _collect_subtree_ids(product_id, entity_map)
                     entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.id in subtree_ids]
 
+                # DF-20260419-L2d: exclude archived entities from default search
+                # unless caller explicitly asks for status="archived" (the same
+                # pattern documents collection already uses at line 424).
+                # Archived L2 should not pollute discovery / listing flows but
+                # stays retrievable via get(id=X).
+                if status != "archived":
+                    entities_with_scores = [
+                        (e, sc, bd) for e, sc, bd in entities_with_scores
+                        if e.status != "archived"
+                    ]
+
                 if confirmed_only is not None:
                     entities_with_scores = [
                         (e, sc, bd) for e, sc, bd in entities_with_scores

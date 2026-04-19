@@ -390,6 +390,36 @@ async def write(
             entity_id = serialized.get("entity", {}).get("id")
             if entity_id:
                 _mcp._schedule_embed(entity_id)
+
+            # DF-20260419-L2d: L2 archive lifecycle warning. When a module is
+            # moved to status=archived while it still has active entries,
+            # surface the orphan-knowledge risk. Not a reject (deprecation
+            # is sometimes intentional even with unresolved knowledge) but
+            # the warning routes callers to consolidate/manual-archive first.
+            _saved = result.entity if hasattr(result, "entity") else None
+            if (
+                _saved is not None
+                and getattr(_saved, "type", None) == "module"
+                and getattr(_saved, "status", None) == "archived"
+                and entity_id
+            ):
+                try:
+                    _orphan_entries = await _mcp.entry_repo.list_by_entity(
+                        entity_id, status="active"
+                    )
+                except Exception:
+                    _orphan_entries = []
+                if _orphan_entries:
+                    _count = len(_orphan_entries)
+                    _orphan_warn = (
+                        f"L2 '{_saved.name}' 已 archived，但仍有 {_count} 條 active entries。"
+                        " 建議先跑 analyze(check_type='consolidate', entity_id=...) 或逐條手動 archive，"
+                        "避免 orphan 知識殘留。"
+                    )
+                    if result.warnings is None:
+                        result.warnings = [_orphan_warn]
+                    else:
+                        result.warnings.append(_orphan_warn)
             _audit_log(
                 event_type="ontology.entity.upsert",
                 target={"collection": collection, "id": entity_id},

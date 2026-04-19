@@ -1307,7 +1307,12 @@ class OntologyService:
         status = merged_data.get("status", "active")
         _DOCUMENT_STATUSES = {"current", "stale", "draft", "conflict", "archived"}
         _BASE_STATUSES = {"active", "paused", "completed", "planned"}
-        _L2_EXTRA_STATUSES = {"draft", "stale"}  # L2 lifecycle states
+        # DF-20260419-L2d: add "archived" as explicit L2 end-of-life state so
+        # consumers can deprecate a module without deleting it. Cascade is
+        # not automatic — caller is expected to consolidate/manual-archive
+        # entries first (warning is emitted when archiving an L2 with active
+        # entries, see upsert_entity post-save checks).
+        _L2_EXTRA_STATUSES = {"draft", "stale", "archived"}
         if entity_type == EntityType.DOCUMENT:
             valid_statuses = sorted(_BASE_STATUSES | _DOCUMENT_STATUSES)
             # Default status for document entities
