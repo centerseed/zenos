@@ -8,11 +8,20 @@ Run: .venv/bin/pytest tests/spec_compliance/test_task_action_upgrade_ac.py -x
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _make_uow_factory():
+    uow = MagicMock()
+    uow.conn = MagicMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=False)
+    return lambda: uow
 
 
 # ─────────────────────────────────────────────────────────────
@@ -350,7 +359,55 @@ async def test_ac_task_upg_05_handoff_atomic_append_and_state_changes():
     (c) task.status == "review" (auto-bumped because qa + in_progress)
     (d) audit log event ontology.task.handoff written
     All four must be atomic (fail together or all apply)."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.application.action.task_service import TaskService, TaskResult
+    from zenos.domain.action import Task
+    from zenos.interface.mcp.task import _task_handler
+
+    task_repo = AsyncMock()
+    task_repo.get_by_id = AsyncMock(return_value=Task(
+        id="task-1",
+        title="Developer task",
+        status="in_progress",
+        priority="medium",
+        created_by="partner-1",
+        dispatcher="agent:developer",
+    ))
+    task_repo.upsert = AsyncMock(side_effect=lambda task, **_: task)
+    svc = TaskService(task_repo, AsyncMock(), AsyncMock(), uow_factory=_make_uow_factory())
+
+    result = await svc.handoff_task(
+        "task-1",
+        to_dispatcher="agent:qa",
+        reason="ready for review",
+        updated_by="partner-1",
+    )
+
+    assert result.task.dispatcher == "agent:qa"
+    assert result.task.status == "review"
+    assert len(result.task.handoff_events) == 1
+    assert result.task.handoff_events[0].from_dispatcher == "agent:developer"
+    assert result.task.handoff_events[0].to_dispatcher == "agent:qa"
+    assert result.task.handoff_events[0].reason == "ready for review"
+    task_repo.upsert.assert_awaited_once()
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock()), \
+         patch("zenos.interface.mcp.task._current_partner") as mock_cp, \
+         patch("zenos.interface.mcp.task._audit_log") as mock_audit, \
+         patch("zenos.interface.mcp.task._enrich_task_result", new=AsyncMock(
+             return_value={"id": "task-1", "dispatcher": "agent:qa", "status": "review"}
+         )), \
+         patch("zenos.interface.mcp.task_service", AsyncMock(handoff_task=AsyncMock(return_value=TaskResult(task=result.task, cascade_updates=[])))):
+        mock_cp.get.return_value = {"id": "partner-1", "defaultProject": "zenos"}
+        mcp_result = await _task_handler(
+            action="handoff",
+            id="task-1",
+            to_dispatcher="agent:qa",
+            reason="ready for review",
+        )
+
+    assert mcp_result["status"] == "ok"
+    mock_audit.assert_called_once()
+    assert mock_audit.call_args.kwargs["event_type"] == "ontology.task.handoff"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -364,7 +421,40 @@ async def test_ac_task_upg_06_search_filters_dispatcher_parent_linked_entity():
     - parent_task_id=T → only subtasks of T
     - linked_entity=E → tasks where E is any member of linked_entities
     All three can combine with existing filters via AND."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.mcp.search import search
+
+    mock_task_service = AsyncMock()
+    mock_task_service.list_tasks = AsyncMock(return_value=[
+        MagicMock(id="task-1", title="Architect task", description="", linked_entities=["entity-1"]),
+    ])
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock()), \
+         patch("zenos.interface.mcp.search._current_partner") as mock_cp, \
+         patch("zenos.interface.mcp.search._is_task_visible", new=AsyncMock(return_value=True)), \
+         patch("zenos.interface.mcp.search._enrich_task_result", new=AsyncMock(return_value={"id": "task-1"})), \
+         patch("zenos.interface.mcp.task_service", mock_task_service):
+        mock_cp.get.return_value = {"id": "partner-1", "defaultProject": "zenos"}
+        result = await search(
+            collection="tasks",
+            dispatcher="agent:architect",
+            parent_task_id="parent-1",
+            linked_entity="entity-1",
+        )
+
+    assert result["status"] == "ok"
+    assert result["data"]["tasks"] == [{"id": "task-1"}]
+    mock_task_service.list_tasks.assert_awaited_once_with(
+        assignee=None,
+        created_by=None,
+        status=None,
+        dispatcher="agent:architect",
+        parent_task_id="parent-1",
+        linked_entity="entity-1",
+        limit=200,
+        offset=0,
+        project="zenos",
+        plan_id=None,
+    )
 
 
 @pytest.mark.spec("AC-TASK-UPG-07")
@@ -373,7 +463,50 @@ async def test_ac_task_upg_07_filter_composability_with_product_id():
     parent_task_id=T) applies all four filters AND; result is subset of each
     individual filter. Verifies DF-20260419-7 F12 fix preserved alongside
     new filters."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.mcp.search import search
+
+    keep = MagicMock(id="task-keep", title="Keep", description="", linked_entities=["module-1"])
+    drop = MagicMock(id="task-drop", title="Drop", description="", linked_entities=["module-2"])
+    product = MagicMock(id="product-1", parent_id=None)
+    module_1 = MagicMock(id="module-1", parent_id="product-1")
+    module_2 = MagicMock(id="module-2", parent_id="product-2")
+    product_2 = MagicMock(id="product-2", parent_id=None)
+
+    mock_task_service = AsyncMock()
+    mock_task_service.list_tasks = AsyncMock(return_value=[keep, drop])
+    mock_ontology_service = MagicMock()
+    mock_ontology_service._entities.list_all = AsyncMock(return_value=[product, module_1, product_2, module_2])
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock()), \
+         patch("zenos.interface.mcp.search._current_partner") as mock_cp, \
+         patch("zenos.interface.mcp.search._is_task_visible", new=AsyncMock(return_value=True)), \
+         patch("zenos.interface.mcp.search._enrich_task_result", new=AsyncMock(side_effect=[
+             {"id": "task-keep"},
+         ])), \
+         patch("zenos.interface.mcp.task_service", mock_task_service), \
+         patch("zenos.interface.mcp.ontology_service", mock_ontology_service):
+        mock_cp.get.return_value = {"id": "partner-1", "defaultProject": "zenos"}
+        result = await search(
+            collection="tasks",
+            product_id="product-1",
+            dispatcher="agent:qa",
+            parent_task_id="parent-1",
+        )
+
+    assert result["status"] == "ok"
+    assert [item["id"] for item in result["data"]["tasks"]] == ["task-keep"]
+    mock_task_service.list_tasks.assert_awaited_once_with(
+        assignee=None,
+        created_by=None,
+        status=None,
+        dispatcher="agent:qa",
+        parent_task_id="parent-1",
+        linked_entity=None,
+        limit=200,
+        offset=0,
+        project="zenos",
+        plan_id=None,
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -386,7 +519,47 @@ async def test_ac_task_upg_08_confirm_appends_final_handoff_event():
     confirm(collection="tasks", id=T, accepted=true), Then handoff_events
     appends a final event {to_dispatcher:"human", reason:"accepted", ...}
     and status becomes "done"."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.application.action.task_service import TaskService
+    from zenos.domain.action import HandoffEvent, Task
+
+    task = Task(
+        id="task-review",
+        title="QA review task",
+        status="review",
+        priority="medium",
+        created_by="partner-1",
+        dispatcher="agent:qa",
+        handoff_events=[
+            HandoffEvent(
+                at=datetime(2026, 4, 19, 10, 0, tzinfo=timezone.utc),
+                from_dispatcher="agent:developer",
+                to_dispatcher="agent:qa",
+                reason="ready for review",
+            )
+        ],
+    )
+
+    task_repo = AsyncMock()
+    task_repo.get_by_id = AsyncMock(return_value=task)
+    task_repo.upsert = AsyncMock(side_effect=lambda current, **_: current)
+    task_repo.list_blocked_by = AsyncMock(return_value=[])
+    entity_repo = AsyncMock()
+    entity_repo.list_by_ids = AsyncMock(return_value=[])
+    blindspot_repo = AsyncMock()
+    svc = TaskService(task_repo, entity_repo, blindspot_repo, uow_factory=_make_uow_factory())
+
+    result = await svc.confirm_task(
+        "task-review",
+        accepted=True,
+        updated_by="partner-qa",
+        entity_entries=[{"entity_id": "entity-1", "type": "insight", "content": "done"}],
+    )
+
+    assert result.task.status == "done"
+    assert result.task.dispatcher == "human"
+    assert result.task.handoff_events[-1].to_dispatcher == "human"
+    assert result.task.handoff_events[-1].reason == "accepted"
+    assert result.task.handoff_events[-1].output_ref == "entity-1"
 
 
 # ─────────────────────────────────────────────────────────────
@@ -400,4 +573,13 @@ def test_ac_task_upg_09_related_spec_review_passed():
     dispatcher / handoff / subtask semantics. Any conflicting paragraph has
     been updated. This AC is a human-reviewed checkpoint — the test asserts
     the review note exists in each spec's changelog."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    targets = [
+        ROOT / "docs/specs/SPEC-task-communication-sync.md",
+        ROOT / "docs/specs/SPEC-task-view-clarity.md",
+        ROOT / "docs/specs/SPEC-task-kanban-operations.md",
+    ]
+    required_note = "2026-04-19: reviewed against SPEC-task-governance dispatcher / handoff / subtask semantics"
+    for path in targets:
+        text = path.read_text(encoding="utf-8")
+        assert "updated: 2026-04-19" in text, f"{path.name} must update frontmatter date"
+        assert required_note in text, f"{path.name} must carry related-spec review note"

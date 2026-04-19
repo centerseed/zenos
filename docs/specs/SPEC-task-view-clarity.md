@@ -4,7 +4,7 @@ id: SPEC-task-view-clarity
 status: Under Review
 l2_entity: action-layer
 created: 2026-03-27
-updated: 2026-04-01
+updated: 2026-04-19
 ---
 
 # Feature Spec: Task 畫面可讀性與跨專案狀態清晰化
@@ -217,6 +217,10 @@ AC-R10:
 4. Given task 狀態為 done/cancelled/archived，When 在 Kanban 檢視，Then 不顯示任何風險 badge，無論 due_date 為何。
 
 ## Open Questions
+
+## Changelog
+
+- 2026-04-19: reviewed against SPEC-task-governance dispatcher / handoff / subtask semantics; added reference note only, no conflicting state-machine text in this view spec.
 
 1. `review` 是否需要進一步拆分「待審核」與「被退回」顯示（目前以 `rejectionReason` 偵測）？此項列為 P2 後續討論，不阻塞本 spec。
 2. 晨報的「無人動 48h」門檻是否應可由用戶設定（例如 24h / 72h）？Phase 0 先固定 48h，後續討論。

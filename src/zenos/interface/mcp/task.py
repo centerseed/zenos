@@ -149,6 +149,10 @@ async def _task_handler(
     parent_task_id: str | None = None,
     dispatcher: str | None = None,
     handoff_events: Any | None = None,  # readonly — always stripped; use task(action="handoff") instead
+    to_dispatcher: str | None = None,
+    reason: str | None = None,
+    output_ref: str | None = None,
+    notes: str | None = None,
     conn: Any | None = None,
 ) -> dict:
     """Core task handler logic — extracted for testability.
@@ -444,11 +448,43 @@ async def _task_handler(
                 ),
             )
 
+        elif action == "handoff":
+            if not id:
+                return _unified_response(status="rejected", data={}, rejection_reason="id is required for handoff")
+            if not to_dispatcher:
+                return _unified_response(status="rejected", data={}, rejection_reason="to_dispatcher is required for handoff")
+            if not reason:
+                return _unified_response(status="rejected", data={}, rejection_reason="reason is required for handoff")
+
+            if _mcp.task_service is None:
+                await _ensure_services()
+            task_result = await _mcp.task_service.handoff_task(
+                id,
+                to_dispatcher=to_dispatcher,
+                reason=reason,
+                output_ref=output_ref,
+                notes=notes,
+                updated_by=(partner or {}).get("id"),
+            )
+            task_data = await _enrich_task_result(task_result.task)
+            _audit_log(
+                event_type="ontology.task.handoff",
+                target={"collection": "tasks", "id": id},
+                changes={
+                    "from_dispatcher": task_result.task.handoff_events[-1].from_dispatcher if task_result.task.handoff_events else None,
+                    "to_dispatcher": to_dispatcher,
+                    "reason": reason,
+                    "output_ref": output_ref,
+                    "notes": notes,
+                },
+            )
+            return _unified_response(data=task_data, warnings=mutation_warnings)
+
         else:
             return _unified_response(
                 status="rejected",
                 data={},
-                rejection_reason=f"Unknown action '{action}'. Use: create, update",
+                rejection_reason=f"Unknown action '{action}'. Use: create, update, handoff",
             )
     except ValueError as e:
         from zenos.application.action.task_service import TaskValidationError
@@ -462,7 +498,7 @@ async def _task_handler(
 
 
 async def task(
-    action: str,  # "create" | "update"
+    action: str,  # "create" | "update" | "handoff"
     title: str | None = None,
     created_by: str | None = None,
     id: str | None = None,
@@ -491,6 +527,10 @@ async def task(
     parent_task_id: str | None = None,
     dispatcher: str | None = None,
     handoff_events: Any | None = None,  # readonly — pass triggers HANDOFF_EVENTS_READONLY warning
+    to_dispatcher: str | None = None,
+    reason: str | None = None,
+    output_ref: str | None = None,
+    notes: str | None = None,
     workspace_id: str | None = None,
 ) -> dict:
     """管理知識驅動的行動項目（Action Layer）。
@@ -501,7 +541,8 @@ async def task(
 
     使用時機：
     - 建任務 → action="create"（必填：title；created_by 由 server 依 API key context 寫入）
-    - 改狀態 → action="update"（必填：id。改 status/assignee/priority 等）
+    - 改狀態 / 欄位 → action="update"（必填：id。改 status/assignee/priority 等）
+    - Agent / human 交接 → action="handoff"（必填：id, to_dispatcher, reason）
     - 列任務 → 不要用這個，用 search(collection="tasks") 更靈活
 
     狀態流：todo → in_progress → review → done
@@ -605,4 +646,8 @@ async def task(
         parent_task_id=parent_task_id,
         dispatcher=dispatcher,
         handoff_events=handoff_events,
+        to_dispatcher=to_dispatcher,
+        reason=reason,
+        output_ref=output_ref,
+        notes=notes,
     )

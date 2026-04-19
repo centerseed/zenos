@@ -211,6 +211,38 @@ Spec 相容性：已比對 {n} 份既有 spec，{結論}
 
 ---
 
+## 2026-04-19 Action-Layer Handoff（SPEC-task-governance §Action-Layer 升級）
+
+PM 是 handoff chain 的起點。Spec 確認後不是「寫完就走」——把 spec 交棒給 Architect，留下完整履歷。
+
+### PM 建票時（Spec 寫完、ready for Architect）
+```python
+mcp__zenos__task(
+    action="create",
+    title="實作 {feature_slug}",
+    dispatcher="agent:pm",
+    linked_entities=["{affected_entity_id}"],
+    plan_id="{feature-slug}",  # 同 slug 作為 plan 分組
+    acceptance_criteria=[...],  # 帶 AC-{FEAT}-NN ID
+)
+```
+
+### 交棒給 Architect
+```python
+mcp__zenos__task(
+    action="handoff",
+    id="{task_id}",
+    to_dispatcher="agent:architect",
+    reason="spec ready, needs tech design",
+    output_ref="docs/specs/SPEC-{slug}.md",
+    notes="P0 有 {n} 條 AC；開放問題見 spec 最後一節"
+)
+```
+
+**不要**直接改 dispatcher 或 handoff_events 欄位——會被 HANDOFF_EVENTS_READONLY reject。只能走 `action="handoff"`。
+
+---
+
 ## 參考
 
 文件治理完整規則：→ `skills/governance/document-governance.md`

@@ -296,6 +296,8 @@ class SqlTaskRepository:
         status: list[str] | None = None,
         priority: str | None = None,
         linked_entity: str | None = None,
+        dispatcher: str | None = None,
+        parent_task_id: str | None = None,
         include_archived: bool = False,
         limit: int = 200,
         offset: int = 0,
@@ -319,6 +321,14 @@ class SqlTaskRepository:
         if priority is not None:
             conditions.append(f"t.priority = ${idx}")
             params.append(priority)
+            idx += 1
+        if dispatcher is not None:
+            conditions.append(f"t.dispatcher = ${idx}")
+            params.append(dispatcher)
+            idx += 1
+        if parent_task_id is not None:
+            conditions.append(f"t.parent_task_id = ${idx}")
+            params.append(parent_task_id)
             idx += 1
         if project is not None:
             conditions.append(

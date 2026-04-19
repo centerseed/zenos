@@ -103,39 +103,68 @@ PM 將完整 Spec 呈給用戶逐章確認。
 
 ---
 
-## Phase 4：Architect 建立實作計畫
+## Phase 4：PM → Architect Handoff + 建實作 PLAN
 
 > 建票前必讀 `skills/governance/shared-rules.md` 的去重與 linked_entities 規則。
+> 2026-04-19 Action-Layer 升級：派工用顯性 handoff chain，不再隱性 subagent spawn。
 
-叫起 Architect agent（依照 Architect skill 流程）：
-- 讀取剛確認的 Spec
+**PM 建 task + 交棒：**
+```python
+mcp__zenos__task(action="create",
+    title="實作 {feature_slug}", dispatcher="agent:pm",
+    linked_entities=[...], plan_id="{slug}", acceptance_criteria=[...])
+mcp__zenos__task(action="handoff", id="{task_id}",
+    to_dispatcher="agent:architect", reason="spec ready",
+    output_ref="docs/specs/SPEC-{slug}.md")
+```
+
+**Architect 接手：**
+- 讀 task + `handoff_events` 取完整脈絡
 - 技術設計
-- 建立 tasks（`mcp__zenos__task(action="create", ...)`）—— 建票前先去重
-- 分配 plan_id + plan_order
+- 必要時拆 subtask（`parent_task_id=<parent>` + 繼承 `plan_id`，不能跨 plan）
+- 每張 task ready → handoff to `agent:developer`
 
 ---
 
-## Phase 5：Architect 調度實作與驗收
+## Phase 5：Handoff Chain 實作
 
-Architect 是實作階段的主控角色，按 plan_order 逐張 task 執行：
+每張 task 走完整 PM → Architect → Developer → QA handoff 鏈條：
 
-### 5.1 派工 Developer
-- 叫起 Developer subagent，傳入 task 的 description + acceptance_criteria
-- Developer 更新狀態：`task(action="update", id=X, status="in_progress")`
-- Developer 完成後：`task(action="update", id=X, status="review", result="完成摘要")`
+### 5.1 Architect → Developer
+```python
+mcp__zenos__task(action="handoff", id=X,
+    to_dispatcher="agent:developer",
+    reason="TD ready, implementation dispatched",
+    output_ref="docs/designs/TD-{slug}.md")
+```
+叫起 Developer subagent，傳入 task description + AC + TD 引用。
 
-### 5.2 Architect 驗證交付
-- 逐條比對 acceptance_criteria，確認實作符合要求
-- 確認無 regression、blast radius 可控
-- PASS → 交 QA 驗收；FAIL → 退回 Developer，附具體不符合的 AC
+### 5.2 Developer 接手 + 實作
+- 讀 task + handoff_events 取完整脈絡（PM 原意 + Architect 設計）
+- 更新：`task(action="update", id=X, status="in_progress")`
+- 實作完成後 handoff to QA：
+```python
+mcp__zenos__task(action="handoff", id=X,
+    to_dispatcher="agent:qa",
+    reason="implementation complete, tests green",
+    output_ref="{commit SHA}",
+    notes="交付摘要 / 驗證指令 / 已知風險")
+```
+Server 自動升 `status=review`。
 
 ### 5.3 QA 驗收
-叫起 QA subagent：
-- 依照 acceptance_criteria 執行測試
-- PASS：`confirm(collection="tasks", id=X, accepted=True)`
-- FAIL：`confirm(collection="tasks", id=X, accepted=False, rejection_reason="退回原因")` → 退回 Developer，重走 5.1
+叫起 QA subagent，讀 task + handoff_events（看整條履歷）：
+- **PASS**：`confirm(collection="tasks", id=X, accept=True, entity_entries=[...])`
+  - Server 自動 append 結束 HandoffEvent（to="human", reason="accepted"）+ status=done
+- **FAIL**：
+  ```python
+  mcp__zenos__task(action="handoff", id=X,
+      to_dispatcher="agent:developer",
+      reason="rejected: {instance_fix}; class_fix: {class_fix}")
+  ```
+  退回 Developer，重走 5.2。
 
-每張 task 走完 5.1→5.2→5.3 才進入下一張。
+每張 task 走完 5.1→5.2→5.3 才進入下一張。整條履歷沉澱在 `task.handoff_events`，任何時刻 `get(task)` 都能看完整派工軌跡。
 
 ---
 

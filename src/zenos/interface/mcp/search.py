@@ -52,6 +52,9 @@ async def search(
     entity_name: str | None = None,
     assignee: str | None = None,
     created_by: str | None = None,
+    dispatcher: str | None = None,
+    parent_task_id: str | None = None,
+    linked_entity: str | None = None,
     confirmed_only: bool | None = None,
     limit: int = 200,
     offset: int = 0,
@@ -114,6 +117,9 @@ async def search(
         entity_name: 按實體名稱過濾（blindspots 和 documents 用）
         assignee: 按被指派者過濾 tasks（Inbox 視角）
         created_by: 按建立者過濾 tasks（Outbox 視角）
+        dispatcher: 按當前 dispatcher 過濾 tasks（如 "agent:qa"）
+        parent_task_id: 只看某 parent task 的 subtasks
+        linked_entity: 按 linked_entities 內含的 entity ID 過濾 tasks
         confirmed_only: true=只看已確認 / false=只看未確認 / 不傳=全部
         limit: 回傳上限，預設 200（無硬性 cap，可依需求調大）
         offset: 分頁偏移量，預設 0。搭配 limit 做分頁。
@@ -214,6 +220,12 @@ async def search(
         applied_filters["confirmed_only"] = confirmed_only
     if status is not None:
         applied_filters["status"] = status
+    if dispatcher is not None:
+        applied_filters["dispatcher"] = dispatcher
+    if parent_task_id is not None:
+        applied_filters["parent_task_id"] = parent_task_id
+    if linked_entity is not None:
+        applied_filters["linked_entity"] = linked_entity
 
     # Keyword search mode (cross-collection)
     if query.strip() and collection == "all":
@@ -518,6 +530,9 @@ async def search(
                 assignee=assignee,
                 created_by=created_by,
                 status=status_list,
+                dispatcher=dispatcher,
+                parent_task_id=parent_task_id,
+                linked_entity=linked_entity,
                 limit=limit,
                 offset=offset,
                 project=effective_project or None,

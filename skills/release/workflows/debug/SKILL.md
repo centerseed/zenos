@@ -71,23 +71,40 @@ def test_regression_{bug}():
 
 ---
 
-## Phase 4：Developer 修復
+## Phase 4：Developer 修復（2026-04-19 Handoff Chain）
 
-叫起 Developer agent：
-- 讀取 Debugger 的根因 + Architect 的確認 + QA 的測試
+前置：Architect 已建 task 並 handoff：
+```python
+mcp__zenos__task(action="handoff", id=X,
+    to_dispatcher="agent:developer",
+    reason="reproducer ready, root cause confirmed",
+    output_ref="tests/regression/test_...py::test_reproduces_bug")
+```
+
+Developer 接手：
+- `get(task).handoff_events` 讀整條履歷（Debugger 根因 + Architect 確認 + QA 測試）
 - **只修根因，不修 symptom**
-- 修復後測試必須 PASS
-- 更新 task result，status → review
+- 修復後回歸測試必須 PASS
+- 實作完 handoff to QA（不再 `status="review"` 手動升）：
+```python
+mcp__zenos__task(action="handoff", id=X,
+    to_dispatcher="agent:qa",
+    reason="fix complete, regression green",
+    output_ref="{commit SHA}")
+```
+Server 自動升 `status=review`。
 
 ---
 
-## Phase 5：Architect 最終確認
+## Phase 5：QA 驗收 + Architect 最終確認
 
-Architect 確認：
-1. 測試 PASS（開發人員提供輸出）
+QA 驗收：
+1. 回歸測試 PASS（開發人員提供輸出）
 2. 根因確實被移除（不是繞過）
 3. 無新的 regression
-4. 執行 `mcp__zenos__confirm(collection="tasks", id="...", accepted=True)`
+4. PASS：`mcp__zenos__confirm(collection="tasks", id=X, accept=True)`
+   → Server 自動 append 結束 HandoffEvent（to="human", reason="accepted"）+ status=done
+5. FAIL：`task(action="handoff", to_dispatcher="agent:developer", reason="rejected: ...")` → 退回 Phase 4
 
 ---
 

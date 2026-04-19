@@ -113,6 +113,14 @@ class TaskService:
         self._uow_factory = uow_factory
         self._plans = plan_repo
 
+    async def _save_task(self, task: Task, *, conn: Any | None = None) -> Task:
+        if conn is None:
+            return await self._tasks.upsert(task)
+        try:
+            return await self._tasks.upsert(task, conn=conn)
+        except TypeError:
+            return await self._tasks.upsert(task)
+
     # ──────────────────────────────────────────
     # Create
     # ──────────────────────────────────────────
@@ -274,14 +282,7 @@ class TaskService:
             dispatcher=dispatcher,
         )
 
-        if conn is None:
-            saved = await self._tasks.upsert(task)
-        else:
-            # SQL repositories support conn-scoped writes for cross-repo atomicity.
-            try:
-                saved = await self._tasks.upsert(task, conn=conn)
-            except TypeError:
-                saved = await self._tasks.upsert(task)
+        saved = await self._save_task(task, conn=conn)
         return TaskResult(task=saved, cascade_updates=[])
 
     # ──────────────────────────────────────────
@@ -378,8 +379,62 @@ class TaskService:
             raise ValueError("plan_order must be >= 1")
 
         task.updated_at = datetime.utcnow()
-        saved = await self._tasks.upsert(task)
+        saved = await self._save_task(task)
         return TaskResult(task=saved, cascade_updates=cascades)
+
+    async def handoff_task(
+        self,
+        task_id: str,
+        *,
+        to_dispatcher: str,
+        reason: str,
+        output_ref: str | None = None,
+        notes: str | None = None,
+        updated_by: str | None = None,
+    ) -> TaskResult:
+        """Append a handoff event and move dispatcher atomically when possible."""
+        task = await self._tasks.get_by_id(task_id)
+        if task is None:
+            raise ValueError(f"Task '{task_id}' not found")
+        task.status = normalize_task_status(task.status)
+
+        if not to_dispatcher or not DISPATCHER_PATTERN.match(to_dispatcher):
+            raise TaskValidationError(
+                f"dispatcher '{to_dispatcher}' does not match required namespace format "
+                f"^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$",
+                error_code="INVALID_DISPATCHER",
+            )
+        if not reason or not reason.strip():
+            raise ValueError("reason is required for handoff")
+
+        now = datetime.now(timezone.utc)
+        event = HandoffEvent(
+            at=now,
+            from_dispatcher=task.dispatcher,
+            to_dispatcher=to_dispatcher,
+            reason=reason.strip(),
+            output_ref=output_ref,
+            notes=notes,
+        )
+        next_status = task.status
+        if to_dispatcher == "agent:qa" and task.status == TaskStatus.IN_PROGRESS:
+            next_status = TaskStatus.REVIEW
+
+        async def _persist(conn: Any | None = None) -> Task:
+            task.handoff_events = [*(task.handoff_events or []), event]
+            task.dispatcher = to_dispatcher
+            task.status = next_status
+            task.updated_at = datetime.utcnow()
+            if updated_by:
+                task.updated_by = updated_by
+            return await self._save_task(task, conn=conn)
+
+        if self._uow_factory is not None:
+            async with self._uow_factory() as uow:
+                saved = await _persist(getattr(uow, "conn", None))
+        else:
+            saved = await _persist()
+        return TaskResult(task=saved, cascade_updates=[])
 
     # ──────────────────────────────────────────
     # Confirm (accept / reject)
@@ -413,6 +468,26 @@ class TaskService:
                 task.status = TaskStatus.DONE
                 task.confirmed_by_creator = True
                 task.completed_at = datetime.utcnow()
+                accept_ref = None
+                if entity_entries:
+                    entity_ids = [
+                        str(item.get("entity_id"))
+                        for item in entity_entries
+                        if isinstance(item, dict) and item.get("entity_id")
+                    ]
+                    if entity_ids:
+                        accept_ref = ",".join(entity_ids)
+                task.handoff_events = [
+                    *(task.handoff_events or []),
+                    HandoffEvent(
+                        at=datetime.now(timezone.utc),
+                        from_dispatcher=task.dispatcher,
+                        to_dispatcher="human",
+                        reason="accepted",
+                        output_ref=accept_ref,
+                    ),
+                ]
+                task.dispatcher = "human"
                 cascades = await self._cascade_unblock(task_id, conn=uow.conn)
 
                 # Phase 1: feedback engine (batch to avoid N+1)
@@ -465,7 +540,7 @@ class TaskService:
                 task.updated_at = datetime.utcnow()
                 if updated_by:
                     task.updated_by = updated_by
-                saved = await self._tasks.upsert(task, conn=uow.conn)
+                saved = await self._save_task(task, conn=uow.conn)
             return TaskResult(task=saved, cascade_updates=cascades, suggested_entity_updates=suggested_entity_updates)
         else:
             if not rejection_reason:
@@ -473,11 +548,20 @@ class TaskService:
             task.status = TaskStatus.IN_PROGRESS
             task.confirmed_by_creator = False
             task.rejection_reason = rejection_reason
+            task.handoff_events = [
+                *(task.handoff_events or []),
+                HandoffEvent(
+                    at=datetime.now(timezone.utc),
+                    from_dispatcher=task.dispatcher,
+                    to_dispatcher=task.dispatcher or "human",
+                    reason=f"rejected: {rejection_reason}",
+                ),
+            ]
 
             task.updated_at = datetime.utcnow()
             if updated_by:
                 task.updated_by = updated_by
-            saved = await self._tasks.upsert(task)
+            saved = await self._save_task(task)
             return TaskResult(task=saved, cascade_updates=cascades, suggested_entity_updates=[])
 
     # ──────────────────────────────────────────
@@ -492,6 +576,8 @@ class TaskService:
         status: list[str] | None = None,
         priority: str | None = None,
         linked_entity: str | None = None,
+        dispatcher: str | None = None,
+        parent_task_id: str | None = None,
         include_archived: bool = False,
         limit: int = 200,
         offset: int = 0,
@@ -505,6 +591,8 @@ class TaskService:
             status=status,
             priority=priority,
             linked_entity=linked_entity,
+            dispatcher=dispatcher,
+            parent_task_id=parent_task_id,
             include_archived=include_archived,
             limit=limit,
             offset=offset,

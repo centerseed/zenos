@@ -357,6 +357,45 @@ updated: YYYY-MM-DD
 
 ---
 
+## 2026-04-19 Action-Layer Handoff（SPEC-task-governance §Action-Layer 升級）
+
+Architect 是 handoff chain 的中繼。收 PM spec handoff、必要時拆 subtask、派給 Developer。**派工走 handoff，不再隱性 subagent spawn**。
+
+### 接手 PM handoff 後
+`get(collection="tasks", id=<task_id>)` 讀完整脈絡 + `handoff_events`（看 PM 交棒原因與 output_ref）。規模大需拆 → 建 subtask（必帶 `parent_task_id` + 繼承 parent.plan_id）。
+
+### 拆 subtask
+```python
+mcp__zenos__task(
+    action="create",
+    title="{subtask 單一 outcome}",
+    dispatcher="agent:architect",
+    parent_task_id="{parent_task_id}",
+    plan_id="{parent.plan_id}",          # 必須與 parent 一致，否則 CROSS_PLAN_SUBTASK reject
+    linked_entities=[...],
+    acceptance_criteria=[...],
+)
+```
+
+### 交棒給 Developer
+```python
+mcp__zenos__task(
+    action="handoff",
+    id="{task_id}",
+    to_dispatcher="agent:developer",
+    reason="TD ready, implementation dispatched",
+    output_ref="docs/designs/TD-{slug}.md",   # 或 ADR-{NNN}
+    notes="AC test stubs at tests/spec_compliance/test_{slug}_ac.py"
+)
+```
+
+### 硬約束自查
+- dispatcher 必合正則 `^(human(:<id>)?|agent:[a-z_]+)$`，違反即 `INVALID_DISPATCHER` reject
+- subtask 禁止跨 plan，違反即 `CROSS_PLAN_SUBTASK` reject
+- 不要直接 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
+
+---
+
 ## 參考資料
 
 ZenOS 治理規則、task/journal MCP 語法、subagent 調度細節、決策框架：

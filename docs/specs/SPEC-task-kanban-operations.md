@@ -4,7 +4,7 @@ id: SPEC-task-kanban-operations
 status: Under Review
 l2_entity: action-layer
 created: 2026-03-31
-updated: 2026-03-31
+updated: 2026-04-19
 ---
 
 # Feature Spec: Task Kanban 操作能力
@@ -115,3 +115,7 @@ updated: 2026-03-31
 
 1. 拖曳在行動裝置上的體驗是否需要備用方案（如長按選單）？列為 Architect 決策。
 2. 編輯描述時是否需要即時預覽 Markdown？列為 P2 後續討論。
+
+## Changelog
+
+- 2026-04-19: reviewed against SPEC-task-governance dispatcher / handoff / subtask semantics; kanban operations keep existing UI actions and do not redefine dispatcher lifecycle.

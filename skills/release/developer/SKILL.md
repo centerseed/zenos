@@ -184,17 +184,30 @@ Simplify 後立刻重跑該模組的最小 scope 測試。
 
 ---
 
-## 完成後更新任務
+## 完成後更新任務（2026-04-19 Action-Layer Handoff）
+
+實作完成後不要用 `action="update"` + `status="review"`——改走顯性 handoff 交棒給 QA，server 會自動升 status 並留派工履歷。
 
 ```python
 mcp__zenos__task(
-    action="update",
-    id="task-id",
-    status="review",
-    result="交付：{檔案清單摘要}；驗證指令：{command}；已知風險：{或無}"
+    action="handoff",
+    id="{task_id}",
+    to_dispatcher="agent:qa",
+    reason="implementation complete, tests green",
+    output_ref="{commit SHA 或 PR URL}",
+    notes="交付：{檔案清單摘要}；驗證指令：{command}；已知風險：{或無}"
 )
 ```
 
-只有在 AC / Done Criteria 都有對應證據時，才能送 `review`。
+副作用：
+- `to_dispatcher="agent:qa"` 且當前 status=in_progress → server 自動升 status=review
+- `handoff_events` append 一條事件（包含 from_dispatcher="agent:developer"）
+- 寫 audit log `ontology.task.handoff`
 
-等待 QA 驗收。QA FAIL → task 退回 `in_progress`，根據問題修復後再次 update to review。
+**約束**：
+- 只有在 AC / Done Criteria 都有對應證據時，才能 handoff 給 QA
+- `to_dispatcher` 必合正則，違反即 `INVALID_DISPATCHER` reject
+- 不要手動 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
+
+### QA FAIL 時
+QA 會把 task handoff 回給 `agent:developer`（reason="rejected: ..."）。你從 `get(task).handoff_events` 最後一條看到退回原因，修好後再次 handoff 給 QA。status 回到 `in_progress` 自動處理。

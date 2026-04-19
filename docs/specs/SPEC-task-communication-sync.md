@@ -4,7 +4,7 @@ id: SPEC-task-communication-sync
 status: Draft
 ontology_entity: action-layer
 created: 2026-03-30
-updated: 2026-03-30
+updated: 2026-04-19
 ---
 
 # Feature Spec: Task 通訊同步與知識對齊 (Lowering Communication Cost)
@@ -47,3 +47,7 @@ updated: 2026-03-30
 
 ## 邊界定義
 - 本文件僅定義 UI 呈現邏輯，不涉及 Adapter 的具體實現流程。
+
+## Changelog
+
+- 2026-04-19: reviewed against SPEC-task-governance dispatcher / handoff / subtask semantics; no conflict found, task communication sync remains UI-facing provenance/context scope.

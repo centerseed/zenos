@@ -230,3 +230,46 @@ QA 不自己修 bug，而是在退回時**同時告訴 Developer 兩個層次該
 
 只寫「這裡有 bug」不說怎麼修 = 浪費 Developer 重新診斷的時間。
 只修 instance 不修 class = 同類 bug 會不斷出現。
+
+---
+
+## 2026-04-19 Action-Layer Handoff（SPEC-task-governance §Action-Layer 升級）
+
+QA 是 handoff chain 的驗收節點。**不再用 `confirm(accept=False)` + `status=in_progress` 的舊流程**——改用 handoff 把球打回給 Developer（或前一 dispatcher），audit trail 完整。
+
+### PASS：驗收通過
+```python
+mcp__zenos__confirm(
+    collection="tasks",
+    id="{task_id}",
+    accept=True,
+    entity_entries=[{"entity_id": "...", "type": "decision|insight|limitation|change|context", "content": "..."}]
+)
+```
+Server 自動：
+- append 結束 `HandoffEvent(to_dispatcher="human", reason="accepted", output_ref=<entity_entries ids>)`
+- `task.dispatcher = "human"`
+- `task.status = "done"`
+- 寫回 ontology entries（若提供 entity_entries）
+
+### FAIL：驗收退回
+```python
+mcp__zenos__task(
+    action="handoff",
+    id="{task_id}",
+    to_dispatcher="agent:developer",   # 通常退回 Developer；若是設計問題退 agent:architect
+    reason="rejected: {instance_fix_summary}; class_fix: {class_fix_summary}",
+    output_ref=None,
+    notes="詳見 QA Verdict 退回要求"
+)
+```
+Server 自動：
+- append `HandoffEvent` 記錄退回
+- `task.dispatcher` 切回 `to_dispatcher`（通常是 Developer）
+- status 保持 review 或應用自訂邏輯（實作依 task_service.handoff_task 規則）
+
+**約束**：
+- `to_dispatcher` 必合正則，違反即 `INVALID_DISPATCHER` reject
+- reason 必填；用結構化格式 `"rejected: <instance>; class_fix: <class>"` 讓 Developer 一眼看懂要修什麼
+- 不要直接 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
+- 退回後可讀 `get(task).handoff_events` 比對前後派工履歷
