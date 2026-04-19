@@ -2195,7 +2195,8 @@ class TestAnalyzeTool:
             assert data["quality"]["entry_saturation_count"] == 0
 
     async def test_analyze_quality_entry_saturation_has_proposal(self):
-        """analyze quality: saturated entity produces proposal in entry_saturation."""
+        """DF-20260419-L2c: analyze quality lists saturated entities (no LLM proposal);
+        proposal is returned only by targeted consolidate check_type."""
         from zenos.interface.mcp import analyze
         from zenos.application.knowledge.governance_ai import ConsolidationProposal, ConsolidationMergeGroup
         import zenos.interface.mcp as tools_mod
@@ -2232,6 +2233,7 @@ class TestAnalyzeTool:
             ])
             tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=entries)
 
+            # quality → list-only, no LLM consolidation in the payload
             result = await analyze(check_type="quality")
             data = _ok_data(result)
 
@@ -2239,7 +2241,16 @@ class TestAnalyzeTool:
             saturation_items = data["quality"]["entry_saturation"]
             assert len(saturation_items) == 1
             assert saturation_items[0]["entity_id"] == "ent-1"
-            assert saturation_items[0]["consolidation_proposal"] is not None
+            assert "consolidation_proposal" not in saturation_items[0]
+            # consolidate_entries not called by quality branch anymore
+            assert mock_ai.consolidate_entries.call_count == 0
+
+            # consolidate with entity_id → targeted LLM proposal
+            result2 = await analyze(check_type="consolidate", entity_id="ent-1")
+            data2 = _ok_data(result2)
+            assert data2["entity_id"] == "ent-1"
+            assert data2["consolidation_proposal"] is not None
+            assert mock_ai.consolidate_entries.call_count == 1
 
     async def test_analyze_quality_entry_saturation_llm_failure(self):
         """analyze quality: LLM failure in consolidate_entries -> proposal is None, analyze doesn't crash."""
@@ -2266,12 +2277,18 @@ class TestAnalyzeTool:
             ])
             tools_mod.entry_repo.list_by_entity = AsyncMock(return_value=entries)
 
+            # DF-20260419-L2c: quality lists saturated, targeted consolidate
+            # handles the LLM path including failure.
             result = await analyze(check_type="quality")
             data = _ok_data(result)
-
             assert "quality" in data
             assert data["quality"]["entry_saturation_count"] == 1
-            assert data["quality"]["entry_saturation"][0]["consolidation_proposal"] is None
+
+            # When LLM fails for the targeted consolidate, proposal is None but
+            # response is still ok (payload carries consolidation_proposal=None).
+            result2 = await analyze(check_type="consolidate", entity_id="ent-1")
+            data2 = _ok_data(result2)
+            assert data2["consolidation_proposal"] is None
 
 
 # ===================================================================

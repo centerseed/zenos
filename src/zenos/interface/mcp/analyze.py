@@ -146,45 +146,81 @@ async def analyze(
             })
         return repairs
 
-    async def _check_entry_saturation() -> list[dict]:
-        """Detect saturated (entity, department) groups (>= 20 active entries) and produce consolidation proposals.
+    async def _list_saturated_entities() -> list[dict]:
+        """Fast listing of (entity, department) saturation groups (>= 20 active).
 
-        Each (entity_id, department) pair is checked independently so entries from
-        different departments are never merged in the same consolidation proposal.
+        Diagnose-only: no LLM call. Use _consolidate_one(entity_id) to run
+        the actual LLM proposal for a single entity (DF-20260419-L2c).
         """
-        # Re-read from module-level since _ensure_services may have updated it
+        _erepo = _mcp.entry_repo
+        if _erepo is None:
+            return []
+        saturated = await _erepo.list_saturated_entities(threshold=20)
+        return [
+            {
+                "entity_id": item["entity_id"],
+                "entity_name": item["entity_name"],
+                "active_count": item["active_count"],
+                **({"department": item["department"]} if item.get("department") is not None else {}),
+            }
+            for item in saturated
+        ]
+
+    async def _consolidate_one(target_entity_id: str) -> dict | None:
+        """Run LLM consolidation proposal for a single (entity, department) group.
+
+        Returns {entity_id, entity_name, active_count, department, consolidation_proposal}
+        or None if the entity isn't saturated / no LLM available.
+        """
         _erepo = _mcp.entry_repo
         _gai = _mcp._governance_ai
         if _erepo is None or _gai is None:
-            return []
+            return None
         saturated = await _erepo.list_saturated_entities(threshold=20)
-        if not saturated:
-            return []
+        match = next((s for s in saturated if s["entity_id"] == target_entity_id), None)
+        if match is None:
+            return None
+        dept = match.get("department")
+        all_entries = await _erepo.list_by_entity(target_entity_id, status="active")
+        entries = [e for e in all_entries if e.department == dept]
+        entry_dicts = [
+            {"id": e.id, "type": e.type, "content": e.content}
+            for e in entries
+        ]
+        proposal = _gai.consolidate_entries(target_entity_id, match["entity_name"], entry_dicts)
+        result: dict = {
+            "entity_id": target_entity_id,
+            "entity_name": match["entity_name"],
+            "active_count": match["active_count"],
+            "consolidation_proposal": proposal.model_dump() if proposal else None,
+        }
+        if dept is not None:
+            result["department"] = dept
+        return result
 
-        proposals = []
-        for item in saturated:
-            entity_id = item["entity_id"]
-            entity_name = item["entity_name"]
-            active_count = item["active_count"]
-            dept = item.get("department")  # may be None (unassigned group)
-            all_entries = await _erepo.list_by_entity(entity_id, status="active")
-            # Strict per-department isolation: only consolidate entries of this group
-            entries = [e for e in all_entries if e.department == dept]
-            entry_dicts = [
-                {"id": e.id, "type": e.type, "content": e.content}
-                for e in entries
-            ]
-            proposal = _gai.consolidate_entries(entity_id, entity_name, entry_dicts)
-            result_item: dict = {
-                "entity_id": entity_id,
-                "entity_name": entity_name,
-                "active_count": active_count,
-                "consolidation_proposal": proposal.model_dump() if proposal else None,
-            }
-            if dept is not None:
-                result_item["department"] = dept
-            proposals.append(result_item)
-        return proposals
+    # DF-20260419-L2c: single-entity consolidation proposal. Separated
+    # diagnosis (check_type="quality" lists saturated entities, no LLM) from
+    # execution (check_type="consolidate" runs one LLM call for one entity).
+    # Previously analyze(quality) did both synchronously in a loop, timing
+    # out on any entity with 40+ entries.
+    if check_type == "consolidate":
+        if not entity_id:
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message="analyze(check_type='consolidate') 需要 entity_id（先用 quality 列 saturated 再 targeted call）",
+            )
+        proposal = await _consolidate_one(entity_id)
+        if proposal is None:
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=(
+                    f"Entity '{entity_id}' 不在 saturation 清單（active entries < 20），"
+                    "或 LLM 不可用。先跑 analyze(check_type='quality') 確認是否真的 saturated。"
+                ),
+            )
+        return _unified_response(data=proposal)
 
     # DF-20260419-L2b: single-entity health audit.
     # Replaces Monitor's manual gather (get entity + list rels + list entries +
@@ -491,9 +527,12 @@ async def analyze(
         except Exception:
             logger.warning("L2 governance review overdue check failed", exc_info=True)
 
-        # Entry saturation detection
+        # Entry saturation detection (DF-20260419-L2c: list-only, no per-entity
+        # LLM consolidate — that was the timeout source. Use
+        # analyze(check_type="consolidate", entity_id=X) to generate a proposal
+        # for a specific entity.)
         try:
-            entry_saturation = await _check_entry_saturation()
+            entry_saturation = await _list_saturated_entities()
             results["quality"]["entry_saturation"] = entry_saturation
             results["quality"]["entry_saturation_count"] = len(entry_saturation)
         except Exception:
