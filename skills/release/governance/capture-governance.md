@@ -41,6 +41,28 @@
 
 ---
 
+## Anti-pattern 負面範例（2026-04-19 實證）
+
+訓練計畫系統 entity 一度累到 53 active entries，手動稽核後發現以下退化模式反覆出現。**下筆前自我檢查這 9 類，命中任一就不該寫 entry**：
+
+| Anti-pattern | 反例（archived ID） | 為什麼不該記 |
+|---|---|---|
+| 純 code path trace | `SlotDistributionSection._get_slot_distribution()（:633）... Call path: get_plan_run → ...` | grep 5 秒可得 |
+| 實作細節 + 函式內行為 | `_extract_types` 遞迴解析必須處理 dict/string；`hr_target_percent 會覆蓋 pace_zone` | 讀函式即知 |
+| Fallback / 默認行為 | `_convert_stages_to_v2() 對未知 stage_id 默默 fallback 到 base` | code 可驗 |
+| 配置事實 | `complete_10k 沒有 LSD slot` | YAML 可查 |
+| Bug fix commit log | `auto_fill_heart_rate() 的 easy_zone[0] 是 index bug`；entry 帶 commit SHA | git log 範疇 |
+| Transient debug noise | `V1 endpoint 404 P3 noise`、特定時間點的現象 | 短壽事件 |
+| 已被解決的 limitation | limitation A 已被 decision B 修掉仍留 active | 應 supersede |
+| 重複主題未合併 | 兩條 entry 講同一件事（粒度相似） | 應 consolidate |
+| 短壽 supersede 鏈 | 同主題 3 天內寫 3 版（df580c91→4afdfbfe→cb407680） | 設計未收斂就下筆 |
+
+**根本測試**：寫 entry 前先問——「這條知識 agent 讀 code 或 git log 五分鐘內能推導出來嗎？」能 → 不記。
+
+**entry 本質是 code 讀不出來的東西**：決策取捨、業務規則、架構層 tradeoff、語言陷阱。不是 bug fix 紀錄、不是 changelog、不是 code navigation 備忘。
+
+---
+
 ## Work Journal 規範
 
 每次 `/zenos-capture` 完成後**必須**寫 journal：

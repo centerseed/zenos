@@ -76,6 +76,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - `analyze(check_type="quality")`
    - `analyze(check_type="staleness")`
    - `analyze(check_type="blindspot")`
+   - **若 `analyze(quality)` timeout**（已知限制：entity active entries 接近或超過 20 時 LLM consolidate 會超時），走第 6 節「Entry 飽和手動稽核 protocol」
 2. 分類問題
    - 結構問題：命名混亂、L1/L2 掛錯、孤兒節點、關聯缺失。
    - 內容問題：summary 技術噪音、tags 不完整、文件重複。
@@ -243,6 +244,49 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
 - 找不到答案時先 `search/get`，不要憑空生成 entity。
 - 建 task 前必須先過第 5.3 節 8 題 checklist，2 題以上否則不建票。
 - Task 標 done 前必須確認知識反饋已落地（第 5.8 節）。
+
+## 6) Entry 飽和手動稽核 protocol
+
+當 `analyze(check_type="quality")` timeout（原因：server 對所有 saturated entity 同步跑 LLM consolidate，單 entity 超過 ~40 條就超時），改走手動稽核。此 protocol 也適用於用戶明確要求「治理某 entity 的 entries」。
+
+### 6.1 拉取全部 entries（繞開截斷）
+
+`get(collection="entities", name=..., include=["entries"])` 只回 5 條 most recent。用以下組合才能拿完整：
+
+- 多次 `search(collection="entries", query=<關鍵字>, mode="keyword", entity_level="all", limit=200)`，用不同 query 詞（主題詞、常用虛詞如 `是 / 用 / 一`）湊齊
+- 結果以 `id` dedupe
+- 逐條包含：`id`、`type`、`status`、`content`、`context`、`author`、`department`、`created_at`、`superseded_by`、`archive_reason`
+
+### 6.2 對照 ADR-010 設計本意判斷 anti-pattern
+
+以下任一命中就是低品質 entry，建議 `archive(reason=manual)` 或 `supersede`：
+
+| Anti-pattern | 判準 |
+|---|---|
+| 純 code path trace | 帶行號 `:NNN`、帶 Call path 箭頭、帶函式名串 |
+| 實作細節 | 描述函式內行為、欄位/變數級邏輯 |
+| Bug fix commit log | 帶 commit SHA、形如「改了 X 欄位從 A 到 B」 |
+| Fallback / 默認行為 | code 讀就知的 fallback 規則 |
+| 配置事實 | YAML / config 直接查得到 |
+| Transient debug | 標 P3 noise、特定時間點現象 |
+| 短壽 supersede 鏈 | ≤3 天內多版本未收斂 → 代表記得太早 |
+| 重複主題 | 多條 entry 指同一概念，未 consolidate |
+| 已被更結構性 entry 涵蓋 | 粒度低者應 archive |
+
+### 6.3 執行治理
+
+- **寫入時 `id` 必須是完整 UUID**（32-char hex），非 8-char prefix
+- Archive：`write(collection="entries", id=<full_id>, data={"status":"archived","archive_reason":"manual"})`
+- Supersede：`write(collection="entries", id=<old_id>, data={"status":"superseded","superseded_by":<new_id>})`
+- 寫入前列出完整清單給用戶核對，批次確認後執行
+
+### 6.4 發現 entity 粒度過大時
+
+active entries ≥ 30 或主題涵蓋 ≥ 5 個獨立子系統 → 建議拆分 entity（ADR-010 §治理規則「拆分信號」）。此決策應走 architect，不在本 skill 內自動執行。
+
+### 6.5 稽核結束必寫 journal
+
+`flow_type="governance"`，記錄：稽核對象 entity、archive 條數、supersede 條數、剩餘 active、是否觸發拆分建議。
 
 ## 9) 與既有三個 skill 的關係
 

@@ -51,20 +51,31 @@ def keyword_matches(query: str, entity: Any) -> int:
     q = query.lower()
     pool: list[str] = []
 
-    pool.append(entity.name or "")
-    pool.append(entity.summary or "")
+    def _push(value: Any) -> None:
+        """Coerce any tag value (str / list / nested / None) to flat list[str] in pool."""
+        if value is None:
+            return
+        if isinstance(value, str):
+            if value:
+                pool.append(value)
+            return
+        if isinstance(value, (list, tuple, set)):
+            for v in value:
+                _push(v)
+            return
+        pool.append(str(value))
+
+    _push(entity.name)
+    _push(entity.summary)
 
     tags = entity.tags
     if tags:
-        # Flatten list fields (what, who) and include scalar fields (why, how)
-        for v in (tags.what or []):
-            pool.append(v or "")
-        for v in (tags.who or []):
-            pool.append(v or "")
-        pool.append(tags.why or "")
-        pool.append(tags.how or "")
+        _push(tags.what)
+        _push(tags.who)
+        _push(tags.why)
+        _push(tags.how)
 
-    return 1 if any(q in s.lower() for s in pool if s) else 0
+    return 1 if any(q in s.lower() for s in pool if isinstance(s, str) and s) else 0
 
 
 class SearchService:

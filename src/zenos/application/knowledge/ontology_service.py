@@ -199,6 +199,28 @@ def _build_ancestors(entity_id: str, entity_map: dict[str, Entity], max_depth: i
     return ancestors
 
 
+def _find_product_root(entity_id: str, entity_map: dict[str, Entity]) -> str | None:
+    """Walk parent_id chain up to the L1 product root.
+
+    Returns the root entity's ID (which may equal entity_id if it IS an L1 product).
+    Returns None only if entity is orphaned (no parent chain reaches an L1).
+    Used by governance auto-link scoping to prevent cross-product contamination.
+    """
+    visited: set[str] = set()
+    current_id: str | None = entity_id
+    while current_id and current_id not in visited:
+        visited.add(current_id)
+        ent = entity_map.get(current_id)
+        if ent is None:
+            return None
+        if (ent.level or 0) == 1:
+            return current_id
+        if not ent.parent_id:
+            return None
+        current_id = ent.parent_id
+    return None
+
+
 def _collect_subtree_ids(root_id: str, entity_map: dict[str, Entity]) -> set[str]:
     """Return the set of entity IDs that belong to a product subtree.
 
@@ -531,9 +553,28 @@ class OntologyService:
         all_entities: list[Entity],
         *,
         exclude_entity_id: str | None = None,
+        scope_entity_id: str | None = None,
     ) -> dict:
-        """Build deterministic panorama hints so inference starts global-first."""
-        scoped_entities = [e for e in all_entities if e.id != exclude_entity_id]
+        """Build deterministic panorama hints so inference starts global-first.
+
+        DF-20260419-3 F6 fix: when scope_entity_id is given and maps to an L1
+        product root, `active_products / active_modules / impact_target_hints`
+        are filtered to that subtree, so the LLM prompt cannot propose links
+        pointing at unrelated products.
+        """
+        allowed_ids: set[str] | None = None
+        if scope_entity_id:
+            emap = {e.id: e for e in all_entities if e.id}
+            product_root = _find_product_root(scope_entity_id, emap)
+            if product_root:
+                allowed_ids = _collect_subtree_ids(product_root, emap)
+
+        def _in_scope(e: Entity) -> bool:
+            if allowed_ids is None:
+                return True
+            return e.id in allowed_ids if e.id else False
+
+        scoped_entities = [e for e in all_entities if e.id != exclude_entity_id and _in_scope(e)]
         non_doc_entities = [e for e in scoped_entities if e.type != EntityType.DOCUMENT]
         doc_entities = [e for e in scoped_entities if e.type == EntityType.DOCUMENT]
 
@@ -806,17 +847,41 @@ class OntologyService:
         *,
         all_entities: list[Entity],
         exclude_entity_id: str | None = None,
+        scope_entity_id: str | None = None,
     ) -> tuple[list[dict], list[dict]]:
         """Build richer, token-aware infer_all inputs.
 
         Includes summary/tags plus compact doc and impacts hints so LLM can infer
         concrete propagation paths without sending full documents.
+
+        If scope_entity_id is provided, candidates are filtered to the same
+        L1 product subtree (DF-20260419-2 F6 fix: prevent cross-subtree
+        auto-link contamination). Entities without a product root are excluded
+        from scoped inference entirely; cross-product relationships must be
+        authored explicitly.
         """
         entity_map = {e.id: e for e in all_entities if e.id}
-        doc_entities = [e for e in all_entities if e.type == EntityType.DOCUMENT and e.id]
+
+        # Determine subtree scope if requested
+        allowed_ids: set[str] | None = None
+        if scope_entity_id:
+            product_root = _find_product_root(scope_entity_id, entity_map)
+            if product_root:
+                allowed_ids = _collect_subtree_ids(product_root, entity_map)
+
+        def _in_scope(e: Entity) -> bool:
+            if allowed_ids is None:
+                return True
+            return e.id in allowed_ids if e.id else False
+
+        doc_entities = [
+            e for e in all_entities
+            if e.type == EntityType.DOCUMENT and e.id and _in_scope(e)
+        ]
         skeleton_entities = [
             e for e in all_entities
-            if e.type in (EntityType.PRODUCT, EntityType.MODULE) and e.id and e.id != exclude_entity_id
+            if e.type in (EntityType.PRODUCT, EntityType.MODULE)
+            and e.id and e.id != exclude_entity_id and _in_scope(e)
         ]
         relationships = await self._load_relationship_snapshot(all_entities)
 
@@ -1414,11 +1479,13 @@ class OntologyService:
                 entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
                     all_entities=all_entities,
                     exclude_entity_id=merged_data.get("id"),
+                    scope_entity_id=merged_data.get("parent_id") or merged_data.get("id"),
                 )
                 infer_entity_data = dict(merged_data)
                 infer_entity_data["_global_context"] = self._build_global_infer_context(
                     all_entities,
                     exclude_entity_id=merged_data.get("id"),
+                    scope_entity_id=merged_data.get("parent_id") or merged_data.get("id"),
                 )
                 pre_save_inference = self._governance_ai.infer_all(
                     infer_entity_data, entity_dicts, unlinked_dicts
@@ -1700,12 +1767,14 @@ class OntologyService:
             entity_dicts, unlinked_dicts = await self._build_infer_all_inputs(
                 all_entities=all_entities,
                 exclude_entity_id=saved.id,
+                scope_entity_id=saved.id,
             )
             doc_entities = [e for e in all_entities if e.type == EntityType.DOCUMENT and e.id]
             infer_entity_data = self._entity_to_dict(saved)
             infer_entity_data["_global_context"] = self._build_global_infer_context(
                 all_entities,
                 exclude_entity_id=saved.id,
+                scope_entity_id=saved.id,
             )
 
             inference = pre_save_inference if pre_save_inference and not unlinked_dicts else None

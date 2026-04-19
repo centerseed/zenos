@@ -372,5 +372,5 @@ mcp__zenos__journal_write(
 - Entity：type/status/tags(四維) 必填，module 的 parent_id 必填，命名禁止括號
 - Document：source.type 必填，linked_entity_ids 盡量帶，寫入前用 source.uri 查重
 - 寫入順序：product → module → relationships → documents → entries
-- Sync 不主動產出 entries（entries 由 `/zenos-capture` 或 task 完成流程產出）
+- **Sync 不主動產出 entries**：sync 的輸入是 git log / commit diff，而 ADR-010 明定 entry 不記 code 或 git history 看得到的事實——輸入來源與 entry 設計意圖反向，從 sync 抽 entry 必然退化成 commit log。entries 只能由 `/zenos-capture`（對話脈絡）或 task 完成流程（決策產出）產生。sync 遇到疑似 entry 候選時，改為標記 L3 document staleness 或建 blindspot。
 - 完整驗證規則見 `zenos-capture/SKILL.md`「MCP Server 驗證規則」段落

@@ -63,6 +63,7 @@ async def search(
     workspace_id: str | None = None,
     include: list[str] | None = None,
     mode: str = "hybrid",
+    entity_id: str | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -75,6 +76,7 @@ async def search(
     - 看待確認項目 → confirmed_only=False
     - 查任務 → collection="tasks"，可加 assignee/created_by 過濾
     - 查同一 plan 的所有任務 → collection="tasks"，plan_id="my-plan-id"
+    - 列出單一 entity 的所有 entries → collection="entries"，entity_id="..."（可選 query 做二次過濾）
     - 按產品過濾 → product="Paceriz"（by name）或 product_id="product-xxx"（by ID）
     - 控制搜尋層級 → entity_level="L1,L2"（預設只搜 L1+L2，排除 L3 細節）
 
@@ -490,22 +492,56 @@ async def search(
             results["tasks"] = [await _enrich_task_result(t) for t in visible_tasks]
 
         elif col == "entries":
-            if not query.strip():
-                return _error_response(
-                    status="rejected",
-                    error_code="INVALID_INPUT",
-                    message="search(collection='entries') 目前需要提供 query 關鍵字",
+            # DF-20260419-5 F5 fix: support entity_id filter to enumerate all entries
+            # under a single entity (no keyword required). When entity_id is set,
+            # query is optional; when entity_id is None, query is still required.
+            if entity_id:
+                partner_department = str(current_partner_department.get() or "all")
+                # status filter: accept comma-separated statuses (e.g. "active,superseded")
+                # default to active only for backward compat
+                status_filter: str | None = "active"
+                if status is not None:
+                    status_filter = status if status.lower() != "all" else None
+                entries_list = await _mcp.entry_repo.list_by_entity(
+                    entity_id,
+                    status=status_filter,
+                    department=partner_department,
                 )
-            partner_department = str(current_partner_department.get() or "all")
-            entry_hits = await _mcp.entry_repo.search_content(
-                query,
-                limit=limit,
-                department=partner_department,
-            )
-            results["entries"] = [
-                {**_serialize(hit["entry"]), "entity_name": hit["entity_name"]}
-                for hit in entry_hits
-            ]
+                # Apply keyword post-filter if query provided (narrow within entity)
+                if query.strip():
+                    q = query.lower()
+                    entries_list = [
+                        e for e in entries_list
+                        if q in (e.content or "").lower()
+                        or q in (e.context or "").lower()
+                    ]
+                # Look up entity name once for display
+                entity_obj = await _mcp.entity_repo.get_by_id(entity_id)
+                entity_name_resolved = entity_obj.name if entity_obj else None
+                results["entries"] = [
+                    {**_serialize(e), "entity_name": entity_name_resolved}
+                    for e in entries_list[:limit]
+                ]
+            else:
+                if not query.strip():
+                    return _error_response(
+                        status="rejected",
+                        error_code="INVALID_INPUT",
+                        message=(
+                            "search(collection='entries') 需要 query 關鍵字，"
+                            "或改用 entity_id= 列出單一 entity 的所有 entries"
+                        ),
+                    )
+                partner_department = str(current_partner_department.get() or "all")
+                entry_hits = await _mcp.entry_repo.search_content(
+                    query,
+                    limit=limit,
+                    department=partner_department,
+                )
+                results["entries"] = [
+                    {**_serialize(hit["entry"]), "entity_name": hit["entity_name"]}
+                    for hit in entry_hits
+                ]
 
     # Log a tool event for each entity exposed in collection-specific results
     entity_items = results.get("entities", [])

@@ -2078,10 +2078,14 @@ class TestGovernanceAIPromptInputFiltering:
             summary="new",
             tags=Tags(what=["x"], why="x", how="x", who=["x"]),
         )
+        # DF-20260419-2 F6: post-save auto-link is now subtree-scoped.
+        # module and doc must be under ent-new's L1 subtree to be considered.
         module = Entity(
             id="mod-1",
             name="Module A",
             type="module",
+            level=2,
+            parent_id="ent-new",
             summary="module",
             tags=Tags(what=["x"], why="x", how="x", who=["x"]),
         )
@@ -2089,9 +2093,13 @@ class TestGovernanceAIPromptInputFiltering:
             id="doc-1",
             name="Spec A",
             type="document",
+            level=3,
+            parent_id="mod-1",
             summary="doc",
             tags=Tags(what=["x"], why="x", how="x", who=["x"]),
         )
+        # saved needs level=1 so _find_product_root treats it as L1 root
+        saved.level = 1
         repos["entity_repo"].list_all = AsyncMock(return_value=[saved, module, doc])
         repos["entity_repo"].get_by_id = AsyncMock(return_value=saved)
 
