@@ -163,6 +163,54 @@ get(tasks, id=Z).handoff_events
   - confirm(task, accepted=true) 之後 handoff_events 有 final 事件、status=done
 - [ ] SPEC-task-communication-sync / SPEC-task-view-clarity / SPEC-task-kanban-operations 若有衝突描述需同步更新
 
+### 下游 SSOT 同步清單（Implementation 必做）
+
+Action-Layer 升級不是只改 schema 就完——MCP tool docstring、governance rules SSOT、四個 Agent skill、workflow skill 都要跟著一致。**以下 14 項任一未同步，不得轉交驗收**：
+
+#### MCP 介面層（3 項）
+
+| # | 檔案 | 具體改動 |
+|---|------|---------|
+| 1 | `src/zenos/interface/mcp/task.py` | 加 `action="handoff"` 分支；docstring 新增 `handoff` action + `to_dispatcher` / `reason` / `output_ref` / `notes` 欄位說明；audit event `ontology.task.handoff` |
+| 2 | `src/zenos/interface/mcp/search.py` | tasks collection docstring 加 `dispatcher` / `parent_task_id` / `linked_entity` 三個 filter；實作三個 server-side AND 過濾 |
+| 3 | `src/zenos/interface/mcp/write.py` | tasks write docstring 加 `parent_task_id` / `dispatcher` 兩個欄位說明；明示 `handoff_events` 是 readonly 於 write 路徑 |
+
+#### Governance SSOT（1 項）
+
+| # | 檔案 | 具體改動 |
+|---|------|---------|
+| 4 | `src/zenos/interface/governance_rules.py["task"]` | 加三條硬約束規則（level 2 內容）：`DISPATCHER_NAMESPACE`（正則驗證）、`CROSS_PLAN_SUBTASK`（subtask 必須繼承 plan_id）、`HANDOFF_EVENTS_READONLY`（write 不可直接改 handoff_events） |
+
+#### Agent Role Skills（4 項）
+
+| # | 檔案 | 具體改動 |
+|---|------|---------|
+| 5 | `skills/release/pm/SKILL.md` | 建 task 時 `dispatcher="agent:pm"`；完成 Feature Spec 後呼叫 `task(action="handoff", to_dispatcher="agent:architect", output_ref=<spec 檔名>)` |
+| 6 | `skills/release/architect/SKILL.md` | 接 handoff 後若需 subtask 必須帶 `parent_task_id` + 繼承 parent.plan_id；完成技術設計後 handoff to `agent:developer`，output_ref 為 TD/ADR path |
+| 7 | `skills/release/developer/SKILL.md` | 實作完成後 handoff to `agent:qa`，output_ref 為 commit SHA；status 自動升 review |
+| 8 | `skills/release/qa/SKILL.md` | 驗收通過走 `confirm(collection="tasks", accepted=true, entity_entries=[...])`；驗收 reject 走 `task(action="handoff", to_dispatcher=<上一個 dispatcher>, reason="rejected: ...")` 把球打回去 |
+
+#### Governance Task Skill（1 項）
+
+| # | 檔案 | 具體改動 |
+|---|------|---------|
+| 9 | `skills/release/governance/task-governance.md` | 8-題 checklist 擴 10 題，新增：「這張是不是該開 subtask 而不是新 task？」「dispatcher 有沒有依 namespace 規則填對？」；建票範例加一個 dispatcher="agent:pm" 的例子 |
+
+#### Workflow Skills（3 項）
+
+| # | 檔案 | 具體改動 |
+|---|------|---------|
+| 10 | `skills/release/workflows/feature.md` | 流程章節把「PM → Architect → Developer → QA」從隱性 subagent chain 改為顯性 handoff chain；每個階段指明 `task(action="handoff", ...)` 呼叫 |
+| 11 | `skills/release/workflows/debug.md` | 同上（Debugger → Architect → QA → Developer → Architect 鏈條） |
+| 12 | `skills/release/workflows/implement.md` | 同上（Spec → Architect → Developer → QA） |
+
+#### 相關 Spec 審查（2 項）
+
+| # | 檔案 | 動作 |
+|---|------|------|
+| 13 | `docs/specs/SPEC-task-communication-sync.md` | **讀一遍**，若有「task 狀態流轉」或「agent 互通」描述與 handoff_events 衝突，改；沒衝突直接加 reference |
+| 14 | `docs/specs/SPEC-task-view-clarity.md` + `SPEC-task-kanban-operations.md` | 同上——視圖層要不要顯示 handoff 履歷 / subtask 樹 / dispatcher 過濾 inbox，在這兩份 spec 決定 UI 契約 |
+
 ### 不納入本次升級（defer）
 
 | 項目 | 延後理由 |
