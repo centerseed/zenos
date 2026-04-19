@@ -4,13 +4,176 @@ id: SPEC-task-governance
 status: Approved
 ontology_entity: action-layer
 created: 2026-03-26
-updated: 2026-04-10
+updated: 2026-04-19
 ---
 
 # Feature Spec: ZenOS Task Governance
 
 > Layering note: 本 spec 只定義 `ZenOS Core` 中的 Action Layer 治理規則。
 > `Task` 與 `Plan` 的平台定位以 `SPEC-zenos-core` 為準；application-specific subtask / checklist / execution step 不在本 spec 範圍。
+
+## 2026-04-19 Action-Layer 升級：Subtask / Dispatcher / Handoff（最新覆寫）
+
+本節在既有 Task schema 上增補三個正交維度，同時把 **milestone** 落位到既有 L3 Goal entity，不新增 entity type。
+
+### 模型定位
+
+```
+Milestone (= EntityType.GOAL，不新增 type)      ← L3 entity，outcome anchor
+    ▲ rel/linked_entities
+Plan (string id grouper，維持現狀)                ← 不升 entity（見 ADR-028 Draft）
+    ▲ plan_id
+Task (加三欄)                                     ← 主角
+    ▲ parent_task_id（自指）
+Subtask (= Task with parent_task_id ≠ null)      ← 同表、任意深度
+```
+
+### Schema 增補（三欄）
+
+| 欄位 | 型別 | 必填 | 定義 | 治理規則 |
+|------|------|------|------|---------|
+| `parent_task_id` | string \| null | 否 | Subtask 的父 task ID（自指） | 若設，subtask 必須繼承 parent 的 `plan_id`；Server 強制一致否則 reject |
+| `dispatcher` | string \| null | 否 | 當前派工角色，namespace 格式 `^(human(:<id>)?\|agent:[a-z_]+)$` | Server 強制 enum prefix 驗證；不合格 reject |
+| `handoff_events` | HandoffEvent[] | 系統產生 | 派工履歷（append-only） | Caller 不可直接 write；只能透過 `task(action="handoff")` 由 server append |
+
+### `HandoffEvent` 結構
+
+| 欄位 | 型別 | 必填 | 說明 |
+|------|------|------|------|
+| `at` | datetime | 系統產生 | 事件時間（UTC） |
+| `from_dispatcher` | string | 系統產生 | 事件前的 dispatcher |
+| `to_dispatcher` | string | 是 | 事件後的 dispatcher（通過 namespace 驗證） |
+| `reason` | string | 是 | 為什麼 handoff（驗收通過 / 需架構 / 遇阻 / cancel） |
+| `output_ref` | string \| null | 建議 | 該階段產出引用（commit SHA / ADR id / entry id / file path） |
+| `notes` | string \| null | 否 | 補充說明 |
+
+**DB 儲存**：handoff_events 作為 JSONB 欄位存於 tasks table，append-only 由 server 層保證（write 不允許覆寫整個欄位）。
+
+### Dispatcher Namespace
+
+| 值 | 意義 | 備註 |
+|---|------|------|
+| `human` | 泛指任何人類 | 未指定具體 assignee 時使用 |
+| `human:<partner_id>` | 具體人類 | 通常跟 assignee 一致 |
+| `agent:pm` | PM agent | 寫 Feature Spec |
+| `agent:architect` | Architect agent | 技術設計、拆任務 |
+| `agent:developer` | Developer agent | 實作 |
+| `agent:qa` | QA agent | 驗收 |
+| `agent:<role>` | 未來擴充 | 小寫 + underscore |
+
+**Server 驗證**：正則 `^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$`。不合格的 dispatcher 值 → `write` / `task(action="handoff")` reject，error_code=`INVALID_DISPATCHER`。
+
+### Handoff 流程（Action-Layer 原生）
+
+**MCP tool**：`task(action="handoff", id=X, data={...})`
+
+```
+task(action="handoff", id="...", data={
+    to_dispatcher: "agent:architect",        # 必填，通過 namespace 驗證
+    reason: "spec ready, needs tech design", # 必填
+    output_ref: "docs/specs/SPEC-foo.md",    # 建議
+    notes: "..."                             # 選填
+})
+→ Server 原子操作：
+  1. append {at: now, from: <current dispatcher>, to: <to_dispatcher>, ...} to handoff_events
+  2. update task.dispatcher = to_dispatcher
+  3. 若 to_dispatcher 為 "agent:qa" 且當前 status=in_progress，自動升 status=review
+  4. 若 reason 為 "accepted" 且 confirm 同步觸發，升 status=done
+  5. audit log: ontology.task.handoff
+```
+
+**Append-only 保證**：`write(collection="tasks", data={handoff_events: [...]})` 忽略 handoff_events 欄位並回傳 warning。唯一入口是 `task(action="handoff")`。
+
+### Subtask 規則
+
+| 規則 | 強制等級 |
+|------|---------|
+| subtask 必須繼承 parent 的 `plan_id`（不能跨 plan） | **Server reject** |
+| subtask 可無 parent（parent_task_id = null） | 允許 |
+| subtask 可任意深度（A → B → C → ...） | 允許，但建議 ≤ 2 層 |
+| subtask 的 `linked_entities` 可獨立於 parent | 允許 |
+| subtask 完成 ≠ parent 完成 | Parent 完成需自行 confirm（不自動 cascade） |
+
+**粒度原則繼續適用**：subtask 仍必須單一 outcome、2-5 條 AC、單一 assignee。subtask 不是「parent 的 checklist」——是「同 plan 下獨立可驗收的子單位」。
+
+### Milestone（= Goal entity）掛法
+
+1. 建 milestone：`write(collection="entities", data={type: "goal", level: 3, name: "Q2 Launch", ...})`
+2. Task 連到 milestone：`linked_entities` 包含 milestone 的 entity id
+3. 查 milestone 下所有 task：
+   ```
+   search(collection="tasks", linked_entity=<milestone_id>)
+   ```
+4. Milestone 跨 plan 的聚合靠反查 task 的 plan_id（client 端 group），**不在 milestone entity 上存 plan_ids 列表**（避免雙向寫）。
+
+### Inbox / Kanban Query Pattern
+
+```
+# 某 agent role 的工作 inbox
+search(tasks, dispatcher="agent:architect", status="todo,in_progress")
+
+# 某 product 底下的 milestone 列
+search(entities, type="goal", product_id=X)
+
+# 某 milestone 下的 plan 聚合
+search(tasks, linked_entity=<goal_id>)   → group_by plan_id
+
+# 某 plan 的 task 看板
+search(tasks, plan_id=Y)                  → group_by status
+
+# 某 task 的 subtask 列
+search(tasks, parent_task_id=Z)
+
+# 某 task 的 handoff 履歷
+get(tasks, id=Z).handoff_events
+```
+
+需要 MCP 新增 filter：`search(tasks, dispatcher=..., parent_task_id=..., linked_entity=...)`。三者均為 server-side AND 過濾。
+
+### Migration
+
+| 現有資料 | 新欄位預設 |
+|---------|-----------|
+| 所有現存 task | `parent_task_id = null`、`dispatcher = null`、`handoff_events = []` |
+| `source_metadata.agent_name` 已存在 | **不自動回填** dispatcher；新寫入才強制 dispatcher 格式 |
+| 現有 plan_id 分組 | 不動 |
+
+**向下相容**：舊 caller 不傳 dispatcher / parent_task_id 都能繼續 work；只在主動使用新欄位時才套用新驗證。
+
+### 驗收條件（給 Developer / QA）
+
+- [ ] tasks table 加 `parent_task_id TEXT`、`dispatcher TEXT`、`handoff_events JSONB DEFAULT '[]'`，附 index on `parent_task_id`、`dispatcher`
+- [ ] Schema validator：
+  - parent_task_id 存在時，subtask.plan_id 必須 = parent.plan_id，否則 reject（`CROSS_PLAN_SUBTASK`）
+  - dispatcher 不合 namespace 正則時 reject（`INVALID_DISPATCHER`）
+  - write(tasks) 收到 handoff_events 欄位 → 忽略 + warning（`HANDOFF_EVENTS_READONLY`）
+- [ ] 新 MCP action：`task(action="handoff", id, data)`
+  - 原子 append handoff event
+  - 更新 task.dispatcher
+  - `to_dispatcher="agent:qa"` 且 status=in_progress 時，連帶升 status=review
+  - audit log: `ontology.task.handoff`
+- [ ] search(tasks) 加 filter：`dispatcher`、`parent_task_id`、`linked_entity`（後者跨 linked_entities array 查 any）
+- [ ] 既有 search(tasks, product_id=X) 已在 DF-20260419-7 F12 修正，與本次新 filter 正交可組合
+- [ ] 測試矩陣：
+  - create with parent_task_id cross-plan → reject
+  - create with dispatcher="agent:badrole!" → reject
+  - write(tasks, {handoff_events: [...]}) → 被忽略 + warning
+  - task(handoff) 之後 get(task).handoff_events 多一條、dispatcher 更新
+  - handoff to agent:qa 時 status 自動升 review
+  - confirm(task, accepted=true) 之後 handoff_events 有 final 事件、status=done
+- [ ] SPEC-task-communication-sync / SPEC-task-view-clarity / SPEC-task-kanban-operations 若有衝突描述需同步更新
+
+### 不納入本次升級（defer）
+
+| 項目 | 延後理由 |
+|------|---------|
+| `kind` enum (milestone/plan/task/subtask) | parent_task_id 存在與否 + goal entity 足以分層 |
+| task `nature` tags (dev/review/research) | tags 或 description 可表達，優先級低 |
+| Plan 升格 entity | 另走 ADR-028 Draft，不在本升級範圍 |
+| Task template / recipe | 獨立討論 |
+| Handoff 反向 rollback / revert 履歷 | 若需修正派工錯誤，append 新事件（reason="revert"），不刪除 |
+
+---
 
 ## 2026-03-31 Task 附件支援（最新增補）
 
