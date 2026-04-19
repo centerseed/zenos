@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 async def analyze(
     check_type: str = "all",
+    entity_id: str | None = None,
 ) -> dict:
     """執行 ontology 治理健康檢查。
 
@@ -184,6 +185,198 @@ async def analyze(
                 result_item["department"] = dept
             proposals.append(result_item)
         return proposals
+
+    # DF-20260419-L2b: single-entity health audit.
+    # Replaces Monitor's manual gather (get entity + list rels + list entries +
+    # walk peer parents) with one server-side call. Returns six dimensions
+    # per PLAN-zenos-dogfooding-loop L2 rules, plus rule-based anti-pattern
+    # hits so governance audit can act without pulling the full corpus.
+    if check_type == "entity_health":
+        import re as _re
+
+        if not entity_id:
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message="analyze(check_type='entity_health') 需要 entity_id",
+            )
+        entity = await _mcp.entity_repo.get_by_id(entity_id)
+        if entity is None:
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=f"Entity '{entity_id}' not found",
+            )
+
+        partner_dept = "all"
+        try:
+            from zenos.infrastructure.context import current_partner_department as _cpd
+            partner_dept = str(_cpd.get() or "all")
+        except Exception:
+            pass
+
+        # Dim 1 — summary
+        summary_text = entity.summary or ""
+        summary_dim = {
+            "present": bool(summary_text),
+            "length": len(summary_text),
+            "over_limit": len(summary_text) > 300,
+        }
+
+        # Dim 2 — tags 4-dim
+        tags = entity.tags
+        missing = []
+        if tags:
+            if not (tags.what and (tags.what if isinstance(tags.what, list) else [tags.what])):
+                missing.append("what")
+            if not tags.why:
+                missing.append("why")
+            if not tags.how:
+                missing.append("how")
+            if not (tags.who and (tags.who if isinstance(tags.who, list) else [tags.who])):
+                missing.append("who")
+        else:
+            missing = ["what", "why", "how", "who"]
+        tags_dim = {"complete": not missing, "missing_dimensions": missing}
+
+        # Dim 3 — relationships
+        rels = await _mcp.relationship_repo.list_by_entity(entity_id)
+        out_count = sum(1 for r in rels if r.source_entity_id == entity_id)
+        in_count = sum(1 for r in rels if r.source_entity_id != entity_id)
+        out_confirmed = sum(1 for r in rels if r.source_entity_id == entity_id and r.confirmed_by_user)
+        in_confirmed = sum(1 for r in rels if r.source_entity_id != entity_id and r.confirmed_by_user)
+        total_confirmed = out_confirmed + in_confirmed
+
+        # Cross-subtree check: walk peers' L1 roots
+        all_ents = await _mcp.entity_repo.list_all()
+        emap = {e.id: e for e in all_ents if e.id}
+        from zenos.application.knowledge.ontology_service import _find_product_root
+        self_l1 = _find_product_root(entity_id, emap) if entity_id else None
+        cross_subtree = 0
+        for r in rels:
+            peer_id = r.target_id if r.source_entity_id == entity_id else r.source_entity_id
+            peer_l1 = _find_product_root(peer_id, emap) if peer_id else None
+            if self_l1 and peer_l1 and peer_l1 != self_l1:
+                cross_subtree += 1
+        rels_dim = {
+            "outgoing": out_count,
+            "incoming": in_count,
+            "outgoing_confirmed": out_confirmed,
+            "incoming_confirmed": in_confirmed,
+            "total_confirmed": total_confirmed,
+            "orphan": total_confirmed < 2,
+            "cross_subtree_count": cross_subtree,
+        }
+
+        # Dim 4 — entries saturation & anti-pattern scan
+        entries = await _mcp.entry_repo.list_by_entity(entity_id, status="active", department=partner_dept)
+        active_count = len(entries)
+        saturation_level = "red" if active_count >= 20 else ("yellow" if active_count >= 15 else "green")
+
+        # Rule-based anti-pattern detection (regex, no LLM)
+        _commit_re = _re.compile(r"\bcommit\s+[0-9a-f]{7,40}\b", _re.IGNORECASE)
+        _sha_re = _re.compile(r"\b[0-9a-f]{7,40}\b")
+        _file_line_re = _re.compile(r"\w+\.py[:\s]+L?\d+|:\s*\d{2,4}\b")
+        _call_arrow_re = _re.compile(r"→.+→|->.+->")
+        _func_dunder_re = _re.compile(r"\b_\w+\(\)")
+
+        def _classify_anti_pattern(text: str) -> list[str]:
+            hits = []
+            if _commit_re.search(text):
+                hits.append("#5_commit_sha")
+            elif _sha_re.search(text) and "commit" in text.lower():
+                hits.append("#5_commit_sha")
+            if _file_line_re.search(text):
+                hits.append("#1_code_path_trace")
+            if _call_arrow_re.search(text):
+                hits.append("#1_call_path")
+            if _func_dunder_re.search(text):
+                hits.append("#2_internal_func")
+            return hits
+
+        anti_pattern_hits = []
+        for e in entries:
+            text = (e.content or "") + " " + (e.context or "")
+            hits = _classify_anti_pattern(text)
+            if hits:
+                anti_pattern_hits.append({
+                    "entry_id": e.id,
+                    "type": e.type,
+                    "content_preview": (e.content or "")[:80],
+                    "patterns": hits,
+                })
+
+        entries_dim = {
+            "active_count": active_count,
+            "threshold": 20,
+            "saturation_level": saturation_level,
+            "anti_pattern_candidates": anti_pattern_hits,
+            "anti_pattern_count": len(anti_pattern_hits),
+        }
+
+        # Dim 5 — granularity signal (v1 proxy: entry count + type diversity)
+        type_diversity = len({e.type for e in entries}) if entries else 0
+        granularity_dim = {
+            "active_entries": active_count,
+            "type_diversity": type_diversity,
+            "split_signal": active_count >= 30 or (active_count >= 20 and type_diversity >= 4),
+            "split_reason": (
+                "entries >= 30" if active_count >= 30
+                else ("entries >= 20 + type diversity >= 4" if active_count >= 20 and type_diversity >= 4 else None)
+            ),
+        }
+
+        # Verdict
+        issues = []
+        if not summary_dim["present"]: issues.append("summary_missing")
+        if summary_dim["over_limit"]: issues.append("summary_over_300")
+        if missing: issues.append("tags_incomplete")
+        if rels_dim["orphan"]: issues.append("orphan_insufficient_confirmed_rels")
+        if cross_subtree: issues.append("cross_subtree_rels")
+        if saturation_level == "red": issues.append("entries_saturated")
+        if anti_pattern_hits: issues.append("entries_anti_pattern")
+        if granularity_dim["split_signal"]: issues.append("split_candidate")
+        verdict = "healthy" if not issues else "needs_review"
+
+        suggested_actions = []
+        for h in anti_pattern_hits:
+            suggested_actions.append({
+                "action": "archive_entry",
+                "entry_id": h["entry_id"],
+                "reason": f"anti-pattern {','.join(h['patterns'])}",
+            })
+        if saturation_level == "red":
+            suggested_actions.append({
+                "action": "consolidate_entries",
+                "reason": f"active_count {active_count} >= threshold 20",
+            })
+        if rels_dim["orphan"]:
+            suggested_actions.append({
+                "action": "review_relationships",
+                "reason": f"only {total_confirmed} confirmed rels (need ≥2)",
+            })
+        if granularity_dim["split_signal"]:
+            suggested_actions.append({
+                "action": "consider_split",
+                "reason": granularity_dim["split_reason"],
+            })
+
+        return _unified_response(data={
+            "entity_id": entity_id,
+            "name": entity.name,
+            "type": entity.type,
+            "level": entity.level,
+            "dimensions": {
+                "summary": summary_dim,
+                "tags": tags_dim,
+                "relationships": rels_dim,
+                "entries": entries_dim,
+                "granularity": granularity_dim,
+            },
+            "issues": issues,
+            "verdict": verdict,
+            "suggested_actions": suggested_actions,
+        })
 
     # ADR-020: lightweight health check — KPIs only, no heavy analysis
     if check_type == "health":
