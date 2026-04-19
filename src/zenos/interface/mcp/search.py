@@ -158,6 +158,14 @@ async def search(
     results: dict = {}
     warnings: list[str] = []
 
+    # DF-20260419-8 F2 fix: empty-query list-all on entities collection
+    # previously eager-dumped every entity (129K+ chars for mid-size
+    # workspaces, exceeding MCP token limit). When caller passes no query
+    # and no explicit include, defer the decision: apply auto-degrade
+    # after we know the result count, below, only if large. This keeps
+    # ADR-040 Phase A eager-dump behavior intact for small workspaces.
+    _list_all_auto_degrade = not query.strip() and collection in ("all", "entities") and include is None
+
     # Resolve product name → product_id (product takes priority over product_id)
     if product is not None:
         resolved = await _mcp.entity_repo.get_by_name(product)
@@ -336,7 +344,18 @@ async def search(
 
                 paginated = entities_with_scores[offset:offset + limit]
 
-                if include_set is None:
+                # DF-20260419-8 F2: auto-degrade eager dump when list-all
+                # response is too large (>20 results). Keeps small workspaces
+                # at Phase A eager-dump; protects large ones from token blow-up.
+                _effective_include_set = include_set
+                if include_set is None and _list_all_auto_degrade and len(paginated) > 20:
+                    _effective_include_set = {"summary"}
+                    warnings.append(
+                        f"search(query=\"\") 回 {len(paginated)} 筆，自動套用 "
+                        "include=[\"summary\"] 避免 token 超限；要完整 payload 請傳 include=[\"full\"]"
+                    )
+
+                if _effective_include_set is None:
                     # Default legacy path: eager dump + deprecation warning (once per call)
                     _partner_ctx_for_warn = _current_partner.get()
                     _caller_id = str(_partner_ctx_for_warn.get("id")) if _partner_ctx_for_warn else None
@@ -350,7 +369,7 @@ async def search(
                 else:
                     items = []
                     for e, score, score_breakdown in paginated:
-                        item = build_search_result(_serialize(e), score=score, include_set=include_set)
+                        item = build_search_result(_serialize(e), score=score, include_set=_effective_include_set)
                         item["score_breakdown"] = score_breakdown
                         items.append(item)
             else:
