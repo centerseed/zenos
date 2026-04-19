@@ -448,6 +448,19 @@ async def search(
                     b for b in blindspots
                     if b.confirmed_by_user == confirmed_only
                 ]
+            # DF-20260419-7 F11 fix: apply product_id subtree filter.
+            # Previously product_id was silently ignored for blindspots, which
+            # meant Monitor audit saw every workspace blindspot regardless of
+            # scope. Now: keep blindspot if any related_entity is in the
+            # subtree. Strict mode (all related in subtree) may be added later.
+            if product_id is not None:
+                all_e = await _mcp.ontology_service._entities.list_all()
+                entity_map = {e.id: e for e in all_e if e.id}
+                subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                blindspots = [
+                    b for b in blindspots
+                    if any(eid in subtree_ids for eid in (b.related_entity_ids or []))
+                ]
             visible_bs = [b for b in blindspots if await _is_blindspot_visible(b)]
             results["blindspots"] = [_serialize(b) for b in visible_bs[offset:offset + limit]]
 
@@ -488,6 +501,18 @@ async def search(
                 visible_tasks = [
                     t for t in visible_tasks
                     if q in t.title.lower() or q in (t.description or "").lower()
+                ]
+            # DF-20260419-7 F12 fix: apply product_id subtree filter.
+            # Previously product_id was silently ignored for tasks — Monitor
+            # audit saw every workspace task. Now: keep task if any linked
+            # entity is in the product subtree.
+            if product_id is not None:
+                all_e = await _mcp.ontology_service._entities.list_all()
+                entity_map = {e.id: e for e in all_e if e.id}
+                subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                visible_tasks = [
+                    t for t in visible_tasks
+                    if any(eid in subtree_ids for eid in (t.linked_entities or []))
                 ]
             results["tasks"] = [await _enrich_task_result(t) for t in visible_tasks]
 
