@@ -7,7 +7,7 @@ from typing import Any
 
 import asyncpg  # type: ignore[import-untyped]
 
-from zenos.domain.action import Task
+from zenos.domain.action import HandoffEvent, Task
 from zenos.infrastructure.sql_common import (
     SCHEMA,
     _acquire_with_tx,
@@ -20,11 +20,32 @@ from zenos.infrastructure.sql_common import (
 )
 
 
+def _deserialize_handoff_events(raw: object) -> list[HandoffEvent]:
+    """Deserialize JSONB handoff_events column into HandoffEvent objects."""
+    if not raw:
+        return []
+    records: list[dict] = raw if isinstance(raw, list) else (_json_loads_safe(raw) or [])
+    events: list[HandoffEvent] = []
+    for rec in records:
+        if not isinstance(rec, dict):
+            continue
+        events.append(HandoffEvent(
+            at=_to_dt(rec.get("at")) or _now(),
+            from_dispatcher=rec.get("from_dispatcher"),
+            to_dispatcher=rec.get("to_dispatcher", ""),
+            reason=rec.get("reason", ""),
+            output_ref=rec.get("output_ref"),
+            notes=rec.get("notes"),
+        ))
+    return events
+
+
 def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: list[str]) -> Task:
     plan_id = row["plan_id"] if "plan_id" in row else None
     plan_order = row["plan_order"] if "plan_order" in row else None
     depends_json = row["depends_on_task_ids_json"] if "depends_on_task_ids_json" in row else None
     source_metadata_json = row["source_metadata_json"] if "source_metadata_json" in row else None
+    handoff_events_raw = row["handoff_events"] if "handoff_events" in row else None
     return Task(
         id=row["id"],
         title=row["title"],
@@ -58,6 +79,9 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         project=row["project"],
         project_id=row["project_id"] if "project_id" in row else None,
         attachments=_json_loads_safe(row["attachments"] if "attachments" in row else None) or [],
+        parent_task_id=row["parent_task_id"] if "parent_task_id" in row else None,
+        dispatcher=row["dispatcher"] if "dispatcher" in row else None,
+        handoff_events=_deserialize_handoff_events(handoff_events_raw),
         created_at=_to_dt(row["created_at"]) or _now(),
         updated_at=_to_dt(row["updated_at"]) or _now(),
         completed_at=_to_dt(row["completed_at"]),
@@ -144,6 +168,18 @@ class SqlTaskRepository:
             task.id = _new_id()
             task.created_at = now
 
+        handoff_events_json = _dumps([
+            {
+                "at": e.at.isoformat() if hasattr(e.at, "isoformat") else str(e.at),
+                "from_dispatcher": e.from_dispatcher,
+                "to_dispatcher": e.to_dispatcher,
+                "reason": e.reason,
+                "output_ref": e.output_ref,
+                "notes": e.notes,
+            }
+            for e in (task.handoff_events or [])
+        ])
+
         async with _acquire_with_tx(self._pool, conn) as _conn:
             await _conn.execute(
                 f"""
@@ -155,12 +191,14 @@ class SqlTaskRepository:
                     due_date, blocked_reason, acceptance_criteria_json, completed_by,
                     confirmed_by_creator, rejection_reason, result, project, project_id,
                     attachments,
+                    parent_task_id, dispatcher, handoff_events,
                     created_at, updated_at, completed_at
                 ) VALUES (
                     $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,
                     $12,$13,$14::jsonb,$15,$16,$17,$18::jsonb,$19,$20,$21,$22::jsonb,$23,$24,$25,$26,$27,$28,
                     $29::jsonb,
-                    $30,$31,$32
+                    $30,$31,$32::jsonb,
+                    $33,$34,$35
                 )
                 ON CONFLICT (id) DO UPDATE SET
                     title=EXCLUDED.title, description=EXCLUDED.description,
@@ -186,6 +224,9 @@ class SqlTaskRepository:
                     result=EXCLUDED.result, project=EXCLUDED.project,
                     project_id=EXCLUDED.project_id,
                     attachments=EXCLUDED.attachments,
+                    parent_task_id=EXCLUDED.parent_task_id,
+                    dispatcher=EXCLUDED.dispatcher,
+                    handoff_events=EXCLUDED.handoff_events,
                     updated_at=EXCLUDED.updated_at,
                     completed_at=EXCLUDED.completed_at
                 WHERE tasks.partner_id = EXCLUDED.partner_id
@@ -200,6 +241,7 @@ class SqlTaskRepository:
                 task.completed_by, task.confirmed_by_creator,
                 task.rejection_reason, task.result, task.project, task.project_id,
                 _dumps(task.attachments),
+                task.parent_task_id, task.dispatcher, handoff_events_json,
                 task.created_at, task.updated_at, task.completed_at,
             )
             # Sync task_entities join table

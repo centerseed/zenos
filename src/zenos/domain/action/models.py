@@ -2,8 +2,27 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
+
+# Dispatcher namespace pattern — single source of truth (used by write and handoff validators)
+DISPATCHER_PATTERN = re.compile(r"^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$")
+
+
+@dataclass
+class HandoffEvent:
+    """A single dispatcher-handoff record appended to Task.handoff_events.
+
+    Append-only. Created by task(action="handoff") and confirm(), never by
+    direct write(). Server generates ``at`` and ``from_dispatcher``.
+    """
+    at: datetime
+    from_dispatcher: str | None
+    to_dispatcher: str
+    reason: str
+    output_ref: str | None = None
+    notes: str | None = None
 
 
 @dataclass
@@ -69,6 +88,10 @@ class Task:
     project: str = ""  # Partner-level project grouping (e.g. "zenos", "paceriz")
     project_id: str | None = None  # Link to product/project entity ID
     attachments: list[dict] = field(default_factory=list)  # [{id, filename, content_type, gcs_path, ...}]
+    # Action-Layer upgrade fields (2026-04-19)
+    parent_task_id: str | None = None
+    dispatcher: str | None = None
+    handoff_events: list[HandoffEvent] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None

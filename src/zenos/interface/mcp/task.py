@@ -7,6 +7,7 @@ import logging
 import re
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from zenos.domain.task_rules import normalize_task_status
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
@@ -145,6 +146,9 @@ async def _task_handler(
     plan_order: int | None = None,
     depends_on_task_ids: list[str] | None = None,
     attachments: list[dict] | None = None,
+    parent_task_id: str | None = None,
+    dispatcher: str | None = None,
+    handoff_events: Any | None = None,  # readonly — always stripped; use task(action="handoff") instead
     conn: Any | None = None,
 ) -> dict:
     """Core task handler logic — extracted for testability.
@@ -238,6 +242,11 @@ async def _task_handler(
         )
         mutation_warnings: list[str] = []
 
+        # handoff_events is server-managed (append-only via task(action="handoff")).
+        # If caller passes it on create/update, strip it and emit a warning.
+        if handoff_events is not None:
+            mutation_warnings.append("HANDOFF_EVENTS_READONLY")
+
         if action == "create":
             if not title:
                 return _unified_response(status="rejected", data={}, rejection_reason="title is required for create")
@@ -298,6 +307,8 @@ async def _task_handler(
                 "plan_id": plan_id,
                 "plan_order": plan_order,
                 "depends_on_task_ids": normalized_depends_on,
+                "parent_task_id": parent_task_id,
+                "dispatcher": dispatcher,
             }
 
             # Validate and process attachments
@@ -377,6 +388,10 @@ async def _task_handler(
                 if isinstance(normalized_depends_on, dict):
                     return normalized_depends_on
                 updates["depends_on_task_ids"] = normalized_depends_on
+            if parent_task_id is not None:
+                updates["parent_task_id"] = parent_task_id
+            if dispatcher is not None:
+                updates["dispatcher"] = dispatcher
 
             # Attachments: full replacement with GCS cleanup for removed items
             if attachments is not None:
@@ -436,6 +451,13 @@ async def _task_handler(
                 rejection_reason=f"Unknown action '{action}'. Use: create, update",
             )
     except ValueError as e:
+        from zenos.application.action.task_service import TaskValidationError
+        if isinstance(e, TaskValidationError):
+            return _error_response(
+                status="rejected",
+                error_code=e.error_code,
+                message=str(e),
+            )
         return _unified_response(status="rejected", data={}, rejection_reason=str(e))
 
 
@@ -466,6 +488,9 @@ async def task(
     plan_order: int | None = None,
     depends_on_task_ids: list[str] | None = None,
     attachments: list[dict] | None = None,
+    parent_task_id: str | None = None,
+    dispatcher: str | None = None,
+    handoff_events: Any | None = None,  # readonly — pass triggers HANDOFF_EVENTS_READONLY warning
     workspace_id: str | None = None,
 ) -> dict:
     """管理知識驅動的行動項目（Action Layer）。
@@ -577,4 +602,7 @@ async def task(
         plan_order=plan_order,
         depends_on_task_ids=depends_on_task_ids,
         attachments=attachments,
+        parent_task_id=parent_task_id,
+        dispatcher=dispatcher,
+        handoff_events=handoff_events,
     )

@@ -142,26 +142,18 @@ get(tasks, id=Z).handoff_events
 
 ### 驗收條件（給 Developer / QA）
 
-- [ ] tasks table 加 `parent_task_id TEXT`、`dispatcher TEXT`、`handoff_events JSONB DEFAULT '[]'`，附 index on `parent_task_id`、`dispatcher`
-- [ ] Schema validator：
-  - parent_task_id 存在時，subtask.plan_id 必須 = parent.plan_id，否則 reject（`CROSS_PLAN_SUBTASK`）
-  - dispatcher 不合 namespace 正則時 reject（`INVALID_DISPATCHER`）
-  - write(tasks) 收到 handoff_events 欄位 → 忽略 + warning（`HANDOFF_EVENTS_READONLY`）
-- [ ] 新 MCP action：`task(action="handoff", id, data)`
-  - 原子 append handoff event
-  - 更新 task.dispatcher
-  - `to_dispatcher="agent:qa"` 且 status=in_progress 時，連帶升 status=review
-  - audit log: `ontology.task.handoff`
-- [ ] search(tasks) 加 filter：`dispatcher`、`parent_task_id`、`linked_entity`（後者跨 linked_entities array 查 any）
-- [ ] 既有 search(tasks, product_id=X) 已在 DF-20260419-7 F12 修正，與本次新 filter 正交可組合
-- [ ] 測試矩陣：
-  - create with parent_task_id cross-plan → reject
-  - create with dispatcher="agent:badrole!" → reject
-  - write(tasks, {handoff_events: [...]}) → 被忽略 + warning
-  - task(handoff) 之後 get(task).handoff_events 多一條、dispatcher 更新
-  - handoff to agent:qa 時 status 自動升 review
-  - confirm(task, accepted=true) 之後 handoff_events 有 final 事件、status=done
-- [ ] SPEC-task-communication-sync / SPEC-task-view-clarity / SPEC-task-kanban-operations 若有衝突描述需同步更新
+每條 AC 帶唯一 ID `AC-TASK-UPG-NN`，對應 test stub 於
+`tests/spec_compliance/test_task_action_upgrade_ac.py`。
+
+- **AC-TASK-UPG-01**：tasks table 加 `parent_task_id TEXT`、`dispatcher TEXT`、`handoff_events JSONB DEFAULT '[]'`，並有 index on `parent_task_id` 與 `dispatcher`。
+- **AC-TASK-UPG-02**：`write(collection="tasks")` 在 `parent_task_id` 存在且 `parent.plan_id ≠ self.plan_id` 時 reject，`error_code=CROSS_PLAN_SUBTASK`。
+- **AC-TASK-UPG-03**：`write(collection="tasks")` 或 `task(action="handoff")` 傳入的 `dispatcher` / `to_dispatcher` 若不符合正則 `^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$`，reject，`error_code=INVALID_DISPATCHER`。
+- **AC-TASK-UPG-04**：`write(collection="tasks", data={handoff_events: [...]})` 忽略該欄位並回傳 warning `HANDOFF_EVENTS_READONLY`；DB 內原值不變。
+- **AC-TASK-UPG-05**：`task(action="handoff", id, data={to_dispatcher, reason, ...})` 原子完成：append HandoffEvent 到 `handoff_events`、更新 `task.dispatcher = to_dispatcher`、`to_dispatcher="agent:qa"` 且 status=in_progress 時連帶升 status=review、寫 audit log `ontology.task.handoff`。
+- **AC-TASK-UPG-06**：`search(collection="tasks")` 支援新 filter `dispatcher`、`parent_task_id`、`linked_entity`（任一 match 即保留），三者 server-side AND 可組合。
+- **AC-TASK-UPG-07**：既有 `search(tasks, product_id=X)` 過濾（DF-20260419-7 F12）與 AC-TASK-UPG-06 三個新 filter 可同時套用，彼此 AND。
+- **AC-TASK-UPG-08**：`confirm(collection="tasks", id, accepted=true)` 呼叫後，`handoff_events` 自動 append 一條 `to_dispatcher="human"` + `reason="accepted"` 的結束事件，status 升 `done`。
+- **AC-TASK-UPG-09**：SPEC-task-communication-sync / SPEC-task-view-clarity / SPEC-task-kanban-operations 經審查無衝突描述，或已補更。
 
 ### 下游 SSOT 同步清單（Implementation 必做）
 

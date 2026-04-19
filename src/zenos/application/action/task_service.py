@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from zenos.domain.action import Task, TaskPriority, TaskStatus
+from zenos.domain.action import DISPATCHER_PATTERN, HandoffEvent, Task, TaskPriority, TaskStatus
 from zenos.domain.knowledge import Blindspot, EntityType
 from zenos.domain.action import TaskRepository
 from zenos.domain.action.repositories import PlanRepository
@@ -24,6 +24,14 @@ from zenos.domain.task_rules import (
     normalize_task_status,
     recommend_priority,
 )
+
+
+class TaskValidationError(ValueError):
+    """Validation error with a machine-readable error_code."""
+
+    def __init__(self, message: str, error_code: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 def _normalize_project_scope(value: object) -> str:
@@ -132,6 +140,32 @@ class TaskService:
                 f"Invalid initial status '{status}'. Must be 'todo'."
             )
 
+        # Dispatcher namespace validation
+        dispatcher = data.get("dispatcher")
+        if dispatcher is not None and not DISPATCHER_PATTERN.match(dispatcher):
+            raise TaskValidationError(
+                f"dispatcher '{dispatcher}' does not match required namespace format "
+                f"^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$",
+                error_code="INVALID_DISPATCHER",
+            )
+
+        # Cross-plan subtask validation
+        parent_task_id = data.get("parent_task_id")
+        if parent_task_id is not None:
+            parent = await self._tasks.get_by_id(parent_task_id)
+            if parent is None:
+                raise TaskValidationError(
+                    f"parent_task_id '{parent_task_id}' does not exist.",
+                    error_code="PARENT_NOT_FOUND",
+                )
+            if data.get("plan_id") and parent.plan_id != data.get("plan_id"):
+                raise TaskValidationError(
+                    f"Subtask plan_id '{data.get('plan_id')}' does not match "
+                    f"parent task plan_id '{parent.plan_id}'. "
+                    f"Subtasks must inherit the parent's plan_id.",
+                    error_code="CROSS_PLAN_SUBTASK",
+                )
+
         # Build linked context for priority recommendation
         linked_entity_ids = data.get("linked_entities", [])
 
@@ -236,6 +270,8 @@ class TaskService:
             acceptance_criteria=data.get("acceptance_criteria") or [],
             project=_normalize_project_scope(data.get("project")),
             attachments=data.get("attachments") or [],
+            parent_task_id=parent_task_id,
+            dispatcher=dispatcher,
         )
 
         if conn is None:
@@ -258,6 +294,35 @@ class TaskService:
         if task is None:
             raise ValueError(f"Task '{task_id}' not found")
         task.status = normalize_task_status(task.status)
+
+        # Dispatcher namespace validation
+        if "dispatcher" in updates:
+            dispatcher_val = updates["dispatcher"]
+            if dispatcher_val is not None and not DISPATCHER_PATTERN.match(dispatcher_val):
+                raise TaskValidationError(
+                    f"dispatcher '{dispatcher_val}' does not match required namespace format "
+                    f"^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$",
+                    error_code="INVALID_DISPATCHER",
+                )
+
+        # Cross-plan subtask validation
+        if "parent_task_id" in updates:
+            new_parent_id = updates["parent_task_id"]
+            if new_parent_id is not None:
+                parent = await self._tasks.get_by_id(new_parent_id)
+                if parent is None:
+                    raise TaskValidationError(
+                        f"parent_task_id '{new_parent_id}' does not exist.",
+                        error_code="PARENT_NOT_FOUND",
+                    )
+                effective_plan_id = updates.get("plan_id", task.plan_id)
+                if effective_plan_id and parent.plan_id != effective_plan_id:
+                    raise TaskValidationError(
+                        f"Subtask plan_id '{effective_plan_id}' does not match "
+                        f"parent task plan_id '{parent.plan_id}'. "
+                        f"Subtasks must inherit the parent's plan_id.",
+                        error_code="CROSS_PLAN_SUBTASK",
+                    )
 
         new_status = normalize_task_status(updates.get("status")) if updates.get("status") else None
         cascades: list[CascadeUpdate] = []
@@ -300,6 +365,7 @@ class TaskService:
             "result", "acceptance_criteria", "blocked_by",
             "plan_id", "plan_order", "depends_on_task_ids", "source_metadata",
             "updated_by", "project", "linked_entities", "attachments",
+            "parent_task_id", "dispatcher",
         ):
             if field in updates:
                 setattr(task, field, updates[field])
