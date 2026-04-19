@@ -33,6 +33,11 @@ import {
 } from "@/lib/cowork-helper";
 import { fetchGraphContext } from "@/lib/graph-context";
 import {
+  clearSessionStarted,
+  markSessionStarted,
+  readFreshSessionStartedAt,
+} from "@/lib/copilot/session";
+import {
   MarketingProject,
   MarketingProjectGroup,
   MarketingStyle,
@@ -152,6 +157,27 @@ function CopilotLaunchButton({
       {children}
     </Button>
   );
+}
+
+function getStrategySaveBlockers(input: {
+  projectType: Campaign["projectType"];
+  audience: string[];
+  tone: string;
+  coreMessage: string;
+  platforms: string[];
+  frequency?: string;
+  contentMix?: Record<string, number>;
+}) {
+  const blockers: string[] = [];
+  if (input.audience.length === 0) blockers.push("目標受眾");
+  if (!input.tone.trim()) blockers.push("語氣風格");
+  if (!input.coreMessage.trim()) blockers.push("核心訊息");
+  if (input.platforms.length === 0) blockers.push("發文平台");
+  if (input.projectType === "long_term") {
+    if (!input.frequency?.trim()) blockers.push("發文頻率");
+    if (!input.contentMix || Object.keys(input.contentMix).length === 0) blockers.push("內容比例");
+  }
+  return blockers;
 }
 
 export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; onSelect: (id: string) => void }) {
@@ -1311,6 +1337,7 @@ export function CoworkChatSheet({
   onOpenChange,
   hideTrigger = false,
   desktopInline = false,
+  inlineOnly = false,
 }: {
   campaignId: string | null;
   onUseOutput?: (output: string) => void;
@@ -1322,6 +1349,7 @@ export function CoworkChatSheet({
   onOpenChange?: (nextOpen: boolean) => void;
   hideTrigger?: boolean;
   desktopInline?: boolean;
+  inlineOnly?: boolean;
 }) {
   const generateHelperToken = () =>
     `mk-${Math.random().toString(36).slice(2, 8)}${Math.random().toString(36).slice(2, 8)}`;
@@ -1371,7 +1399,7 @@ node server.mjs`;
   const baselineConflictVersionRef = useRef<string | null>(null);
   const isControlled = typeof controlledOpen === "boolean";
   const open = isControlled ? controlledOpen : internalOpen;
-  const railVisible = desktopInline || open;
+  const railVisible = inlineOnly || desktopInline || open;
   const setOpen = useCallback(
     (nextOpen: boolean) => {
       if (!isControlled) {
@@ -1387,10 +1415,7 @@ node server.mjs`;
   const activeConflictLabel = promptContext ? `${promptContext.title} Draft` : fieldContext?.conflictLabel || fieldContext?.fieldLabel || "目前內容";
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const started =
-      window.localStorage.getItem(startedStorageKey) === "1" ||
-      window.localStorage.getItem(legacyStartedStorageKey) === "1";
+    const started = Boolean(readFreshSessionStartedAt(startedStorageKey, [legacyStartedStorageKey]));
     setHasStartedConversation(started);
   }, [legacyStartedStorageKey, startedStorageKey]);
 
@@ -1532,14 +1557,10 @@ node server.mjs`;
   } as const;
 
   const updateConversationStarted = (started: boolean) => {
-    if (typeof window !== "undefined") {
-      if (started) {
-        window.localStorage.setItem(startedStorageKey, "1");
-        window.localStorage.removeItem(legacyStartedStorageKey);
-      } else {
-        window.localStorage.removeItem(startedStorageKey);
-        window.localStorage.removeItem(legacyStartedStorageKey);
-      }
+    if (started) {
+      markSessionStarted(startedStorageKey, [legacyStartedStorageKey]);
+    } else {
+      clearSessionStarted(startedStorageKey, [legacyStartedStorageKey]);
     }
     setHasStartedConversation(started);
   };
@@ -1702,7 +1723,6 @@ node server.mjs`;
               }
               if (missingKeys.length > 0) {
                 setMissingApplyKeys(missingKeys);
-                setLogLines((prev) => [...prev, `系統：結構化結果缺少鍵：${missingKeys.join(", ")}`]);
               }
               if (!payload) {
                 onUseOutput?.(collected.trim());
@@ -1724,7 +1744,12 @@ node server.mjs`;
     };
 
     try {
-      if (hasStartedConversation) {
+      const canResumeConversation = Boolean(readFreshSessionStartedAt(startedStorageKey, [legacyStartedStorageKey]));
+      if (!canResumeConversation && hasStartedConversation) {
+        setHasStartedConversation(false);
+      }
+
+      if (canResumeConversation) {
         try {
           await runOnce("continue");
         } catch (err) {
@@ -1754,12 +1779,13 @@ node server.mjs`;
   };
 
   const handleCancel = async () => {
-    if (!requestId || !running) return;
+    if (!running) return;
     try {
       await cancelCoworkRequest({
         baseUrl: helperBaseUrl,
         token: helperToken,
-        requestId,
+        requestId: requestId || undefined,
+        conversationId,
       });
       setLogLines((prev) => [...prev, "系統：已送出取消請求"]);
       setChatStatus((prev) => nextChatStatus(prev, "cancel"));
@@ -1809,13 +1835,6 @@ node server.mjs`;
     : helperConnected
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
       : "border-border/40 bg-background/70 text-muted-foreground";
-  const statusTone =
-    chatStatus === "error"
-      ? "border-destructive/30 bg-destructive/10 text-destructive"
-      : chatStatus === "apply-ready"
-        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-        : "border-border/40 bg-background/70 text-muted-foreground";
-  const showChatStatus = chatStatus !== "idle";
   const hasCapabilityWarnings = Boolean(
     capability && (!capability.mcpOk || (capability.missingSkills && capability.missingSkills.length > 0))
   );
@@ -1826,6 +1845,11 @@ node server.mjs`;
   const canSummarize = !running && (logLines.length > 0 || hasStartedConversation);
   const userTurnCount = logLines.filter((line) => line.startsWith("你：")).length;
   const turnLimitReached = userTurnCount >= COWORK_MAX_TURNS;
+  const compactPreviewText = (value: string, max = 88) => {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (normalized.length <= max) return normalized;
+    return `${normalized.slice(0, max - 1)}…`;
+  };
   const handleRailOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     if (nextOpen) {
@@ -1860,22 +1884,20 @@ node server.mjs`;
         chatStatus={chatStatus}
         connectorStatus={checkingHealth ? "checking" : helperConnected ? "connected" : "disconnected"}
         desktopInline={desktopInline}
+        inlineOnly={inlineOnly}
         diagnostics={
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-              {showChatStatus && (
-                <Badge variant="outline" className={`text-[10px] ${statusTone}`}>
-                  Claude Code：{statusText[chatStatus]}
-                </Badge>
-              )}
-              {activeContextLabel && (
-                <Badge variant="outline" className="text-[10px]">
-                  {activeContextLabel} 背景已載入
-                </Badge>
-              )}
-              <Badge variant="outline" className="text-[10px]">
-                rules {REDACTION_RULES_VERSION}
-              </Badge>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-foreground">
+                {activeContextLabel ? `正在處理 ${activeContextLabel}` : "先從任一區塊把內容帶進 AI"}
+              </div>
+              <div className="mt-1 text-[11px] text-muted-foreground">
+                {applyPayload
+                  ? "AI 已整理出可套用摘要，先看變更，再決定要不要寫回。"
+                  : activeApplyHandler
+                    ? "直接描述你想修改的方向，AI 會整理成可預覽的變更。"
+                    : "保留最必要的上下文與操作，不再把診斷資訊攤滿整個面板。"}
+              </div>
             </div>
             <Button
               size="sm"
@@ -1894,8 +1916,8 @@ node server.mjs`;
         footer={
           <div>
             {missingApplyKeys.length > 0 && (
-              <div className="mb-3 rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
-                結構化結果缺少鍵：{missingApplyKeys.join(", ")}
+              <div className="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-100">
+                AI 回覆還不能套用，缺少欄位：{missingApplyKeys.join(", ")}
               </div>
             )}
 
@@ -1907,45 +1929,45 @@ node server.mjs`;
 
             {applyPayload && chatStatus === "apply-ready" && (
               <div className="mb-3 rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3">
-                <div className="mb-2 text-xs font-medium text-foreground">可套用變更：{applyPayload.targetField}</div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium text-foreground">可套用到 {activeContextLabel || applyPayload.targetField}</div>
+                  <Badge variant="outline" className="text-[10px] border-emerald-500/20 bg-emerald-500/10 text-emerald-100">
+                    {changePreview.length} 項變更
+                  </Badge>
+                </div>
                 {changePreview.length > 0 && (
-                  <div className="mb-3 grid gap-2">
+                  <div className="mb-3 space-y-2">
                     {changePreview.map((item) => (
-                      <div key={item.label} className="rounded-md border border-border/30 bg-background/70 p-2">
-                        <div className="mb-2 text-[11px] font-medium text-foreground">{item.label}</div>
-                        <div className="grid gap-2 sm:grid-cols-2">
-                          <div>
-                            <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">目前</div>
-                            <div className="whitespace-pre-wrap rounded border border-border/20 bg-card/50 px-2 py-1.5 text-[11px] text-muted-foreground">
-                              {item.before}
-                            </div>
+                      <div key={item.label} className="rounded-md border border-border/30 bg-background/70 px-3 py-2">
+                        <div className="mb-1 text-[11px] font-medium text-foreground">{item.label}</div>
+                        <div className="grid gap-1 text-[11px] sm:grid-cols-[1fr_auto_1fr] sm:items-start sm:gap-2">
+                          <div className="rounded border border-border/20 bg-card/50 px-2 py-1.5 text-muted-foreground">
+                            {compactPreviewText(item.before)}
                           </div>
-                          <div>
-                            <div className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">套用後</div>
-                            <div className="whitespace-pre-wrap rounded border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-[11px] text-foreground">
-                              {item.after}
-                            </div>
+                          <div className="hidden pt-1 text-muted-foreground sm:block">→</div>
+                          <div className="rounded border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-foreground">
+                            {compactPreviewText(item.after)}
                           </div>
                         </div>
                       </div>
                     ))}
                   </div>
                 )}
-                <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                  {typeof applyPayload.value === "string" ? applyPayload.value : JSON.stringify(applyPayload.value, null, 2)}
-                </pre>
+                <details className="rounded-md border border-border/20 bg-background/40 px-3 py-2">
+                  <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">查看原始 structured result</summary>
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                    {typeof applyPayload.value === "string" ? applyPayload.value : JSON.stringify(applyPayload.value, null, 2)}
+                  </pre>
+                </details>
               </div>
             )}
 
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              {activeApplyHandler ? (
-                <div className="text-xs text-muted-foreground">可先看 diff，再決定是否寫回</div>
-              ) : onUseOutput ? (
-                <div className="text-xs text-muted-foreground">回覆完成後會自動帶回</div>
-              ) : (
-                <div className="text-xs text-muted-foreground">可自由聊，也可先從左側把設定帶進來</div>
-              )}
-              <div className="text-xs text-muted-foreground">{activeContextLabel || "未指定欄位"}</div>
+            <div className="mb-3 text-xs text-muted-foreground">
+              {activeApplyHandler
+                ? "先討論，再看變更摘要，最後決定是否寫回。"
+                : onUseOutput
+                  ? "回覆完成後會自動帶回到目前流程。"
+                  : "可自由聊，也可先從左側把設定帶進來。"}
             </div>
 
             <textarea
@@ -2011,68 +2033,70 @@ node server.mjs`;
           </div>
         }
       >
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-border/40 bg-card/60 p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Shared AI Rail</div>
-                <div className="mt-1 text-sm font-medium text-foreground">
-                  {activeContextLabel ? `目前正在處理 ${activeContextLabel}` : "從左側任一設定按「帶進 AI」"}
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-border/30 bg-card/45 p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-foreground">
+                    {activeContextLabel ? `討論這段：${activeContextLabel}` : "AI 工作區"}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {activeContextLabel
+                      ? "只保留目前欄位、project scope 和必要 context，討論完直接看變更摘要。"
+                      : "先從任一區塊按「帶進 AI」，再開始討論。"}
+                  </p>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  這裡會自動帶入 project scope、ZenOS context、helper 狀態，討論完再用 diff 寫回。
-                </p>
+                {activeApplyHandler && (
+                  <Badge
+                    variant="outline"
+                    className="shrink-0 border-emerald-500/20 bg-emerald-500/10 text-[10px] text-emerald-100"
+                  >
+                    可套用
+                  </Badge>
+                )}
               </div>
-              <Badge variant="outline" className="text-[10px]">
-                {activeApplyHandler ? "可直接寫回" : "對話模式"}
-              </Badge>
-            </div>
-            <GraphContextBadge
-              className="mt-4"
-              graphContext={graphContext}
-              unavailableReason={graphContextUnavailableReason}
-            />
-            <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-              <span className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1">strategy</span>
-              <span className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1">schedule</span>
-              <span className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1">topic</span>
-              <span className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1">style</span>
-              <span className="rounded-full border border-border/40 bg-background/70 px-2.5 py-1">prompt draft</span>
-            </div>
-          </div>
-
-          {hasCapabilityWarnings && capability && (
-            <div className="flex flex-wrap gap-2 text-[11px]">
-              {!capability.mcpOk && (
-                <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
-                  ZenOS 連線失敗，這輪只能對話不能寫回
-                </div>
-              )}
-              {capability.missingSkills && capability.missingSkills.length > 0 && (
-                <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
-                  缺 skill：{capability.missingSkills.join(", ")}
-                </div>
-              )}
-            </div>
-          )}
-
-          <details className="rounded-xl border border-border/30 bg-background/70 p-3">
-            <summary className="cursor-pointer text-xs font-medium text-foreground">查看 prompt / context</summary>
-            <div className="mt-3 grid gap-3">
-              {runtimeContextPack && (
-                <div className="rounded-lg border border-border/30 bg-background/70 p-3">
-                  <div className="mb-2 text-[11px] font-medium text-foreground">已載入上下文清單</div>
-                  <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
-                    {JSON.stringify(runtimeContextPack, null, 2)}
-                  </pre>
-                </div>
-              )}
-              <div className="rounded-lg border border-border/30 bg-background/70 p-3">
-                <div className="mb-2 text-[11px] font-medium text-foreground">Prompt 預覽</div>
-                <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{promptPreview}</pre>
+              <div className="mt-3">
+                <GraphContextBadge
+                  className="w-full"
+                  compact
+                  graphContext={graphContext}
+                  unavailableReason={graphContextUnavailableReason}
+                />
               </div>
             </div>
-          </details>
+
+            {hasCapabilityWarnings && capability && (
+              <div className="flex flex-wrap gap-2 text-[11px]">
+                {!capability.mcpOk && (
+                  <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+                    ZenOS 連線失敗，這輪只能對話不能寫回
+                  </div>
+                )}
+                {capability.missingSkills && capability.missingSkills.length > 0 && (
+                  <div className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-amber-200">
+                    缺 skill：{capability.missingSkills.join(", ")}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <details className="rounded-xl border border-border/20 bg-background/60 p-3">
+              <summary className="cursor-pointer text-xs font-medium text-foreground">查看 prompt / context</summary>
+              <div className="mt-3 grid gap-3">
+                {runtimeContextPack && (
+                  <div className="rounded-lg border border-border/20 bg-background/60 p-3">
+                    <div className="mb-2 text-[11px] font-medium text-foreground">已載入上下文清單</div>
+                    <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                      {JSON.stringify(runtimeContextPack, null, 2)}
+                    </pre>
+                  </div>
+                )}
+                <div className="rounded-lg border border-border/20 bg-background/60 p-3">
+                  <div className="mb-2 text-[11px] font-medium text-foreground">Prompt 預覽</div>
+                  <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{promptPreview}</pre>
+                </div>
+              </div>
+            </details>
 
           {showDiagnostics && (
             <div className="space-y-3 rounded-xl border border-border/40 bg-card/60 p-3">
@@ -2198,8 +2222,8 @@ node server.mjs`;
             </div>
           )}
 
-          <div className="flex min-h-[320px] flex-col">
-            <div className="mb-3 flex shrink-0 items-center justify-between">
+          <div className="flex min-h-[360px] flex-col">
+            <div className="mb-2 flex shrink-0 items-center justify-between">
               <div className="text-sm font-medium text-foreground">對話</div>
               <Badge variant="outline" className="text-[10px]">
                 {running ? "串流中" : helperConnected ? "可聊天" : "待連線"}
@@ -2207,7 +2231,7 @@ node server.mjs`;
             </div>
             <div
               ref={chatViewportRef}
-              className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-3xl border border-white/10 bg-black/20 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
+              className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-[24px] border border-white/10 bg-black/20 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]"
             >
               {logLines.length === 0 ? (
                 <div className="m-auto max-w-md text-center">
@@ -2326,13 +2350,28 @@ export function StrategyPlanner({
   const parsedAudience = parseCsv(audience);
   const parsedPlatforms = parseCsv(platforms);
   const parsedContentMix = parseContentMix(contentMix);
+  const contentMixParseError =
+    campaign.projectType === "long_term" && contentMix.trim() && Object.keys(parsedContentMix).length === 0
+      ? "內容比例格式讀不到。可用 education:70, product:30、education 70, product 30 或 JSON。"
+      : null;
+  const saveBlockers = getStrategySaveBlockers({
+    projectType: campaign.projectType,
+    audience: parsedAudience,
+    tone,
+    coreMessage,
+    platforms: parsedPlatforms,
+    frequency,
+    contentMix: parsedContentMix,
+  });
   const canSave =
-    parsedAudience.length > 0 &&
-    tone.trim().length > 0 &&
-    coreMessage.trim().length > 0 &&
-    parsedPlatforms.length > 0 &&
-    (campaign.projectType === "short_term" || (frequency.trim().length > 0 && Object.keys(parsedContentMix).length > 0)) &&
+    saveBlockers.length === 0 &&
     !saving;
+
+  useEffect(() => {
+    if (saveBlockers.length === 0 && parseError?.startsWith("還缺 ")) {
+      setParseError(null);
+    }
+  }, [parseError, saveBlockers]);
 
   return (
     <div className="rounded-xl border border-border/40 bg-card/70 p-4">
@@ -2397,6 +2436,19 @@ export function StrategyPlanner({
                 setCtaStrategy(nextCtaStrategy);
                 setReferenceMaterials(formatCsv(nextReferenceMaterials));
                 setShowManual(true);
+                const nextSaveBlockers = getStrategySaveBlockers({
+                  projectType: campaign.projectType,
+                  audience: nextAudience,
+                  tone: nextTone,
+                  coreMessage: nextCoreMessage,
+                  platforms: nextPlatforms,
+                  frequency: nextFrequency,
+                  contentMix: nextContentMix,
+                });
+                if (nextSaveBlockers.length > 0) {
+                  setParseError(`還缺 ${nextSaveBlockers.join("、")}，補完後才能儲存策略。`);
+                  return;
+                }
                 setParseError(null);
                 await onSave({
                   audience: nextAudience,
@@ -2421,7 +2473,7 @@ export function StrategyPlanner({
       </div>
 
       <div className="rounded-md border border-border/40 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
-        右側 AI rail 會沿用同一套對話、權限、diff 與寫回流程。策略討論完可直接套用到下方欄位。
+        AI 工作區會沿用同一套對話、權限、diff 與寫回流程。策略討論完可直接套用到下方欄位。
       </div>
       {parseError && <p className="mt-1 text-xs text-destructive">{parseError}</p>}
 
@@ -2479,9 +2531,19 @@ export function StrategyPlanner({
                     <input
                       value={contentMix}
                       onChange={(e) => setContentMix(e.target.value)}
+                      onBlur={() => {
+                        if (Object.keys(parsedContentMix).length > 0) {
+                          setContentMix(formatContentMix(parsedContentMix));
+                        }
+                      }}
                       placeholder="例如 education:70, product:30"
                       className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
                     />
+                    {contentMixParseError ? (
+                      <p className="mt-1 text-[11px] text-destructive">{contentMixParseError}</p>
+                    ) : contentMix.trim() && Object.keys(parsedContentMix).length > 0 ? (
+                      <p className="mt-1 text-[11px] text-muted-foreground">已辨識：{formatContentMix(parsedContentMix)}</p>
+                    ) : null}
                   </div>
                 </>
               )}
@@ -2526,7 +2588,16 @@ export function StrategyPlanner({
         </>
       )}
 
-      <div className="mt-3 flex justify-end">
+      {showManual && saveBlockers.length > 0 && (
+        <div className="mt-3 rounded-lg border border-amber-500/20 bg-amber-500/8 px-3 py-2 text-xs text-amber-100">
+          還缺 {saveBlockers.join("、")}，補完後才能儲存策略。
+        </div>
+      )}
+
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <div className="text-xs text-muted-foreground">
+          {canSave ? "欄位已齊，可直接儲存。" : "長期經營項目需要頻率與內容比例才會寫回。"}
+        </div>
         <Button
           size="sm"
           disabled={!canSave}
@@ -3075,19 +3146,10 @@ export function CampaignDetail({
             目前階段：{phaseLabels.find((item) => item.key === currentStage)?.label}
           </Badge>
         </div>
-        <div className="mt-3 grid gap-2 sm:grid-cols-3">
-          <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">1. 選一段</div>
-            <div className="mt-1 text-xs text-foreground">在策略、排程、文風、主題或審核卡按「帶進 AI」。</div>
-          </div>
-          <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">2. 在 Rail 討論</div>
-            <div className="mt-1 text-xs text-foreground">右側會自動載入 scope、prompt 與 helper 狀態。</div>
-          </div>
-          <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">3. 預覽後套用</div>
-            <div className="mt-1 text-xs text-foreground">只要 AI 有 structured result，就能先看 diff 再寫回。</div>
-          </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span className="rounded-full border border-border/30 bg-background/60 px-2.5 py-1">按「帶進 AI」開始</span>
+          <span className="rounded-full border border-border/30 bg-background/60 px-2.5 py-1">集中在同一個 AI 工作區討論</span>
+          <span className="rounded-full border border-border/30 bg-background/60 px-2.5 py-1">有 structured result 才套用</span>
         </div>
       </div>
 
@@ -3114,7 +3176,8 @@ export function CampaignDetail({
       )}
 
       <div data-testid="campaign-detail-layout" className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(360px,420px)] xl:items-start">
-        <div className="space-y-5">
+        <aside className="order-1 space-y-5 xl:sticky xl:top-24 xl:order-2">{copilotRail}</aside>
+        <div className="order-2 space-y-5 xl:order-1">
           <StrategyPlanner
             campaign={campaign}
             strategy={campaign.strategy}
@@ -3242,15 +3305,12 @@ export function CampaignDetail({
             </section>
           )}
         </div>
-
-        <aside className="space-y-5 xl:sticky xl:top-24">{copilotRail}</aside>
       </div>
     </div>
   );
 }
 
 export default function MarketingPage() {
-  const { partner } = useAuth();
   const {
     activeFieldContext,
     activePromptContext,
@@ -3262,7 +3322,6 @@ export default function MarketingPage() {
     handleCreateCampaign,
     handleCreateTopic,
     handleOpenFieldCopilot,
-    handleOpenGeneralCopilot,
     handleOpenPromptCopilot,
     handleReview,
     handleSaveContentPlan,
@@ -3293,10 +3352,6 @@ export default function MarketingPage() {
               <p className="mt-1 text-sm font-medium text-[#bcd3e7]">Paceriz</p>
             </div>
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-card/70 p-1.5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]">
-              <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs xl:hidden" onClick={handleOpenGeneralCopilot}>
-                <PlugZap className="h-3.5 w-3.5" />
-                AI 工作區
-              </Button>
               <PromptManagerSheet
                 user={user ? { getIdToken: () => user.getIdToken() } : null}
                 onError={setError}
@@ -3348,7 +3403,7 @@ export default function MarketingPage() {
                   open={copilotOpen}
                   onOpenChange={setCopilotOpen}
                   hideTrigger
-                  desktopInline
+                  inlineOnly
                   fieldContext={activeFieldContext}
                   promptContext={activePromptContext}
                 />
@@ -3365,17 +3420,6 @@ export default function MarketingPage() {
             </div>
           )}
         </main>
-        {!selectedId && (
-          <CoworkChatSheet
-            campaignId={selectedId}
-            onError={(message) => setError(message)}
-            open={copilotOpen}
-            onOpenChange={setCopilotOpen}
-            hideTrigger
-            fieldContext={activeFieldContext}
-            promptContext={activePromptContext}
-          />
-        )}
       </div>
   );
 }

@@ -24,11 +24,23 @@ from zenos.domain.knowledge import Entity, EntityType, Tags
 # ---------------------------------------------------------------------------
 
 
+def _make_parent_entity() -> Entity:
+    return Entity(
+        id="mod-1",
+        name="Parent Module",
+        type=EntityType.MODULE,
+        summary="Parent document module",
+        tags=Tags(what=["doc"], why="test", how="manual", who=["qa"]),
+        parent_id="prod-1",
+    )
+
+
 def _mock_repos() -> dict:
+    parent = _make_parent_entity()
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda eid: {"mod-1": parent}.get(eid))
     entity_repo.get_by_name = AsyncMock(return_value=None)
-    entity_repo.list_all = AsyncMock(return_value=[])
+    entity_repo.list_all = AsyncMock(return_value=[parent])
     entity_repo.upsert = AsyncMock(side_effect=lambda e: e)
 
     relationship_repo = AsyncMock()
@@ -65,6 +77,7 @@ def _base_doc_data(**overrides) -> dict:
         "title": "Test Document",
         "summary": "A test summary",
         "tags": {"what": ["doc"], "why": "test", "how": "manual", "who": ["qa"]},
+        "linked_entity_ids": ["mod-1"],
     }
     defaults.update(overrides)
     return defaults
@@ -202,7 +215,12 @@ class TestUpdateExistingDocument:
 
         # Should not raise — no source_uri provided, only summary update
         result = await svc.upsert_document(
-            {"id": "doc-001", "title": "Existing Doc", "summary": "updated summary"}
+            {
+                "id": "doc-001",
+                "title": "Existing Doc",
+                "summary": "updated summary",
+                "linked_entity_ids": ["mod-1"],
+            }
         )
         assert result is not None
 
@@ -210,7 +228,10 @@ class TestUpdateExistingDocument:
         """Criteria 5b: updating with new valid source_uri → accepted, status=valid."""
         existing = self._make_existing_entity()
         repos = _mock_repos()
-        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        parent = _make_parent_entity()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-001": existing, "mod-1": parent}.get(eid)
+        )
         repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
         repos["entity_repo"].upsert = AsyncMock(side_effect=lambda e: e)
         svc = _make_service(repos)
@@ -220,6 +241,7 @@ class TestUpdateExistingDocument:
                 "id": "doc-001",
                 "title": "Existing Doc",
                 "summary": "updated summary",
+                "linked_entity_ids": ["mod-1"],
                 "source": {
                     "type": "github",
                     "uri": "https://github.com/owner/repo/blob/main/new.md",
@@ -234,7 +256,10 @@ class TestUpdateExistingDocument:
         """Criteria 5c: updating with invalid source_uri → rejected."""
         existing = self._make_existing_entity()
         repos = _mock_repos()
-        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        parent = _make_parent_entity()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-001": existing, "mod-1": parent}.get(eid)
+        )
         repos["entity_repo"].list_all = AsyncMock(return_value=[existing])
         repos["entity_repo"].upsert = AsyncMock(side_effect=lambda e: e)
         svc = _make_service(repos)
@@ -245,6 +270,7 @@ class TestUpdateExistingDocument:
                     "id": "doc-001",
                     "title": "Existing Doc",
                     "summary": "updated summary",
+                    "linked_entity_ids": ["mod-1"],
                     "source": {
                         "type": "github",
                         "uri": "relative/path/file.md",

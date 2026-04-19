@@ -26,11 +26,23 @@ from zenos.domain.knowledge import Entity, EntityType, Tags
 # ---------------------------------------------------------------------------
 
 
+def _make_parent_entity() -> Entity:
+    return Entity(
+        id="mod-1",
+        name="Parent Module",
+        type=EntityType.MODULE,
+        summary="Parent document module",
+        tags=Tags(what=["doc"], why="test", how="manual", who=["qa"]),
+        parent_id="prod-1",
+    )
+
+
 def _mock_repos() -> dict:
+    parent = _make_parent_entity()
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda eid: {"mod-1": parent}.get(eid))
     entity_repo.get_by_name = AsyncMock(return_value=None)
-    entity_repo.list_all = AsyncMock(return_value=[])
+    entity_repo.list_all = AsyncMock(return_value=[parent])
     entity_repo.upsert = AsyncMock(side_effect=lambda e: e)
 
     relationship_repo = AsyncMock()
@@ -76,6 +88,7 @@ class TestUpsertDocumentSourceLabel:
             "title": "CLAUDE.md (Setup Guide)",
             "summary": "Setup guide document",
             "tags": {"what": ["doc"], "why": "guide", "how": "markdown", "who": ["dev"]},
+            "linked_entity_ids": ["mod-1"],
             "source": {
                 "type": "github",
                 "uri": "https://github.com/org/repo/blob/main/CLAUDE.md",
@@ -94,6 +107,7 @@ class TestUpsertDocumentSourceLabel:
             "title": "Some Other Title",
             "summary": "Test document",
             "tags": {"what": ["doc"], "why": "test", "how": "markdown", "who": ["dev"]},
+            "linked_entity_ids": ["mod-1"],
             "source": {
                 "type": "github",
                 "uri": "https://github.com/org/repo/blob/main/README.md",
@@ -110,6 +124,7 @@ class TestUpsertDocumentSourceLabel:
             "title": "Untitled Doc",
             "summary": "No source",
             "tags": {"what": ["doc"], "why": "test", "how": "manual", "who": ["qa"]},
+            "linked_entity_ids": ["mod-1"],
         })
         assert result.sources == []
 
@@ -120,6 +135,7 @@ class TestUpsertDocumentSourceLabel:
             "title": "Architecture Decision Record",
             "summary": "ADR for database selection",
             "tags": {"what": ["adr"], "why": "decision", "how": "doc", "who": ["architect"]},
+            "linked_entity_ids": ["mod-1"],
             "source": {
                 "type": "github",
                 "uri": "https://github.com/org/repo/blob/main/docs/adr-001.md",

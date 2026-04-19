@@ -375,17 +375,26 @@ export async function streamCoworkChat(params: {
 export async function cancelCoworkRequest(params: {
   baseUrl: string;
   token?: string;
-  requestId: string;
+  requestId?: string;
+  conversationId?: string;
 }): Promise<void> {
+  const requestId = params.requestId?.trim();
+  const conversationId = params.conversationId?.trim();
+  if (!requestId && !conversationId) {
+    throw new Error("requestId or conversationId is required");
+  }
   const normalizedBaseUrl = normalizeBaseUrl(params.baseUrl);
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (params.token?.trim()) headers["X-Local-Helper-Token"] = params.token.trim();
+  const body: Record<string, string> = {};
+  if (requestId) body.requestId = requestId;
+  if (conversationId) body.conversationId = conversationId;
   const res = await fetch(
     `${normalizedBaseUrl}/v1/chat/cancel`,
     buildHelperFetchInit(normalizedBaseUrl, {
       method: "POST",
       headers,
-      body: JSON.stringify({ requestId: params.requestId }),
+      body: JSON.stringify(body),
     })
   );
   if (!res.ok) {

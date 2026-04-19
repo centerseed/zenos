@@ -62,6 +62,9 @@ export function useMarketingWorkspace() {
     if (!user || !selectedId) {
       setSelectedCampaign(null);
       setProjectStyles({ product: [], platform: [], project: [] });
+      setCopilotOpen(false);
+      setActiveFieldContext(undefined);
+      setActivePromptContext(undefined);
       return;
     }
 

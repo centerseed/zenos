@@ -5,6 +5,13 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
+import {
+  createRuntimeState,
+  findConflictingRuns,
+  findRunForCancel,
+  registerRun,
+  unregisterRun,
+} from "./runtime-state.mjs";
 
 const PORT = Number.parseInt(process.env.PORT || "4317", 10);
 const HOST = "127.0.0.1";
@@ -28,6 +35,10 @@ const ZENOS_MCP_URL = String(
   process.env.ZENOS_MCP_URL || "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
 ).trim();
 const SESSION_STATE_FILE = path.join(homedir(), ".zenos-cowork-helper", "sessions.json");
+const SESSION_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.SESSION_TTL_MINUTES || "55", 10) * 60 * 1000 || 55 * 60 * 1000
+);
 const PERMISSION_TIMEOUT_SECONDS = Math.max(
   1,
   Number.parseInt(process.env.PERMISSION_TIMEOUT_SECONDS || "60", 10) || 60
@@ -45,10 +56,9 @@ const EXPECTED_CRM_SKILLS = [
 ];
 const REDACTION_RULES_VERSION = process.env.REDACTION_RULES_VERSION || "2026-04-14";
 
-/** @type {Map<string, { sessionId: string, sessionName: string, cwd: string, updatedAt: string }>} */
+/** @type {Map<string, { sessionId: string, sessionName: string, cwd: string, createdAt: string, updatedAt: string }>} */
 const sessions = new Map();
-/** @type {Map<string, import("node:child_process").ChildProcess>} */
-const running = new Map();
+const runtimeState = createRuntimeState();
 
 function loadSessions() {
   try {
@@ -57,17 +67,47 @@ function loadSessions() {
     if (!parsed || typeof parsed !== "object") return;
     for (const [conversationId, value] of Object.entries(parsed)) {
       if (!value || typeof value !== "object") continue;
-      const row = /** @type {{ sessionId?: string, sessionName?: string, cwd?: string, updatedAt?: string }} */ (value);
+      const row = /** @type {{ sessionId?: string, sessionName?: string, cwd?: string, createdAt?: string, updatedAt?: string }} */ (value);
       if (!row.sessionName || !row.cwd) continue;
       sessions.set(conversationId, {
         sessionId: row.sessionId || randomUUID(),
         sessionName: row.sessionName,
         cwd: row.cwd,
+        createdAt: row.createdAt || row.updatedAt || new Date().toISOString(),
         updatedAt: row.updatedAt || new Date().toISOString(),
       });
     }
   } catch {
     // no-op
+  }
+}
+
+function isSessionExpired(row) {
+  const startedAt = Date.parse(row.createdAt || row.updatedAt || "");
+  if (!Number.isFinite(startedAt)) return true;
+  return Date.now() - startedAt > SESSION_TTL_MS;
+}
+
+function createSessionRecord(conversationId, cwd) {
+  const now = new Date().toISOString();
+  return {
+    sessionId: randomUUID(),
+    sessionName: `web-${conversationId}`,
+    cwd,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function purgeExpiredSessions() {
+  let changed = false;
+  for (const [conversationId, row] of sessions.entries()) {
+    if (!isSessionExpired(row)) continue;
+    sessions.delete(conversationId);
+    changed = true;
+  }
+  if (changed) {
+    saveSessions();
   }
 }
 
@@ -168,36 +208,50 @@ function resolveModel(inputModel) {
   return candidate;
 }
 
-function getOrCreateSession(conversationId, cwd) {
+function resolveSession(conversationId, cwd, mode) {
+  purgeExpiredSessions();
   const current = sessions.get(conversationId);
-  if (current) {
+  if (mode === "continue" && current) {
     if (!current.sessionId) {
       current.sessionId = randomUUID();
     }
     if (cwd && current.cwd !== cwd) {
       current.cwd = cwd;
-      current.updatedAt = new Date().toISOString();
-      sessions.set(conversationId, current);
-      saveSessions();
     }
-    return current;
+    current.updatedAt = new Date().toISOString();
+    sessions.set(conversationId, current);
+    saveSessions();
+    return { session: current, resumed: true };
   }
-  const sessionName = `web-${conversationId}`;
-  const created = {
-    sessionId: randomUUID(),
-    sessionName,
-    cwd,
-    updatedAt: new Date().toISOString(),
-  };
+
+  const created = createSessionRecord(conversationId, cwd);
   sessions.set(conversationId, created);
   saveSessions();
-  return created;
+  return { session: created, resumed: false };
 }
 
 function buildEnv() {
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
   return env;
+}
+
+function stopChildProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }, 250);
+}
+
+function stopRun(run, reason) {
+  const detached = unregisterRun(runtimeState, run.requestId) || run;
+  console.warn(
+    `[runtime] stopping request ${detached.requestId} (${detached.conversationId}) because ${reason}`
+  );
+  stopChildProcess(detached.child);
 }
 
 // ── Workspace Bootstrap ─────────────────────────────────────────────────────
@@ -414,9 +468,16 @@ function startStreamingRun({
   cwd,
   maxTurns,
 }) {
-  const session = getOrCreateSession(conversationId, cwd);
+  const { session, resumed } = resolveSession(conversationId, cwd, mode);
   const requestId = randomUUID();
   const allowedTools = loadAllowedTools(session.cwd);
+
+  for (const conflict of findConflictingRuns(runtimeState, {
+    conversationId,
+    sessionId: session.sessionId,
+  })) {
+    stopRun(conflict, "superseded");
+  }
 
   const args = ["-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages"];
   const mcpConfigPath = resolveMcpConfigPath(session.cwd);
@@ -430,7 +491,7 @@ function startStreamingRun({
   if (maxTurns && Number.isFinite(maxTurns)) {
     args.push("--max-turns", String(maxTurns));
   }
-  if (mode === "continue") {
+  if (mode === "continue" && resumed) {
     args.push("--resume", session.sessionId);
   } else {
     args.push("--session-id", session.sessionId, "--name", session.sessionName);
@@ -452,7 +513,12 @@ function startStreamingRun({
     env: buildEnv(),
     stdio: ["ignore", "pipe", "pipe"],
   });
-  running.set(requestId, child);
+  registerRun(runtimeState, {
+    requestId,
+    conversationId,
+    sessionId: session.sessionId,
+    child,
+  });
 
   let stdoutBuffer = "";
   let permissionState = null;
@@ -530,7 +596,7 @@ function startStreamingRun({
 
   child.on("close", (code, signal) => {
     clearPermissionTimer();
-    running.delete(requestId);
+    unregisterRun(runtimeState, requestId);
     if (stdoutBuffer.trim()) {
       sendSse(res, "message", { requestId, line: stdoutBuffer.trim() });
       stdoutBuffer = "";
@@ -545,7 +611,7 @@ function startStreamingRun({
 
   child.on("error", (error) => {
     clearPermissionTimer();
-    running.delete(requestId);
+    unregisterRun(runtimeState, requestId);
     sendSse(res, "stderr", {
       requestId,
       text: String(error.message || error),
@@ -595,7 +661,7 @@ const server = createServer(async (req, res) => {
       {
         status: "ok",
         sessions: sessions.size,
-        running: running.size,
+        running: runtimeState.running.size,
         capability,
       },
       auth.origin
@@ -637,24 +703,19 @@ const server = createServer(async (req, res) => {
 
   if (req.method === "POST" && pathname === "/v1/chat/cancel") {
     try {
-      const body = /** @type {{ requestId?: string }} */ (await parseRequestJson(req));
+      const body = /** @type {{ requestId?: string, conversationId?: string }} */ (await parseRequestJson(req));
       const requestId = String(body.requestId || "").trim();
-      if (!requestId) {
-        sendJson(res, 400, { status: "error", message: "requestId is required" }, auth.origin);
+      const conversationId = String(body.conversationId || "").trim();
+      if (!requestId && !conversationId) {
+        sendJson(res, 400, { status: "error", message: "requestId or conversationId is required" }, auth.origin);
         return;
       }
-      const child = running.get(requestId);
-      if (!child) {
+      const run = findRunForCancel(runtimeState, { requestId, conversationId });
+      if (!run) {
         sendJson(res, 404, { status: "error", message: "request not found" }, auth.origin);
         return;
       }
-      running.delete(requestId);
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }, 250);
+      stopRun(run, "cancelled");
       sendJson(res, 200, { status: "ok" }, auth.origin);
       return;
     } catch (error) {

@@ -137,6 +137,15 @@ describe("SPEC-cowork-knowledge-context AC (frontend)", () => {
     expect(screen.queryByText(/graph_context=/)).not.toBeInTheDocument();
   });
 
+  it("AC-CKC-21b: compact GraphContextBadge keeps neighbor rows readable in narrow rails", () => {
+    render(<GraphContextBadge graphContext={baseGraphContext} compact />);
+    const details = screen.getByText("已讀取 1 個模組、1 個文件 ▸").closest("details");
+    details?.setAttribute("open", "");
+    expect(screen.getByText("Audience Engine")).toBeInTheDocument();
+    expect(screen.getByText("1 docs")).toBeInTheDocument();
+    expect(screen.getByText("SPEC Audience")).toBeInTheDocument();
+  });
+
   it("AC-CKC-22: truncated=true → shows 'N more nodes not loaded' notice", () => {
     render(
       <GraphContextBadge

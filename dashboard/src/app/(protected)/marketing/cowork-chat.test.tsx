@@ -107,7 +107,7 @@ function renderSheet(overrides?: Record<string, unknown>) {
 describe("CoworkChatSheet", () => {
   it("shows loaded context for field discussion", async () => {
     renderSheet();
-    expect(screen.getByText("討論這段：策略設定")).toBeInTheDocument();
+    expect(screen.getAllByText("討論這段：策略設定").length).toBeGreaterThan(0);
     expect(screen.getByText("策略設定 / 已載入範圍")).toBeInTheDocument();
     expect(screen.getByText("查看 prompt / context")).toBeInTheDocument();
   });
@@ -207,6 +207,40 @@ describe("CoworkChatSheet", () => {
     expect(mockStreamCoworkChat).toHaveBeenCalledTimes(2);
   });
 
+  it("shows a single missing-field warning when structured output is incomplete", async () => {
+    render(
+      <CoworkChatSheet
+        campaignId="proj-1"
+        onError={vi.fn()}
+        fieldContext={{
+          fieldId: "style",
+          fieldLabel: "文風設定",
+          currentPhase: "adapt",
+          suggestedSkill: "/marketing-adapt",
+          projectSummary: "官網 Blog / 長期經營",
+          fieldValue: { title: "Threads 版", content: "原始文風" },
+          onApply: vi.fn(async () => {}),
+        }}
+      />
+    );
+
+    mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
+      onEvent({
+        type: "message",
+        requestId: "req-1",
+        line: '{"target_field":"style","value":{"title":"只有標題"}}',
+      });
+      onEvent({ type: "done", requestId: "req-1", code: 0 });
+    });
+
+    fireEvent.click(screen.getByText("AI 討論（Beta）"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Connector 已連線" })).toBeInTheDocument());
+    fireEvent.click(screen.getByText("開始討論"));
+    await waitFor(() => expect(screen.getByText("AI 回覆還不能套用，缺少欄位：content")).toBeInTheDocument());
+    expect(screen.queryByText("系統：結構化結果缺少鍵：content")).not.toBeInTheDocument();
+    expect(screen.getAllByText("AI 回覆還不能套用，缺少欄位：content")).toHaveLength(1);
+  });
+
   it("supports marketing prompt draft apply in the shared rail", async () => {
     mockStreamCoworkChat.mockImplementation(async ({ onEvent }) => {
       onEvent({
@@ -247,8 +281,8 @@ describe("CoworkChatSheet", () => {
 
   it("enters the dialog with field-level context already loaded", async () => {
     renderSheet();
-    expect(screen.getByText(/討論這段：策略設定/)).toBeInTheDocument();
-    expect(screen.getByText(/這裡會自動帶入 project scope、ZenOS context、helper 狀態/)).toBeInTheDocument();
+    expect(screen.getAllByText(/討論這段：策略設定/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/只保留目前欄位、project scope 和必要 context/)).toBeInTheDocument();
     fireEvent.click(screen.getByText("查看 prompt / context"));
     expect(screen.getByText("已載入上下文清單")).toBeInTheDocument();
   });

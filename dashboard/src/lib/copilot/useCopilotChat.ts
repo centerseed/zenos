@@ -21,6 +21,11 @@ import {
   getCopilotConversationKey,
   usesScopedResume,
 } from "@/lib/copilot/state";
+import {
+  clearSessionStarted,
+  markSessionStarted,
+  readFreshSessionStartedAt,
+} from "@/lib/copilot/session";
 import { buildCopilotPromptEnvelope } from "@/lib/copilot/envelope";
 import { COWORK_MAX_TURNS } from "@/lib/cowork-knowledge";
 import { parseStructuredResult } from "@/lib/copilot/structured-result";
@@ -58,24 +63,10 @@ export interface UseCopilotChatReturn {
   checkHealth: () => Promise<void>;
 }
 
-// ---------------------------------------------------------------------------
-// localStorage helpers
-// ---------------------------------------------------------------------------
-
 const STARTED_KEY_PREFIX = "zenos.copilot.started.";
 
 function getStartedKey(conversationKey: string): string {
   return `${STARTED_KEY_PREFIX}${conversationKey}`;
-}
-
-function markConversationStarted(conversationKey: string): void {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(getStartedKey(conversationKey), "1");
-}
-
-function isConversationStarted(conversationKey: string): boolean {
-  if (typeof window === "undefined") return false;
-  return window.localStorage.getItem(getStartedKey(conversationKey)) === "1";
 }
 
 // ---------------------------------------------------------------------------
@@ -168,7 +159,8 @@ export function useCopilotChat(
       const scopedResume = usesScopedResume(entry);
 
       // Determine mode: "continue" if scoped_resume and session already started
-      const alreadyStarted = scopedResume && isConversationStarted(conversationKey);
+      const alreadyStarted =
+        scopedResume && Boolean(readFreshSessionStartedAt(getStartedKey(conversationKey)));
       const mode: "start" | "continue" = alreadyStarted ? "continue" : "start";
 
       const prompt = buildCopilotPromptEnvelope(entry, userInput);
@@ -327,7 +319,7 @@ export function useCopilotChat(
 
         // Mark the conversation as started so subsequent sends use "continue"
         if (scopedResume) {
-          markConversationStarted(conversationKey);
+          markSessionStarted(getStartedKey(conversationKey));
         }
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
@@ -357,12 +349,14 @@ export function useCopilotChat(
     abortControllerRef.current?.abort();
 
     const requestId = currentRequestIdRef.current;
-    if (requestId) {
+    const conversationId = entry ? getCopilotConversationKey(entry) : undefined;
+    if (requestId || conversationId) {
       try {
         await cancelCoworkRequest({
           baseUrl: getDefaultHelperBaseUrl(),
           token: getDefaultHelperToken(),
           requestId,
+          conversationId,
         });
       } catch {
         // Best-effort cancel — ignore errors
@@ -373,7 +367,7 @@ export function useCopilotChat(
     setStreamingText("");
     setStatus(nextCopilotStatus("streaming", "cancel")); // → "idle"
     pushMessage("system", "[Cancelled]");
-  }, []);
+  }, [entry]);
 
   // ---------------------------------------------------------------------------
   // retry
@@ -420,7 +414,10 @@ export function useCopilotChat(
     setMissingKeys([]);
     setLastError(null);
     // Intentionally leave messages intact so the user can see history
-  }, []);
+    if (entry && usesScopedResume(entry)) {
+      clearSessionStarted(getStartedKey(getCopilotConversationKey(entry)));
+    }
+  }, [entry]);
 
   // ---------------------------------------------------------------------------
   // Return

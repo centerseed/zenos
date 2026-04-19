@@ -159,4 +159,24 @@ describe("cancelCoworkRequest", () => {
     expect(JSON.parse(String(options.body))).toEqual({ requestId: "req-1" });
     expect((options as RequestInit & { targetAddressSpace?: string }).targetAddressSpace).toBe("loopback");
   });
+
+  it("can cancel by conversationId before the helper emits a requestId", async () => {
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: vi.fn().mockResolvedValue({ status: "ok" }),
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await cancelCoworkRequest({
+      baseUrl: "http://127.0.0.1:4317",
+      conversationId: "conv-2",
+    });
+
+    const [url, options] = fakeFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://127.0.0.1:4317/v1/chat/cancel");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(String(options.body))).toEqual({ conversationId: "conv-2" });
+    expect((options as RequestInit & { targetAddressSpace?: string }).targetAddressSpace).toBe("loopback");
+  });
 });

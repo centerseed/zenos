@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import {
   Sheet,
@@ -33,9 +33,30 @@ export interface CopilotRailShellProps {
   chatStatus: CopilotChatStatus;
   connectorStatus: ConnectorStatus;
   desktopInline?: boolean;
+  inlineOnly?: boolean;
   diagnostics?: ReactNode;
   children?: ReactNode;
   footer?: ReactNode;
+}
+
+function useMinWidth(query: string) {
+  const [matches, setMatches] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mediaQuery = window.matchMedia(query);
+    const handleChange = () => setMatches(mediaQuery.matches);
+
+    handleChange();
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, [query]);
+
+  return matches;
 }
 
 export function CopilotRailShell({
@@ -45,14 +66,27 @@ export function CopilotRailShell({
   chatStatus,
   connectorStatus,
   desktopInline = false,
+  inlineOnly = false,
   diagnostics,
   children,
   footer,
 }: CopilotRailShellProps) {
+  const isDesktopInlineViewport = useMinWidth("(min-width: 1280px)");
+  const renderInlineShell = inlineOnly || (desktopInline && isDesktopInlineViewport);
+  const renderSheetShell = !inlineOnly && (!desktopInline || !isDesktopInlineViewport);
+  const inlineShellClass = inlineOnly
+    ? "h-[min(76vh,840px)] md:h-[min(78vh,880px)] xl:h-[calc(100vh-7.5rem)] xl:max-h-[calc(100vh-7.5rem)]"
+    : desktopInline
+      ? "xl:h-[calc(100vh-7.5rem)] xl:max-h-[calc(100vh-7.5rem)]"
+      : "";
   const shellContent = (
     <div
       className={`flex h-full flex-col overflow-hidden bg-background ${
-        desktopInline ? "xl:rounded-[28px] xl:border xl:border-border/40 xl:bg-card/80 xl:shadow-[0_28px_80px_rgba(0,0,0,0.2)]" : ""
+        inlineOnly
+          ? "rounded-[24px] border border-border/40 bg-card/80 shadow-[0_20px_50px_rgba(0,0,0,0.18)]"
+          : desktopInline
+            ? "xl:rounded-[28px] xl:border xl:border-border/40 xl:bg-card/80 xl:shadow-[0_28px_80px_rgba(0,0,0,0.2)]"
+            : ""
       }`}
     >
       <div className="border-b border-border/40 px-4 py-4">
@@ -61,39 +95,33 @@ export function CopilotRailShell({
             <h2 className="font-heading text-base font-medium text-foreground">{entry?.title || "AI 助手"}</h2>
             <p className="text-sm text-muted-foreground">{entry?.scope.scope_label || "尚未指定範圍"}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline" className="text-[10px]">
-              {statusText[chatStatus]}
-            </Badge>
-            <Badge variant="outline" className="text-[10px]">
-              {connectorText[connectorStatus]}
-            </Badge>
-            {entry?.mode && (
-              <Badge variant="outline" className="text-[10px]">
-                mode {entry.mode}
-              </Badge>
-            )}
-          </div>
+          <Badge variant="outline" className="text-[10px]">
+            {statusText[chatStatus]}
+          </Badge>
         </div>
         {diagnostics}
       </div>
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">{children}</div>
-        {footer ? <div className="border-t border-border/30 bg-background px-4 py-4">{footer}</div> : null}
+        {footer ? (
+          <div className="max-h-[min(42vh,420px)] shrink-0 overflow-y-auto border-t border-border/30 bg-background px-4 py-4">
+            {footer}
+          </div>
+        ) : null}
       </div>
     </div>
   );
 
   return (
     <>
-      {desktopInline ? <div className="hidden xl:block">{shellContent}</div> : null}
-      <div className={desktopInline ? "xl:hidden" : undefined}>
+      {renderInlineShell ? <div className={inlineShellClass}>{shellContent}</div> : null}
+      {renderSheetShell ? (
         <Sheet open={open} onOpenChange={onOpenChange}>
           <SheetContent side="right" className="w-full overflow-hidden p-0 sm:max-w-3xl">
             {shellContent}
           </SheetContent>
         </Sheet>
-      </div>
+      ) : null}
     </>
   );
 }

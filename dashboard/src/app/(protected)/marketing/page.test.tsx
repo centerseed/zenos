@@ -5,6 +5,7 @@ import {
   CampaignDetail,
   CampaignList,
   CampaignStarter,
+  StrategyPlanner,
   StrategyAndPlan,
 } from "@/app/(protected)/marketing/page";
 
@@ -317,6 +318,35 @@ describe("CampaignDetail", () => {
     expect(screen.getByText("待你確認")).toBeInTheDocument();
     expect(screen.getAllByText("已發佈").length).toBeGreaterThan(0);
     expect(screen.getByText("建立行銷主題")).toBeInTheDocument();
+  });
+});
+
+describe("StrategyPlanner", () => {
+  it("shows missing required fields instead of failing silently for long-term projects", async () => {
+    render(
+      <StrategyPlanner
+        campaign={makeCampaign()}
+        strategy={{
+          documentId: "doc-1",
+          audience: ["跑步新手"],
+          tone: "直接",
+          coreMessage: "先建立習慣",
+          platforms: ["Threads"],
+          frequency: "",
+          contentMix: {},
+          campaignGoal: "",
+          ctaStrategy: "",
+          referenceMaterials: [],
+        }}
+        onSave={vi.fn(async () => {})}
+        onError={vi.fn()}
+        saving={false}
+      />
+    );
+
+    fireEvent.click(screen.getByText("手動微調策略（進階）"));
+    expect(screen.getByText(/還缺 發文頻率、內容比例/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "儲存策略" })).toBeDisabled();
   });
 });
 

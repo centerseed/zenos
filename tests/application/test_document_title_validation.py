@@ -29,11 +29,23 @@ from zenos.domain.knowledge import Entity, EntityType, Tags
 # ---------------------------------------------------------------------------
 
 
+def _make_parent_entity() -> Entity:
+    return Entity(
+        id="mod-1",
+        name="Parent Module",
+        type=EntityType.MODULE,
+        summary="Parent document module",
+        tags=Tags(what=["doc"], why="test", how="manual", who=["qa"]),
+        parent_id="prod-1",
+    )
+
+
 def _mock_repos() -> dict:
+    parent = _make_parent_entity()
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda eid: {"mod-1": parent}.get(eid))
     entity_repo.get_by_name = AsyncMock(return_value=None)
-    entity_repo.list_all = AsyncMock(return_value=[])
+    entity_repo.list_all = AsyncMock(return_value=[parent])
     entity_repo.upsert = AsyncMock(side_effect=lambda e: e)
 
     relationship_repo = AsyncMock()
@@ -70,6 +82,7 @@ def _base_doc_data(**overrides) -> dict:
         "title": "Test Document",
         "summary": "A test summary",
         "tags": {"what": ["doc"], "why": "test", "how": "manual", "who": ["qa"]},
+        "linked_entity_ids": ["mod-1"],
     }
     defaults.update(overrides)
     return defaults

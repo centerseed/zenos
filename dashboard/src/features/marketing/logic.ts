@@ -85,10 +85,14 @@ export function parseContentMix(value: string): Record<string, number> {
   } catch {}
 
   const result: Record<string, number> = {};
-  for (const chunk of trimmed.split(/[,，\n]/)) {
-    const [rawKey, rawValue] = chunk.split(/[:：]/);
-    const key = rawKey?.trim();
-    const num = Number(rawValue?.trim());
+  for (const chunk of trimmed.split(/[,，；;\n|｜]/)) {
+    const normalizedChunk = chunk.trim().replace(/^[([{【]+|[)\]}】]+$/g, "");
+    if (!normalizedChunk) continue;
+    const matched =
+      normalizedChunk.match(/^(.+?)\s*[:：=＝]\s*([0-9]+(?:\.[0-9]+)?)(?:\s*[%％])?$/) ||
+      normalizedChunk.match(/^(.+?)\s+([0-9]+(?:\.[0-9]+)?)(?:\s*[%％])?$/);
+    const key = matched?.[1]?.trim();
+    const num = Number(matched?.[2]?.trim());
     if (key && Number.isFinite(num)) result[key] = num;
   }
   return result;

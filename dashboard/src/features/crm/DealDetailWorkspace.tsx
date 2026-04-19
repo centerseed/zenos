@@ -44,6 +44,18 @@ const ACTIVITY_TYPES: ActivityType[] = ["電話", "Email", "會議", "Demo", "�
 /** Activity types that trigger an automatic debrief after creation */
 const DEBRIEF_TRIGGER_TYPES = new Set<ActivityType>(["會議", "Demo", "電話"]);
 
+function safeTimeValue(value: Date | string | null | undefined): number {
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+  return 0;
+}
+
 // ─── Debrief metadata parsing ─────────────────────────────────────────────────
 
 function extractDebriefMetadata(text: string): Record<string, unknown> {
@@ -378,6 +390,8 @@ function DealDetailPage() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [secondaryWarning, setSecondaryWarning] = useState<string | null>(null);
   const [token, setToken] = useState("");
   const [stageUpdating, setStageUpdating] = useState(false);
 
@@ -393,35 +407,88 @@ function DealDetailPage() {
   useEffect(() => {
     if (!user || !partner || !dealId) return;
 
+    let cancelled = false;
+
     async function load() {
+      setLoading(true);
+      setLoadError(null);
+      setSecondaryWarning(null);
       const t = await user!.getIdToken();
+      if (cancelled) return;
       setToken(t);
+
+      let fetchedDeal: Deal;
       try {
-        const [fetchedDeal, fetchedActivities] = await Promise.all([
+        const [dealResult, fetchedActivities] = await Promise.all([
           getDeal(t, dealId),
           getDealActivities(t, dealId),
         ]);
+        fetchedDeal = dealResult;
+        if (cancelled) return;
         setDeal(fetchedDeal);
         setActivities(
           [...fetchedActivities].sort(
-            (a, b) => b.activityAt.getTime() - a.activityAt.getTime()
+            (a, b) => safeTimeValue(b.activityAt) - safeTimeValue(a.activityAt)
           )
         );
-        const [fetchedCompany, fetchedContacts, fetchedAiEntries] = await Promise.all([
+        setLoading(false);
+      } catch (err) {
+        if (cancelled) return;
+        setDeal(null);
+        setActivities([]);
+        setCompany(null);
+        setContacts([]);
+        setAiEntries(null);
+        setLoadError(err instanceof Error ? err.message : "載入商機失敗");
+        setLoading(false);
+        return;
+      }
+
+      const secondaryResults = await Promise.allSettled([
           getCompany(t, fetchedDeal.companyId),
           getCompanyContacts(t, fetchedDeal.companyId),
           fetchDealAiEntries(t, dealId),
-        ]);
-        setCompany(fetchedCompany);
-        setContacts(fetchedContacts);
-        setAiEntries(fetchedAiEntries);
-      } catch (err) {
-        console.error("Failed to load deal:", err);
+      ]);
+      if (cancelled) return;
+
+      const secondaryErrors: string[] = [];
+
+      if (secondaryResults[0].status === "fulfilled") {
+        setCompany(secondaryResults[0].value);
+      } else {
+        setCompany(null);
+        secondaryErrors.push("公司資料");
+        console.error("Failed to load company:", secondaryResults[0].reason);
       }
-      setLoading(false);
+
+      if (secondaryResults[1].status === "fulfilled") {
+        setContacts(secondaryResults[1].value);
+      } else {
+        setContacts([]);
+        secondaryErrors.push("聯絡人");
+        console.error("Failed to load contacts:", secondaryResults[1].reason);
+      }
+
+      if (secondaryResults[2].status === "fulfilled") {
+        setAiEntries(secondaryResults[2].value);
+      } else {
+        setAiEntries(null);
+        secondaryErrors.push("AI 洞察");
+        console.error("Failed to load AI entries:", secondaryResults[2].reason);
+      }
+
+      setSecondaryWarning(
+        secondaryErrors.length > 0
+          ? `部分資料暫時無法載入：${secondaryErrors.join("、")}`
+          : null
+      );
     }
 
-    load();
+    void load();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user, partner, dealId]);
 
   async function handleStageChange(newStage: FunnelStage) {
@@ -439,7 +506,7 @@ function DealDetailPage() {
   function handleActivityCreated(activity: Activity) {
     setActivities((prev) =>
       [activity, ...prev].sort(
-        (a, b) => b.activityAt.getTime() - a.activityAt.getTime()
+        (a, b) => safeTimeValue(b.activityAt) - safeTimeValue(a.activityAt)
       )
     );
     if (DEBRIEF_TRIGGER_TYPES.has(activity.activityType)) {
@@ -524,7 +591,9 @@ function DealDetailPage() {
     return (
       <div className="min-h-screen">
         <main className="max-w-3xl mx-auto px-4 py-6">
-          <p className="text-muted-foreground">找不到該商機</p>
+          <p className={loadError ? "text-red-400" : "text-muted-foreground"}>
+            {loadError ?? "找不到該商機"}
+          </p>
         </main>
       </div>
     );
@@ -600,6 +669,12 @@ function DealDetailPage() {
           <span>/</span>
           <span className="text-foreground">{deal.title}</span>
         </div>
+
+        {secondaryWarning && (
+          <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+            {secondaryWarning}
+          </div>
+        )}
 
         {/* Deal header — full width */}
         <div className="bg-card border border-border rounded-xl p-5">

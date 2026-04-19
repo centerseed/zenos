@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import type { CopilotEntryConfig } from "@/lib/copilot/types";
 
@@ -20,6 +20,10 @@ const entry: CopilotEntryConfig = {
 };
 
 describe("CopilotRailShell", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("renders a shared shell header with status and connector badges", () => {
     render(
       <CopilotRailShell
@@ -36,15 +40,27 @@ describe("CopilotRailShell", () => {
     expect(screen.getByText("AI 會議準備")).toBeInTheDocument();
     expect(screen.getByText("企業流程導入 / 會議準備")).toBeInTheDocument();
     expect(screen.getByText("AI 回覆中")).toBeInTheDocument();
-    expect(screen.getByText("Connector 已連線")).toBeInTheDocument();
-    expect(screen.getByText("mode artifact")).toBeInTheDocument();
     expect(screen.getByText("content")).toBeInTheDocument();
   });
 
-  it("supports inline rail mode for desktop layouts", () => {
+  it("supports inline rail mode for desktop layouts without mounting the sheet dialog", async () => {
+    Object.defineProperty(window, "matchMedia", {
+      writable: true,
+      value: () => ({
+        matches: true,
+        media: "(min-width: 1280px)",
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => true,
+      }),
+    });
+
     render(
       <CopilotRailShell
-        open={false}
+        open
         onOpenChange={() => {}}
         entry={entry}
         chatStatus="idle"
@@ -55,7 +71,10 @@ describe("CopilotRailShell", () => {
       </CopilotRailShell>
     );
 
-    expect(screen.getAllByText("AI 會議準備").length).toBeGreaterThan(0);
+    await waitFor(() => {
+      expect(screen.getAllByText("AI 會議準備").length).toBeGreaterThan(0);
+    });
     expect(screen.getAllByText("inline content").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });

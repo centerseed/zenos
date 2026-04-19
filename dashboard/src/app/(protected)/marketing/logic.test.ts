@@ -5,6 +5,7 @@ import {
   composeStyleMarkdown,
   deriveProjectStage,
   nextChatStatus,
+  parseContentMix,
   parseCoworkStreamLine,
   parseStructuredApplyPayload,
   postNextStepHint,
@@ -145,6 +146,14 @@ describe("parseStructuredApplyPayload", () => {
     const result = parseStructuredApplyPayload("```json\n{nope}\n```");
     expect(result.payload).toBeNull();
     expect(result.missingKeys).toEqual([]);
+  });
+});
+
+describe("parseContentMix", () => {
+  it("accepts natural manual formats for content mix", () => {
+    expect(parseContentMix("education 70, product 30")).toEqual({ education: 70, product: 30 });
+    expect(parseContentMix("education=70%; product=30%")).toEqual({ education: 70, product: 30 });
+    expect(parseContentMix("教育：70，產品：30")).toEqual({ 教育: 70, 產品: 30 });
   });
 });
 

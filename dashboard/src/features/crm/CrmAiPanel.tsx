@@ -119,13 +119,25 @@ function parseSseLineForDelta(line: string): string {
   }
 }
 
+function safeTimeValue(value: Date | string | null | undefined): number {
+  if (value instanceof Date) {
+    const time = value.getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? 0 : time;
+  }
+  return 0;
+}
+
 /**
  * Build a summary of recent activities (≤1500 chars) from newest to oldest.
  */
 function buildActivitiesSummary(activities: Activity[]): string {
   const sorted = [...activities]
     .filter((a) => !a.isSystem)
-    .sort((a, b) => b.activityAt.getTime() - a.activityAt.getTime())
+    .sort((a, b) => safeTimeValue(b.activityAt) - safeTimeValue(a.activityAt))
     .slice(0, 10);
 
   const lines = sorted.map((a) => {
@@ -1043,12 +1055,13 @@ export function CrmAiPanel({
   }, [chatHistory, streamingText]);
 
   function handleCancel() {
-    if (requestId) {
+    if (requestId || conversationId.current) {
       void Promise.resolve(
         cancelCoworkRequest({
           baseUrl: getDefaultHelperBaseUrl(),
           token: getDefaultHelperToken() || undefined,
-          requestId,
+          requestId: requestId || undefined,
+          conversationId: conversationId.current,
         })
       ).catch(() => undefined);
     }
