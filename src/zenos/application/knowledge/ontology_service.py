@@ -1869,11 +1869,20 @@ class OntologyService:
                 f"Must be one of: {', '.join(valid_rel_types)}"
             )
 
-        # --- Cross-product guard for auto-inferred related_to ---
-        if (
-            rel_type == RelationshipType.RELATED_TO
-            and description.startswith("auto-inferred")
-        ):
+        # --- Cross-product guard for ANY auto-inferred / auto-linked edge ---
+        # DF-20260419-L2a (F6 symmetric): previously only related_to with
+        # description="auto-inferred..." was blocked cross-product, leaving
+        # the other five rel_types (impacts / depends_on / part_of / serves
+        # / enables) and "auto-linked document" paths able to silently span
+        # L1 subtrees. F6 already scopes the candidate pool at inference
+        # time, but a hostile / buggy caller can still call add_relationship
+        # directly with a cross-subtree target. Generalize the guard:
+        # any description that starts with "auto-" and targets a peer in a
+        # different L1 product → don't persist, return synthetic edge.
+        # Manual callers (description without auto- prefix) are unaffected,
+        # so intentional cross-product edges still work.
+        is_auto = description.startswith("auto-")
+        if is_auto:
             source_product = await self._find_product_ancestor(source)
             target_product = await self._find_product_ancestor(target)
             if (
@@ -1882,9 +1891,9 @@ class OntologyService:
                 and source_product.id != target_product.id
             ):
                 logger.info(
-                    "Skipping cross-product auto-inferred related_to: "
-                    "%s (%s) -> %s (%s)",
+                    "Skipping cross-product auto edge: %s (%s) -%s-> %s (%s)",
                     source.name, source_product.name,
+                    rel_type,
                     target.name, target_product.name,
                 )
                 # Return a synthetic relationship without persisting
