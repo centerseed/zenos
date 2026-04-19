@@ -2,7 +2,7 @@
 spec: docs/specs/SPEC-task-governance.md
 ac_test: tests/spec_compliance/test_task_action_upgrade_ac.py
 created: 2026-04-19
-status: in-progress
+status: done
 ---
 
 # PLAN: Task Action-Layer 升級（subtask / dispatcher / handoff）
@@ -121,7 +121,7 @@ Batch 6: S12 E2E + deploy + verify + commit
 
 ## Resume Point
 
-尚未開始 dispatch。下一步：dispatch **Batch 1 (S01 + S02)** 給 Developer subagent。
+**Completed 2026-04-19**. All 12 stages delivered; 9 AC green; 2160 tests pass; Cloud Run 00193 deployed with migration 20260419_0001 applied. Commits: a80503b → 094dc23.
 
 ## Post-Delivery
 
