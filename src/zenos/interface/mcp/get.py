@@ -158,10 +158,13 @@ async def get(
 
         eid = result.entity.id
 
-        # Resolve visible relationships (needed for both paths)
+        # Resolve visible relationships (needed for both paths). Also keep the
+        # peer Entity object so we can enrich each rel dict with peer_parent_id
+        # / peer_l1_id (DF-20260419-9 F9 — saves governance audit an extra
+        # get() per peer just to check subtree membership).
+        visible_rel_pairs: list[tuple] = []  # list of (Relationship, peer Entity)
         if result.relationships:
             allowed_ids = await _guest_allowed_entity_ids() if partner and is_guest(partner) else set()
-            visible_relationships = []
             for rel in result.relationships:
                 other_id = rel.target_id if rel.source_entity_id == eid else rel.source_entity_id
                 other_entity = await _mcp.entity_repo.get_by_id(other_id)
@@ -174,9 +177,25 @@ async def get(
                         continue
                 elif not _is_entity_visible(other_entity):
                     continue
-                visible_relationships.append(rel)
-        else:
-            visible_relationships = []
+                visible_rel_pairs.append((rel, other_entity))
+        visible_relationships = [r for r, _ in visible_rel_pairs]
+
+        # Compute L1 root for each peer once. Builds entity map lazily only
+        # when we have at least one visible peer.
+        peer_l1_map: dict[str, str | None] = {}
+        if visible_rel_pairs:
+            _all_entities = await _mcp.entity_repo.list_all()
+            _emap_for_root = {e.id: e for e in _all_entities if e.id}
+            from zenos.application.knowledge.ontology_service import _find_product_root
+            for _, peer in visible_rel_pairs:
+                if peer.id and peer.id not in peer_l1_map:
+                    peer_l1_map[peer.id] = _find_product_root(peer.id, _emap_for_root)
+
+        def _enrich_rel_dict(rel, peer_entity) -> dict:
+            d = _serialize(rel)
+            d["peer_parent_id"] = peer_entity.parent_id
+            d["peer_l1_id"] = peer_l1_map.get(peer_entity.id) if peer_entity.id else None
+            return d
 
         if include_set is None or "all" in include_set:
             # Eager-dump path.
@@ -187,13 +206,13 @@ async def get(
                 log_deprecation_warning("get", "entities", str(caller_id) if caller_id else None)
 
             response = _serialize(result)
-            if visible_relationships:
+            if visible_rel_pairs:
                 response["outgoing_relationships"] = [
-                    _serialize(r) for r in visible_relationships
+                    _enrich_rel_dict(r, peer) for r, peer in visible_rel_pairs
                     if r.source_entity_id == eid
                 ]
                 response["incoming_relationships"] = [
-                    _serialize(r) for r in visible_relationships
+                    _enrich_rel_dict(r, peer) for r, peer in visible_rel_pairs
                     if r.source_entity_id != eid
                 ]
                 response.pop("relationships", None)
@@ -216,8 +235,8 @@ async def get(
         rel_dicts: list[dict] | None = None
         if "relationships" in include_set:
             rel_dicts = []
-            for r in visible_relationships:
-                d = _serialize(r)
+            for r, peer in visible_rel_pairs:
+                d = _enrich_rel_dict(r, peer)
                 d["_direction"] = "outgoing" if r.source_entity_id == eid else "incoming"
                 rel_dicts.append(d)
 
