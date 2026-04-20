@@ -708,6 +708,7 @@ export async function createTask(
     assignee?: string;
     due_date?: string;
     project?: string;
+    linked_entities?: string[];
   }
 ): Promise<Task> {
   const body = await apiRequest<{ task?: Task } | Task>("/api/data/tasks", {
@@ -757,6 +758,25 @@ export async function confirmTask(
   return hydrateDates(unwrapTaskPayload(body)) as Task;
 }
 
+/** Hand off a task to a different dispatcher (agent:* or human[:id]). */
+export async function handoffTask(
+  token: string,
+  taskId: string,
+  data: {
+    to_dispatcher: string;
+    reason: string;
+    output_ref?: string | null;
+    notes?: string | null;
+  }
+): Promise<Task> {
+  const body = await apiRequest<{ task?: Task } | Task>(`/api/data/tasks/${taskId}/handoff`, {
+    json: data,
+    method: "POST",
+    token,
+  });
+  return hydrateDates(unwrapTaskPayload(body)) as Task;
+}
+
 /** Fetch comments for a task */
 export async function getTaskComments(token: string, taskId: string): Promise<TaskComment[]> {
   const res = await apiFetch<{ comments: Array<{
@@ -797,6 +817,45 @@ export async function deleteTaskComment(token: string, taskId: string, commentId
     responseType: "void",
     token,
   });
+}
+
+// ─── Docs CRUD ────────────────────────────────────────────────────────────────
+
+/** List all document entities for the current workspace */
+export async function listDocs(token: string): Promise<import("@/types").Entity[]> {
+  const res = await apiFetch<{ entities: import("@/types").Entity[] }>(
+    "/api/data/entities?type=document",
+    token
+  );
+  return res.entities ?? [];
+}
+
+export interface CreateDocResult {
+  entity: import("@/types").Entity;
+  doc_id: string;
+  base_revision_id: string;
+}
+
+/**
+ * Create a new native document entity.
+ * Sets doc_role=index, status=draft, adds first zenos_native source.
+ * The backend auto-generates canonical_path=/docs/{doc_id} and an initial revision.
+ */
+export async function createDoc(
+  token: string,
+  opts?: { name?: string; product_id?: string }
+): Promise<CreateDocResult> {
+  const result = await apiRequest<CreateDocResult>("/api/docs", {
+    json: {
+      name: opts?.name ?? "未命名文件",
+      doc_role: "index",
+      status: "draft",
+      ...(opts?.product_id ? { product_id: opts.product_id } : {}),
+    },
+    method: "POST",
+    token,
+  });
+  return hydrateDates(result) as CreateDocResult;
 }
 
 /** Delete a task attachment */

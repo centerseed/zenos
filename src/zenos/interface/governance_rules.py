@@ -287,85 +287,74 @@ impact_chain: [
     },
 
     "document": {
-        1: """# L3 文件治理規則 v2.0
+        1: """# L3 文件治理規則 v2.2
 
 ## 文件的定位
-L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
-文件不是 L2（文件是 L2 概念的具體體現），不是 task（文件沒有 owner 和 AC）。
+L3 document entity 是正式文件的語意索引入口。
+- metadata 永遠在 ZenOS（entity / source / relationship / status）
+- 內容承載有兩種合法模式：外部 Authoring、ZenOS Delivery Snapshot
+- 文件不是 L2，不是 task；但某些文件會成為 execution spec，必須有驗收邊界
 
 ## 必要欄位
 - title: 文件標題
-- type: 11 種泛用類別之一（見下方分類說明）
-- source.uri: 文件的存放位置（GitHub URL、Google Drive 連結、Notion URL 等）
-- ontology_entity: 掛載到哪個 L2 entity 的名稱
+- type: 11 種泛用類別之一
+- source.uri: 文件的存放位置（GitHub / Drive / Notion / `/docs/{doc_id}`）
+- ontology_entity: 掛載到哪個 L2 entity
 - status: draft / under_review / approved / superseded / archived
 
-## 11 種泛用文件類別
-| 類別 | 用途 | 軟體範例 | 非軟體範例 |
-|------|------|---------|-----------|
-| SPEC | 需求/規格（what + why） | Feature Spec | 採購規格書、產品需求文件 |
-| DECISION | 決策紀錄（why this choice） | ADR | 供應商選型紀錄、策略決策備忘 |
-| DESIGN | 設計文件（how） | 技術設計文件 | 流程設計、組織架構設計 |
-| PLAN | 計畫/排程 | Sprint Plan | 行銷活動企劃、專案時程表 |
-| REPORT | 報告/分析 | 效能分析報告 | 月報、競品分析、市場調研 |
-| CONTRACT | 合約/協議 | API 合約 | 服務合約、NDA、合作備忘錄 |
-| GUIDE | 指南/手冊/SOP | Playbook | 新人手冊、操作 SOP、品管手冊 |
-| MEETING | 會議紀錄 | 架構討論紀錄 | 董事會紀錄、部門週會紀錄 |
-| REFERENCE | 參考資料 | 競品技術分析 | 法規摘要、產業白皮書 |
-| TEST | 測試文件 | Test Case | 品質檢驗標準、驗收清單 |
-| OTHER | 不屬於以上類別 | Script 文件 | 其他 |
-
-Legacy 別名（自動轉換）：ADR→DECISION, TD→DESIGN, TC→TEST, PB→GUIDE, REF→REFERENCE
-
 ## doc_role: single vs index
-- **index**（預設）：文件本身是多個 source 的索引；即使目前只有 1 個 source 也合法
-- **single**（例外）：文件本身就是獨立治理單位
-- 不得因為「現在只有一份文件」就直接建 single
-- 同一個 L2 主題的正式文件，預設應收斂到同一個 index
-- index 文件在 Dashboard 按 doc_type 分組顯示 sources，且優先顯示 bundle_highlights
+- 新建 document 預設 `doc_role=index`
+- `index` 即使目前只有 1 個 source 也合法
+- `single` 只保留給獨立治理、獨立分享、獨立 supersede 的例外情境
 
-## 生命週期
-draft → under_review → approved（正式文件）
-approved → superseded（被新版取代時，保留原文件，建立指向）
-任何狀態 → archived（廢棄）
+## Delivery-first 硬規則
+- current 正式入口文件不得只剩外部 source 而沒有 ZenOS 可讀 delivery
+- current formal-entry 文件應優先採 `git + gcs`
+- 若 GitHub source 尚未 remote 可見，不得宣稱已可交付
 
-## 硬規則
-- 每份文件必須掛載到至少一個 L2 entity（ontology_entity 必填）
-- MCP payload 寫 document 時，`linked_entity_ids` 必填；第一個 ID 映射為 primary parent
-- source.uri 必填（沒有 URI 的文件不值得建 entity）
-- supersede 時必須更新被取代文件的 status 並指向新版
+## Dispatch Gate
+- `SPEC` 要有 Acceptance Criteria 與穩定 `AC-*` ID
+- `DESIGN` / `TD` 若要派工，必須有 `Spec Compliance Matrix` + `Done Criteria`
+- `PLAN` 不能直接取代 task 派工
+- `DECISION` / `REFERENCE` / `REPORT` / `GUIDE` / `MEETING` 不得單獨作為 Developer 執行依據
 
-## Capture/Sync 路由決策樹
-1. 收到一份新文件 → 用 search 查重
-2. 已有 index entity？→ 加為新 source（走 write per-source 操作），並更新 bundle_highlights
-3. 已有 single entity？→ 預設升級為 index，再加新 source
-4. 無既有 entity？→ 判斷類別（11 類），預設建新 index document entity
-5. 檔案已刪除/改名？→ 更新 source_status（stale / unresolvable）""",
+## Capture/Sync 路由
+1. 收到新文件 → 先 search 查重
+2. 已有 index → `add_source`
+3. 已有 single → 預設升級為 index 再加 source
+4. 無既有 entity → 預設建新 index
+5. rename / delete → 更新 `source_status`，必要時 archive""",
 
-        2: """# L3 文件治理規則 v2.0（完整版）
+        2: """# L3 文件治理規則 v2.2（完整版）
 
 ## 文件的定位
-L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
-文件不是 L2（文件是 L2 概念的具體體現），不是 task（文件沒有 owner 和 AC）。
+L3 document entity 是正式文件的語意索引入口。
+
+- metadata 永遠在 ZenOS（entity / source / relationship / status）
+- 內容承載有兩種合法模式：
+  - 外部 Authoring：source 在 Git / Drive / Notion，ZenOS 追蹤 metadata 與 routing
+  - ZenOS Delivery Snapshot：內容寫入 ZenOS snapshot revision，提供穩定 permalink 與 Reader
+- 文件不是 L2（它是 L2 概念的具體體現），不是 task
+- 但某些文件類型會成為 agent 的 execution spec，必須帶明確驗收邊界
 
 ## 必要欄位
 - title: 文件標題
-- type: 11 種泛用類別之一（SPEC/DECISION/DESIGN/PLAN/REPORT/CONTRACT/GUIDE/MEETING/REFERENCE/TEST/OTHER）
-- source.uri: 文件的存放位置（GitHub URL、Google Drive 連結、Notion URL 等）
+- type: 11 種泛用類別之一（SPEC / DECISION / DESIGN / PLAN / REPORT / CONTRACT / GUIDE / MEETING / REFERENCE / TEST / OTHER）
+- source.uri: 文件的存放位置（GitHub URL、Google Drive / Notion URL、或 ZenOS `/docs/{doc_id}` canonical path）
 - ontology_entity: 掛載到哪個 L2 entity 的名稱
 - status: draft / under_review / approved / superseded / archived
 
 ## 完整 Frontmatter 格式
 ```yaml
 ---
-doc_id: SPEC-feature-name          # 唯一 ID（格式：類別-描述）
+doc_id: SPEC-feature-name
 title: 功能規格：功能名稱
-type: SPEC                          # 11 種類別之一
-ontology_entity: L2 Entity 名稱     # 掛載的 L2 entity
-status: draft                       # draft|under_review|approved|superseded|archived
+type: SPEC
+ontology_entity: L2 Entity 名稱
+status: draft
 version: "0.1"
 date: 2026-01-01
-supersedes: null                    # 被此文件取代的文件 ID（如有）
+supersedes: null
 ---
 ```
 
@@ -373,9 +362,29 @@ supersedes: null                    # 被此文件取代的文件 ID（如有）
 
 **重複文件檢查：** `write` 回傳 `similar_items` 列出相近的既有文件。建立前應檢查避免重複。
 
-**原子取代：** 建立新版文件時，可在 `write` 的 data 中同時填入 `supersedes` 欄位，Server 會原子性地將舊文件標為 superseded，省去手動更新舊 entity 的步驟。
+**原子取代：** 建立新版文件時，可在 `write` 的 data 中同時填入 `supersedes` 欄位，Server 會原子性地將舊文件標為 superseded。
 
-**關聯要求：** `write(collection="documents")` 時 `linked_entity_ids` 必填；缺少或空陣列應 reject，先 search 正確的 entity IDs 再重試。
+**關聯要求：** `write(collection="documents")` 時 `linked_entity_ids` 必填；缺少或空陣列應 reject，第一個 ID 映射為 primary parent。
+
+## 內容承載雙模式
+| 模式 | Source of Truth | 典型場景 | 要點 |
+|------|------------------|----------|------|
+| 外部 Authoring | Git / Drive / Notion | 重度編輯、多人協作、版本管理 | ZenOS 管 metadata + 權限 + routing，不接管主編輯流程 |
+| ZenOS Delivery Snapshot | ZenOS（GCS private revision） | 快速分享、穩定 permalink、直接在 Dashboard 編輯 | 內容寫進 snapshot revision，經 ZenOS ACL 讀取 |
+
+## Agent 自動判斷矩陣
+- `git only`：非入口協作文檔
+- `git + gcs`：current 正式入口，或會被分享、會被其他 agent 直接閱讀的文件
+- `gcs only`：用戶明確要求不經 Git、直接發布
+
+## Delivery-first 硬規則
+- `current` 的關鍵 L3 document，不得只剩外部 source 而沒有 ZenOS 可讀 delivery
+- 若文件是某個 L2 的正式入口，治理完成定義必須包含：
+  - 可從 ZenOS Reader 直接閱讀
+  - 有 snapshot revision 可作為穩定 permalink
+  - 分享優先使用 `/docs?docId=...` 或 share-link，不把 GitHub URL 當主要閱讀入口
+- GitHub / Drive / Notion URL 是 provenance，不是主要交付面
+- 若 source.type=`github` 且要讓其他人直接從 source 讀到內容，agent 必須確認檔案已 push 到 remote；只存在本地工作樹或未 push commit，不算可交付入口
 
 ## 11 種泛用文件類別（詳細）
 | 類別 | 用途 | 面向 | 選型準則 |
@@ -392,111 +401,112 @@ supersedes: null                    # 被此文件取代的文件 ID（如有）
 | TEST | 測試文件 | 品質 | Test case、驗收標準、品質檢驗清單 |
 | OTHER | 其他 | - | 不屬於以上類別 |
 
-選型準則：看受眾和目的，不看篇幅。一份短的「為什麼」= DECISION，長的「怎麼做」= DESIGN。
-
 ### Legacy 別名（自動轉換）
-舊類別會自動對應到新類別：ADR→DECISION, TD→DESIGN, TC→TEST, PB→GUIDE, REF→REFERENCE。
-搜尋時會自動展開（搜 ADR 也會找到 DECISION，反之亦然）。
+舊類別會自動對應到新類別：ADR → DECISION、TD → DESIGN、TC → TEST、PB → GUIDE、REF → REFERENCE。搜尋時自動展開。
+
+## 哪些文件必須有驗收邊界
+| 文件類型 | 是否可直接作為 execution spec | 必要驗收邊界 |
+|---------|------------------------------|------------|
+| SPEC | 可以 | Acceptance Criteria + 穩定 `AC-*` ID |
+| DESIGN / TD | 只有拿來 handoff 時可以 | `Spec Compliance Matrix` + `Done Criteria` |
+| PLAN | 不可直接派工 | `entry_criteria` + `exit_criteria` + Resume Point |
+| TEST / TC | QA 驗收依據 | Given / When / Then + P0 / P1 分級 |
+| DECISION / ADR | 不可 | 不要求產品 AC，但需有理由、替代方案、後果 |
+| REFERENCE / REPORT / GUIDE / MEETING | 不可 | 只能作為背景材料 |
+
+## Dispatch Gate
+1. `SPEC`：每個 P0 需求都要有至少一條帶 ID 的 AC。沒有 AC ID 不得進 Approved，不得派工。
+2. `DESIGN` / `TD`：若要 dispatch，必須列出 `Spec Compliance Matrix` 與 `Done Criteria`。
+3. `PLAN`：只能描述協作脈絡與完成邊界，不能取代 task claim 單位。
+4. `DECISION` / `REFERENCE` / 願景文件 / 核心架構文件：預設 non-executable，不得單獨要求 Developer 開工。
 
 ## doc_role: single vs index（ADR-022 Document Bundle）
 
 ### 概念
-- **index**（預設）：文件本身是多個 source 的索引/集合，即使目前只有 1 個 source 也合法
+- **index**（預設）：文件本身是多個 source 的索引 / 集合，即使目前只有 1 個 source 也合法
 - **single**（例外）：文件有一個主要 source，且文件本身就是獨立治理單位
-  - 例：「產品文件集」包含 SPEC + DESIGN + TEST 三類文件
-  - 例：「合規文件包」包含 CONTRACT + REFERENCE + GUIDE
 
-### single → index 升級流程
-觸發條件：single 新增第 2 份同主題正式文件，或已成為某個 L2 的主文件入口
-```
-write(collection="documents", data={
-    "doc_id": "existing-doc-id",
-    "doc_role": "index"
-})
-```
+### 選擇規則
+- 新建 document 預設 `doc_role=index`
+- 不得因為「現在只有一份文件」就直接建 `single`
+- 同一個 L2 主題的正式文件，原則上應收斂到同一個 index bundle
+- `single` 只保留給需要獨立分享、獨立授權、獨立 supersede 的例外情境
 
 ### Dashboard 顯示差異
 - single：平面 source 列表
-- index：按 doc_type 分組顯示 sources（SPEC 區、DESIGN 區、TEST 區...）
+- index：按 `doc_type` 分組顯示 sources，並優先展示 `bundle_highlights`
 
 ## 生命週期
 draft → under_review → approved（正式文件）
-approved → superseded（被新版取代時，保留原文件，建立指向）
-任何狀態 → archived（廢棄）
+approved → superseded（被新版取代時，保留原文件，建立追溯）
+任何狀態 → archived（退場）
 
-## Supersede 流程細節
+## Supersede 流程
 1. 建立新版文件（新 doc_id，status=draft）
-2. 新文件 frontmatter 加 supersedes: 舊文件 ID
+2. 新文件 frontmatter 加 `supersedes: 舊文件 ID`
 3. 舊文件 status 更新為 superseded
 4. 在 ZenOS 建 relationship：新文件 supersedes 舊文件
-5. 保留舊文件（不刪除），讓歷史可追溯
+5. 保留舊文件，不刪除
 
-## Stale 偵測規則
-文件可能過時的訊號：
-- approved 文件已超過 90 天未被 review
-- 掛載的 L2 entity 已變為 stale 狀態
-- 相關 task 的 result 顯示文件描述的行為已改變
-- git log 顯示實作已大幅偏離文件描述
-- source_status 變為 stale 或 unresolvable
-
-偵測到 stale 時：建 task 要求 review，tag 文件為 under_review。
-
-## Capture/Sync 路由決策樹（完整）
+## Capture / Sync 路由
 ```
 收到一份文件
     ↓
 1. search(collection="documents", query="文件主題") 查重
     ↓
-2a. 找到既有 document entity
-    → 若是 index：加為新 source，並更新 bundle_highlights
-    → 若是 single：預設升級為 index，再加新 source
+2a. 找到既有 index entity
+    → add_source，並更新 bundle_highlights / change_summary
     ↓
-2b. 無既有 entity
-    → 判斷類別（11 類 + legacy 別名自動轉換）
-    → write(collection="documents", data={doc_role:"index", ...}) 建新 entity
-    → 補 bundle_highlights
+2b. 找到既有 single entity
+    → 預設升級為 index，再加新 source
     ↓
-3. 檔案已刪除/改名？
-    → 更新 source_status：stale（暫時不可達）或 unresolvable（確認已刪除）
+2c. 無既有 entity
+    → 判斷類別，預設建新 index
+    ↓
+3. rename / delete / dead-link
+    → 更新 source_status（stale / unresolvable）
     → 唯一 source 且 unresolvable → 文件 status 改為 archived
 ```
-
-## Batch Sync 操作說明
-從 git log 批量同步文件狀態：
-1. 掃描 git log，找出最近修改的文件
-2. 比對 ZenOS 中對應 document entity 的 status
-3. 如果 git 文件有新 commit 但 ZenOS status 仍是 draft → 建議更新為 under_review
-4. 如果 git 文件已刪除但 ZenOS 仍 approved → 標記為 archived
 
 ## Source 稽核規則
 
 ### source.label 規範
-- **必須是實際檔名**，例如 `SPEC-agent-system.md`、`ADR-007-entity-architecture.md`
-- **不可只寫 type**：`"github"` 是無意義的 label，Dashboard 顯示時毫無資訊量
-- 若 label 為空或等於 type 名稱（如 "github"），視為 `bad_label`，應從 URI 尾段提取正確檔名
-
-提取規則：取 URI 最後一個 `/` 之後的部分作為 label。
+- 必須是實際檔名或可辨識的人類標題
+- 不可只寫 type（如 `"github"`）
+- 若 label 為空或等於 type，應從 URI 尾段提取
 
 ### source.uri 規範
-- 必須指向**有效的檔案位置**，不可指向已刪除或已改名的路徑
+- 必須指向有效的檔案位置，不可指向已刪除或已改名的路徑
 - 對 `type=github` 的 source，可用 `git ls-files` 驗證路徑是否存在
 - 若檔案已改名，應更新 URI 為新路徑
-- 若檔案已刪除且無改名記錄，應標記為 broken 並等用戶確認後才移除
 
 ### source_status 欄位
-- **valid**（預設）：source 可正常存取
-- **stale**：source 可能過時（偵測到但尚未確認）
-- **unresolvable**：source 確認不可達（已刪除、連結失效）
+- `valid`：source 可正常存取
+- `stale`：source 可能過時
+- `unresolvable`：source 確認不可達
 
 ### 稽核觸發時機
-每次執行 `/zenos-sync` 時，**Step 0: Source Audit 預設自動執行**。
-若只想執行稽核而不做增量同步，使用 `/zenos-sync --audit`。""",
+每次 `/zenos-sync` 時，Step 0 預設先做 Source Audit；只做稽核可用 `/zenos-sync --audit`。""",
 
-        3: """# L3 文件治理規則 v2.0（含完整範例）
+        3: """# L3 文件治理規則 v2.2（含完整範例）
 
 ## 文件的定位
-L3 document entity 是正式文件的語意代理——metadata 在 ZenOS，實際內容在外部。
-文件不是 L2（文件是 L2 概念的具體體現），不是 task（文件沒有 owner 和 AC）。
+L3 document entity 是正式文件的語意索引入口。
+- metadata 永遠在 ZenOS
+- 外部 Authoring 與 ZenOS Delivery Snapshot 都是合法內容模式
+- 文件不是 task，但 execution spec 類型必須有驗收邊界
+
+## 交付模式範例
+
+### `git only`
+- 協作文檔、內部草稿、暫不對外分享的支援文件
+
+### `git + gcs`
+- current 正式入口文件
+- 需要被其他 agent 直接閱讀、需要穩定 permalink 的文件
+
+### `gcs only`
+- 用戶明確要求不要經 Git，直接在 Dashboard 發布的原生文件
 
 ## 各文件類別完整範例 Frontmatter
 
@@ -714,6 +724,9 @@ Server 自動將舊文件 status 標為 superseded。
 
 陷阱 5：index 文件不設 doc_type
 → index 文件的每個 source 應設 doc_type，讓 Dashboard 能正確分組顯示。
+
+陷阱 6：把 DECISION / GUIDE / REFERENCE 直接拿去派工
+→ 這些文件預設都是 non-executable；若要派工，必須另外有 SPEC 或具體 task / Done Criteria
 
 ## Source 稽核規則
 
@@ -1066,7 +1079,7 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
     },
 
     "bundle": {
-        1: """# L3 Document Bundle 規則 v1.0
+        1: """# L3 Document Bundle 規則 v1.1
 
 ## bundle-first 原則
 - 新建 document 預設 `doc_role=index`
@@ -1076,8 +1089,8 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 ## 最低要求
 - `bundle_highlights` 至少 1 筆，且至少 1 筆 `priority=primary`
 - highlight 只能引用本 bundle 的 `source_id`
-- 從 L2 detail 應直接看到 bundle_highlights 與 primary source""",
-        2: """# L3 Document Bundle 規則 v1.0（完整版）
+- 同一 index 可同時掛 `zenos_native`、`github`、`notion`、`gdrive` 等多種 source""",
+        2: """# L3 Document Bundle 規則 v1.1（完整版）
 
 ## bundle-first 原則
 - 新建 document 預設 `doc_role=index`
@@ -1095,15 +1108,23 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 - 沒有相關 bundle → 建新 `index`
 - 若不確定是否同主題 → 停下來回報，不自行猜測
 
+## mixed-source 合約
+- 同一個 index 可同時容納 `zenos_native`、`github`、`notion`、`gdrive`、`local`
+- 外部 helper source 可帶 `external_id` 做同 bundle 內 upsert
+- `snapshot_summary` 是 helper 萃取的語意摘要，不是全文 mirror
+- stale / re-sync hint 是 read path 動態資訊，不是 bundle highlight 的替代品
+
 ## Server 行為
 - write(add_source) / write(update_source) / write({sources:[...]}) 只回 deterministic `bundle_highlights_suggestion`
 - Server 不得用 LLM 生成 `bundle_highlights` 或 `change_summary`
 - `change_summary` / `bundle_highlights` 的語意內容由 agent 產生後寫回""",
-        3: """# L3 Document Bundle 規則 v1.0（含範例）
+        3: """# L3 Document Bundle 規則 v1.1（含範例）
 
 ## 路由範例
 - 新增同主題 SPEC：找到既有 index bundle → `add_source`
 - single 升級：當同主題第二份正式文件出現 → 升級為 `index` 並補 `bundle_highlights`
+- 原生編輯：建立 `zenos_native` source，Reader 走 ZenOS `/docs/{doc_id}`
+- Helper ingest：用 `external_id` 鎖定 notion / gdrive source，存在就 update，不存在就 append
 
 ## highlights 範例
 ```

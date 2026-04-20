@@ -217,6 +217,38 @@ Relationship 寫入時：
 
 注意：首次建構時大部分知識會進 L2 summary 或 document，只有符合 entry 嚴格判斷標準（通過兩關）的才記成 entry。
 
+### C3.6 Recent-change 硬規則（必守）
+
+**Material change 定義**：以下任一項成立，就視為 material change，不是單純文字整理：
+- 新增或刪除正式章節
+- acceptance criteria / rule / flow / scope / status 有改動
+- 新增對其他角色有下游影響的資訊
+- 任何會改變後續工作方式、對外說法、或協作邊界的內容
+
+**非 material change**：以下情況不得當成 change 事件，也不得逼迫覆寫既有 change 痕跡：
+- typo 修正
+- formatting / 換行 / 排版調整
+- 純結構整理但知識內容不變
+
+**`change_summary` 必填條件**：
+- 只要 `capture` 判定文件有 material change，對應 document 寫入時就必須帶 `change_summary`
+- `change_summary` 必須是 1-3 句白話摘要，至少寫出「改了什麼」與「為什麼重要」
+- 若是 material change 卻沒有 `change_summary`，這筆 capture 視為未完成，不能假裝同步完成
+- 若不是 material change，不得為了湊欄位硬改既有 `change_summary`
+
+**`entry(type="change")` 觸發條件**：
+- 只有當文件變更影響既有 L2 / module 的可消費知識時，才寫 `entry(type="change")`
+- 可消費知識的判斷標準：別的角色下次做事時，這筆更新會改變他的行為、檢查點、說法或決策
+- `entry(type="change")` 必須包含時間、變更點、受影響面
+- `entry.content` 不得只是重貼 `change_summary`，要明示「哪個概念被改、誰需要跟著看」
+- 若只是 L3 敘述補充、文件整理、或內部編輯註記，且不影響 L2 做法 / 對外說法 / 下游協作，就不得建立 change entry
+
+**判斷順序**：
+1. 先判定是不是 material change
+2. 是 material change 才檢查是否要寫 `change_summary`
+3. 再判定是否影響既有 L2，只有影響 L2 才寫 `entry(type="change")`
+4. 不確定時，先回報缺口，不要默默跳過或硬補
+
 ### C4. 第三階段：P1 文件 — 建 document entry
 
 為每份 P1 文件建立 document entry（C2 已讀過內容，直接寫入，不需要重讀）：
@@ -236,6 +268,7 @@ Relationship 寫入時：
 - `tags.how`：文件類型（spec/frd/guide/architecture）
 - `tags.who`：目標讀者（list[str]，如 ["開發", "PM"]）
 - `summary`：2-3 句語意摘要——這份文件在知識體系中的定位，不是全文節錄
+- `change_summary`：只有在本次文件屬 material change 時才必填；若不是 material change，保留既有值即可
 - `linked_entity_ids`：關聯的 entity IDs（**優先指向 C3 確認的 L2 entity**，第一個映射為 parent_id，其餘自動建立 relationships）
 - `confirmed_by_user = false`（全部先 draft）
 

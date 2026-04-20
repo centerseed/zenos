@@ -292,6 +292,17 @@ write(collection="documents", data={
 - 若只新增 source 沒更新 `bundle_highlights`，這次 sync 視為未完成治理
 - 若文件是某個 L2 的主要入口，sync 完後必須能從該 L2 直接看到這個 doc bundle
 
+**Recent-change 硬規則（必守）：**
+- `material change` 的定義與 `/zenos-capture` 完全一致：新增/刪除正式章節、AC/rule/flow/scope/status 改動、增加下游影響資訊，這些都算；typo / formatting / 純整理不算
+- 任何會改變文件語意的 bundle operation（`add_source` / `update_source` / `remove_source`）若屬 material change，workflow 就必須把 `change_summary` 視為必填
+- `change_summary` 必須是 1-3 句白話摘要，至少包含「改了什麼」與「為什麼重要」
+- 若 material change 已成立，但 bundle 操作沒有帶出可更新的 `change_summary`，這次 sync 視為未完成，不能宣稱治理完成
+- 若只是 non-material change，不得為了湊欄位強迫覆寫既有 `change_summary`
+- 若變更影響既有 L2 / module 的可消費知識，就必須同步補 `entry(type="change")`
+- `entry(type="change")` 的內容不得只是複製 `change_summary`，必須明示「哪個概念被改、誰需要跟著看」
+- 若只是 L3 敘述補充、文件整理，或純內部編輯註記，且不影響 L2 做法 / 對外說法 / 下游協作，就不得硬建 change entry
+- 判斷順序固定為：先判定 material change，再判定 `change_summary`，最後判定是否需要 change entry；不確定時先記為治理缺口，不要默默跳過
+
 **authoring vs delivery 自動判斷（必守）：**
 - 非正式入口、以編輯協作為主 → 維持 `git only`
 - `current formal-entry` → 預設升級成 `git + gcs`

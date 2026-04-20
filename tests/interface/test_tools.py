@@ -205,6 +205,9 @@ class TestSearchTool:
             mock_ts.list_tasks.assert_called_once_with(
                 assignee="developer",
                 created_by=None,
+                dispatcher=None,
+                parent_task_id=None,
+                linked_entity=None,
                 status=None,
                 limit=200,
                 offset=0,
@@ -224,6 +227,9 @@ class TestSearchTool:
             mock_ts.list_tasks.assert_called_once_with(
                 assignee=None,
                 created_by=None,
+                dispatcher=None,
+                parent_task_id=None,
+                linked_entity=None,
                 status=["todo", "in_progress"],
                 limit=200,
                 offset=0,
@@ -242,6 +248,9 @@ class TestSearchTool:
             mock_ts.list_tasks.assert_called_once_with(
                 assignee=None,
                 created_by=None,
+                dispatcher=None,
+                parent_task_id=None,
+                linked_entity=None,
                 status=None,
                 limit=200,
                 offset=0,
@@ -400,6 +409,9 @@ class TestSearchNewParams:
             mock_ts.list_tasks.assert_called_once_with(
                 assignee=None,
                 created_by=None,
+                dispatcher=None,
+                parent_task_id=None,
+                linked_entity=None,
                 status=None,
                 limit=5,
                 offset=10,
@@ -2785,6 +2797,20 @@ class TestGovernanceGuideTool:
         # No internal model details
         assert "gemini" not in content.lower()
         assert "flash" not in content.lower()
+
+    async def test_document_rules_synced_to_delivery_snapshot_v22(self):
+        """Document guide reflects current delivery-snapshot and dispatch-gate rules."""
+        from zenos.interface.mcp import governance_guide
+
+        result = await governance_guide(topic="document", level=2)
+        data = _ok_data(result)
+        content = data["content"]
+
+        assert data["version"] == "2.2"
+        assert "ZenOS Delivery Snapshot" in content
+        assert "git + gcs" in content
+        assert "linked_entity_ids" in content
+        assert "Spec Compliance Matrix" in content
 
 
 class TestBatchUpdateSources:

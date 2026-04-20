@@ -1,6 +1,7 @@
 "use client";
 
 import type { GraphContextResponse } from "@/lib/api";
+import { useInk } from "@/lib/zen-ink/tokens";
 
 function formatTags(tags: { what: string[]; why: string; who: string[] }): string {
   const parts = [
@@ -28,10 +29,24 @@ export function GraphContextBadge({
   className?: string;
   compact?: boolean;
 }) {
+  const t = useInk("light");
+  const { c, fontMono } = t;
+
   if (!graphContext) {
     if (!unavailableReason) return null;
     return (
-      <div className={`rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-100 ${className}`.trim()}>
+      <div
+        className={className}
+        style={{
+          borderRadius: 14,
+          border: `1px solid ${c.vermLine}`,
+          background: c.vermSoft,
+          color: c.ink,
+          padding: "10px 12px",
+          fontSize: 12,
+          lineHeight: 1.55,
+        }}
+      >
         {unavailableReason}
       </div>
     );
@@ -43,61 +58,155 @@ export function GraphContextBadge({
     (graphContext.truncation_details?.dropped_l2 || 0) + (graphContext.truncation_details?.dropped_l3 || 0);
 
   return (
-    <details className={`rounded-xl border border-border/40 bg-card/60 px-3 py-2 text-xs text-muted-foreground ${className}`.trim()}>
-      <summary className="cursor-pointer list-none font-medium text-foreground">
+    <details
+      className={className}
+      style={{
+        borderRadius: 16,
+        border: `1px solid ${c.inkHair}`,
+        background: c.surface,
+        padding: "10px 12px",
+        color: c.inkMuted,
+        fontSize: 12,
+      }}
+    >
+      <summary
+        className="cursor-pointer list-none"
+        style={{
+          color: c.ink,
+          fontFamily: fontMono,
+          fontSize: 11,
+          letterSpacing: "0.08em",
+        }}
+      >
         已讀取 {l2Count} 個模組、{l3Count} 個文件 ▸
       </summary>
-      <div className="mt-3 space-y-3">
-        <div className="rounded-lg border border-border/30 bg-background/60 px-3 py-2">
-          <div className="font-medium text-foreground">{graphContext.seed.name}</div>
-          <div className="mt-1 text-[11px]">
+      <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
+        <div
+          style={{
+            borderRadius: 12,
+            border: `1px solid ${c.inkHair}`,
+            background: c.paperWarm,
+            padding: "10px 12px",
+          }}
+        >
+          <div style={{ fontWeight: 600, color: c.ink }}>{graphContext.seed.name}</div>
+          <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.55 }}>
             {compact ? compactText(formatTags(graphContext.seed.tags), 96) : formatTags(graphContext.seed.tags)}
           </div>
         </div>
         {graphContext.neighbors.map((neighbor) =>
           compact ? (
-            <div key={neighbor.id} className="rounded-lg border border-border/30 bg-background/50 px-3 py-2">
+            <div
+              key={neighbor.id}
+              style={{
+                borderRadius: 12,
+                border: `1px solid ${c.inkHair}`,
+                background: c.surfaceHi,
+                padding: "10px 12px",
+              }}
+            >
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="font-medium text-foreground">{neighbor.name}</div>
-                  <div className="mt-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{neighbor.type}</div>
+                  <div style={{ fontWeight: 600, color: c.ink }}>{neighbor.name}</div>
+                  <div
+                    style={{
+                      marginTop: 4,
+                      fontSize: 10,
+                      letterSpacing: "0.14em",
+                      textTransform: "uppercase",
+                      color: c.inkFaint,
+                    }}
+                  >
+                    {neighbor.type}
+                  </div>
                 </div>
-                <div className="shrink-0 rounded-full border border-border/30 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+                <div
+                  style={{
+                    flexShrink: 0,
+                    borderRadius: 999,
+                    border: `1px solid ${c.inkHair}`,
+                    background: c.paperWarm,
+                    padding: "2px 8px",
+                    fontSize: 10,
+                    color: c.inkMuted,
+                  }}
+                >
                   {neighbor.documents.length} docs
                 </div>
               </div>
-              <div className="mt-2 text-[11px] leading-5 text-muted-foreground">
+              <div style={{ marginTop: 8, fontSize: 11, lineHeight: 1.6, color: c.inkMuted }}>
                 {compactText(formatTags(neighbor.tags), 110)}
               </div>
               {neighbor.documents.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5 border-t border-border/20 pt-2">
+                <div
+                  style={{
+                    marginTop: 8,
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 6,
+                    borderTop: `1px solid ${c.inkHair}`,
+                    paddingTop: 8,
+                  }}
+                >
                   {neighbor.documents.slice(0, 2).map((doc) => (
-                    <span
+                    <div
                       key={doc.id}
-                      className="rounded-full border border-border/30 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground"
+                      style={{
+                        borderRadius: 999,
+                        border: `1px solid ${c.inkHair}`,
+                        background: c.paperWarm,
+                        padding: "2px 8px",
+                        fontSize: 10,
+                        color: c.inkMuted,
+                      }}
                     >
                       {compactText(doc.title, 28)}
-                    </span>
+                    </div>
                   ))}
                   {neighbor.documents.length > 2 && (
-                    <span className="rounded-full border border-border/30 bg-background/70 px-2 py-0.5 text-[10px] text-muted-foreground">
+                    <div
+                      style={{
+                        borderRadius: 999,
+                        border: `1px solid ${c.inkHair}`,
+                        background: c.paperWarm,
+                        padding: "2px 8px",
+                        fontSize: 10,
+                        color: c.inkMuted,
+                      }}
+                    >
                       +{neighbor.documents.length - 2}
-                    </span>
+                    </div>
                   )}
                 </div>
               )}
             </div>
           ) : (
-            <div key={neighbor.id} className="rounded-lg border border-border/30 bg-background/50 px-3 py-2">
-              <div className="font-medium text-foreground">
-                {neighbor.name} <span className="text-[11px] text-muted-foreground">({neighbor.type})</span>
+            <div
+              key={neighbor.id}
+              style={{
+                borderRadius: 12,
+                border: `1px solid ${c.inkHair}`,
+                background: c.surfaceHi,
+                padding: "10px 12px",
+              }}
+            >
+              <div style={{ fontWeight: 600, color: c.ink }}>
+                {neighbor.name} <span style={{ fontSize: 11, color: c.inkMuted }}>({neighbor.type})</span>
               </div>
-              <div className="mt-1 text-[11px]">{formatTags(neighbor.tags)}</div>
+              <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.55 }}>{formatTags(neighbor.tags)}</div>
               {neighbor.documents.length > 0 && (
-                <div className="mt-2 space-y-1 border-t border-border/20 pt-2">
+                <div
+                  style={{
+                    marginTop: 8,
+                    display: "grid",
+                    gap: 4,
+                    borderTop: `1px solid ${c.inkHair}`,
+                    paddingTop: 8,
+                  }}
+                >
                   {neighbor.documents.map((doc) => (
-                    <div key={doc.id} className="text-[11px] text-muted-foreground">
-                      {doc.title} <span className="text-[10px]">({doc.type} / {doc.status})</span>
+                    <div key={doc.id} style={{ fontSize: 11, color: c.inkMuted }}>
+                      {doc.title} <span style={{ fontSize: 10 }}>({doc.type} / {doc.status})</span>
                     </div>
                   ))}
                 </div>
@@ -106,7 +215,15 @@ export function GraphContextBadge({
           )
         )}
         {graphContext.truncated && hiddenCount > 0 && (
-          <div className="rounded-lg border border-border/30 bg-background/50 px-3 py-2 text-[11px]">
+          <div
+            style={{
+              borderRadius: 12,
+              border: `1px solid ${c.inkHair}`,
+              background: c.paperWarm,
+              padding: "10px 12px",
+              fontSize: 11,
+            }}
+          >
             還有 {hiddenCount} 個節點因長度限制未載入
           </div>
         )}

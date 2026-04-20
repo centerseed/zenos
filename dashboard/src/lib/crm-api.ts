@@ -143,12 +143,12 @@ export interface Deal {
   companyId: string;
   ownerPartnerId: string;
   funnelStage: FunnelStage;
-  amountTwd?: number;
+  amountTwd?: number | null;
   dealType?: DealType;
   sourceType?: DealSource;
   referrer?: string;
-  expectedCloseDate?: Date;
-  signedDate?: Date;
+  expectedCloseDate?: Date | null;
+  signedDate?: Date | null;
   scopeDescription?: string;
   deliverables: string[];
   notes?: string;

@@ -62,32 +62,32 @@ export function CopilotInputBar({
         placeholder={placeholder}
         disabled={isRunning}
         rows={3}
-        className="w-full rounded-xl border border-border/40 bg-card/60 px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/50 disabled:opacity-50"
+        className="w-full rounded-[2px] border border-border bg-card px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/50 disabled:opacity-50"
       />
       <div className="flex flex-wrap items-center justify-end gap-2">
         {extraActions}
 
         {onSummarize && status === "idle" && (
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onSummarize}>
+          <Button size="sm" variant="outline" className="h-8 rounded-[2px] text-xs" onClick={onSummarize}>
             整理結果
           </Button>
         )}
 
         {status === "error" && (
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onRetry}>
+          <Button size="sm" variant="outline" className="h-8 rounded-[2px] text-xs" onClick={onRetry}>
             <RefreshCw className="mr-1.5 h-3 w-3" />
             重試
           </Button>
         )}
 
         {isApplyReady && onApply && (
-          <Button size="sm" className="h-8 text-xs" onClick={onApply}>
+          <Button size="sm" className="h-8 rounded-[2px] text-xs" onClick={onApply}>
             套用到欄位
           </Button>
         )}
 
         {isRunning && (
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={onCancel}>
+          <Button size="sm" variant="outline" className="h-8 rounded-[2px] text-xs" onClick={onCancel}>
             <Square className="mr-1.5 h-3 w-3" />
             停止
           </Button>
@@ -95,7 +95,7 @@ export function CopilotInputBar({
 
         <Button
           size="sm"
-          className="h-8 text-xs"
+          className="h-8 rounded-[2px] text-xs"
           disabled={isRunning || (!input.trim() && !canSendEmpty)}
           onClick={handleSend}
         >

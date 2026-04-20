@@ -1,10 +1,11 @@
 ---
 type: ADR
 id: ADR-032
-status: Draft
+status: Accepted
 ontology_entity: L3 文件治理
 created: 2026-04-11
-updated: 2026-04-11
+updated: 2026-04-20
+accepted_at: 2026-04-20
 ---
 
 # ADR-032: Document Delivery Layer 架構（Snapshot + Permalink + Share Token）

@@ -9,6 +9,22 @@ BARE_DOMAIN_BLACKLIST: frozenset[str] = frozenset({
     "github", "notion", "drive", "wiki", "confluence"
 })
 
+# --- Helper Ingest Contract validators ---
+
+ZENOS_NATIVE_URI_PATTERN = re.compile(
+    r"^/docs/[a-zA-Z0-9_\-]+$"
+)
+
+LOCAL_URI_PATTERN = re.compile(
+    r"^local:[a-f0-9]{64}$"
+)
+
+# external_id format: {source_type_prefix}:{identifier}
+# prefix: lowercase letters and underscores only; identifier: alphanumeric + _-./
+EXTERNAL_ID_PATTERN = re.compile(
+    r"^[a-z_]+:[A-Za-z0-9_\-./]+$"
+)
+
 GITHUB_BLOB_PATTERN = re.compile(
     r"^https://github\.com/[^/]+/[^/]+/blob/[^/]+/.+"
 )
@@ -134,5 +150,60 @@ def validate_source_uri(source_type: str, uri: str) -> tuple[bool, str]:
             )
         return (True, "")
 
+    if source_type == "zenos_native":
+        if not ZENOS_NATIVE_URI_PATTERN.match(uri):
+            return (
+                False,
+                (
+                    "zenos_native source_uri must match /docs/{doc_id} "
+                    "(alphanumeric, hyphens, underscores only). "
+                    f"Got: {uri!r}"
+                ),
+            )
+        return (True, "")
+
+    if source_type == "local":
+        if not LOCAL_URI_PATTERN.match(uri):
+            return (
+                False,
+                (
+                    "local source_uri must be in the form local:{sha256_hex} "
+                    "(exactly 64 lowercase hex characters). "
+                    f"Got: {uri!r}"
+                ),
+            )
+        return (True, "")
+
     # Unknown or unvalidated types (e.g. 'upload') pass through
+    return (True, "")
+
+
+def validate_external_id_format(external_id: str) -> tuple[bool, str]:
+    """Validate the format of an external_id value.
+
+    Valid format: ``{prefix}:{identifier}``
+    - prefix: one or more lowercase letters or underscores
+    - identifier: one or more alphanumeric chars, hyphens, underscores, dots, slashes
+
+    Examples of valid values: ``notion:abc123``, ``gdrive:1abcXYZ``,
+    ``local:a1b2c3...`` (64 hex chars).
+
+    Returns (is_valid, error_message). error_message is empty when valid.
+    """
+    if not external_id:
+        return (
+            False,
+            "external_id must not be empty.",
+        )
+    if not EXTERNAL_ID_PATTERN.match(external_id):
+        return (
+            False,
+            (
+                "external_id must follow the format '{source_type}:{identifier}', "
+                "e.g. 'notion:abc123' or 'gdrive:1abcXYZ'. "
+                "Prefix must be lowercase letters/underscores; "
+                "identifier must be alphanumeric plus _-./. "
+                f"Got: {external_id!r}"
+            ),
+        )
     return (True, "")

@@ -4,7 +4,7 @@ model: sonnet
 description: >
   Developer 角色。按照 Architect 的技術設計實作功能，遵循最小 mock 測試、階段性 simplify。
   由 Architect 透過 Agent tool 以 subagent 方式調度。
-version: 0.4.1
+version: 0.4.2
 ---
 
 # Developer
@@ -210,7 +210,9 @@ mcp__zenos__task(
 - 不要手動 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
 
 ### QA FAIL 時
-QA 會把 task handoff 回給 `agent:developer`（reason="rejected: ..."）。你從 `get(task).handoff_events` 最後一條看到退回原因，修好後再次 handoff 給 QA。status 回到 `in_progress` 自動處理。
+QA 會把 task handoff 回給 `agent:developer`（reason="rejected: ..."）。你從 `get(task).handoff_events` 最後一條看到退回原因，修好後再次 handoff 給 QA。
+
+> Server 行為：handoff 只會在 `agent:developer → agent:qa 且 status=in_progress` 時自動升 `review`；其他方向（包含 QA 退回）status **維持不變**。被退回時 task 仍是 `review`，修復期間可選擇手動 `task(action="update", status="in_progress")` 反映實際狀態，或直接修完再 handoff 回 QA（status 保持 review 不影響 handoff 成立）。
 
 ---
 

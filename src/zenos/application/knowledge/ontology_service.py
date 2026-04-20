@@ -17,7 +17,11 @@ logger = logging.getLogger(__name__)
 
 from zenos.domain.governance import apply_tag_confidence, check_split_criteria, find_tech_terms_in_summary
 from zenos.domain.validation import find_similar_items
-from zenos.domain.source_uri_validator import validate_source_uri, BARE_DOMAIN_BLACKLIST
+from zenos.domain.source_uri_validator import (
+    validate_source_uri,
+    validate_external_id_format,
+    BARE_DOMAIN_BLACKLIST,
+)
 from zenos.domain.doc_types import (
     canonical_type as compute_canonical_type,
     ensure_source_ids,
@@ -31,6 +35,32 @@ from zenos.domain.shared import SplitRecommendation, TagConfidence
 from zenos.domain.knowledge import BlindspotRepository, DocumentRepository, EntityRepository, ProtocolRepository, RelationshipRepository
 from zenos.domain.search import SearchResult, search_ontology
 from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
+
+
+# ──────────────────────────────────────────────
+# Helper Ingest Contract constants
+# ──────────────────────────────────────────────
+
+SNAPSHOT_SUMMARY_MAX_BYTES = 10_240  # 10 KB — semantic discipline, not just tech limit
+
+
+class SnapshotTooLargeError(ValueError):
+    """Raised when snapshot_summary exceeds the 10 KB hard limit.
+
+    snapshot_summary is a helper-distilled semantic summary, NOT a raw mirror.
+    The 10 KB limit enforces meaningful compression by the helper.
+    """
+    pass
+
+
+def _assert_snapshot_size(snapshot: str | bytes) -> None:
+    """Raise SnapshotTooLargeError if snapshot_summary exceeds the size limit."""
+    size = len(snapshot.encode("utf-8")) if isinstance(snapshot, str) else len(snapshot)
+    if size > SNAPSHOT_SUMMARY_MAX_BYTES:
+        raise SnapshotTooLargeError(
+            f"snapshot_summary 是摘要不是 mirror，請先在 helper 端 distill。"
+            f"（大小 {size} bytes 超過上限 {SNAPSHOT_SUMMARY_MAX_BYTES} bytes）"
+        )
 
 
 # ──────────────────────────────────────────────
@@ -2461,47 +2491,162 @@ class OntologyService:
                     _sync_bundle_source_status(src, _bundle_source_status(src))
 
             if add_source_data:
-                # Guard: single cannot add 2nd source
-                if doc_role == "single" and len(sources) >= 1:
-                    raise ValueError(
-                        "single doc entity 只能有一個 source。"
-                        "若需聚合多份文件請先將 doc_role 改為 index。"
+                # --- Helper Ingest Contract: external_id validation & size check ---
+                new_external_id = add_source_data.get("external_id")
+                if new_external_id is not None:
+                    is_valid_eid, eid_error = validate_external_id_format(str(new_external_id))
+                    if not is_valid_eid:
+                        raise ValueError(f"Invalid external_id: {eid_error}")
+
+                new_snapshot = add_source_data.get("snapshot_summary")
+                if new_snapshot is not None:
+                    _assert_snapshot_size(new_snapshot)
+
+                # Helper upsert by external_id: if same external_id already exists in
+                # this doc → update in-place (preserve source_id), not add a new source.
+                if new_external_id is not None:
+                    existing_idx = next(
+                        (i for i, s in enumerate(sources) if s.get("external_id") == new_external_id),
+                        None,
                     )
-                # Validate URI if provided
-                new_src_uri = str(add_source_data.get("uri", "")).strip()
-                new_src_type = add_source_data.get("type", "")
-                if new_src_type and new_src_uri:
-                    is_valid, error_msg = validate_source_uri(new_src_type, new_src_uri)
-                    if not is_valid:
-                        raise ValueError(f"Invalid source URI: {error_msg}")
-                new_source = {
-                    "source_id": generate_source_id(),
-                    "uri": new_src_uri,
-                    "type": new_src_type,
-                    "label": add_source_data.get("label", ""),
-                    "doc_type": add_source_data.get("doc_type", ""),
-                    "doc_status": add_source_data.get("doc_status", ""),
-                    "status": "valid",
-                    "source_status": "valid",
-                    "note": add_source_data.get("note", ""),
-                    "is_primary": add_source_data.get("is_primary", False),
-                }
-                # Warn on unknown doc_type
-                if new_source["doc_type"] and not is_known_doc_type(new_source["doc_type"]):
-                    suggestions.append(
-                        f"doc_type '{new_source['doc_type']}' is not a known type. "
-                        f"Consider using 'OTHER' or one of: SPEC, DECISION, DESIGN, PLAN, "
-                        f"REPORT, CONTRACT, GUIDE, MEETING, REFERENCE, TEST."
-                    )
-                sources.append(new_source)
-                suggestion_source_ids = [new_source["source_id"]]
-                suggestions.append("change_summary 可能需要更新")
+                    now_iso = datetime.now(timezone.utc).isoformat()
+                    if existing_idx is not None:
+                        # Update path: overwrite mutable fields, preserve source_id
+                        existing_src = sources[existing_idx]
+                        preserved_sid = existing_src.get("source_id") or generate_source_id()
+                        updated_src = dict(existing_src)
+                        updated_src["last_synced_at"] = now_iso
+                        updated_src["source_id"] = preserved_sid
+                        for key in ("uri", "label", "type", "doc_type", "doc_status", "note", "is_primary"):
+                            if key in add_source_data and add_source_data[key] is not None:
+                                updated_src[key] = add_source_data[key]
+                        if "external_updated_at" in add_source_data:
+                            updated_src["external_updated_at"] = add_source_data["external_updated_at"]
+                        if "snapshot_summary" in add_source_data:
+                            updated_src["snapshot_summary"] = add_source_data["snapshot_summary"]
+                        sources[existing_idx] = updated_src
+                        suggestion_source_ids = [preserved_sid]
+                        # Detect no-op
+                        new_ext_upd = add_source_data.get("external_updated_at")
+                        old_ext_upd = existing_src.get("external_updated_at")
+                        noop = (new_ext_upd == old_ext_upd) and (new_snapshot == existing_src.get("snapshot_summary"))
+                        if "_helper_upsert_meta" not in data:
+                            data["_helper_upsert_meta"] = {}
+                        data["_helper_upsert_meta"]["noop"] = noop
+                        data["_helper_upsert_meta"]["source_id"] = preserved_sid
+                    else:
+                        # Create path: new source with external_id
+                        # Guard: single cannot add 2nd source
+                        if doc_role == "single" and len(sources) >= 1:
+                            raise ValueError(
+                                "single doc entity 只能有一個 source。"
+                                "若需聚合多份文件請先將 doc_role 改為 index。"
+                            )
+                        new_src_uri = str(add_source_data.get("uri", "")).strip()
+                        new_src_type = add_source_data.get("type", "")
+                        if new_src_type and new_src_uri:
+                            is_valid, error_msg = validate_source_uri(new_src_type, new_src_uri)
+                            if not is_valid:
+                                raise ValueError(f"Invalid source URI: {error_msg}")
+                        new_sid = generate_source_id()
+                        new_source = {
+                            "source_id": new_sid,
+                            "external_id": new_external_id,
+                            "last_synced_at": now_iso,
+                            "uri": new_src_uri,
+                            "type": new_src_type,
+                            "label": add_source_data.get("label", ""),
+                            "doc_type": add_source_data.get("doc_type", ""),
+                            "doc_status": add_source_data.get("doc_status", ""),
+                            "status": "valid",
+                            "source_status": "valid",
+                            "note": add_source_data.get("note", ""),
+                            "is_primary": add_source_data.get("is_primary", False),
+                        }
+                        if "external_updated_at" in add_source_data:
+                            new_source["external_updated_at"] = add_source_data["external_updated_at"]
+                        if new_snapshot is not None:
+                            new_source["snapshot_summary"] = new_snapshot
+                        # Warn on unknown doc_type
+                        if new_source["doc_type"] and not is_known_doc_type(new_source["doc_type"]):
+                            suggestions.append(
+                                f"doc_type '{new_source['doc_type']}' is not a known type. "
+                                f"Consider using 'OTHER' or one of: SPEC, DECISION, DESIGN, PLAN, "
+                                f"REPORT, CONTRACT, GUIDE, MEETING, REFERENCE, TEST."
+                            )
+                        sources.append(new_source)
+                        suggestion_source_ids = [new_sid]
+                        data["_helper_upsert_meta"] = {"noop": False, "source_id": new_sid}
+                    suggestions.append("change_summary 可能需要更新")
+                else:
+                    # No external_id: standard add path (backward compat)
+                    # Guard: single cannot add 2nd source
+                    if doc_role == "single" and len(sources) >= 1:
+                        raise ValueError(
+                            "single doc entity 只能有一個 source。"
+                            "若需聚合多份文件請先將 doc_role 改為 index。"
+                        )
+                    # Validate URI if provided
+                    new_src_uri = str(add_source_data.get("uri", "")).strip()
+                    new_src_type = add_source_data.get("type", "")
+                    if new_src_type and new_src_uri:
+                        is_valid, error_msg = validate_source_uri(new_src_type, new_src_uri)
+                        if not is_valid:
+                            raise ValueError(f"Invalid source URI: {error_msg}")
+                    new_source = {
+                        "source_id": generate_source_id(),
+                        "uri": new_src_uri,
+                        "type": new_src_type,
+                        "label": add_source_data.get("label", ""),
+                        "doc_type": add_source_data.get("doc_type", ""),
+                        "doc_status": add_source_data.get("doc_status", ""),
+                        "status": "valid",
+                        "source_status": "valid",
+                        "note": add_source_data.get("note", ""),
+                        "is_primary": add_source_data.get("is_primary", False),
+                    }
+                    # Warn on unknown doc_type
+                    if new_source["doc_type"] and not is_known_doc_type(new_source["doc_type"]):
+                        suggestions.append(
+                            f"doc_type '{new_source['doc_type']}' is not a known type. "
+                            f"Consider using 'OTHER' or one of: SPEC, DECISION, DESIGN, PLAN, "
+                            f"REPORT, CONTRACT, GUIDE, MEETING, REFERENCE, TEST."
+                        )
+                    sources.append(new_source)
+                    suggestion_source_ids = [new_source["source_id"]]
+                    suggestions.append("change_summary 可能需要更新")
 
             elif update_source_data:
+                # --- Helper Ingest Contract: external_id in update_source ---
+                upd_external_id = update_source_data.get("external_id")
+                if upd_external_id is not None:
+                    is_valid_eid, eid_error = validate_external_id_format(str(upd_external_id))
+                    if not is_valid_eid:
+                        raise ValueError(f"Invalid external_id: {eid_error}")
+
+                upd_snapshot = update_source_data.get("snapshot_summary")
+                if upd_snapshot is not None:
+                    _assert_snapshot_size(upd_snapshot)
+
                 target_sid = update_source_data.get("source_id")
-                if not target_sid:
-                    raise ValueError("update_source requires source_id")
+                if not target_sid and upd_external_id is None:
+                    raise ValueError("update_source requires source_id or external_id")
+
+                # If external_id provided without source_id: look up by external_id
+                if target_sid is None and upd_external_id is not None:
+                    matched = next(
+                        (s for s in sources if s.get("external_id") == upd_external_id),
+                        None,
+                    )
+                    if matched is None:
+                        raise ValueError(
+                            f"update_source: external_id '{upd_external_id}' not found in this document. "
+                            f"Use add_source to create a new source with this external_id."
+                        )
+                    target_sid = matched.get("source_id")
+
                 found = False
+                now_iso = datetime.now(timezone.utc).isoformat()
                 for src in sources:
                     if src.get("source_id") == target_sid:
                         for key in ("uri", "label", "doc_type", "doc_status", "note", "is_primary", "status", "source_status"):
@@ -2514,6 +2659,16 @@ class OntologyService:
                             is_valid, error_msg = validate_source_uri(src["type"], src["uri"])
                             if not is_valid:
                                 raise ValueError(f"Invalid source URI: {error_msg}")
+                        # Helper ingest fields
+                        if upd_external_id is not None:
+                            src["external_id"] = upd_external_id
+                        if "external_updated_at" in update_source_data:
+                            src["external_updated_at"] = update_source_data["external_updated_at"]
+                        if "snapshot_summary" in update_source_data:
+                            src["snapshot_summary"] = update_source_data["snapshot_summary"]
+                        # Always update last_synced_at when helper calls update_source
+                        if upd_external_id is not None or "external_updated_at" in update_source_data:
+                            src["last_synced_at"] = now_iso
                         found = True
                         break
                 if not found:
@@ -2682,6 +2837,34 @@ class OntologyService:
         if "confirmed_by_user" in data:
             entity_payload["confirmed_by_user"] = data["confirmed_by_user"]
 
+        # --- Helper Ingest: cross-doc duplicate external_id detection (warning only) ---
+        # Collect all external_ids being written in this operation
+        _helper_warnings: list[str] = []
+        _all_new_external_ids: list[str] = []
+        if add_source_data and add_source_data.get("external_id"):
+            _all_new_external_ids.append(str(add_source_data["external_id"]))
+        if update_source_data and update_source_data.get("external_id"):
+            _all_new_external_ids.append(str(update_source_data["external_id"]))
+
+        if _all_new_external_ids:
+            current_entity_id = data.get("id") or (existing.id if existing else None)
+            try:
+                all_docs = await self._entities.list_all(type_filter=EntityType.DOCUMENT)
+                for ext_id in _all_new_external_ids:
+                    for doc in all_docs:
+                        if doc.id == current_entity_id:
+                            continue
+                        for src in (doc.sources or []):
+                            if src.get("external_id") == ext_id:
+                                _helper_warnings.append(
+                                    f"DUPLICATE_EXTERNAL_ID_ACROSS_BUNDLES: "
+                                    f"external_id '{ext_id}' 已存在於 doc_id='{doc.id}'。"
+                                    f"同一外部文件疑似掛在多個 bundle，請確認是否正確。"
+                                )
+                                break
+            except Exception:
+                logger.warning("Cross-doc external_id duplicate check failed", exc_info=True)
+
         result = await self.upsert_entity(entity_payload)
         saved = result.entity
 
@@ -2698,7 +2881,10 @@ class OntologyService:
             )
 
         # Attach bundle operation suggestions for tools.py to pick up
+        # Also attach helper ingest metadata (noop flag, duplicate warnings)
         saved._bundle_suggestions = suggestions  # type: ignore[attr-defined]
+        saved._helper_upsert_meta = data.get("_helper_upsert_meta", {})  # type: ignore[attr-defined]
+        saved._helper_warnings = _helper_warnings  # type: ignore[attr-defined]
         return saved
 
     async def _resolve_document_title(

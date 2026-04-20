@@ -1,15 +1,28 @@
+// ZenOS · TaskAttachments — Zen Ink migration (B4)
+// Replaces Tailwind dark classes with zen primitives (Btn, Chip, Dialog).
+// Image preview opens in zen/Dialog. Upload / delete / link CRUD preserved unchanged.
 "use client";
+
+// Inject spin keyframe once so loading spinners work without Tailwind animate-spin
+if (typeof document !== "undefined") {
+  const SPIN_STYLE_ID = "zen-spin-keyframe";
+  if (!document.getElementById(SPIN_STYLE_ID)) {
+    const style = document.createElement("style");
+    style.id = SPIN_STYLE_ID;
+    style.textContent = `@keyframes zen-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`;
+    document.head.appendChild(style);
+  }
+}
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Image,
   FileText,
   ExternalLink,
-  X,
   Upload,
   Loader2,
   AlertCircle,
   Paperclip,
+  X,
 } from "lucide-react";
 import type { Task } from "@/types";
 import {
@@ -19,6 +32,10 @@ import {
   deleteTaskAttachment,
   addLinkAttachment,
 } from "@/lib/api";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Btn } from "./zen/Btn";
+import { Input } from "./zen/Input";
+import { Dialog } from "./zen/Dialog";
 
 type Attachment = NonNullable<Task["attachments"]>[number];
 
@@ -73,11 +90,16 @@ function AttachmentItem({
   deleting: boolean;
   token: string;
 }) {
+  const t = useInk("light");
+  const { c } = t;
   const type = att.type ?? (isImageType(att.content_type) ? "image" : "file");
   const blobUrl = useAuthBlobUrl(
     type === "image" || att.proxy_url ? att.proxy_url : undefined,
     token,
   );
+
+  // Image preview dialog state
+  const [previewOpen, setPreviewOpen] = useState(false);
 
   const handleDownload = useCallback(() => {
     if (!att.proxy_url || !token) return;
@@ -98,77 +120,219 @@ function AttachmentItem({
   }, [att.proxy_url, att.filename, token]);
 
   return (
-    <div className="group relative flex items-start gap-3 bg-white/[0.04] border border-white/10 rounded-xl p-3 hover:bg-white/[0.06] transition-colors">
-      {type === "image" && blobUrl ? (
-        <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-white/[0.06] border border-white/10">
-          <img
-            src={blobUrl}
-            alt={att.filename || "image"}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        </div>
-      ) : type === "image" && att.proxy_url ? (
-        <div className="flex-shrink-0 w-20 h-20 rounded-lg overflow-hidden bg-white/[0.06] border border-white/10 flex items-center justify-center">
-          <Loader2 className="w-5 h-5 text-muted-foreground animate-spin" />
-        </div>
-      ) : type === "link" ? (
-        <div className="flex-shrink-0 p-2 rounded-lg bg-blue-500/20 border border-blue-500/30">
-          <ExternalLink className="w-4 h-4 text-blue-300" />
-        </div>
-      ) : (
-        <div className="flex-shrink-0 p-2 rounded-lg bg-purple-500/20 border border-purple-500/30">
-          <FileText className="w-4 h-4 text-purple-300" />
-        </div>
-      )}
-
-      <div className="flex-1 min-w-0">
-        {type === "link" ? (
-          <a
-            href={att.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-sm font-medium text-blue-400 hover:text-blue-300 underline underline-offset-2 transition-colors truncate block"
-          >
-            {att.filename || att.url || "Link"}
-          </a>
-        ) : att.proxy_url ? (
+    <>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+          background: c.surface,
+          border: `1px solid ${c.inkHair}`,
+          borderRadius: t.radius,
+          padding: 12,
+          position: "relative",
+          transition: "border-color 0.15s",
+        }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.borderColor = c.inkHairBold)}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.borderColor = c.inkHair)}
+      >
+        {/* Thumbnail / icon */}
+        {type === "image" && blobUrl ? (
           <button
-            onClick={handleDownload}
-            className="text-sm font-medium text-white hover:text-blue-300 transition-colors truncate block text-left cursor-pointer"
+            onClick={() => setPreviewOpen(true)}
+            aria-label="預覽圖片"
+            style={{
+              flexShrink: 0,
+              width: 64,
+              height: 64,
+              borderRadius: t.radius,
+              overflow: "hidden",
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              padding: 0,
+              cursor: "zoom-in",
+            }}
           >
-            {att.filename || "File"}
+            <img
+              src={blobUrl}
+              alt={att.filename || "image"}
+              style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+              loading="lazy"
+            />
           </button>
+        ) : type === "image" && att.proxy_url ? (
+          <div
+            style={{
+              flexShrink: 0,
+              width: 64,
+              height: 64,
+              borderRadius: t.radius,
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Loader2 style={{ width: 18, height: 18, color: c.inkFaint, animation: "zen-spin 1s linear infinite" }} />
+          </div>
+        ) : type === "link" ? (
+          <div
+            style={{
+              flexShrink: 0,
+              padding: 8,
+              borderRadius: t.radius,
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <ExternalLink style={{ width: 14, height: 14, color: c.inkMuted }} />
+          </div>
         ) : (
-          <span className="text-sm font-medium text-white truncate block">
-            {att.filename || "File"}
-          </span>
+          <div
+            style={{
+              flexShrink: 0,
+              padding: 8,
+              borderRadius: t.radius,
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <FileText style={{ width: 14, height: 14, color: c.inkMuted }} />
+          </div>
         )}
-        {att.description && (
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">
-            {att.description}
-          </p>
-        )}
-        {att.content_type && (
-          <span className="text-[10px] text-muted-foreground/60 uppercase tracking-wider">
-            {att.content_type}
-          </span>
-        )}
+
+        {/* Info */}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+          {type === "link" ? (
+            <a
+              href={att.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontFamily: t.fontBody,
+                fontSize: 13,
+                fontWeight: 500,
+                color: c.inkMuted,
+                textDecoration: "underline",
+                textDecorationColor: c.inkHairBold,
+                textUnderlineOffset: 2,
+                display: "block",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = c.ink)}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLAnchorElement).style.color = c.inkMuted)}
+            >
+              {att.filename || att.url || "Link"}
+            </a>
+          ) : att.proxy_url ? (
+            <button
+              onClick={handleDownload}
+              style={{
+                fontFamily: t.fontBody,
+                fontSize: 13,
+                fontWeight: 500,
+                color: c.ink,
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                textAlign: "left",
+                cursor: "pointer",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                display: "block",
+                width: "100%",
+                transition: "color 0.15s",
+              }}
+              onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.color = c.inkMuted)}
+              onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.color = c.ink)}
+            >
+              {att.filename || "File"}
+            </button>
+          ) : (
+            <span style={{ fontFamily: t.fontBody, fontSize: 13, fontWeight: 500, color: c.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>
+              {att.filename || "File"}
+            </span>
+          )}
+          {att.description && (
+            <p style={{ fontFamily: t.fontBody, fontSize: 11, color: c.inkFaint, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {att.description}
+            </p>
+          )}
+          {att.content_type && (
+            <span style={{ fontFamily: t.fontMono, fontSize: 10, color: c.inkFaint, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              {att.content_type}
+            </span>
+          )}
+        </div>
+
+        {/* Delete */}
+        <button
+          onClick={onDelete}
+          disabled={deleting}
+          title="Remove attachment"
+          style={{
+            padding: 6,
+            borderRadius: t.radius,
+            border: `1px solid transparent`,
+            background: "transparent",
+            color: c.inkFaint,
+            cursor: deleting ? "not-allowed" : "pointer",
+            display: "flex",
+            alignItems: "center",
+            opacity: deleting ? 0.5 : 1,
+            transition: "color 0.15s, background 0.15s, border-color 0.15s",
+          }}
+          onMouseEnter={(e) => {
+            if (!deleting) {
+              const btn = e.currentTarget as HTMLButtonElement;
+              btn.style.color = c.vermillion;
+              btn.style.background = c.vermSoft;
+              btn.style.borderColor = c.vermLine;
+            }
+          }}
+          onMouseLeave={(e) => {
+            const btn = e.currentTarget as HTMLButtonElement;
+            btn.style.color = c.inkFaint;
+            btn.style.background = "transparent";
+            btn.style.borderColor = "transparent";
+          }}
+        >
+          {deleting ? (
+            <Loader2 style={{ width: 13, height: 13, animation: "zen-spin 1s linear infinite" }} />
+          ) : (
+            <X style={{ width: 13, height: 13 }} />
+          )}
+        </button>
       </div>
 
-      <button
-        onClick={onDelete}
-        disabled={deleting}
-        className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg hover:bg-red-500/20 text-muted-foreground hover:text-red-400 transition-all border border-transparent hover:border-red-500/30 disabled:opacity-50"
-        title="Remove attachment"
-      >
-        {deleting ? (
-          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-        ) : (
-          <X className="w-3.5 h-3.5" />
-        )}
-      </button>
-    </div>
+      {/* Image preview dialog */}
+      {type === "image" && blobUrl && (
+        <Dialog
+          t={t}
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+          title={att.filename || "Image Preview"}
+          size="lg"
+        >
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <img
+              src={blobUrl}
+              alt={att.filename || "image"}
+              style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain", borderRadius: t.radius }}
+            />
+          </div>
+        </Dialog>
+      )}
+    </>
   );
 }
 
@@ -177,6 +341,8 @@ export function TaskAttachments({
   token,
   onAttachmentsChanged,
 }: TaskAttachmentsProps) {
+  const t = useInk("light");
+  const { c } = t;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState<UploadingFile[]>([]);
   const [deletingIds, setDeletingIds] = useState<Set<string>>(new Set());
@@ -193,14 +359,11 @@ export function TaskAttachments({
       const fileArray = Array.from(files);
 
       for (const file of fileArray) {
-        // Validate file size
         const isImage = file.type.startsWith("image/");
         const maxSize = isImage ? MAX_IMAGE_SIZE : MAX_FILE_SIZE;
         if (file.size > maxSize) {
           const limitMb = maxSize / (1024 * 1024);
-          setError(
-            `"${file.name}" exceeds ${limitMb}MB limit for ${isImage ? "images" : "files"}`
-          );
+          setError(`"${file.name}" exceeds ${limitMb}MB limit for ${isImage ? "images" : "files"}`);
           continue;
         }
 
@@ -208,16 +371,11 @@ export function TaskAttachments({
         setUploading((prev) => [...prev, uploadEntry]);
 
         try {
-          // Step 1: Get signed URL from backend
           const result = await uploadTaskAttachment(token, task.id, {
             filename: file.name,
             content_type: file.type || "application/octet-stream",
           });
-
-          // Step 2: Upload directly to GCS
           await uploadToSignedUrl(result.signed_put_url, file);
-
-          // Step 3: Update local state with the new attachment
           const newAttachment: Attachment = {
             id: result.attachment_id,
             type: isImage ? "image" : "file",
@@ -227,8 +385,7 @@ export function TaskAttachments({
           };
           onAttachmentsChanged([...(task.attachments ?? []), newAttachment]);
         } catch (err) {
-          const msg =
-            err instanceof Error ? err.message : "Upload failed";
+          const msg = err instanceof Error ? err.message : "Upload failed";
           setError(`Failed to upload "${file.name}": ${msg}`);
         } finally {
           setUploading((prev) => prev.filter((u) => u.name !== file.name));
@@ -244,13 +401,10 @@ export function TaskAttachments({
       setDeletingIds((prev) => new Set(prev).add(attachmentId));
       try {
         await deleteTaskAttachment(token, task.id, attachmentId);
-        const updated = (task.attachments ?? []).filter(
-          (a) => a.id !== attachmentId
-        );
+        const updated = (task.attachments ?? []).filter((a) => a.id !== attachmentId);
         onAttachmentsChanged(updated);
       } catch (err) {
-        const msg =
-          err instanceof Error ? err.message : "Delete failed";
+        const msg = err instanceof Error ? err.message : "Delete failed";
         setError(`Failed to delete attachment: ${msg}`);
       } finally {
         setDeletingIds((prev) => {
@@ -308,14 +462,15 @@ export function TaskAttachments({
   }, [token, task.id, task.attachments, onAttachmentsChanged, linkUrl]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-4">
-        <div className="h-4 w-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]" />
-        <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Section header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div style={{ width: 3, height: 16, borderRadius: 999, background: c.ocher, flexShrink: 0 }} />
+        <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.16em", color: c.inkMuted }}>
           Attachments
-        </h3>
+        </span>
         {attachments.length > 0 && (
-          <span className="text-[10px] text-muted-foreground font-bold">
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, color: c.inkFaint, fontWeight: 700 }}>
             ({attachments.length})
           </span>
         )}
@@ -323,7 +478,7 @@ export function TaskAttachments({
 
       {/* Existing attachments */}
       {attachments.length > 0 && (
-        <div className="space-y-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {attachments.map((att) => (
             <AttachmentItem
               key={att.id}
@@ -338,14 +493,22 @@ export function TaskAttachments({
 
       {/* Uploading indicators */}
       {uploading.length > 0 && (
-        <div className="space-y-2">
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {uploading.map((u) => (
             <div
               key={u.name}
-              className="flex items-center gap-3 bg-white/[0.04] border border-white/10 rounded-xl p-3"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                background: c.surface,
+                border: `1px solid ${c.inkHair}`,
+                borderRadius: t.radius,
+                padding: 10,
+              }}
             >
-              <Loader2 className="w-4 h-4 text-blue-400 animate-spin flex-shrink-0" />
-              <span className="text-sm text-muted-foreground truncate">
+              <Loader2 style={{ width: 14, height: 14, color: c.inkMuted, animation: "zen-spin 1s linear infinite" }} />
+              <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.inkMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 Uploading {u.name}...
               </span>
             </div>
@@ -355,40 +518,51 @@ export function TaskAttachments({
 
       {/* Error message */}
       {error && (
-        <div className="flex items-start gap-2 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
-          <AlertCircle className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" />
-          <p className="text-sm text-red-300">{error}</p>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            background: c.vermSoft,
+            border: `1px solid ${c.vermLine}`,
+            borderRadius: t.radius,
+            padding: 10,
+          }}
+        >
+          <AlertCircle style={{ width: 14, height: 14, color: c.vermillion, flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontFamily: t.fontBody, fontSize: 12, color: c.vermillion, margin: 0 }}>{error}</p>
         </div>
       )}
 
       {/* Link input */}
-      <div className="flex gap-2">
-        <input
-          type="url"
+      <div style={{ display: "flex", gap: 8 }}>
+        <Input
+          t={t}
+          size="sm"
+          type="text"
           value={linkUrl}
-          onChange={(e) => setLinkUrl(e.target.value)}
+          onChange={setLinkUrl}
           onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleAddLink();
-            }
+            if (e.key === "Enter") { e.preventDefault(); handleAddLink(); }
           }}
           placeholder="Paste a URL to attach..."
-          className="flex-1 bg-white/[0.04] border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-muted-foreground focus:outline-none focus:border-blue-500/50 focus:bg-white/[0.06] transition-colors"
           disabled={addingLink}
+          style={{ flex: 1 }}
         />
-        <button
+        <Btn
+          t={t}
+          variant="outline"
+          size="sm"
           onClick={handleAddLink}
-          disabled={addingLink || !linkUrl.trim()}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-sm font-medium hover:bg-blue-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ opacity: addingLink || !linkUrl.trim() ? 0.5 : 1, cursor: addingLink || !linkUrl.trim() ? "not-allowed" : "pointer" }}
         >
           {addingLink ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <Loader2 style={{ width: 12, height: 12, animation: "zen-spin 1s linear infinite" }} />
           ) : (
-            <ExternalLink className="w-3.5 h-3.5" />
+            <ExternalLink style={{ width: 12, height: 12 }} />
           )}
           Add
-        </button>
+        </Btn>
       </div>
 
       {/* Drop zone */}
@@ -397,29 +571,54 @@ export function TaskAttachments({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => fileInputRef.current?.click()}
-        className={`flex flex-col items-center justify-center gap-2 p-6 rounded-xl border-2 border-dashed cursor-pointer transition-all ${
-          isDragOver
-            ? "border-blue-500/50 bg-blue-500/10"
-            : "border-white/10 bg-white/[0.02] hover:border-white/20 hover:bg-white/[0.04]"
-        }`}
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 8,
+          padding: 24,
+          borderRadius: t.radius,
+          border: `2px dashed ${isDragOver ? c.vermLine : c.inkHair}`,
+          background: isDragOver ? c.vermSoft : c.paperWarm,
+          cursor: "pointer",
+          transition: "border-color 0.15s, background 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          if (!isDragOver) {
+            (e.currentTarget as HTMLDivElement).style.borderColor = c.inkHairBold;
+            (e.currentTarget as HTMLDivElement).style.background = c.surface;
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isDragOver) {
+            (e.currentTarget as HTMLDivElement).style.borderColor = c.inkHair;
+            (e.currentTarget as HTMLDivElement).style.background = c.paperWarm;
+          }
+        }}
       >
         <div
-          className={`p-2 rounded-full transition-colors ${
-            isDragOver ? "bg-blue-500/20" : "bg-white/[0.06]"
-          }`}
+          style={{
+            padding: 8,
+            borderRadius: "50%",
+            background: isDragOver ? c.vermSoft : c.surface,
+            border: `1px solid ${isDragOver ? c.vermLine : c.inkHair}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            transition: "background 0.15s, border-color 0.15s",
+          }}
         >
           {isDragOver ? (
-            <Paperclip className="w-5 h-5 text-blue-400" />
+            <Paperclip style={{ width: 18, height: 18, color: c.vermillion }} />
           ) : (
-            <Upload className="w-5 h-5 text-muted-foreground" />
+            <Upload style={{ width: 18, height: 18, color: c.inkFaint }} />
           )}
         </div>
-        <p className="text-xs text-muted-foreground text-center">
-          {isDragOver
-            ? "Drop files here"
-            : "Drag & drop files or click to upload"}
+        <p style={{ fontFamily: t.fontBody, fontSize: 12, color: c.inkMuted, margin: 0, textAlign: "center" }}>
+          {isDragOver ? "Drop files here" : "Drag & drop files or click to upload"}
         </p>
-        <p className="text-[10px] text-muted-foreground/60">
+        <p style={{ fontFamily: t.fontBody, fontSize: 10, color: c.inkFaint, margin: 0 }}>
           Images up to 10MB, other files up to 50MB
         </p>
       </div>
@@ -428,7 +627,7 @@ export function TaskAttachments({
         ref={fileInputRef}
         type="file"
         multiple
-        className="hidden"
+        style={{ display: "none" }}
         onChange={(e) => {
           if (e.target.files && e.target.files.length > 0) {
             handleUpload(e.target.files);

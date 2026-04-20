@@ -3,9 +3,10 @@ doc_id: ADR-022-document-bundle-architecture
 title: 決策紀錄：Document Bundle 架構
 type: DECISION
 ontology_entity: L3 文件治理
-status: Draft
+status: Accepted
 version: "2.0"
 date: 2026-04-09
+accepted_at: 2026-04-20
 supersedes: null
 ---
 

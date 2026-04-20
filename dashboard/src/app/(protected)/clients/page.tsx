@@ -1,1 +1,1 @@
-export { default } from "@/features/crm/ClientsWorkspace";
+export { default } from "@/features/crm/ZenInkClientsWorkspace";

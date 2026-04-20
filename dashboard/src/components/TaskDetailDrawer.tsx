@@ -1,6 +1,9 @@
+// ZenOS · TaskDetailDrawer — Zen Ink migration (B4)
+// Replaces shadcn Sheet + Tailwind dark classes with zen/Drawer + zen primitives.
+// headerExtras slot passed (null) for future Task L3 dispatcher badge / handoff tabs.
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import type { Entity, Task, TaskComment } from "@/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -12,7 +15,6 @@ import {
   ArrowUp,
   Minus,
   ArrowDown,
-  X,
   Layers,
   User,
   ExternalLink,
@@ -24,7 +26,19 @@ import {
   ChevronDown,
   Trash2,
   MessageSquare,
+  GitBranch,
+  Send,
+  CornerUpRight,
+  X,
 } from "lucide-react";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Drawer } from "./zen/Drawer";
+import { Input } from "./zen/Input";
+import { Textarea } from "./zen/Textarea";
+import { Select } from "./zen/Select";
+import { Btn } from "./zen/Btn";
+import { Chip } from "./zen/Chip";
+import { Dialog } from "./zen/Dialog";
 
 interface TaskDetailDrawerProps {
   task: Task | null;
@@ -34,30 +48,67 @@ interface TaskDetailDrawerProps {
   onTaskUpdated?: () => void;
   onUpdateTask?: (taskId: string, updates: Record<string, unknown>) => Promise<void>;
   onConfirmTask?: (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => Promise<void>;
+  onHandoffTask?: (
+    taskId: string,
+    data: { to_dispatcher: string; reason: string; notes?: string | null }
+  ) => Promise<void>;
+}
+
+const DISPATCHER_PRESETS: Array<{ value: string; label: string }> = [
+  { value: "agent:pm", label: "PM" },
+  { value: "agent:architect", label: "Architect" },
+  { value: "agent:developer", label: "Developer" },
+  { value: "agent:qa", label: "QA" },
+  { value: "agent:designer", label: "Designer" },
+  { value: "agent:debugger", label: "Debugger" },
+  { value: "human", label: "Human" },
+];
+
+function dispatcherLabel(value: string | null | undefined): string {
+  if (!value) return "未指派";
+  const preset = DISPATCHER_PRESETS.find((p) => p.value === value);
+  return preset ? preset.label : value;
+}
+
+/** Map dispatcher value to Zen Chip tone */
+function dispatcherChipTone(value: string | null | undefined): "muted" | "jade" | "ocher" | "accent" | "plain" {
+  if (!value) return "muted";
+  if (value.startsWith("human")) return "jade";
+  if (value === "agent:qa") return "ocher";
+  if (value === "agent:developer") return "ocher";
+  if (value === "agent:architect") return "plain";
+  if (value === "agent:pm") return "jade";
+  return "muted";
+}
+
+/** Map status to Chip tone */
+function statusChipTone(status: string): "muted" | "jade" | "ocher" | "accent" | "plain" {
+  switch (status) {
+    case "done": return "jade";
+    case "review": return "ocher";
+    case "in_progress": return "ocher";
+    case "cancelled": return "muted";
+    case "blocked": return "accent";
+    default: return "plain"; // todo, backlog
+  }
+}
+
+/** Map priority to Chip tone */
+function priorityChipTone(priority: string): "muted" | "jade" | "ocher" | "accent" | "plain" {
+  switch (priority) {
+    case "critical": return "accent";
+    case "high": return "ocher";
+    case "medium": return "plain";
+    case "low": return "muted";
+    default: return "muted";
+  }
 }
 
 const priorityIcons: Record<string, React.ReactNode> = {
-  critical: <AlertTriangle className="w-4 h-4 text-red-400" />,
-  high: <ArrowUp className="w-4 h-4 text-orange-400" />,
-  medium: <Minus className="w-4 h-4 text-yellow-400" />,
-  low: <ArrowDown className="w-4 h-4 text-blue-400" />,
-};
-
-const priorityBg: Record<string, string> = {
-  critical: "bg-red-500/20 border-red-500/30 text-red-300",
-  high: "bg-orange-500/20 border-orange-500/30 text-orange-300",
-  medium: "bg-yellow-500/20 border-yellow-500/30 text-yellow-300",
-  low: "bg-blue-500/20 border-blue-500/30 text-blue-300",
-};
-
-const statusColors: Record<string, string> = {
-  todo: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  in_progress: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-  review: "bg-purple-500/10 text-purple-400 border-purple-500/20",
-  done: "bg-green-500/10 text-green-400 border-green-500/20",
-  blocked: "bg-red-500/10 text-red-400 border-red-500/20",
-  backlog: "bg-gray-500/10 text-gray-400 border-gray-500/20",
-  cancelled: "bg-gray-500/10 text-gray-500 border-gray-500/20",
+  critical: <AlertTriangle style={{ width: 12, height: 12 }} />,
+  high: <ArrowUp style={{ width: 12, height: 12 }} />,
+  medium: <Minus style={{ width: 12, height: 12 }} />,
+  low: <ArrowDown style={{ width: 12, height: 12 }} />,
 };
 
 /** Valid status transitions: from -> to[] */
@@ -80,57 +131,72 @@ function formatDate(date: Date | null): string {
 }
 
 function ContextCard({ entity }: { entity?: Entity; name: string }) {
+  const t = useInk("light");
+  const { c } = t;
   if (!entity) return null;
 
   return (
-    <Link href={`/knowledge-map?id=${entity.id}`} className="block group">
-      <div className="bg-white/[0.04] border border-white/10 rounded-xl p-4 space-y-3 group-hover:bg-white/[0.08] group-hover:border-blue-500/30 transition-all shadow-sm overflow-hidden relative active:scale-[0.98]">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-blue-500/20 border border-blue-500/30 group-hover:bg-blue-500/30 transition-colors">
-              <Link2 className="w-3.5 h-3.5 text-blue-300" />
+    <Link href={`/knowledge-map?id=${entity.id}`} style={{ display: "block", textDecoration: "none" }}>
+      <div
+        style={{
+          background: c.surface,
+          border: `1px solid ${c.inkHair}`,
+          borderRadius: t.radius,
+          padding: 16,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+          overflow: "hidden",
+          cursor: "pointer",
+          transition: "border-color 0.15s, background 0.15s",
+        }}
+        onMouseEnter={(e) => {
+          (e.currentTarget as HTMLDivElement).style.background = c.paperWarm;
+          (e.currentTarget as HTMLDivElement).style.borderColor = c.inkHairBold;
+        }}
+        onMouseLeave={(e) => {
+          (e.currentTarget as HTMLDivElement).style.background = c.surface;
+          (e.currentTarget as HTMLDivElement).style.borderColor = c.inkHair;
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div
+              style={{
+                padding: 6,
+                borderRadius: t.radius,
+                background: c.vermSoft,
+                border: `1px solid ${c.vermLine}`,
+                display: "flex",
+                alignItems: "center",
+              }}
+            >
+              <Link2 style={{ width: 14, height: 14, color: c.vermillion }} />
             </div>
             <div>
-              <h4 className="text-sm font-bold text-white group-hover:text-blue-300 transition-colors">
+              <div style={{ fontFamily: t.fontBody, fontSize: 13, fontWeight: 600, color: c.ink, letterSpacing: "0.01em" }}>
                 {entity.name}
-              </h4>
-              <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-black">
+              </div>
+              <div style={{ fontFamily: t.fontMono, fontSize: 10, color: c.inkFaint, textTransform: "uppercase", letterSpacing: "0.12em" }}>
                 {entity.type}
-              </span>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className={`px-2 py-0.5 rounded-full text-[9px] font-black border ${
-              entity.status === 'active' ? 'bg-green-500/20 text-green-400 border-green-500/30' : 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30'
-            }`}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Chip t={t} tone={entity.status === "active" ? "jade" : "ocher"}>
               {entity.status.toUpperCase()}
-            </div>
-            <ExternalLink className="w-3 h-3 text-white/20 group-hover:text-blue-400 transition-colors" />
+            </Chip>
+            <ExternalLink style={{ width: 12, height: 12, color: c.inkFaint }} />
           </div>
         </div>
-
-        <p className="text-xs text-foreground/90 leading-relaxed line-clamp-3 italic">
+        <p style={{ fontFamily: t.fontBody, fontSize: 12, color: c.inkMuted, lineHeight: 1.6, margin: 0, fontStyle: "italic" }}>
           &ldquo;{entity.summary}&rdquo;
         </p>
-
-        {entity.tags && (
-          <div className="grid grid-cols-2 gap-4 pt-1 border-t border-white/5 mt-2">
-            {entity.tags.what && (Array.isArray(entity.tags.what) ? entity.tags.what : []).length > 0 && (
-              <div className="space-y-1">
-                <span className="text-[9px] font-black text-blue-400/80 uppercase tracking-widest">What</span>
-                <div className="flex flex-wrap gap-1">
-                  {(Array.isArray(entity.tags.what) ? entity.tags.what : []).slice(0, 2).map((t: string, i: number) => (
-                    <span key={i} className="text-[10px] text-foreground font-medium">{t}</span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {entity.owner && (
-              <div className="space-y-1">
-                <span className="text-[9px] font-black text-indigo-400/80 uppercase tracking-widest">Owner</span>
-                <div className="text-[10px] text-foreground font-medium">{entity.owner}</div>
-              </div>
-            )}
+        {entity.tags?.what && Array.isArray(entity.tags.what) && entity.tags.what.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, paddingTop: 8, borderTop: `1px solid ${c.inkHair}` }}>
+            {(entity.tags.what as string[]).slice(0, 2).map((tag, i) => (
+              <span key={i} style={{ fontFamily: t.fontBody, fontSize: 10, color: c.inkMuted }}>{tag}</span>
+            ))}
           </div>
         )}
       </div>
@@ -138,18 +204,21 @@ function ContextCard({ entity }: { entity?: Entity; name: string }) {
   );
 }
 
-/** Inline editable text field */
+/** Inline editable text field — Zen version */
 function InlineTextField({
   value,
   onSave,
   placeholder,
   multiline = false,
+  t,
 }: {
   value: string;
   onSave: (v: string) => void;
   placeholder?: string;
   multiline?: boolean;
+  t: ReturnType<typeof useInk>;
 }) {
+  const { c } = t;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
 
@@ -161,54 +230,58 @@ function InlineTextField({
     return (
       <div
         onClick={() => setEditing(true)}
-        className="cursor-text hover:bg-white/5 rounded px-1 -mx-1 transition-colors"
+        style={{
+          cursor: "text",
+          padding: "2px 4px",
+          margin: "0 -4px",
+          borderRadius: t.radius,
+          transition: "background 0.15s",
+          color: value ? c.ink : c.inkFaint,
+          fontStyle: value ? "normal" : "italic",
+        }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLDivElement).style.background = c.paperWarm)}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLDivElement).style.background = "transparent")}
         title="點擊編輯"
       >
-        {value || <span className="text-muted-foreground italic">{placeholder || "點擊編輯"}</span>}
+        {value || (placeholder || "點擊編輯")}
       </div>
     );
   }
 
   if (multiline) {
     return (
-      <div className="space-y-2">
-        <textarea
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <Textarea
+          t={t}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={setDraft}
           autoFocus
           rows={4}
-          className="w-full px-3 py-2 text-sm bg-background border border-primary/50 rounded-lg text-foreground focus:outline-none resize-none"
+          resize="vertical"
         />
-        <div className="flex gap-2">
-          <button
-            onClick={() => { onSave(draft); setEditing(false); }}
-            className="px-3 py-1 text-xs font-bold bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-          >
+        <div style={{ display: "flex", gap: 8 }}>
+          <Btn t={t} variant="ink" size="sm" onClick={() => { onSave(draft); setEditing(false); }}>
             儲存
-          </button>
-          <button
-            onClick={() => { setDraft(value); setEditing(false); }}
-            className="px-3 py-1 text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary"
-          >
+          </Btn>
+          <Btn t={t} variant="ghost" size="sm" onClick={() => { setDraft(value); setEditing(false); }}>
             取消
-          </button>
+          </Btn>
         </div>
       </div>
     );
   }
 
   return (
-    <input
-      type="text"
+    <Input
+      t={t}
       value={draft}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={setDraft}
       autoFocus
       onBlur={() => { onSave(draft); setEditing(false); }}
       onKeyDown={(e) => {
         if (e.key === "Enter") { onSave(draft); setEditing(false); }
         if (e.key === "Escape") { setDraft(value); setEditing(false); }
       }}
-      className="w-full px-2 py-1 text-sm bg-background border border-primary/50 rounded text-foreground focus:outline-none"
     />
   );
 }
@@ -221,9 +294,11 @@ export function TaskDetailDrawer({
   onTaskUpdated,
   onUpdateTask,
   onConfirmTask,
+  onHandoffTask,
 }: TaskDetailDrawerProps) {
-  const drawerRef = useRef<HTMLDivElement>(null);
-  const [isVisible, setIsVisible] = useState(false);
+  const t = useInk("light");
+  const { c } = t;
+
   const [localTask, setLocalTask] = useState<Task | null>(task);
   const { user, partner } = useAuth();
   const [authToken, setAuthToken] = useState<string | null>(null);
@@ -243,6 +318,14 @@ export function TaskDetailDrawer({
   const [commentsError, setCommentsError] = useState<string | null>(null);
   const [newComment, setNewComment] = useState("");
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  // Handoff form state
+  const [showHandoffForm, setShowHandoffForm] = useState(false);
+  const [handoffTarget, setHandoffTarget] = useState<string>("agent:developer");
+  const [handoffCustom, setHandoffCustom] = useState("");
+  const [handoffReason, setHandoffReason] = useState("");
+  const [handoffNotes, setHandoffNotes] = useState("");
+  const [handoffSubmitting, setHandoffSubmitting] = useState(false);
+  const [handoffError, setHandoffError] = useState<string | null>(null);
 
   useEffect(() => {
     setLocalTask(task);
@@ -255,6 +338,12 @@ export function TaskDetailDrawer({
     setComments([]);
     setCommentsError(null);
     setNewComment("");
+    setShowHandoffForm(false);
+    setHandoffReason("");
+    setHandoffNotes("");
+    setHandoffError(null);
+    setHandoffCustom("");
+    setHandoffTarget("agent:developer");
   }, [task]);
 
   // Fetch comments when task and token are available
@@ -308,15 +397,35 @@ export function TaskDetailDrawer({
     [localTask, onTaskUpdated]
   );
 
-  useEffect(() => {
-    if (task) {
-      setIsVisible(true);
-      document.body.style.overflow = "hidden";
-    } else {
-      setIsVisible(false);
-      document.body.style.overflow = "unset";
+  const handleHandoffSubmit = useCallback(async () => {
+    if (!localTask || !onHandoffTask) return;
+    const to = handoffTarget === "__custom" ? handoffCustom.trim() : handoffTarget;
+    if (!to) {
+      setHandoffError("請選擇或輸入 dispatcher");
+      return;
     }
-  }, [task]);
+    if (!handoffReason.trim()) {
+      setHandoffError("reason 為必填");
+      return;
+    }
+    setHandoffSubmitting(true);
+    setHandoffError(null);
+    try {
+      await onHandoffTask(localTask.id, {
+        to_dispatcher: to,
+        reason: handoffReason.trim(),
+        notes: handoffNotes.trim() || null,
+      });
+      setShowHandoffForm(false);
+      setHandoffReason("");
+      setHandoffNotes("");
+      setHandoffCustom("");
+    } catch (err) {
+      setHandoffError(err instanceof Error ? err.message : "Handoff 失敗");
+    } finally {
+      setHandoffSubmitting(false);
+    }
+  }, [localTask, onHandoffTask, handoffTarget, handoffCustom, handoffReason, handoffNotes]);
 
   const handleFieldSave = useCallback(async (field: string, value: unknown) => {
     if (!localTask || !onUpdateTask) return;
@@ -333,13 +442,11 @@ export function TaskDetailDrawer({
     if (!localTask) return;
     setShowStatusDropdown(false);
 
-    // Warning: skipping todo → done directly
     if (localTask.status === "todo" && newStatus === "done") {
       setWarningMessage("建議先經過 in_progress 和 review，確定要直接完成？");
       setPendingStatusChange(newStatus);
       return;
     }
-    // Warning: moving to review with no result
     if (newStatus === "review" && !localTask.result) {
       setWarningMessage("建議填寫任務成果後再送審，確定要送審？");
       setPendingStatusChange(newStatus);
@@ -368,449 +475,786 @@ export function TaskDetailDrawer({
   const availableTransitions = STATUS_TRANSITIONS[localTask?.status ?? task.status] ?? [];
   const displayTask = localTask ?? task;
 
-  return (
-    <div
-      className={`fixed inset-0 z-50 transition-opacity duration-300 ${
-        isVisible ? "opacity-100" : "opacity-0 pointer-events-none"
-      }`}
-    >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/85 backdrop-blur-md"
-        onClick={onClose}
-      />
+  // ── Section label style (shared) ─────────────────────────────────────────
+  const sectionLabel = (label: string) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+      <div style={{ width: 3, height: 16, borderRadius: 999, background: c.vermillion, flexShrink: 0 }} />
+      <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.16em", color: c.inkMuted }}>
+        {label}
+      </span>
+    </div>
+  );
 
-      {/* Drawer */}
-      <div
-        ref={drawerRef}
-        className={`absolute right-0 top-0 bottom-0 w-full max-w-2xl bg-gradient-to-b from-[#0d0d0d] to-[#050505] border-l border-white/10 shadow-2xl transition-transform duration-500 ease-out flex flex-col ${
-          isVisible ? "translate-x-0" : "translate-x-full"
-        }`}
-      >
-        {/* Header Section */}
-        <div className="p-6 border-b border-white/10 bg-white/[0.02]">
-          <div className="flex items-start justify-between mb-6">
-            <div className="space-y-4 flex-1 pr-8">
-              <div className="flex flex-wrap items-center gap-2.5">
-                {/* Status badge with dropdown */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowStatusDropdown(!showStatusDropdown)}
-                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-colors ${statusColors[displayTask.status]} ${onUpdateTask && availableTransitions.length > 0 ? "hover:opacity-80 cursor-pointer" : "cursor-default"}`}
-                  >
-                    {displayTask.status}
-                    {onUpdateTask && availableTransitions.length > 0 && (
-                      <ChevronDown className="w-3 h-3" />
-                    )}
-                  </button>
-                  {showStatusDropdown && availableTransitions.length > 0 && (
-                    <div className="absolute top-full mt-1 left-0 z-10 bg-card border border-border rounded-lg shadow-xl min-w-[140px] py-1">
-                      {availableTransitions.map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => requestStatusChange(s)}
-                          className="w-full text-left px-3 py-1.5 text-xs font-medium text-foreground hover:bg-secondary transition-colors"
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${priorityBg[displayTask.priority]}`}>
-                  {priorityIcons[displayTask.priority]}
-                  {displayTask.priority}
-                </span>
-                {displayTask.planId && (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border border-purple-500/30 bg-purple-500/10 text-purple-300 shadow-sm">
-                    <Layers className="w-3.5 h-3.5" />
-                    {entityNames[displayTask.planId] || displayTask.planId}
-                    {displayTask.planOrder !== null && (
-                      <span className="opacity-70 ml-1">#{displayTask.planOrder}</span>
-                    )}
-                  </span>
-                )}
-              </div>
-
-              {/* Inline editable title */}
-              <h2 className="text-2xl font-bold text-white leading-tight tracking-tight">
-                {onUpdateTask ? (
-                  <InlineTextField
-                    value={displayTask.title}
-                    onSave={(v) => handleFieldSave("title", v)}
-                    placeholder="任務標題"
-                  />
-                ) : displayTask.title}
-              </h2>
-            </div>
+  // ── Drawer header ─────────────────────────────────────────────────────────
+  const drawerHeader = (
+    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+        {/* Chips row */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+          {/* Status chip with dropdown */}
+          <div style={{ position: "relative" }}>
             <button
-              onClick={onClose}
-              className="p-2 rounded-xl hover:bg-white/10 text-muted-foreground hover:text-white transition-all border border-transparent hover:border-white/20"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Meta fields */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 pt-2">
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.15em] flex items-center gap-1.5 opacity-80">
-                <User className="w-3 h-3 text-indigo-400" /> Owner
-              </span>
-              {onUpdateTask ? (
-                <div className="text-sm font-bold text-white">
-                  <InlineTextField
-                    value={displayTask.assigneeName || displayTask.assignee || ""}
-                    onSave={(v) => handleFieldSave("assignee", v)}
-                    placeholder="Unassigned"
-                  />
-                </div>
-              ) : (
-                <div className="text-sm font-bold text-white truncate">
-                  {displayTask.assigneeName || displayTask.assignee || "Unassigned"}
-                </div>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.15em] flex items-center gap-1.5 opacity-80">
-                <Clock className="w-3 h-3 text-orange-400" /> Due Date
-              </span>
-              {onUpdateTask ? (
-                <input
-                  type="date"
-                  value={displayTask.dueDate ? displayTask.dueDate.toISOString().slice(0, 10) : ""}
-                  onChange={(e) => handleFieldSave("due_date", e.target.value || null)}
-                  className="text-sm font-bold text-white bg-transparent border-b border-transparent hover:border-white/20 focus:border-primary/50 focus:outline-none w-full"
-                />
-              ) : (
-                <div className="text-sm font-bold text-white">
-                  {formatDate(displayTask.dueDate)}
-                </div>
-              )}
-            </div>
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.15em] flex items-center gap-1.5 opacity-80">
-                <Hash className="w-3 h-3 text-blue-400" /> Project
-              </span>
-              <div className="text-sm font-black text-blue-400 uppercase tracking-tight">
-                {displayTask.project || "N/A"}
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.15em] flex items-center gap-1.5 opacity-80">
-                <Bot className="w-3 h-3 text-purple-400" /> Source
-              </span>
-              <div className="text-sm font-medium text-foreground/90 truncate">
-                {displayTask.creatorName || displayTask.createdBy}
-              </div>
-            </div>
-          </div>
-
-          {/* Priority inline edit */}
-          {onUpdateTask && (
-            <div className="mt-4 pt-4 border-t border-white/5 flex items-center gap-3">
-              <span className="text-[10px] font-black text-muted-foreground uppercase tracking-wide">優先級</span>
-              <select
-                value={displayTask.priority}
-                onChange={(e) => handleFieldSave("priority", e.target.value)}
-                className="text-xs bg-background border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary/50"
-              >
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="medium">Medium</option>
-                <option value="low">Low</option>
-              </select>
-            </div>
-          )}
-        </div>
-
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar bg-black/20">
-          <div className="p-8 space-y-10">
-
-            {/* Context Cards Section */}
-            {displayTask.linkedEntities.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="h-4 w-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]" />
-                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">Contextual Assets</h3>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {displayTask.linkedEntities.map(id => (
-                    <ContextCard key={id} name={id} entity={entitiesById[id]} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Description Section */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2 mb-4">
-                <div className="h-4 w-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_rgba(99,102,241,0.5)]" />
-                <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">Instruction &amp; Logic</h3>
-              </div>
-              {onUpdateTask ? (
-                <div className="bg-white/[0.03] border border-white/10 rounded-2xl p-4 shadow-inner">
-                  <InlineTextField
-                    value={displayTask.description || ""}
-                    onSave={(v) => handleFieldSave("description", v)}
-                    placeholder="點擊新增描述"
-                    multiline
-                  />
-                </div>
-              ) : (
-                <div className="prose prose-invert prose-sm max-w-none bg-white/[0.03] border border-white/10 rounded-2xl p-6 shadow-inner leading-relaxed text-foreground">
-                  <MarkdownRenderer content={displayTask.description || "_No description provided._"} />
-                </div>
-              )}
-            </div>
-
-            {/* Acceptance Criteria */}
-            {displayTask.acceptanceCriteria && displayTask.acceptanceCriteria.length > 0 && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="h-4 w-1.5 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.5)]" />
-                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">Success Criteria</h3>
-                </div>
-                <div className="space-y-3">
-                  {displayTask.acceptanceCriteria.map((item, idx) => (
-                    <div key={idx} className="flex items-start gap-4 bg-white/[0.03] border border-white/10 p-4 rounded-xl hover:bg-white/[0.05] transition-colors">
-                      <div className="mt-0.5 w-5 h-5 rounded-full bg-purple-500/20 border border-purple-500/40 flex items-center justify-center flex-shrink-0 text-[11px] font-black text-purple-300">
-                        {idx + 1}
-                      </div>
-                      <p className="text-sm text-foreground leading-relaxed font-medium">{item}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Attachments */}
-            {localTask && authToken && (
-              <div className="space-y-4">
-                <TaskAttachments
-                  task={localTask}
-                  token={authToken}
-                  onAttachmentsChanged={handleAttachmentsChanged}
-                />
-              </div>
-            )}
-
-            {/* Result / Deliverables */}
-            {displayTask.result && (
-              <div className="space-y-4 pt-4 border-t border-white/10">
-                <div className="flex items-center gap-2 mb-4">
-                  <div className="h-4 w-1.5 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.5)]" />
-                  <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">Outcome</h3>
-                </div>
-                <div className="bg-green-500/10 border border-green-500/20 rounded-2xl p-6 text-sm text-green-50 leading-relaxed italic shadow-inner">
-                  <MarkdownRenderer content={displayTask.result} />
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Footer Actions */}
-        {(onUpdateTask || onConfirmTask) && (
-          <div className="p-4 border-t border-white/10 bg-white/[0.01] space-y-3">
-
-            {/* Cancel button (owner/creator only) */}
-            {onUpdateTask && canCancel && displayTask.status !== "cancelled" && displayTask.status !== "done" && (
-              <div>
-                {!showCancelConfirm ? (
-                  <button
-                    onClick={() => setShowCancelConfirm(true)}
-                    className="w-full px-4 py-2 text-sm font-bold text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/10 transition-colors"
-                  >
-                    取消任務
-                  </button>
-                ) : (
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 space-y-2">
-                    <p className="text-sm text-red-300">確定要取消此任務？</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          setShowCancelConfirm(false);
-                          handleFieldSave("status", "cancelled");
-                        }}
-                        className="px-3 py-1.5 text-xs font-bold bg-red-500 text-white rounded-md hover:bg-red-600"
-                      >
-                        確定取消
-                      </button>
-                      <button
-                        onClick={() => setShowCancelConfirm(false)}
-                        className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary"
-                      >
-                        返回
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Review: Approve / Reject */}
-            {onConfirmTask && displayTask.status === "review" && (
-              <div className="space-y-2">
-                {!showRejectInput ? (
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => onConfirmTask(displayTask.id, { action: "approve" })}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-bold bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                    >
-                      <Check className="w-4 h-4" />
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => setShowRejectInput(true)}
-                      className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-bold border border-red-500/40 text-red-400 rounded-lg hover:bg-red-500/10 transition-colors"
-                    >
-                      <X className="w-4 h-4" />
-                      Reject
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <textarea
-                      value={rejectReason}
-                      onChange={(e) => setRejectReason(e.target.value)}
-                      placeholder="拒絕原因（選填）"
-                      rows={2}
-                      className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none resize-none"
-                    />
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => {
-                          onConfirmTask(displayTask.id, {
-                            action: "reject",
-                            rejection_reason: rejectReason || undefined,
-                          });
-                          setShowRejectInput(false);
-                          setRejectReason("");
-                        }}
-                        className="flex-1 px-3 py-1.5 text-xs font-bold bg-red-500 text-white rounded-md hover:bg-red-600"
-                      >
-                        確認拒絕
-                      </button>
-                      <button
-                        onClick={() => { setShowRejectInput(false); setRejectReason(""); }}
-                        className="px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground rounded-md hover:bg-secondary"
-                      >
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Comments section */}
-        <div className="p-4 border-t border-white/10 space-y-4">
-          <div className="flex items-center gap-2">
-            <div className="h-4 w-1.5 rounded-full bg-blue-400 shadow-[0_0_8px_rgba(96,165,250,0.4)]" />
-            <h3 className="text-[11px] font-black uppercase tracking-[0.2em] text-white/90">留言</h3>
-            <MessageSquare className="w-3.5 h-3.5 text-white/40" />
-          </div>
-
-          {commentsError ? (
-            <p className="text-xs text-red-400">{commentsError}</p>
-          ) : comments.length === 0 ? (
-            <p className="text-xs text-muted-foreground">尚無留言</p>
-          ) : (
-            <div className="space-y-3">
-              {comments.map((comment) => {
-                const canDelete =
-                  partner?.isAdmin || (partner && partner.id === comment.partnerId);
-                return (
-                  <div key={comment.id} className="flex gap-2.5 group">
-                    <div className="flex-shrink-0 w-7 h-7 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
-                      <span className="text-[10px] font-bold text-blue-300">
-                        {comment.authorName.charAt(0).toUpperCase()}
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold text-white/80">{comment.authorName}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {comment.createdAt.toLocaleString("zh-TW")}
-                          </span>
-                        </div>
-                        {canDelete && (
-                          <button
-                            onClick={() => handleCommentDelete(comment.id)}
-                            className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-red-500/20 text-red-400/60 hover:text-red-400 transition-all"
-                            title="刪除留言"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
-                      <p className="text-xs text-foreground/80 mt-0.5 leading-relaxed whitespace-pre-wrap">
-                        {comment.content}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* New comment input */}
-          <div className="space-y-2">
-            <textarea
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              placeholder="新增留言..."
-              rows={2}
-              className="w-full px-3 py-2 text-sm bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none resize-none"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                  e.preventDefault();
-                  handleCommentSubmit();
-                }
+              onClick={() => setShowStatusDropdown(!showStatusDropdown)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "2px 8px",
+                border: `1px solid ${c.inkHair}`,
+                borderRadius: t.radius,
+                background: "transparent",
+                fontFamily: t.fontMono,
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase" as const,
+                letterSpacing: "0.12em",
+                color: statusChipTone(displayTask.status) === "jade" ? c.jade
+                  : statusChipTone(displayTask.status) === "ocher" ? c.ocher
+                  : statusChipTone(displayTask.status) === "accent" ? c.vermillion
+                  : c.inkMuted,
+                cursor: onUpdateTask && availableTransitions.length > 0 ? "pointer" : "default",
               }}
-            />
-            <button
-              onClick={handleCommentSubmit}
-              disabled={!newComment.trim() || commentSubmitting}
-              className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {commentSubmitting ? "送出中..." : "送出留言"}
+              {displayTask.status}
+              {onUpdateTask && availableTransitions.length > 0 && (
+                <ChevronDown style={{ width: 10, height: 10 }} />
+              )}
             </button>
+            {showStatusDropdown && availableTransitions.length > 0 && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 4px)",
+                  left: 0,
+                  zIndex: 10,
+                  background: c.surface,
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: t.radius,
+                  boxShadow: "0 8px 24px rgba(58,52,44,0.10)",
+                  minWidth: 140,
+                  padding: "4px 0",
+                }}
+              >
+                {availableTransitions.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => requestStatusChange(s)}
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "6px 12px",
+                      fontFamily: t.fontBody,
+                      fontSize: 12,
+                      color: c.ink,
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      transition: "background 0.1s",
+                    }}
+                    onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = c.paperWarm)}
+                    onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Priority chip */}
+          <Chip t={t} tone={priorityChipTone(displayTask.priority)} dot>
+            {priorityIcons[displayTask.priority]}
+            {displayTask.priority}
+          </Chip>
+
+          {/* Plan chip */}
+          {displayTask.planId && (
+            <Chip t={t} tone="ocher">
+              <Layers style={{ width: 11, height: 11 }} />
+              {entityNames[displayTask.planId] || displayTask.planId}
+              {displayTask.planOrder !== null && (
+                <span style={{ opacity: 0.7, marginLeft: 2 }}>#{displayTask.planOrder}</span>
+              )}
+            </Chip>
+          )}
+
+          {/* Dispatcher chip */}
+          <Chip t={t} tone={dispatcherChipTone(displayTask.dispatcher)} style={{ cursor: "default" }}>
+            <GitBranch style={{ width: 11, height: 11 }} />
+            {dispatcherLabel(displayTask.dispatcher)}
+          </Chip>
+
+          {/* Subtask chip */}
+          {displayTask.parentTaskId && (
+            <Chip t={t} tone="muted" style={{ cursor: "default" }}>
+              <CornerUpRight style={{ width: 11, height: 11 }} />
+              Subtask
+            </Chip>
+          )}
         </div>
 
-        {/* Warning dialog */}
-        {warningMessage && (
-          <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-2xl p-6 m-4 max-w-sm w-full space-y-4 shadow-2xl">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-foreground">{warningMessage}</p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => pendingStatusChange && applyStatusChange(pendingStatusChange)}
-                  className="flex-1 px-3 py-2 text-xs font-bold bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
+        {/* Inline editable title */}
+        <div style={{ fontFamily: t.fontHead, fontSize: 20, fontWeight: 500, color: c.ink, letterSpacing: "0.01em", lineHeight: 1.3 }}>
+          {onUpdateTask ? (
+            <InlineTextField
+              t={t}
+              value={displayTask.title}
+              onSave={(v) => handleFieldSave("title", v)}
+              placeholder="任務標題"
+            />
+          ) : displayTask.title}
+        </div>
+      </div>
+
+      {/* Close button */}
+      <button
+        onClick={onClose}
+        aria-label="關閉"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 28,
+          height: 28,
+          border: `1px solid ${c.inkHair}`,
+          borderRadius: t.radius,
+          background: "transparent",
+          color: c.inkMuted,
+          cursor: "pointer",
+          fontSize: 14,
+          flexShrink: 0,
+          transition: "background 0.15s",
+        }}
+        onMouseEnter={(e) => ((e.currentTarget as HTMLButtonElement).style.background = c.paperWarm)}
+        onMouseLeave={(e) => ((e.currentTarget as HTMLButtonElement).style.background = "transparent")}
+      >
+        <X style={{ width: 14, height: 14 }} />
+      </button>
+    </div>
+  );
+
+  // ── Drawer footer ─────────────────────────────────────────────────────────
+  const drawerFooter = (onUpdateTask || onConfirmTask || onHandoffTask) ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, width: "100%" }}>
+      {/* Handoff */}
+      {onHandoffTask && displayTask.status !== "done" && displayTask.status !== "cancelled" && (
+        <div>
+          {!showHandoffForm ? (
+            <Btn t={t} variant="outline" size="sm" onClick={() => setShowHandoffForm(true)} style={{ width: "100%", justifyContent: "center" }}>
+              <GitBranch style={{ width: 13, height: 13 }} />
+              交棒 Handoff
+            </Btn>
+          ) : (
+            <div
+              style={{
+                background: c.paperWarm,
+                border: `1px solid ${c.inkHair}`,
+                borderRadius: t.radius,
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkMuted, display: "flex", alignItems: "center", gap: 4 }}>
+                <GitBranch style={{ width: 10, height: 10 }} /> Handoff to
+              </span>
+              <Select
+                t={t}
+                size="sm"
+                value={handoffTarget}
+                onChange={(v) => setHandoffTarget(v ?? "agent:developer")}
+                options={[
+                  ...DISPATCHER_PRESETS.map((p) => ({ value: p.value, label: `${p.label} (${p.value})` })),
+                  { value: "__custom", label: "自訂…" },
+                ]}
+              />
+              {handoffTarget === "__custom" && (
+                <Input
+                  t={t}
+                  size="sm"
+                  value={handoffCustom}
+                  onChange={setHandoffCustom}
+                  placeholder="e.g. human:barry 或 agent:xxx"
+                />
+              )}
+              <Textarea
+                t={t}
+                size="sm"
+                value={handoffReason}
+                onChange={setHandoffReason}
+                placeholder="交棒原因（必填）"
+                rows={2}
+                resize="none"
+              />
+              <Textarea
+                t={t}
+                size="sm"
+                value={handoffNotes}
+                onChange={setHandoffNotes}
+                placeholder="補充 notes（選填）"
+                rows={2}
+                resize="none"
+              />
+              {handoffError && (
+                <p style={{ fontFamily: t.fontBody, fontSize: 11, color: c.vermillion, margin: 0 }}>{handoffError}</p>
+              )}
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn
+                  t={t}
+                  variant="ink"
+                  size="sm"
+                  onClick={handleHandoffSubmit}
+                  style={{ flex: 1, justifyContent: "center", opacity: handoffSubmitting ? 0.5 : 1 }}
                 >
-                  強制執行
-                </button>
-                <button
-                  onClick={() => { setPendingStatusChange(null); setWarningMessage(null); }}
-                  className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary"
+                  <Send style={{ width: 11, height: 11 }} />
+                  {handoffSubmitting ? "送出中…" : "確認交棒"}
+                </Btn>
+                <Btn
+                  t={t}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setShowHandoffForm(false); setHandoffError(null); }}
                 >
                   取消
-                </button>
+                </Btn>
               </div>
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Cancel button */}
+      {onUpdateTask && canCancel && displayTask.status !== "cancelled" && displayTask.status !== "done" && (
+        <div>
+          {!showCancelConfirm ? (
+            <Btn t={t} variant="seal" size="sm" onClick={() => setShowCancelConfirm(true)} style={{ width: "100%", justifyContent: "center" }}>
+              取消任務
+            </Btn>
+          ) : (
+            <div
+              style={{
+                background: c.vermSoft,
+                border: `1px solid ${c.vermLine}`,
+                borderRadius: t.radius,
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <p style={{ fontFamily: t.fontBody, fontSize: 13, color: c.vermillion, margin: 0 }}>確定要取消此任務？</p>
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn
+                  t={t}
+                  variant="seal"
+                  size="sm"
+                  onClick={() => { setShowCancelConfirm(false); handleFieldSave("status", "cancelled"); }}
+                >
+                  確定取消
+                </Btn>
+                <Btn t={t} variant="ghost" size="sm" onClick={() => setShowCancelConfirm(false)}>
+                  返回
+                </Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Review: Approve / Reject */}
+      {onConfirmTask && displayTask.status === "review" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {!showRejectInput ? (
+            <div style={{ display: "flex", gap: 6 }}>
+              <Btn
+                t={t}
+                variant="ink"
+                size="sm"
+                onClick={() => onConfirmTask(displayTask.id, { action: "approve" })}
+                style={{ flex: 1, justifyContent: "center", background: c.jade }}
+              >
+                <Check style={{ width: 13, height: 13 }} />
+                Approve
+              </Btn>
+              <Btn
+                t={t}
+                variant="outline"
+                size="sm"
+                onClick={() => setShowRejectInput(true)}
+                style={{ flex: 1, justifyContent: "center", color: c.vermillion, borderColor: c.vermLine }}
+              >
+                Reject
+              </Btn>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <Textarea
+                t={t}
+                size="sm"
+                value={rejectReason}
+                onChange={setRejectReason}
+                placeholder="拒絕原因（選填）"
+                rows={2}
+                resize="none"
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn
+                  t={t}
+                  variant="seal"
+                  size="sm"
+                  onClick={() => {
+                    onConfirmTask(displayTask.id, { action: "reject", rejection_reason: rejectReason || undefined });
+                    setShowRejectInput(false);
+                    setRejectReason("");
+                  }}
+                  style={{ flex: 1, justifyContent: "center" }}
+                >
+                  確認拒絕
+                </Btn>
+                <Btn t={t} variant="ghost" size="sm" onClick={() => { setShowRejectInput(false); setRejectReason(""); }}>
+                  取消
+                </Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  // ── Drawer body ───────────────────────────────────────────────────────────
+  const drawerBody = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+
+      {/* Meta fields */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        {/* Owner */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: c.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+            <User style={{ width: 10, height: 10 }} /> Owner
+          </span>
+          {onUpdateTask ? (
+            <InlineTextField
+              t={t}
+              value={displayTask.assigneeName || displayTask.assignee || ""}
+              onSave={(v) => handleFieldSave("assignee", v)}
+              placeholder="Unassigned"
+            />
+          ) : (
+            <span style={{ fontFamily: t.fontBody, fontSize: 13, fontWeight: 500, color: c.ink }}>
+              {displayTask.assigneeName || displayTask.assignee || "Unassigned"}
+            </span>
+          )}
+        </div>
+
+        {/* Due Date */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: c.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+            <Clock style={{ width: 10, height: 10 }} /> Due Date
+          </span>
+          {onUpdateTask ? (
+            <Input
+              t={t}
+              size="sm"
+              type="date"
+              value={displayTask.dueDate ? displayTask.dueDate.toISOString().slice(0, 10) : ""}
+              onChange={(v) => handleFieldSave("due_date", v || null)}
+            />
+          ) : (
+            <span style={{ fontFamily: t.fontBody, fontSize: 13, fontWeight: 500, color: c.ink }}>
+              {formatDate(displayTask.dueDate)}
+            </span>
+          )}
+        </div>
+
+        {/* Project */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: c.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+            <Hash style={{ width: 10, height: 10 }} /> Project
+          </span>
+          <span style={{ fontFamily: t.fontMono, fontSize: 12, fontWeight: 700, color: c.ocher, textTransform: "uppercase" as const }}>
+            {displayTask.project || "N/A"}
+          </span>
+        </div>
+
+        {/* Source */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: c.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
+            <Bot style={{ width: 10, height: 10 }} /> Source
+          </span>
+          <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.inkMuted }}>
+            {displayTask.creatorName || displayTask.createdBy}
+          </span>
+        </div>
+      </div>
+
+      {/* Priority inline edit */}
+      {onUpdateTask && (
+        <div style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 12, borderTop: `1px solid ${c.inkHair}` }}>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: c.inkFaint }}>優先級</span>
+          <Select
+            t={t}
+            size="sm"
+            value={displayTask.priority}
+            onChange={(v) => v && handleFieldSave("priority", v)}
+            options={[
+              { value: "critical", label: "Critical", tone: "accent" },
+              { value: "high", label: "High", tone: "ocher" },
+              { value: "medium", label: "Medium" },
+              { value: "low", label: "Low", tone: "muted" },
+            ]}
+            style={{ maxWidth: 160 }}
+          />
+        </div>
+      )}
+
+      {/* Context Cards */}
+      {displayTask.linkedEntities.length > 0 && (
+        <div>
+          {sectionLabel("Contextual Assets")}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {displayTask.linkedEntities.map((id) => (
+              <ContextCard key={id} name={id} entity={entitiesById[id]} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Description */}
+      <div>
+        {sectionLabel("Instruction & Logic")}
+        {onUpdateTask ? (
+          <div
+            style={{
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: t.radius,
+              padding: 16,
+            }}
+          >
+            <InlineTextField
+              t={t}
+              value={displayTask.description || ""}
+              onSave={(v) => handleFieldSave("description", v)}
+              placeholder="點擊新增描述"
+              multiline
+            />
+          </div>
+        ) : (
+          <div
+            style={{
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: t.radius,
+              padding: 24,
+              fontFamily: t.fontBody,
+              fontSize: 13,
+              lineHeight: 1.7,
+              color: c.ink,
+            }}
+          >
+            <MarkdownRenderer content={displayTask.description || "_No description provided._"} />
           </div>
         )}
       </div>
+
+      {/* Acceptance Criteria */}
+      {displayTask.acceptanceCriteria && displayTask.acceptanceCriteria.length > 0 && (
+        <div>
+          {sectionLabel("Success Criteria")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {displayTask.acceptanceCriteria.map((item, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  background: c.paperWarm,
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: t.radius,
+                  padding: 12,
+                }}
+              >
+                <div
+                  style={{
+                    flexShrink: 0,
+                    width: 18,
+                    height: 18,
+                    borderRadius: "50%",
+                    border: `1px solid ${c.inkHairBold}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontFamily: t.fontMono,
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: c.inkMuted,
+                    marginTop: 1,
+                  }}
+                >
+                  {idx + 1}
+                </div>
+                <p style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink, lineHeight: 1.6, margin: 0 }}>{item}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Attachments */}
+      {localTask && authToken && (
+        <div>
+          <TaskAttachments
+            task={localTask}
+            token={authToken}
+            onAttachmentsChanged={handleAttachmentsChanged}
+          />
+        </div>
+      )}
+
+      {/* Handoff Timeline */}
+      {displayTask.handoffEvents && displayTask.handoffEvents.length > 0 && (
+        <div>
+          {sectionLabel("Handoff Chain")}
+          <ol style={{ listStyle: "none", margin: 0, padding: 0, borderLeft: `2px solid ${c.inkHair}`, marginLeft: 8, display: "flex", flexDirection: "column", gap: 0 }}>
+            {displayTask.handoffEvents.map((event, idx) => {
+              const at = new Date(event.at);
+              const fromLabel = dispatcherLabel(event.fromDispatcher);
+              const toLabel = dispatcherLabel(event.toDispatcher);
+              return (
+                <li key={idx} style={{ position: "relative", paddingLeft: 20, paddingBottom: idx < displayTask.handoffEvents!.length - 1 ? 16 : 0 }}>
+                  <span
+                    style={{
+                      position: "absolute",
+                      left: -7,
+                      top: 4,
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      border: `2px solid ${c.inkHairBold}`,
+                      background: c.surface,
+                    }}
+                  />
+                  <div
+                    style={{
+                      background: c.paperWarm,
+                      border: `1px solid ${c.inkHair}`,
+                      borderRadius: t.radius,
+                      padding: 10,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 6,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <Chip t={t} tone={dispatcherChipTone(event.fromDispatcher)}>{fromLabel}</Chip>
+                      <CornerUpRight style={{ width: 10, height: 10, color: c.inkFaint }} />
+                      <Chip t={t} tone={dispatcherChipTone(event.toDispatcher)}>{toLabel}</Chip>
+                      <span style={{ marginLeft: "auto", fontFamily: t.fontMono, fontSize: 9, color: c.inkFaint }}>
+                        {at.toLocaleString("zh-TW", { hour12: false })}
+                      </span>
+                    </div>
+                    <p style={{ fontFamily: t.fontBody, fontSize: 12, color: c.ink, lineHeight: 1.6, margin: 0 }}>{event.reason}</p>
+                    {event.outputRef && (
+                      <p style={{ fontFamily: t.fontMono, fontSize: 10, color: c.inkMuted, margin: 0, wordBreak: "break-all" }}>↳ {event.outputRef}</p>
+                    )}
+                    {event.notes && (
+                      <p style={{ fontFamily: t.fontBody, fontSize: 10, color: c.inkFaint, lineHeight: 1.6, whiteSpace: "pre-wrap", margin: 0 }}>{event.notes}</p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
+      )}
+
+      {/* Result / Outcome */}
+      {displayTask.result && (
+        <div style={{ paddingTop: 16, borderTop: `1px solid ${c.inkHair}` }}>
+          {sectionLabel("Outcome")}
+          <div
+            style={{
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: t.radius,
+              padding: 20,
+              fontFamily: t.fontBody,
+              fontSize: 13,
+              lineHeight: 1.7,
+              color: c.jade,
+              fontStyle: "italic",
+            }}
+          >
+            <MarkdownRenderer content={displayTask.result} />
+          </div>
+        </div>
+      )}
+
+      {/* Comments */}
+      <div style={{ paddingTop: 16, borderTop: `1px solid ${c.inkHair}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+          <div style={{ width: 3, height: 16, borderRadius: 999, background: c.inkHairBold, flexShrink: 0 }} />
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.16em", color: c.inkMuted }}>
+            留言
+          </span>
+          <MessageSquare style={{ width: 11, height: 11, color: c.inkFaint }} />
+        </div>
+
+        {commentsError ? (
+          <p style={{ fontFamily: t.fontBody, fontSize: 12, color: c.vermillion }}>{commentsError}</p>
+        ) : comments.length === 0 ? (
+          <p style={{ fontFamily: t.fontBody, fontSize: 12, color: c.inkFaint }}>尚無留言</p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+            {comments.map((comment) => {
+              const canDelete = partner?.isAdmin || (partner && partner.id === comment.partnerId);
+              return (
+                <div key={comment.id} style={{ display: "flex", gap: 10 }}>
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      width: 26,
+                      height: 26,
+                      borderRadius: "50%",
+                      background: c.paperWarm,
+                      border: `1px solid ${c.inkHair}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontFamily: t.fontMono,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: c.inkMuted,
+                    }}
+                  >
+                    {comment.authorName.charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontFamily: t.fontBody, fontSize: 12, fontWeight: 600, color: c.ink }}>{comment.authorName}</span>
+                        <span style={{ fontFamily: t.fontMono, fontSize: 10, color: c.inkFaint }}>
+                          {comment.createdAt.toLocaleString("zh-TW")}
+                        </span>
+                      </div>
+                      {canDelete && (
+                        <button
+                          onClick={() => handleCommentDelete(comment.id)}
+                          title="刪除留言"
+                          style={{
+                            padding: 4,
+                            borderRadius: t.radius,
+                            border: "none",
+                            background: "transparent",
+                            color: c.inkFaint,
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            transition: "color 0.15s, background 0.15s",
+                          }}
+                          onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.color = c.vermillion;
+                            (e.currentTarget as HTMLButtonElement).style.background = c.vermSoft;
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.color = c.inkFaint;
+                            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+                          }}
+                        >
+                          <Trash2 style={{ width: 11, height: 11 }} />
+                        </button>
+                      )}
+                    </div>
+                    <p style={{ fontFamily: t.fontBody, fontSize: 13, color: c.inkMuted, lineHeight: 1.6, margin: 0, whiteSpace: "pre-wrap" }}>
+                      {comment.content}
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* New comment */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <Textarea
+            t={t}
+            value={newComment}
+            onChange={setNewComment}
+            placeholder="新增留言..."
+            rows={2}
+            resize="none"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                handleCommentSubmit();
+              }
+            }}
+          />
+          <Btn
+            t={t}
+            variant="ink"
+            size="sm"
+            onClick={handleCommentSubmit}
+            style={{ opacity: !newComment.trim() || commentSubmitting ? 0.4 : 1, cursor: !newComment.trim() || commentSubmitting ? "not-allowed" : "pointer" }}
+          >
+            {commentSubmitting ? "送出中..." : "送出留言"}
+          </Btn>
+        </div>
+      </div>
     </div>
+  );
+
+  return (
+    <>
+      <Drawer
+        t={t}
+        open={!!task}
+        onOpenChange={(open) => { if (!open) onClose(); }}
+        side="right"
+        width={600}
+        header={drawerHeader}
+        footer={drawerFooter}
+        headerExtras={null}
+      >
+        {drawerBody}
+      </Drawer>
+
+      {/* Warning Dialog — status change confirmation */}
+      <Dialog
+        t={t}
+        open={!!warningMessage}
+        onOpenChange={(open) => { if (!open) { setPendingStatusChange(null); setWarningMessage(null); } }}
+        title={
+          <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <AlertTriangle style={{ width: 16, height: 16, color: c.ocher }} />
+            確認狀態變更
+          </span>
+        }
+        size="sm"
+        footer={
+          <>
+            <Btn t={t} variant="ghost" size="sm" onClick={() => { setPendingStatusChange(null); setWarningMessage(null); }}>
+              取消
+            </Btn>
+            <Btn
+              t={t}
+              variant="outline"
+              size="sm"
+              onClick={() => pendingStatusChange && applyStatusChange(pendingStatusChange)}
+              style={{ color: c.ocher, borderColor: c.ocher }}
+            >
+              強制執行
+            </Btn>
+          </>
+        }
+      >
+        <p style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink, lineHeight: 1.6, margin: 0 }}>{warningMessage}</p>
+      </Dialog>
+    </>
   );
 }

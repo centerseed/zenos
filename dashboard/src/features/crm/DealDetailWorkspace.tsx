@@ -599,7 +599,7 @@ function DealDetailPage() {
     );
   }
 
-  const formatDate = (date: Date | undefined) =>
+  const formatDate = (date: Date | null | undefined) =>
     date instanceof Date
       ? date.toLocaleDateString("zh-TW", {
           year: "numeric",
@@ -736,7 +736,7 @@ function DealDetailPage() {
             <div>
               <dt className="text-xs text-muted-foreground">案值</dt>
               <dd className="text-foreground">
-                {deal.amountTwd
+                {deal.amountTwd != null && deal.amountTwd !== 0
                   ? `NT$ ${deal.amountTwd.toLocaleString()}`
                   : "—"}
               </dd>

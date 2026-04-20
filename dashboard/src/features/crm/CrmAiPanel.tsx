@@ -7,8 +7,8 @@
  * No AI logic lives here — only context pack assembly, display, and copy.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Copy, Check, RefreshCw, PlugZap, ChevronDown, ChevronUp } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { Copy, Check, RefreshCw, PlugZap, ChevronDown, ChevronUp } from "lucide-react";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import { GraphContextBadge } from "@/components/ai/GraphContextBadge";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
@@ -27,9 +27,11 @@ import { sanitizeContextValue } from "@/config/ai-redaction-rules";
 import type { GraphContextResponse } from "@/lib/api";
 import { fetchGraphContext } from "@/lib/graph-context";
 import { buildCrmKnowledgePrompt, COWORK_MAX_TURNS, graphContextUnavailableNotice } from "@/lib/cowork-knowledge";
+import { parseStreamLine } from "@/lib/copilot/stream";
 import type { Deal, Activity, Company, Contact, FunnelStage, DealAiEntries } from "@/lib/crm-api";
 import { createAiInsight, patchDealStage, updateBriefing } from "@/lib/crm-api";
 import type { AiInsight } from "@/lib/crm-api";
+import { useInk } from "@/lib/zen-ink/tokens";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -77,47 +79,6 @@ interface CrmAiPanelProps {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-/**
- * Parse a raw SSE line from the helper into a text delta.
- * Mirrors parseCoworkStreamLine from marketing/logic.ts but simplified for CRM.
- */
-function parseSseLineForDelta(line: string): string {
-  const raw = line.trim();
-  if (!raw) return "";
-  try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    // Claude CLI wraps API events in {"type":"stream_event","event":{...}}
-    const type = typeof parsed.type === "string" ? parsed.type : "";
-    const inner = type === "stream_event" && parsed.event && typeof parsed.event === "object"
-      ? parsed.event as Record<string, unknown>
-      : parsed;
-    const candidates: unknown[] = [
-      (inner.delta as Record<string, unknown> | undefined)?.text,
-      (inner.content_block_delta as Record<string, unknown> | undefined)?.text,
-      inner.text,
-      (inner.content_block as Record<string, unknown> | undefined)?.text,
-      (parsed.delta as Record<string, unknown> | undefined)?.text,
-      parsed.text,
-    ];
-    for (const obj of [inner, parsed]) {
-      const messageObj = obj.message as Record<string, unknown> | undefined;
-      const messageContent = Array.isArray(messageObj?.content) ? messageObj.content : null;
-      if (messageContent && messageContent.length > 0) {
-        const first = messageContent[0] as Record<string, unknown>;
-        candidates.push(first?.text);
-      }
-    }
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.trim().length > 0) {
-        return candidate;
-      }
-    }
-    return "";
-  } catch {
-    return raw;
-  }
-}
 
 function safeTimeValue(value: Date | string | null | undefined): number {
   if (value instanceof Date) {
@@ -584,6 +545,8 @@ export function CrmAiPanel({
   initialBriefing,
   onBriefingSaved,
 }: CrmAiPanelProps) {
+  const t = useInk("light");
+  const { c, fontBody, fontHead, fontMono } = t;
   const [status, setStatus] = useState<AiStatus>("idle");
   const [streamingText, setStreamingText] = useState("");
   const [finalText, setFinalText] = useState("");
@@ -661,6 +624,18 @@ export function CrmAiPanel({
           : "",
   };
 
+  const lightFieldVars: CSSProperties = {
+    "--primary": c.vermillion,
+    "--foreground": c.ink,
+    "--field-bg": c.surfaceHi,
+    "--field-bg-hover": c.surface,
+    "--field-border": c.inkHairBold,
+    "--field-border-strong": c.vermLine,
+    "--focus-ring": "rgba(182, 58, 44, 0.12)",
+    "--focus-outline": "rgba(182, 58, 44, 0.42)",
+    colorScheme: "light",
+  } as CSSProperties;
+
   const replaceChatHistory = useCallback((messages: ChatMessage[]) => {
     chatHistoryRef.current = messages;
     setChatHistory(messages);
@@ -675,6 +650,15 @@ export function CrmAiPanel({
   const setTurnCountValue = useCallback((value: number) => {
     turnCountRef.current = value;
     setTurnCount(value);
+  }, []);
+
+  const appendHelperEvent = useCallback((message: string) => {
+    const nextLine = message.trim();
+    if (!nextLine) return;
+    setHelperEvents((prev) => {
+      if (prev[prev.length - 1] === nextLine) return prev;
+      return [...prev, nextLine].slice(-6);
+    });
   }, []);
 
   const ensureGraphContext = useCallback(async (): Promise<GraphContextResponse | null> => {
@@ -855,37 +839,36 @@ export function CrmAiPanel({
           if (event.type === "capability_check") {
             setCapability(event.capability);
             if (!event.capability.mcpOk) {
-              setHelperEvents((prev) => [...prev, "ZenOS 連線失敗，這輪僅能讀取當前上下文。"]);
+              appendHelperEvent("ZenOS 連線失敗，這輪僅能讀取當前上下文。");
             }
             const missingSkills = event.capability.missingSkills || [];
             if (missingSkills.length > 0) {
-              setHelperEvents((prev) => [...prev, `缺少 skill：${missingSkills.join(", ")}`]);
+              appendHelperEvent(`缺少 skill：${missingSkills.join(", ")}`);
             }
             return;
           }
           if (event.type === "permission_request") {
             const toolLabel = event.request?.toolName || "工具";
             setPermissionLabel(`等待本機確認：${toolLabel}`);
-            setHelperEvents((prev) => [
-              ...prev,
-              `等待本機確認 ${toolLabel}（${event.request?.timeoutSeconds || 30} 秒）`,
-            ]);
+            appendHelperEvent(`等待本機確認 ${toolLabel}（${event.request?.timeoutSeconds || 30} 秒）`);
             return;
           }
           if (event.type === "permission_result") {
             const toolLabel = event.result?.toolName || "工具";
             const approved = event.result?.approved;
             setPermissionLabel(approved ? null : `授權被拒：${toolLabel}`);
-            setHelperEvents((prev) => [
-              ...prev,
-              `${toolLabel} ${approved ? "已核准" : `已拒絕（${event.result?.reason || "unknown"}）`}`,
-            ]);
+            appendHelperEvent(
+              `${toolLabel} ${approved ? "已核准" : `已拒絕（${event.result?.reason || "unknown"}）`}`
+            );
             return;
           }
           if (event.type === "message") {
             setPermissionLabel(null);
             setStatus("streaming");
-            const delta = parseSseLineForDelta(event.line);
+            const { delta, debug } = parseStreamLine(event.line);
+            if (debug) {
+              appendHelperEvent(debug);
+            }
             if (delta) {
               collected += delta;
               setStreamingText(collected);
@@ -924,6 +907,7 @@ export function CrmAiPanel({
             setErrorMsg(event.message);
             setPermissionLabel(null);
             setStatus("error");
+            appendHelperEvent(event.message);
           }
         },
       });
@@ -986,6 +970,7 @@ export function CrmAiPanel({
     onStreamComplete,
     aiEntries,
     appendChatMessage,
+    appendHelperEvent,
     persistBriefingSnapshot,
   ]);
 
@@ -1108,6 +1093,21 @@ export function CrmAiPanel({
   }
 
   const displayText = status === "streaming" ? streamingText : finalText;
+  const showInlineProgress =
+    chatHistory.length === 0 &&
+    !streamingText.trim() &&
+    (status === "loading" || status === "streaming");
+  const showDebriefProgress =
+    mode === "debrief" &&
+    !displayText.trim() &&
+    (status === "loading" || status === "streaming");
+  const progressTitle =
+    permissionLabel ||
+    (helperChecking
+      ? "檢查 Local Helper…"
+      : status === "loading"
+        ? "正在整理 CRM 與知識圖譜內容…"
+        : "Claude 已開始回應，等待首段內容…");
 
   return (
     <CopilotRailShell
@@ -1128,20 +1128,42 @@ export function CrmAiPanel({
               </span>
             )}
             {mode === "briefing" && activeBriefing && status === "idle" && !briefingSaveError && (
-              <span className="text-xs text-emerald-400">已存成 briefing</span>
+              <span className="text-xs" style={{ color: c.jade }}>已存成 briefing</span>
             )}
             {permissionLabel && (
-              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">
+              <span
+                className="rounded-full px-2 py-0.5 text-[10px]"
+                style={{
+                  border: `1px solid ${c.vermLine}`,
+                  background: c.vermSoft,
+                  color: c.vermillion,
+                }}
+              >
                 {permissionLabel}
               </span>
             )}
             {capability && !capability.mcpOk && (
-              <span className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">
+              <span
+                className="rounded-full px-2 py-0.5 text-[10px]"
+                style={{
+                  border: `1px solid ${c.vermLine}`,
+                  background: c.vermSoft,
+                  color: c.vermillion,
+                }}
+              >
                 ZenOS 連線失敗
               </span>
             )}
             {capability?.missingSkills?.map((skill) => (
-              <span key={skill} className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">
+              <span
+                key={skill}
+                className="rounded-full px-2 py-0.5 text-[10px]"
+                style={{
+                  border: `1px solid ${c.vermLine}`,
+                  background: c.vermSoft,
+                  color: c.vermillion,
+                }}
+              >
                 缺 skill：{skill}
               </span>
             ))}
@@ -1159,18 +1181,32 @@ export function CrmAiPanel({
       }
     >
       {!collapsed && (
-        <div>
+        <div style={lightFieldVars}>
           {/* ── Helper offline fallback (both modes) ── */}
           {helperOffline && status === "idle" && (
-            <div className="m-4 flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
-              <PlugZap className="h-4 w-4 text-amber-400 shrink-0 mt-0.5" />
-              <div className="text-sm text-amber-300">
+            <div
+              className="m-4 flex items-start gap-2 p-3"
+              style={{
+                borderRadius: 16,
+                border: `1px solid ${c.vermLine}`,
+                background: c.vermSoft,
+              }}
+            >
+              <PlugZap className="mt-0.5 h-4 w-4 shrink-0" style={{ color: c.vermillion }} />
+              <div className="text-sm" style={{ color: c.ink }}>
                 <p className="font-medium">Local Helper 未連線</p>
-                <p className="text-xs text-amber-400 mt-0.5">請先啟動 Local Helper（port 4317），再重試。</p>
+                <p className="mt-0.5 text-xs" style={{ color: c.inkMuted }}>
+                  請先啟動 Local Helper（port 4317），再重試。
+                </p>
               </div>
               <button
                 onClick={() => startStream()}
-                className="ml-auto shrink-0 px-3 py-1 text-xs rounded-lg bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 transition-colors"
+                className="ml-auto shrink-0 rounded-lg px-3 py-1 text-xs transition-colors"
+                style={{
+                  border: `1px solid ${c.vermLine}`,
+                  background: c.surface,
+                  color: c.vermillion,
+                }}
               >
                 重試
               </button>
@@ -1187,7 +1223,15 @@ export function CrmAiPanel({
                 />
               </div>
               {briefingSaveError && (
-                <div className="mx-4 mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                <div
+                  className="mx-4 mt-4 px-3 py-2 text-xs"
+                  style={{
+                    borderRadius: 14,
+                    border: `1px solid ${c.vermLine}`,
+                    background: c.vermSoft,
+                    color: c.vermillion,
+                  }}
+                >
                   {briefingSaveError}
                 </div>
               )}
@@ -1218,11 +1262,22 @@ export function CrmAiPanel({
                         {msg.role === "user" ? "你" : "Claude"}
                       </span>
                       <div
-                        className={`mt-1 p-3 rounded-lg text-sm ${
-                          msg.role === "user"
-                            ? "bg-blue-50 dark:bg-blue-950/40 ml-auto max-w-[80%] inline-block text-left"
-                            : "bg-secondary/30"
+                        className={`mt-1 inline-block max-w-[80%] rounded-2xl p-3 text-left text-sm ${
+                          msg.role === "user" ? "ml-auto" : ""
                         }`}
+                        style={
+                          msg.role === "user"
+                            ? {
+                                background: c.surfaceHi,
+                                border: `1px solid ${c.vermLine}`,
+                                color: c.ink,
+                              }
+                            : {
+                                background: c.surface,
+                                border: `1px solid ${c.inkHair}`,
+                                color: c.ink,
+                              }
+                        }
                       >
                         {msg.role === "assistant" ? (
                           <MarkdownRenderer content={msg.content} className="text-sm text-foreground space-y-1" />
@@ -1237,11 +1292,17 @@ export function CrmAiPanel({
                   {(status === "streaming" || status === "loading") && (
                     <div>
                       <span className="text-xs text-muted-foreground">Claude</span>
-                      <div className="mt-1 p-3 rounded-lg text-sm bg-secondary/30">
-                        {status === "loading" ? (
+                      <div
+                        className="mt-1 rounded-2xl p-3 text-sm"
+                        style={{
+                          background: c.surface,
+                          border: `1px solid ${c.inkHair}`,
+                        }}
+                      >
+                        {status === "loading" || !streamingText.trim() ? (
                           <div className="flex items-center gap-2 text-muted-foreground">
                             <RefreshCw className="h-3 w-3 animate-spin" />
-                            <span>連線中...</span>
+                            <span>{progressTitle}</span>
                           </div>
                         ) : (
                           <MarkdownRenderer content={streamingText} className="text-sm text-foreground space-y-1" />
@@ -1254,11 +1315,63 @@ export function CrmAiPanel({
                 </div>
               )}
 
-              {/* Loading spinner before first response */}
-              {status === "loading" && chatHistory.length === 0 && (
-                <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">連線中...</span>
+              {showInlineProgress && (
+                <div className="p-4">
+                  <div
+                    style={{
+                      borderRadius: 18,
+                      border: `1px solid ${c.inkHair}`,
+                      background: c.surface,
+                      padding: 16,
+                    }}
+                  >
+                    <div className="flex items-center gap-2" style={{ color: c.inkMuted }}>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span style={{ fontFamily: fontHead, fontSize: 14, color: c.ink }}>
+                        {progressTitle}
+                      </span>
+                    </div>
+                    <p
+                      style={{
+                        marginTop: 8,
+                        fontSize: 12,
+                        color: c.inkMuted,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      helper 已啟動，這一輪會先整理最近活動、briefing 與知識圖譜，再輸出會議摘要。
+                    </p>
+                    {helperEvents.length > 0 && (
+                      <div
+                        style={{
+                          marginTop: 12,
+                          borderTop: `1px solid ${c.inkHair}`,
+                          paddingTop: 12,
+                          display: "grid",
+                          gap: 6,
+                        }}
+                      >
+                        {helperEvents.slice(-3).map((line, index) => (
+                          <div key={`${index}-${line}`} style={{ fontSize: 11, color: c.inkMuted }}>
+                            {line}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="mt-4 flex justify-end">
+                      <button
+                        onClick={handleCancel}
+                        className="rounded-lg px-3 py-1 text-xs transition-colors"
+                        style={{
+                          border: `1px solid ${c.inkHairBold}`,
+                          background: c.paperWarm,
+                          color: c.inkMuted,
+                        }}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -1266,14 +1379,20 @@ export function CrmAiPanel({
               {status === "streaming" && chatHistory.length === 0 && streamingText && (
                 <div className="p-4">
                   <span className="text-xs text-muted-foreground">Claude</span>
-                  <div className="mt-1 p-3 rounded-lg text-sm bg-secondary/30">
+                  <div
+                    className="mt-1 rounded-2xl p-3 text-sm"
+                    style={{
+                      background: c.surface,
+                      border: `1px solid ${c.inkHair}`,
+                    }}
+                  >
                     <MarkdownRenderer content={streamingText} className="text-sm text-foreground space-y-1" />
                   </div>
                 </div>
               )}
 
               {/* Cancel button while streaming */}
-              {status === "streaming" && (
+              {status === "streaming" && !showInlineProgress && (
                 <div className="flex justify-end px-4 pb-2">
                   <button
                     onClick={handleCancel}
@@ -1346,6 +1465,11 @@ export function CrmAiPanel({
                       }
                     }}
                     className="w-full py-2 text-sm border border-border rounded-md hover:bg-secondary/50 transition-colors text-muted-foreground"
+                    style={{
+                      background: c.surface,
+                      borderColor: c.inkHairBold,
+                      color: c.inkMuted,
+                    }}
                   >
                     複製最新準備摘要
                   </button>
@@ -1355,11 +1479,61 @@ export function CrmAiPanel({
           ) : (
             /* ══ Debrief: original single-shot UI ══ */
             <div className="p-4 space-y-4">
-              {/* Loading spinner */}
-              {status === "loading" && (
-                <div className="flex items-center justify-center py-8 gap-2 text-muted-foreground">
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  <span className="text-sm">連線中...</span>
+              {showDebriefProgress && (
+                <div
+                  style={{
+                    borderRadius: 18,
+                    border: `1px solid ${c.inkHair}`,
+                    background: c.surface,
+                    padding: 16,
+                  }}
+                >
+                  <div className="flex items-center gap-2" style={{ color: c.inkMuted }}>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span style={{ fontFamily: fontHead, fontSize: 14, color: c.ink }}>
+                      {progressTitle}
+                    </span>
+                  </div>
+                  <p
+                    style={{
+                      marginTop: 8,
+                      fontSize: 12,
+                      color: c.inkMuted,
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    helper 已啟動，這一輪會先整理本次活動、既有 briefing 與承諾事項，再輸出 debrief。
+                  </p>
+                  {helperEvents.length > 0 && (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        borderTop: `1px solid ${c.inkHair}`,
+                        paddingTop: 12,
+                        display: "grid",
+                        gap: 6,
+                      }}
+                    >
+                      {helperEvents.slice(-3).map((line, index) => (
+                        <div key={`${index}-${line}`} style={{ fontSize: 11, color: c.inkMuted }}>
+                          {line}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-4 flex justify-end">
+                    <button
+                      onClick={handleCancel}
+                      className="rounded-lg px-3 py-1 text-xs transition-colors"
+                      style={{
+                        border: `1px solid ${c.inkHairBold}`,
+                        background: c.paperWarm,
+                        color: c.inkMuted,
+                      }}
+                    >
+                      取消
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -1431,10 +1605,17 @@ export function CrmAiPanel({
           )}
         </div>
       )}
-      {helperEvents.length > 0 && (
-        <div className="mt-4 space-y-1 rounded-lg border border-border/30 bg-muted/20 px-3 py-2">
+      {helperEvents.length > 0 && !showInlineProgress && (
+        <div
+          className="mt-4 space-y-1 px-3 py-2"
+          style={{
+            borderRadius: 16,
+            border: `1px solid ${c.inkHair}`,
+            background: c.paperWarm,
+          }}
+        >
           {helperEvents.map((line, index) => (
-            <div key={`${index}-${line}`} className="text-[11px] text-muted-foreground">
+            <div key={`${index}-${line}`} className="text-[11px]" style={{ color: c.inkMuted }}>
               {line}
             </div>
           ))}

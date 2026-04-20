@@ -1,466 +1,590 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
-import { useAuth } from "@/lib/auth";
-import { GovernanceHealthHint } from "@/components/GovernanceHealthHint";
-import { LoadingState } from "@/components/LoadingState";
-import { OnboardingChecklist, OnboardingStartButton } from "@/components/OnboardingChecklist";
-import { useSearchParams } from "next/navigation";
-import {
-  getAllEntities,
-  getAllBlindspots,
-  getAllRelationships,
-  getEntityContext,
-  getGovernanceHealth,
-  getTasks,
-  getQualitySignals,
-  updatePreferences,
-} from "@/lib/api";
-import type { Entity, Blindspot, Relationship, Task, QualitySignals, ImpactChainHop, OnboardingPreferences } from "@/types";
-import { NODE_TYPE_COLORS, NODE_TYPE_LABELS } from "@/lib/constants";
-import { cn } from "@/lib/utils";
+// ZenOS · Knowledge Map — Zen Ink frame + react-force-graph canvas (ink variant)
+
 import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Section } from "@/components/zen/Section";
+import { Chip } from "@/components/zen/Chip";
+import { Btn } from "@/components/zen/Btn";
+import { Icon, ICONS } from "@/components/zen/Icons";
+import { useAuth } from "@/lib/auth";
+import { getAllBlindspots, getAllEntities, getAllRelationships } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
+import type { Blindspot, Entity, Relationship } from "@/types";
 
 const KnowledgeGraph = dynamic(() => import("@/components/KnowledgeGraph"), {
   ssr: false,
-  loading: () => <LoadingState variant="graph" label="Loading graph..." className="flex-1" />,
+  loading: () => null,
 });
 
-const NodeDetailSheet = dynamic(() => import("@/components/NodeDetailSheet"), {
-  ssr: false,
-});
+const TYPE_LABEL: Partial<Record<Entity["type"], string>> = {
+  product: "PRODUCT",
+  project: "PROJECT",
+  module: "MODULE",
+  goal: "GOAL",
+  role: "ROLE",
+  document: "DOCUMENT",
+  company: "COMPANY",
+  deal: "DEAL",
+  person: "PERSON",
+};
 
-// ─── Left Sidebar ───
+export default function KnowledgeMapPage() {
+  const t = useInk("light");
+  const { c, fontHead, fontMono, fontBody } = t;
 
-function Sidebar({
-  entities,
-  focusProduct,
-  setFocusProduct,
-  className,
-  onDismiss,
-  healthLevel = "green",
-}: {
-  entities: Entity[];
-  focusProduct: string | null;
-  setFocusProduct: (id: string | null) => void;
-  className?: string;
-  onDismiss?: () => void;
-  healthLevel?: "green" | "yellow" | "red";
-}) {
-  const products = entities.filter((e) => e.type === "product");
-  const modules = entities.filter((e) => e.type === "module");
-  return (
-    <div className={cn("w-[230px] shrink-0 border-r border-border bg-card flex flex-col h-full overflow-y-auto", className)}>
-      <div className="px-3 pt-4 pb-3 border-b border-border">
-        {onDismiss && (
-          <div className="flex justify-end mb-2 md:hidden">
-            <button
-              onClick={onDismiss}
-              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-            >
-              Close
-            </button>
-          </div>
-        )}
-        <h2 className="text-sm font-bold text-foreground">Naruvia</h2>
-        <GovernanceHealthHint level={healthLevel} />
-      </div>
+  // Zen Ink palette for node types
+  const inkNodeColors: Record<string, string> = {
+    product: c.vermillion,
+    project: c.vermillion,
+    module: c.ocher,
+    goal: c.ocher,
+    role: c.ink,
+    company: c.jade,
+    deal: c.jade,
+    person: c.seal,
+    document: c.inkMuted,
+  };
 
-      <div className="px-2 py-2 border-b border-border">
-        <div className="text-xs text-foreground/65 uppercase tracking-widest px-1 mb-1.5">
-          Knowledge Map
-        </div>
-        <button
-          onClick={() => {
-            setFocusProduct(null);
-            onDismiss?.();
-          }}
-          className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors cursor-pointer mb-0.5 ${
-            focusProduct === null
-              ? "bg-foreground/10 text-foreground/70"
-              : "text-foreground/65 hover:bg-foreground/5"
-          }`}
-        >
-          <span className="w-2 h-2 rounded-full bg-foreground/20" />
-          <span className="flex-1 text-left">All Products</span>
-        </button>
-        {products.map((p) => (
-          <button
-            key={p.id}
-            onClick={() => {
-              setFocusProduct(p.id);
-              onDismiss?.();
-            }}
-            className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors cursor-pointer ${
-              focusProduct === p.id
-                ? "bg-blue-500/15 text-blue-300"
-                : "text-foreground/65 hover:bg-foreground/5"
-            }`}
-          >
-            <span
-              className="w-2 h-2 rounded-full shrink-0"
-              style={{ backgroundColor: NODE_TYPE_COLORS.product }}
-            />
-            <span className="flex-1 text-left truncate">{p.name}</span>
-          </button>
-        ))}
-      </div>
-
-      <div className="px-3 py-4 text-[10px] text-foreground/30 leading-relaxed italic">
-        Select a product to focus the view. Click nodes on graph for details.
-      </div>
-    </div>
-  );
-}
-
-// ─── Main Content ───
-
-function KnowledgeMapContent() {
-  const { user, partner } = useAuth();
-  const searchParams = useSearchParams();
-  const targetId = searchParams.get("id");
+  const { user } = useAuth();
+  const { pushToast } = useToast();
 
   const [entities, setEntities] = useState<Entity[]>([]);
-  const [blindspots, setBlindspots] = useState<Blindspot[]>([]);
   const [relationships, setRelationships] = useState<Relationship[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [qualitySignals, setQualitySignals] = useState<QualitySignals>({ search_unused: [], summary_poor: [] });
-  const [healthLevel, setHealthLevel] = useState<"green" | "yellow" | "red">("green");
+  const [blindspots, setBlindspots] = useState<Blindspot[]>([]);
   const [loading, setLoading] = useState(true);
-  const [impactChain, setImpactChain] = useState<ImpactChainHop[]>([]);
-  const [reverseImpactChain, setReverseImpactChain] = useState<ImpactChainHop[]>([]);
-  
+  const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
-  const [selectedPathIds, setSelectedPathIds] = useState<string[]>([]);
-  const [hoveredSidebarNodeId, setHoveredSidebarNodeId] = useState<string | null>(null);
-  
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [focusProduct, setFocusProduct] = useState<string | null>(null);
+  // focusedId drives graph dim/highlight — only set after user interacts.
+  // selectedId drives the Inspector and can auto-init without dimming.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
-  // Onboarding state
-  const [showOnboardingChecklist, setShowOnboardingChecklist] = useState(false);
-  const [onboardingPrefs, setOnboardingPrefs] = useState<OnboardingPreferences>({});
-
-  // Derive onboarding visibility: empty workspace + not dismissed
-  const l1l2Count = useMemo(
-    () => entities.filter((e) => e.type === "product" || e.type === "module").length,
-    [entities],
-  );
-  const isEmptyWorkspace = !loading && l1l2Count === 0;
-  const onboardingDismissed = onboardingPrefs.dismissed === true;
-  const showOnboardingButton = isEmptyWorkspace && !onboardingDismissed && !showOnboardingChecklist;
-
-  // Load onboarding prefs from partner
-  useEffect(() => {
-    if (partner?.preferences?.onboarding) {
-      setOnboardingPrefs(partner.preferences.onboarding);
-    }
-  }, [partner]);
-
-  const handleUpdateOnboardingPrefs = useCallback(
-    async (patch: OnboardingPreferences) => {
-      const merged = { ...onboardingPrefs, ...patch };
-      setOnboardingPrefs(merged);
-      if (!user) return;
-      try {
-        const token = await user.getIdToken();
-        await updatePreferences(token, { onboarding: merged });
-      } catch (err) {
-        console.error("Failed to save onboarding preferences:", err);
-      }
-    },
-    [user, onboardingPrefs],
-  );
-
-  useEffect(() => {
-    if (!user || !partner) return;
-    async function load() {
-      try {
-        const token = await user!.getIdToken();
-        const [fetchedEntities, fetchedBlindspots, fetchedRelationships, fetchedTasks, fetchedQuality, fetchedHealth] =
-          await Promise.all([
-            getAllEntities(token),
-            getAllBlindspots(token),
-            getAllRelationships(token),
-            getTasks(token),
-            getQualitySignals(token).catch(() => ({ search_unused: [], summary_poor: [] })),
-            getGovernanceHealth(token).catch(() => ({ overall_level: "green" as const, cached_at: null, stale: true })),
-          ]);
-        setEntities(fetchedEntities);
-        setBlindspots(fetchedBlindspots);
-        setRelationships(fetchedRelationships);
-        setTasks(fetchedTasks);
-        setQualitySignals(fetchedQuality);
-        setHealthLevel(fetchedHealth.overall_level);
-
-        // Auto-select if id is in URL
-        if (targetId) {
-          const exists = fetchedEntities.some(e => e.id === targetId);
-          if (exists) {
-            setSelectedId(targetId);
-            setFocusedNodeId(targetId);
-            setSelectedPathIds([targetId]);
-          }
-        }
-      } catch (err) {
-        console.error("Failed to load data:", err);
-      }
+  const fetchData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const [e, r, b] = await Promise.all([
+        getAllEntities(token),
+        getAllRelationships(token),
+        getAllBlindspots(token).catch(() => [] as Blindspot[]),
+      ]);
+      setEntities(e);
+      setRelationships(r);
+      setBlindspots(b);
+    } catch (err) {
+      console.error("[KnowledgeMap] fetch failed:", err);
+      setError(err instanceof Error ? err.message : "載入失敗");
+    } finally {
       setLoading(false);
     }
-    load();
-  }, [user, partner, targetId]);
+  }, [user]);
 
   useEffect(() => {
-    if (!user || !selectedId) {
-      setImpactChain([]);
-      setReverseImpactChain([]);
-      return;
-    }
-
-    const activeUser = user;
-    const entityId = selectedId;
-    let cancelled = false;
-    async function loadEntityContext() {
-      try {
-        const token = await activeUser.getIdToken();
-        const context = await getEntityContext(token, entityId);
-        if (cancelled) return;
-        setImpactChain(context?.impact_chain ?? []);
-        setReverseImpactChain(context?.reverse_impact_chain ?? []);
-      } catch {
-        if (cancelled) return;
-        setImpactChain([]);
-        setReverseImpactChain([]);
-      }
-    }
-
-    loadEntityContext();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, selectedId]);
+    void fetchData();
+  }, [fetchData]);
 
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.id, e])), [entities]);
+
   const blindspotsByEntity = useMemo(() => {
     const map = new Map<string, Blindspot[]>();
     for (const b of blindspots) {
-      for (const eid of b.relatedEntityIds) {
-        const list = map.get(eid) ?? [];
-        list.push(b);
-        map.set(eid, list);
+      for (const entityId of b.relatedEntityIds ?? []) {
+        const arr = map.get(entityId) ?? [];
+        arr.push(b);
+        map.set(entityId, arr);
       }
     }
     return map;
   }, [blindspots]);
 
-  const selectedEntity = useMemo(() => selectedId ? entityMap.get(selectedId) ?? null : null, [selectedId, entityMap]);
-  const relationshipMap = useMemo(() => {
-    const map = new Map<string, Relationship>();
-    for (const rel of relationships) {
-      map.set(`${rel.sourceEntityId}->${rel.targetId}`, rel);
-    }
-    return map;
-  }, [relationships]);
+  const selectedEntity = selectedId ? entityMap.get(selectedId) ?? null : null;
+  const selectedRelations = useMemo(
+    () =>
+      selectedId
+        ? relationships.filter(
+            (r) => r.sourceEntityId === selectedId || r.targetId === selectedId,
+          )
+        : [],
+    [selectedId, relationships],
+  );
 
-  const canStepToNode = useCallback((fromId: string, toId: string) => (
-    relationships.some((rel) =>
-      (rel.sourceEntityId === fromId && rel.targetId === toId) ||
-      (rel.sourceEntityId === toId && rel.targetId === fromId)
-    )
-  ), [relationships]);
+  // Visible counts (KnowledgeGraph hides document + project internally)
+  const visibleCount = useMemo(
+    () => entities.filter((e) => e.type !== "document" && e.type !== "project").length,
+    [entities],
+  );
 
-  const buildPathRelationships = useCallback((pathIds: string[]) => {
-    const hops: Relationship[] = [];
-    for (let i = 0; i < pathIds.length - 1; i += 1) {
-      const fromId = pathIds[i];
-      const toId = pathIds[i + 1];
-      const forward = relationshipMap.get(`${fromId}->${toId}`);
-      const reverse = relationshipMap.get(`${toId}->${fromId}`);
-      if (forward) hops.push(forward);
-      else if (reverse) hops.push(reverse);
-    }
-    return hops;
-  }, [relationshipMap]);
-
-  const navigateToEntity = useCallback((entity: Entity, mode: "replace" | "extend" = "replace") => {
+  const handleNodeClick = useCallback((entity: Entity) => {
     setSelectedId(entity.id);
-    setFocusedNodeId(entity.id);
-    setSelectedPathIds((prev) => {
-      if (mode === "replace" || prev.length === 0) return [entity.id];
+    setFocusedId(entity.id);
+  }, []);
 
-      const existingIndex = prev.indexOf(entity.id);
-      if (existingIndex >= 0) return prev.slice(0, existingIndex + 1);
-
-      const lastId = prev[prev.length - 1];
-      if (canStepToNode(lastId, entity.id)) return [...prev, entity.id];
-
-      return [entity.id];
-    });
-  }, [canStepToNode]);
-
-  // Filter entities based on focusProduct
-  const filteredEntities = useMemo(() => {
-    if (!focusProduct) return entities;
-    const focusIds = new Set<string>();
-    focusIds.add(focusProduct);
-    entities.forEach(e => {
-      if (e.parentId === focusProduct) focusIds.add(e.id);
-    });
-    // Add L3 nodes that belong to these parents
-    entities.forEach(e => {
-      if (e.parentId && focusIds.has(e.parentId)) focusIds.add(e.id);
-    });
-    return entities.filter(e => focusIds.has(e.id));
-  }, [entities, focusProduct]);
-
-  const selectedPathEntities = useMemo(
-    () => selectedPathIds.map((id) => entityMap.get(id)).filter(Boolean) as Entity[],
-    [selectedPathIds, entityMap]
-  );
-
-  const selectedPathRelationships = useMemo(
-    () => buildPathRelationships(selectedPathIds),
-    [buildPathRelationships, selectedPathIds]
-  );
-
-  const handleSelect = useCallback((e: Entity) => {
-    navigateToEntity(e, selectedPathIds.length > 0 ? "extend" : "replace");
-  }, [navigateToEntity, selectedPathIds.length]);
-
-  const handleCloseDetail = useCallback(() => {
+  const handleBackgroundClick = useCallback(() => {
+    setFocusedId(null);
     setSelectedId(null);
-    setFocusedNodeId(null);
-    setSelectedPathIds([]);
   }, []);
 
-  const handleFocusNode = useCallback((id: string) => {
-    const target = entityMap.get(id);
-    if (target) navigateToEntity(target, "extend");
-  }, [entityMap, navigateToEntity]);
+  const handleCopyLink = useCallback(() => {
+    if (!selectedId) return;
+    const url = `${window.location.origin}/knowledge-map?entity=${selectedId}`;
+    navigator.clipboard.writeText(url).then(
+      () => pushToast({ title: "連結已複製", tone: "success" }),
+      () => pushToast({ title: "複製失敗", tone: "error" }),
+    );
+  }, [selectedId, pushToast]);
 
-  const handleLinkSelect = useCallback((sourceId: string, targetId: string) => {
-    setSelectedPathIds((prev) => {
-      if (prev.length === 0) {
-        setSelectedId(targetId);
-        setFocusedNodeId(targetId);
-        return [sourceId, targetId];
-      }
+  // ── Loading ─────────────────────────────────────────────────────────────
+  if (loading) {
+    return (
+      <div
+        style={{
+          padding: "40px 48px 48px",
+          maxWidth: 1600,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: 400,
+          gap: 16,
+        }}
+      >
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: "50%",
+            border: `2px solid ${c.inkHair}`,
+            borderTopColor: c.vermillion,
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        <span
+          style={{
+            fontFamily: fontMono,
+            fontSize: 12,
+            color: c.inkMuted,
+            letterSpacing: "0.1em",
+          }}
+        >
+          載入知識地圖…
+        </span>
+      </div>
+    );
+  }
 
-      const sourceIndex = prev.indexOf(sourceId);
-      const targetIndex = prev.indexOf(targetId);
-      let nextPath: string[];
-      let nextFocusId = targetId;
-
-      if (sourceIndex >= 0 && targetIndex === -1) {
-        nextPath = [...prev.slice(0, sourceIndex + 1), targetId];
-        nextFocusId = targetId;
-      } else if (targetIndex >= 0 && sourceIndex === -1) {
-        nextPath = [...prev.slice(0, targetIndex + 1), sourceId];
-        nextFocusId = sourceId;
-      } else if (sourceIndex >= 0 && targetIndex >= 0) {
-        nextPath = prev.slice(0, Math.max(sourceIndex, targetIndex) + 1);
-        nextFocusId = nextPath[nextPath.length - 1];
-      } else {
-        nextPath = [sourceId, targetId];
-      }
-
-      setSelectedId(nextFocusId);
-      setFocusedNodeId(nextFocusId);
-      return nextPath;
-    });
-  }, []);
-
-  const platformType = onboardingPrefs.platform_type ?? "non_technical";
-
-  return (
-    <div className="h-[calc(100vh-3.5rem)] flex flex-col bg-background">
-      {loading ? (
-        <LoadingState variant="page" label="Loading knowledge map..." />
-      ) : showOnboardingButton ? (
-        /* Empty workspace: show "start" button */
-        <div className="flex-1 flex items-center justify-center">
-          <OnboardingStartButton onClick={() => setShowOnboardingChecklist(true)} />
-        </div>
-      ) : showOnboardingChecklist && isEmptyWorkspace ? (
-        /* Checklist open */
-        <div className="flex-1 flex items-center justify-center p-4 overflow-y-auto">
-          <OnboardingChecklist
-            hasPartner={!!partner}
-            hasEntities={l1l2Count > 0}
-            onboardingPrefs={onboardingPrefs}
-            apiKey={partner?.apiKey ?? ""}
-            onUpdatePrefs={handleUpdateOnboardingPrefs}
-            platformType={platformType}
-            platformId={onboardingPrefs.platform_id}
-          />
-        </div>
-      ) : (
-        <div className="flex-1 flex overflow-hidden relative">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="md:hidden absolute top-3 left-3 z-40 rounded border border-border bg-card/95 px-2.5 py-1.5 text-xs text-muted-foreground"
+  // ── Error ───────────────────────────────────────────────────────────────
+  if (error) {
+    return (
+      <div style={{ padding: "40px 48px 48px", maxWidth: 1600 }}>
+        <div
+          style={{
+            background: c.surface,
+            border: `1px solid ${c.vermLine}`,
+            borderRadius: 2,
+            padding: 24,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            maxWidth: 480,
+          }}
+        >
+          <span
+            style={{
+              fontFamily: fontMono,
+              fontSize: 10,
+              color: c.vermillion,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+            }}
           >
-            Menu
-          </button>
+            載入失敗
+          </span>
+          <p style={{ fontSize: 13, color: c.ink, margin: 0, lineHeight: 1.6 }}>
+            {error}
+          </p>
+          <Btn t={t} variant="outline" onClick={fetchData}>
+            重試
+          </Btn>
+        </div>
+      </div>
+    );
+  }
 
-          <Sidebar
+  // ── Empty ───────────────────────────────────────────────────────────────
+  if (visibleCount === 0) {
+    return (
+      <div style={{ padding: "40px 48px 48px", maxWidth: 1600 }}>
+        <Section
+          t={t}
+          eyebrow="CONTEXT · 知識"
+          title="知識地圖"
+          en="Knowledge Map"
+          subtitle="所有專案、客戶、文件之間的關係。點擊節點展開 context。"
+          right={
+            <Chip t={t} tone="muted">
+              0 節點
+            </Chip>
+          }
+        />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: 320,
+            gap: 10,
+            color: c.inkFaint,
+            fontFamily: fontMono,
+            fontSize: 13,
+            letterSpacing: "0.08em",
+          }}
+        >
+          目前沒有節點
+        </div>
+      </div>
+    );
+  }
+
+  // ── Main ────────────────────────────────────────────────────────────────
+  return (
+    <div style={{ padding: "40px 48px 48px", maxWidth: 1600 }}>
+      <Section
+        t={t}
+        eyebrow="CONTEXT · 知識"
+        title="知識地圖"
+        en="Knowledge Map"
+        subtitle="所有專案、客戶、文件之間的關係。點擊節點展開 context。"
+        right={
+          <div style={{ display: "flex", gap: 10 }}>
+            <Chip t={t} tone="muted">
+              {visibleCount} 節點 · {relationships.length} 關聯
+            </Chip>
+            <Btn t={t} variant="outline" icon={ICONS.spark}>
+              Agent 詢問此圖
+            </Btn>
+          </div>
+        }
+      />
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 340px",
+          gap: 16,
+          height: "calc(100vh - 260px)",
+          minHeight: 560,
+        }}
+      >
+        {/* Canvas — reuse force-graph with Zen Ink variant */}
+        <div
+          style={{
+            position: "relative",
+            background: c.paper,
+            border: `1px solid ${c.inkHair}`,
+            borderRadius: 2,
+            overflow: "hidden",
+          }}
+        >
+          <KnowledgeGraph
             entities={entities}
-            focusProduct={focusProduct}
-            setFocusProduct={setFocusProduct}
-            healthLevel={healthLevel}
-            onDismiss={() => setSidebarOpen(false)}
-            className={cn(
-              "absolute inset-y-0 left-0 z-50 transition-transform md:relative md:translate-x-0",
-              sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
-            )}
+            relationships={relationships}
+            blindspotsByEntity={blindspotsByEntity}
+            onNodeClick={handleNodeClick}
+            onBackgroundClick={handleBackgroundClick}
+            focusedNodeId={focusedId}
+            variant="ink"
+            showLegend
+            nodeColorsOverride={inkNodeColors}
+            labelFontFamily={fontBody}
+            blindspotColor={c.vermillion}
           />
+        </div>
 
-          <main className="flex-1 relative flex flex-col min-w-0">
-            <KnowledgeGraph
-              entities={filteredEntities}
-              relationships={relationships}
-              blindspotsByEntity={blindspotsByEntity}
-              onNodeClick={handleSelect}
-              onLinkClick={handleLinkSelect}
-              hoveredSidebarNodeId={hoveredSidebarNodeId}
-              focusedNodeId={focusedNodeId}
-              selectedPathIds={selectedPathIds}
-              detailPanelOpen={!!selectedEntity}
-            />
-          </main>
+        {/* Inspector */}
+        <div
+          style={{
+            background: c.surface,
+            border: `1px solid ${c.inkHair}`,
+            borderRadius: 2,
+            padding: 18,
+            overflow: "auto",
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}
+        >
+          {selectedEntity ? (
+            <>
+              {/* Header */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <div
+                  style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: "50%",
+                    background: c.vermSoft,
+                    border: `1px solid ${c.vermLine}`,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: c.vermillion,
+                    fontSize: 14,
+                    fontFamily: fontHead,
+                    fontWeight: 500,
+                    flexShrink: 0,
+                  }}
+                >
+                  ●
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontFamily: fontMono,
+                      fontSize: 10,
+                      color: c.inkFaint,
+                      letterSpacing: "0.1em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {TYPE_LABEL[selectedEntity.type] ?? selectedEntity.type.toUpperCase()}
+                  </div>
+                  <div
+                    style={{
+                      fontFamily: fontHead,
+                      fontSize: 17,
+                      fontWeight: 500,
+                      color: c.ink,
+                      letterSpacing: "0.02em",
+                      whiteSpace: "nowrap",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                    }}
+                  >
+                    {selectedEntity.name || "—"}
+                  </div>
+                  <div style={{ fontSize: 12, color: c.inkMuted, marginTop: 2 }}>
+                    {selectedEntity.owner ?? "—"}
+                  </div>
+                </div>
+              </div>
 
-          {selectedEntity && (
-            <NodeDetailSheet
-              entity={selectedEntity}
-              entities={entities}
-              relationships={relationships}
-              selectedPathEntities={selectedPathEntities}
-              selectedPathRelationships={selectedPathRelationships}
-              blindspots={blindspotsByEntity.get(selectedEntity.id) ?? []}
-              tasks={tasks}
-              qualitySignals={qualitySignals}
-              impactChain={impactChain}
-              reverseImpactChain={reverseImpactChain}
-              onClose={handleCloseDetail}
-              onHoverNode={setHoveredSidebarNodeId}
-              onFocusNode={handleFocusNode}
-            />
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 6 }}>
+                <Btn t={t} variant="ghost" size="sm" icon={ICONS.arrow}>
+                  開啟
+                </Btn>
+                <Btn
+                  t={t}
+                  variant="ghost"
+                  size="sm"
+                  icon={ICONS.link}
+                  onClick={handleCopyLink}
+                >
+                  複製連結
+                </Btn>
+              </div>
+
+              {/* Agent Summary */}
+              <div
+                style={{
+                  background: c.paperWarm,
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: 2,
+                  padding: 12,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    marginBottom: 8,
+                  }}
+                >
+                  <Icon d={ICONS.spark} size={12} style={{ color: c.vermillion }} />
+                  <span
+                    style={{
+                      fontFamily: fontMono,
+                      fontSize: 10,
+                      color: c.inkFaint,
+                      letterSpacing: "0.12em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Agent Summary
+                  </span>
+                </div>
+                <p
+                  style={{
+                    fontSize: 12,
+                    lineHeight: 1.6,
+                    color: c.ink,
+                    margin: 0,
+                  }}
+                >
+                  {selectedEntity.summary || "—"}
+                </p>
+              </div>
+
+              {/* Relations */}
+              <div>
+                <div
+                  style={{
+                    fontFamily: fontMono,
+                    fontSize: 10,
+                    color: c.inkFaint,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}
+                >
+                  相關 · Relations
+                </div>
+                {selectedRelations.length === 0 ? (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: c.inkFaint,
+                      fontFamily: fontMono,
+                    }}
+                  >
+                    —
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                    }}
+                  >
+                    {selectedRelations.map((rel) => {
+                      const otherId =
+                        rel.sourceEntityId === selectedId
+                          ? rel.targetId
+                          : rel.sourceEntityId;
+                      const otherEntity = entityMap.get(otherId);
+                      const label = otherEntity?.name ?? otherId;
+                      const otherType = otherEntity?.type;
+                      return (
+                        <button
+                          key={rel.id}
+                          onClick={() => {
+                            if (!otherEntity) return;
+                            setSelectedId(otherId);
+                            setFocusedId(otherId);
+                          }}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 10,
+                            padding: "6px 8px",
+                            borderRadius: 2,
+                            background: "transparent",
+                            border: "none",
+                            color: c.ink,
+                            cursor: otherEntity ? "pointer" : "default",
+                            fontSize: 12,
+                            textAlign: "left",
+                            fontFamily: fontBody,
+                            width: "100%",
+                          }}
+                          onMouseEnter={(e) => {
+                            if (otherEntity)
+                              e.currentTarget.style.background = c.surfaceHi;
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = "transparent";
+                          }}
+                        >
+                          <span
+                            style={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: "50%",
+                              background: c.ink,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span
+                            style={{
+                              flex: 1,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {label}
+                          </span>
+                          <span
+                            style={{
+                              fontFamily: fontMono,
+                              fontSize: 10,
+                              color: c.inkFaint,
+                              letterSpacing: "0.08em",
+                              flexShrink: 0,
+                            }}
+                          >
+                            {otherType
+                              ? TYPE_LABEL[otherType] ?? otherType.toUpperCase()
+                              : "—"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Recent activity — P1 */}
+              <div>
+                <div
+                  style={{
+                    fontFamily: fontMono,
+                    fontSize: 10,
+                    color: c.inkFaint,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    marginBottom: 8,
+                  }}
+                >
+                  近期活動
+                </div>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: c.inkFaint,
+                    fontFamily: fontMono,
+                  }}
+                >
+                  —
+                </div>
+              </div>
+            </>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flex: 1,
+                color: c.inkFaint,
+                fontFamily: fontMono,
+                fontSize: 12,
+                letterSpacing: "0.08em",
+              }}
+            >
+              點擊節點查看詳情
+            </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
-}
-
-function KnowledgeMapPage() {
-  return (
-    <Suspense fallback={<LoadingState variant="page" label="Loading..." />}>
-      <KnowledgeMapContent />
-    </Suspense>
-  );
-}
-
-export default function Page() {
-  return <KnowledgeMapPage />;
 }

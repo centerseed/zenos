@@ -1,462 +1,502 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Section } from "@/components/zen/Section";
+import { Btn } from "@/components/zen/Btn";
+import { Chip } from "@/components/zen/Chip";
+import { HeroToday } from "@/components/zen/HeroToday";
+import { ICONS } from "@/components/zen/Icons";
 import { TaskBoard } from "@/components/TaskBoard";
 import { TaskFilters } from "@/components/TaskFilters";
-import { PulseBar } from "@/components/PulseBar";
-import { ProjectProgress } from "@/components/ProjectProgress";
-import { PeopleMatrix } from "@/components/PeopleMatrix";
-import { ActivityTimeline } from "@/components/ActivityTimeline";
-import { MorningReport } from "@/components/MorningReport";
-import { LoadingState } from "@/components/LoadingState";
-import { getTasks, getProjectEntities, getAllEntities, getPartners, createTask, updateTask, confirmTask } from "@/lib/api";
-import { RefreshCw, Plus } from "lucide-react";
-import type { Task, TaskStatus, TaskPriority, Entity, Partner } from "@/types";
 import { TaskCreateDialog } from "@/components/TaskCreateDialog";
-import { resolveActiveWorkspace, isUnassignedPartner } from "@/lib/partner";
+import {
+  confirmTask,
+  createTask,
+  getAllEntities,
+  getTasks,
+  handoffTask,
+  updateTask,
+} from "@/lib/api";
+import type { Entity, Task, TaskPriority, TaskStatus } from "@/types";
 
-type TabKey = "all" | "inbox" | "outbox" | "review";
-type ViewMode = "pulse" | "kanban";
+type CreateTaskInput = {
+  title: string;
+  description?: string;
+  priority?: string;
+  assignee?: string;
+  due_date?: string;
+  project?: string;
+};
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: "all", label: "All" },
-  { key: "inbox", label: "Inbox" },
-  { key: "outbox", label: "Outbox" },
-  { key: "review", label: "Review" },
-];
-
-/** Build server-side filter params for a kanban tab. */
-function tabFilters(
-  tab: TabKey,
-  partnerId: string
-): Parameters<typeof getTasks>[1] {
-  switch (tab) {
-    case "inbox":
-      return { assignee: partnerId };
-    case "outbox":
-      return { createdBy: partnerId };
-    case "review":
-      return { statuses: ["review"] };
-    default:
-      return undefined;
-  }
-}
-
-export function TasksPage() {
-  const { user, partner } = useAuth();
-  const [viewMode, setViewMode] = useState<ViewMode>("kanban");
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [entities, setEntities] = useState<Entity[]>([]);
-  const [allEntities, setAllEntities] = useState<Entity[]>([]);
-  const [partners, setPartners] = useState<Partner[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<TabKey>("all");
-  const [filterStatuses, setFilterStatuses] = useState<TaskStatus[]>([]);
-  const [filterPriority, setFilterPriority] = useState<TaskPriority | null>(null);
-  const [filterProject, setFilterProject] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [newTaskCount, setNewTaskCount] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-  const prevTaskIdsRef = useRef<Set<string>>(new Set());
-
-  // Initial load: all tasks + entities + partners list
-  useEffect(() => {
-    if (!user || !partner) return;
-    const authUser = user;
-
-    async function loadData() {
-      try {
-        const token = await authUser.getIdToken();
-
-        const [fetchedTasks, fetchedEntities, fetchedPartners, fetchedAllEntities] =
-          await Promise.all([
-            getTasks(token),
-            getProjectEntities(token),
-            getPartners(token),
-            getAllEntities(token),
-          ]);
-
-        setTasks(fetchedTasks);
-        setEntities(fetchedEntities);
-        setAllEntities(fetchedAllEntities);
-        setPartners(fetchedPartners);
-      } catch (err) {
-        console.error("Failed to load data:", err);
-        setTasks([]);
-        setEntities([]);
-        setPartners([]);
-        setError(err instanceof Error ? err.message : "載入失敗");
-      }
-      setLoading(false);
-    }
-
-    loadData();
-  }, [user, partner]);
-
-  // Track new tasks (for agent-created notification)
-  useEffect(() => {
-    if (tasks.length === 0) return;
-    const currentIds = new Set(tasks.map((t) => t.id));
-    if (prevTaskIdsRef.current.size > 0) {
-      let count = 0;
-      for (const id of currentIds) {
-        if (!prevTaskIdsRef.current.has(id)) count++;
-      }
-      if (count > 0) setNewTaskCount(count);
-    }
-    prevTaskIdsRef.current = currentIds;
-  }, [tasks]);
-
-  // Manual refresh (for agent-created tasks)
-  const handleRefresh = useCallback(async () => {
-    if (!user || !partner) return;
-    setRefreshing(true);
-    setError(null);
-    try {
-      const token = await user.getIdToken();
-      const filters = viewMode === "kanban" ? tabFilters(activeTab, partner.id) : undefined;
-      const [fetchedTasks, fetchedAllEntities] = await Promise.all([
-        getTasks(token, filters),
-        getAllEntities(token),
-      ]);
-      setTasks(fetchedTasks);
-      setAllEntities(fetchedAllEntities);
-    } catch (err) {
-      console.error("Failed to refresh:", err);
-      setError(err instanceof Error ? err.message : "刷新失敗");
-    }
-    setRefreshing(false);
-    setTimeout(() => setNewTaskCount(0), 3000);
-  }, [user, partner, viewMode, activeTab]);
-
-  // Re-fetch tasks when kanban tab changes (server-side scoping)
-  useEffect(() => {
-    if (viewMode !== "kanban" || !user || !partner) return;
-
-    async function loadTabTasks() {
-      setLoading(true);
-      try {
-        const token = await user!.getIdToken();
-        const filters = tabFilters(activeTab, partner!.id);
-        const fetched = await getTasks(token, filters);
-        setTasks(fetched);
-      } catch (err) {
-        console.error("Failed to load tab tasks:", err);
-        setTasks([]);
-      }
-      setLoading(false);
-    }
-
-    loadTabTasks();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, viewMode]);
-
-  // Build partner name lookup for legacy ID strings
-  const partnerNames = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const p of partners) {
-      map[p.id] = p.displayName;
-      map[p.displayName.toLowerCase()] = p.displayName;
-    }
-    if (!map["pm"]) map["pm"] = "PM";
-    return map;
-  }, [partners]);
-
-  // Build entity name lookup for rich card tags
-  const entityNames = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const e of allEntities) {
-      map[e.id] = e.name;
-    }
-    return map;
-  }, [allEntities]);
-
-  const entitiesById = useMemo(() => {
-    const map: Record<string, Entity> = {};
-    for (const e of allEntities) {
-      map[e.id] = e;
-    }
-    return map;
-  }, [allEntities]);
-
-  const availableProjects = useMemo(() => {
-    const projects = new Set<string>();
-    for (const t of tasks) {
-      if (t.project) projects.add(t.project);
-    }
-    return Array.from(projects).sort();
-  }, [tasks]);
-
-  // ─── Mutation handlers ────────────────────────────────────────────────────
-
-  const handleCreateTask = useCallback(async (data: {
-    title: string;
-    description?: string;
-    priority?: string;
-    assignee?: string;
-    due_date?: string;
-    project?: string;
-  }) => {
-    if (!user) throw new Error("未登入");
-    const token = await user.getIdToken();
-    const newTask = await createTask(token, data);
-    setTasks(prev => [newTask, ...prev]);
-  }, [user]);
-
-  const handleUpdateTask = useCallback(async (taskId: string, updates: Record<string, unknown>) => {
-    if (!user) throw new Error("未登入");
-    // Optimistic update
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } as Task : t));
-    try {
-      const token = await user.getIdToken();
-      const updated = await updateTask(token, taskId, updates as Parameters<typeof updateTask>[2]);
-      setTasks(prev => prev.map(t => t.id === taskId ? updated : t));
-    } catch (err) {
-      // Rollback: re-fetch just that task's state by refreshing
-      console.error("Failed to update task:", err);
-      throw err;
-    }
-  }, [user]);
-
-  const handleConfirmTask = useCallback(async (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => {
-    if (!user) throw new Error("未登入");
-    const token = await user.getIdToken();
-    const updated = await confirmTask(token, taskId, data);
-    setTasks(prev => prev.map(t => t.id === taskId ? updated : t));
-  }, [user]);
-
-  const handleStatusChange = useCallback(async (taskId: string, newStatus: string) => {
-    await handleUpdateTask(taskId, { status: newStatus });
-  }, [handleUpdateTask]);
-
-  const filteredTasks = useMemo(() => {
-    if (!tasks) return [];
-    
-    return tasks.map(t => {
-      const cId = t.createdBy?.toLowerCase();
-      const aId = t.assignee?.toLowerCase();
-      const actorPartnerId = (t.sourceMetadata?.actor_partner_id as string | undefined)?.toLowerCase();
-      const createdByLooksLikePartnerId = Boolean(cId && /^[0-9a-f]{32}$/.test(cId));
-      const createdViaAgent =
-        t.sourceMetadata?.created_via_agent !== undefined
-          ? Boolean(t.sourceMetadata?.created_via_agent)
-          : !createdByLooksLikePartnerId;
-      const rawAgentName =
-        typeof t.sourceMetadata?.agent_name === "string"
-          ? t.sourceMetadata.agent_name.trim()
-          : "";
-      const normalizedAgentName = rawAgentName
-        ? rawAgentName.replace(/-agent$/i, "")
-        : "agent";
-      
-      const ownerName =
-        (actorPartnerId ? partnerNames[actorPartnerId] : null) ||
-        (createdByLooksLikePartnerId && cId ? partnerNames[cId] : null) ||
-        (partner?.displayName || null) ||
-        t.creatorName ||
-        t.createdBy;
-      const cName = createdViaAgent
-        ? `${normalizedAgentName}(by ${ownerName})`
-        : ownerName;
-      const aName = t.assigneeName || (aId ? partnerNames[aId] : null) || t.assignee;
-      
-      return {
-        ...t,
-        creatorName: cName,
-        assigneeName: aName
-      };
-    })
-    .filter(t => {
-      if (filterStatuses.length > 0 && !filterStatuses.includes(t.status)) return false;
-      if (filterPriority && t.priority !== filterPriority) return false;
-      if (filterProject && t.project !== filterProject) return false;
-      return true;
-    });
-  }, [tasks, partnerNames, filterStatuses, filterPriority, filterProject, partner?.displayName]);
-
-  // guest workspace with no authorized entities — not yet configured for shared-L1 access
-  const { workspaceRole } = resolveActiveWorkspace(partner);
-  const isEmptyScoped = !loading && workspaceRole === "guest" && isUnassignedPartner(partner);
+function EmptyScopePrompt() {
+  const t = useInk("light");
+  const { c, fontBody, fontMono } = t;
 
   return (
-    <div className="min-h-screen">
-      {isEmptyScoped && (
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 py-12 text-center">
-          <p className="text-muted-foreground">
-            您的帳號尚未設定存取空間，請聯繫管理員。
-          </p>
-        </main>
-      )}
-
-      {!isEmptyScoped && (
-      <main id="main-content" className={`mx-auto px-4 sm:px-6 py-4 transition-all duration-300 ${viewMode === "kanban" ? "max-w-[1600px]" : "max-w-7xl"}`}>
-        
-        {/* Compressed Single Line Header */}
-        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3 mb-6 bg-card/20 p-2 rounded-xl border border-border/40 backdrop-blur-sm">
-          
-          <div className="flex items-center gap-4">
-            {/* New Task Button */}
-            <button
-              onClick={() => setShowCreateDialog(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              新增任務
-            </button>
-
-            {/* Refresh Button */}
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="p-2 rounded-lg hover:bg-secondary transition-colors disabled:opacity-50 cursor-pointer relative group border border-border/50"
-              aria-label="Refresh tasks"
-            >
-              <RefreshCw className={`w-4 h-4 text-muted-foreground group-hover:text-foreground ${refreshing ? "animate-spin" : ""}`} />
-              {newTaskCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-blue-500 text-white text-[9px] font-bold flex items-center justify-center animate-bounce">
-                  {newTaskCount}
-                </span>
-              )}
-            </button>
-
-            {/* Tabs - Now in the same line */}
-            <div className="flex items-center bg-background/50 rounded-lg p-1 border border-border/50">
-              {TABS.map((tab) => (
-                <button
-                  key={tab.key}
-                  onClick={() => setActiveTab(tab.key)}
-                  className={`px-3 py-1 text-xs font-bold rounded-md transition-all duration-200 cursor-pointer uppercase tracking-tighter ${
-                    activeTab === tab.key
-                      ? "bg-blue-600 text-white shadow-sm"
-                      : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Filters - Now in the same line */}
-          <div className="flex-1 flex items-center justify-center">
-            <TaskFilters
-              selectedStatuses={filterStatuses}
-              selectedPriority={filterPriority}
-              selectedProject={filterProject}
-              availableProjects={availableProjects}
-              onStatusChange={setFilterStatuses}
-              onPriorityChange={setFilterPriority}
-              onProjectChange={setFilterProject}
-            />
-          </div>
-
-          {/* View Toggle */}
-          <div className="flex items-center rounded-lg overflow-hidden border border-border/50 p-1 bg-background/50">
-            <button
-              onClick={() => setViewMode("pulse")}
-              className={`px-3 py-1 text-xs font-bold rounded-md cursor-pointer transition-all ${
-                viewMode === "pulse"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-secondary"
-              }`}
-            >
-              Pulse
-            </button>
-            <button
-              onClick={() => setViewMode("kanban")}
-              className={`px-3 py-1 text-xs font-bold rounded-md cursor-pointer transition-all ${
-                viewMode === "kanban"
-                  ? "bg-primary text-primary-foreground shadow-sm"
-                  : "text-muted-foreground hover:bg-secondary"
-              }`}
-            >
-              Kanban
-            </button>
-          </div>
-        </div>
-
-        {partner && !loading && (
-          <MorningReport
-            tasks={filteredTasks}
-            partnerId={partner.id}
-            onSelectTask={setSelectedTask}
-          />
-        )}
-
-        {/* Pulse View */}
-        {viewMode === "pulse" && (
-          <>
-            {loading ? (
-              <LoadingState label="Loading pulse data..." />
-            ) : (
-              <div className="space-y-6">
-                <PulseBar tasks={tasks} />
-                <ProjectProgress tasks={tasks} entities={entities} />
-                <PeopleMatrix tasks={tasks} entities={entities} partners={partners} />
-                <ActivityTimeline tasks={tasks} partners={partners} entities={entities} />
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Kanban View */}
-        {viewMode === "kanban" && (
-          <>
-            {/* Board */}
-            {loading ? (
-              <LoadingState label="Loading tasks..." />
-            ) : error ? (
-              <div className="text-center py-12 bg-card rounded-lg border border-red-900/30">
-                <p className="text-red-400 mb-3">{error}</p>
-                <button
-                  onClick={handleRefresh}
-                  className="text-sm text-blue-400 hover:text-blue-300 underline cursor-pointer"
-                >
-                  重試
-                </button>
-              </div>
-            ) : filteredTasks.length === 0 && tasks.length > 0 ? (
-              <div className="text-center py-12 bg-card rounded-lg border border-border">
-                <p className="text-muted-foreground">
-                  目前篩選無結果。嘗試調整篩選條件。
-                </p>
-              </div>
-            ) : filteredTasks.length === 0 ? (
-              <div className="text-center py-12 bg-card rounded-lg border border-border">
-                <p className="text-muted-foreground">
-                  尚無任務。透過 MCP tools 或 Agent 建立任務。
-                </p>
-              </div>
-            ) : (
-              <TaskBoard
-                tasks={filteredTasks}
-                entityNames={entityNames}
-                entitiesById={entitiesById}
-                visibleStatuses={filterStatuses}
-                selectedTask={selectedTask}
-                onSelectTask={setSelectedTask}
-                onStatusChange={handleStatusChange}
-                onUpdateTask={handleUpdateTask}
-                onConfirmTask={handleConfirmTask}
-              />
-            )}
-          </>
-        )}
-      </main>
-      )}
-
-      <TaskCreateDialog
-        isOpen={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
-        onCreateTask={handleCreateTask}
-      />
+    <div style={{ padding: "40px 48px 60px", maxWidth: 1600 }}>
+      <div
+        style={{
+          maxWidth: 540,
+          background: c.surface,
+          border: `1px solid ${c.vermLine}`,
+          borderRadius: 2,
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: fontMono,
+            fontSize: 10,
+            color: c.vermillion,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+          }}
+        >
+          Access Scope
+        </span>
+        <p
+          style={{
+            margin: 0,
+            fontFamily: fontBody,
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: c.ink,
+          }}
+        >
+          您的帳號尚未設定存取空間，請聯繫管理員協助配置 workspace 或授權的知識節點。
+        </p>
+      </div>
     </div>
   );
 }
 
-export default function Page() {
-  return <TasksPage />;
+function LoadingState({ message }: { message: string }) {
+  const t = useInk("light");
+  const { c, fontMono } = t;
+
+  return (
+    <div
+      style={{
+        padding: "40px 48px 60px",
+        minHeight: 360,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <span
+        style={{
+          fontFamily: fontMono,
+          fontSize: 12,
+          color: c.inkMuted,
+          letterSpacing: "0.12em",
+        }}
+      >
+        {message}
+      </span>
+    </div>
+  );
 }
+
+function ErrorState({
+  message,
+  onRetry,
+}: {
+  message: string;
+  onRetry: () => void;
+}) {
+  const t = useInk("light");
+  const { c, fontBody, fontMono } = t;
+
+  return (
+    <div style={{ padding: "40px 48px 60px", maxWidth: 1600 }}>
+      <div
+        style={{
+          maxWidth: 520,
+          background: c.surface,
+          border: `1px solid ${c.vermLine}`,
+          borderRadius: 2,
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: fontMono,
+            fontSize: 10,
+            color: c.vermillion,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+          }}
+        >
+          Tasks Load Failed
+        </span>
+        <p
+          style={{
+            margin: 0,
+            fontFamily: fontBody,
+            fontSize: 13,
+            lineHeight: 1.7,
+            color: c.ink,
+          }}
+        >
+          {message}
+        </p>
+        <div>
+          <Btn t={t} variant="outline" onClick={onRetry}>
+            重試
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isEmptyScopedGuest(
+  workspaceRole: string | null | undefined,
+  accessMode: string | null | undefined,
+  authorizedEntityIds: string[] | undefined,
+) {
+  return (
+    workspaceRole === "guest" &&
+    accessMode === "unassigned" &&
+    (authorizedEntityIds?.length ?? 0) === 0
+  );
+}
+
+export function TasksPage() {
+  const { user, partner } = useAuth();
+  const t = useInk("light");
+  const { c, fontHead, fontMono } = t;
+
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [selectedStatuses, setSelectedStatuses] = useState<TaskStatus[]>([]);
+  const [selectedPriority, setSelectedPriority] = useState<TaskPriority | null>(null);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [selectedDispatcher, setSelectedDispatcher] = useState<string | null>(null);
+
+  const fetchData = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const token = await user.getIdToken();
+      const [fetchedTasks, fetchedEntities] = await Promise.all([
+        getTasks(token),
+        getAllEntities(token),
+      ]);
+      setTasks(fetchedTasks);
+      setEntities(fetchedEntities);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "任務載入失敗");
+    } finally {
+      setLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    void fetchData();
+  }, [fetchData]);
+
+  const entityNames = useMemo(
+    () => Object.fromEntries(entities.map((entity) => [entity.id, entity.name])),
+    [entities],
+  );
+  const entitiesById = useMemo(
+    () => Object.fromEntries(entities.map((entity) => [entity.id, entity])),
+    [entities],
+  );
+
+  const availableProjects = useMemo(() => {
+    const projects = new Set<string>();
+    for (const task of tasks) {
+      if (task.project?.trim()) projects.add(task.project.trim());
+    }
+    for (const entity of entities) {
+      if (entity.type === "product" || entity.type === "project") {
+        projects.add(entity.name);
+      }
+    }
+    return Array.from(projects).sort((a, b) => a.localeCompare(b));
+  }, [entities, tasks]);
+
+  const availableDispatchers = useMemo(() => {
+    const set = new Set<string>();
+    for (const task of tasks) {
+      if (task.dispatcher?.trim()) set.add(task.dispatcher.trim());
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [tasks]);
+
+  const filteredTasks = useMemo(() => {
+    return tasks.filter((task) => {
+      if (selectedStatuses.length > 0 && !selectedStatuses.includes(task.status)) {
+        return false;
+      }
+      if (selectedPriority && task.priority !== selectedPriority) {
+        return false;
+      }
+      if (selectedProject && task.project !== selectedProject) {
+        return false;
+      }
+      if (selectedDispatcher && task.dispatcher !== selectedDispatcher) {
+        return false;
+      }
+      return true;
+    });
+  }, [selectedDispatcher, selectedPriority, selectedProject, selectedStatuses, tasks]);
+
+  const visibleStatuses = useMemo(
+    () => selectedStatuses.filter((status) => status !== "cancelled"),
+    [selectedStatuses],
+  );
+
+  const totalTasks = filteredTasks.length;
+  const reviewCount = filteredTasks.filter((task) => task.status === "review").length;
+  const overdueCount = filteredTasks.filter(
+    (task) => task.dueDate && task.dueDate.getTime() < Date.now() && task.status !== "done",
+  ).length;
+  const mineCount = filteredTasks.filter((task) => {
+    const selfIds = [partner?.id, partner?.displayName, user?.email].filter(Boolean);
+    return selfIds.some((value) => value && (task.assignee === value || task.assigneeName === value));
+  }).length;
+
+  const handleCreateTask = useCallback(async (data: CreateTaskInput) => {
+    if (!user) return;
+    const token = await user.getIdToken();
+    const created = await createTask(token, data);
+    setTasks((prev) => [created, ...prev]);
+  }, [user]);
+
+  const replaceTask = useCallback((nextTask: Task) => {
+    setTasks((prev) => prev.map((task) => (task.id === nextTask.id ? nextTask : task)));
+  }, []);
+
+  const handleStatusChange = useCallback(async (taskId: string, status: string) => {
+    if (!user) return;
+    const token = await user.getIdToken();
+    const updated = await updateTask(token, taskId, { status });
+    replaceTask(updated);
+  }, [replaceTask, user]);
+
+  const handleUpdateTask = useCallback(async (taskId: string, updates: Record<string, unknown>) => {
+    if (!user) return;
+    const token = await user.getIdToken();
+    const updated = await updateTask(token, taskId, updates as Parameters<typeof updateTask>[2]);
+    replaceTask(updated);
+  }, [replaceTask, user]);
+
+  const handleConfirmTask = useCallback(
+    async (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => {
+      if (!user) return;
+      const token = await user.getIdToken();
+      const updated = await confirmTask(token, taskId, data);
+      replaceTask(updated);
+    },
+    [replaceTask, user],
+  );
+
+  const handleHandoffTask = useCallback(
+    async (taskId: string, data: { to_dispatcher: string; reason: string; notes?: string | null }) => {
+      if (!user) return;
+      const token = await user.getIdToken();
+      const updated = await handoffTask(token, taskId, data);
+      replaceTask(updated);
+    },
+    [replaceTask, user],
+  );
+
+  if (isEmptyScopedGuest(partner?.workspaceRole, partner?.accessMode, partner?.authorizedEntityIds)) {
+    return <EmptyScopePrompt />;
+  }
+
+  if (loading) {
+    return <LoadingState message="載入任務…" />;
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={fetchData} />;
+  }
+
+  return (
+    <>
+      <div style={{ padding: "40px 48px 60px", maxWidth: 1600 }}>
+        <Section
+          t={t}
+          eyebrow="WORK · 任務"
+          title="任務"
+          en="Tasks"
+          subtitle="這裡直接接真實 task flow。拖拉、送審、驗收與留言都走正式 API。"
+          right={
+            <div style={{ display: "flex", gap: 10 }}>
+              <Btn
+                t={t}
+                variant="ghost"
+                icon={ICONS.filter}
+                onClick={() => {
+                  setSelectedStatuses([]);
+                  setSelectedPriority(null);
+                  setSelectedProject(null);
+                  setSelectedDispatcher(null);
+                }}
+              >
+                清空篩選
+              </Btn>
+              <Btn
+                t={t}
+                variant="seal"
+                icon={ICONS.plus}
+                onClick={() => setCreating(true)}
+              >
+                新任務
+              </Btn>
+            </div>
+          }
+        />
+
+        <div style={{ marginBottom: 24 }}>
+          <HeroToday />
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+            gap: 1,
+            background: c.inkHair,
+            border: `1px solid ${c.inkHair}`,
+            marginBottom: 24,
+          }}
+        >
+          {[
+            { label: "全部任務", value: String(totalTasks) },
+            { label: "待審查", value: String(reviewCount) },
+            { label: "逾期", value: String(overdueCount) },
+            { label: "我的", value: String(mineCount) },
+          ].map((item) => (
+            <div key={item.label} style={{ background: c.surface, padding: "14px 16px" }}>
+              <div
+                style={{
+                  fontFamily: fontMono,
+                  fontSize: 10,
+                  color: c.inkFaint,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  marginBottom: 8,
+                }}
+              >
+                {item.label}
+              </div>
+              <div
+                style={{
+                  fontFamily: fontHead,
+                  fontSize: 28,
+                  fontWeight: 500,
+                  color: c.ink,
+                }}
+              >
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 16,
+            marginBottom: 20,
+            flexWrap: "wrap",
+          }}
+        >
+          <TaskFilters
+            selectedStatuses={selectedStatuses}
+            selectedPriority={selectedPriority}
+            selectedProject={selectedProject}
+            selectedDispatcher={selectedDispatcher}
+            availableProjects={availableProjects}
+            availableDispatchers={availableDispatchers}
+            onStatusChange={setSelectedStatuses}
+            onPriorityChange={setSelectedPriority}
+            onProjectChange={setSelectedProject}
+            onDispatcherChange={setSelectedDispatcher}
+          />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Chip t={t} tone="muted">{`全部 ${totalTasks}`}</Chip>
+            <Chip t={t} tone="ocher">{`Review ${reviewCount}`}</Chip>
+            <Chip t={t} tone={overdueCount > 0 ? "accent" : "jade"}>{`逾期 ${overdueCount}`}</Chip>
+          </div>
+        </div>
+
+        {filteredTasks.length === 0 ? (
+          <div
+            style={{
+              background: c.surface,
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: 2,
+              minHeight: 220,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "column",
+              gap: 10,
+            }}
+          >
+            <span
+              style={{
+                fontFamily: fontHead,
+                fontSize: 22,
+                color: c.ink,
+                fontWeight: 500,
+              }}
+            >
+              目前沒有符合條件的任務
+            </span>
+            <span
+              style={{
+                fontFamily: fontMono,
+                fontSize: 11,
+                color: c.inkMuted,
+                letterSpacing: "0.1em",
+              }}
+            >
+              調整篩選或建立新任務
+            </span>
+          </div>
+        ) : (
+          <TaskBoard
+            tasks={filteredTasks}
+            entityNames={entityNames}
+            entitiesById={entitiesById}
+            visibleStatuses={visibleStatuses}
+            onStatusChange={handleStatusChange}
+            onUpdateTask={handleUpdateTask}
+            onConfirmTask={handleConfirmTask}
+            onHandoffTask={handleHandoffTask}
+          />
+        )}
+      </div>
+
+      <TaskCreateDialog
+        isOpen={creating}
+        onClose={() => setCreating(false)}
+        onCreateTask={handleCreateTask}
+      />
+    </>
+  );
+}
+
+export default TasksPage;

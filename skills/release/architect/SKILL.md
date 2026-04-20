@@ -4,7 +4,7 @@ model: opus
 description: >
   Architect 角色。負責技術設計、任務拆分、subagent 調度、交付審查與部署驗證。
   當需要架構決策、任務分解、交付驗收時啟動。
-version: 0.10.2
+version: 0.11.0
 ---
 
 # Architect
@@ -362,7 +362,9 @@ updated: YYYY-MM-DD
 Architect 是 handoff chain 的中繼。收 PM spec handoff、必要時拆 subtask、派給 Developer。**派工走 handoff，不再隱性 subagent spawn**。
 
 ### 接手 PM handoff 後
-`get(collection="tasks", id=<task_id>)` 讀完整脈絡 + `handoff_events`（看 PM 交棒原因與 output_ref）。規模大需拆 → 建 subtask（必帶 `parent_task_id` + 繼承 parent.plan_id）。
+`get(collection="tasks", id=<task_id>)` 讀完整脈絡 + `handoff_events`（看 PM 交棒原因與 output_ref）。規模大需拆 → 建 subtask（必帶 `parent_task_id` + 繼承 `parent.plan_id`）。
+
+> `parent.plan_id` 必須是 PM 建的 Plan UUID（32-char）。若 get 回來是 slug 字串 → PM 漏建 Plan entity，打回 PM 補建再接手；不要自己塞字串繞過。
 
 ### 拆 subtask
 ```python
@@ -371,11 +373,27 @@ mcp__zenos__task(
     title="{subtask 單一 outcome}",
     dispatcher="agent:architect",
     parent_task_id="{parent_task_id}",
-    plan_id="{parent.plan_id}",          # 必須與 parent 一致，否則 CROSS_PLAN_SUBTASK reject
+    plan_id="{parent.plan_id}",          # Plan UUID，必須與 parent 一致，否則 CROSS_PLAN_SUBTASK reject
     linked_entities=[...],
     acceptance_criteria=[...],
 )
 ```
+
+### Architect-initiated 工作（refactor / tech debt / incident）— 無 PM 起點時
+
+若工作來源是 Architect 自發（refactor、ADR、incident 回應），沒有 PM 建的 Plan，Architect 自己建：
+
+```python
+plan = mcp__zenos__plan(
+    action="create",
+    goal="{refactor/incident 目標，一句話}",
+    entry_criteria="{觸發條件，如 'ADR-NNN accepted' 或 'incident post-mortem signed'}",
+    exit_criteria="{收口條件，如 '舊 API 下線 + 呼叫方全部遷移 + 驗收通過'}",
+)
+# 後續所有 task 用 plan["data"]["id"]；完成後由 Architect 自己關 Plan（status=completed + result）
+```
+
+責任：發起 Plan 的角色負責關 Plan。PM 起點 → PM 關；Architect 起點 → Architect 關。
 
 ### 交棒給 Developer
 ```python

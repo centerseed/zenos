@@ -132,6 +132,12 @@ describe("parseStreamLine", () => {
     expect(parseStreamLine('{"message":{"content":[{"text":"nested"}]}}')).toEqual({ delta: "nested", debug: "" });
   });
 
+  it("extracts nested stream_event payload", () => {
+    expect(
+      parseStreamLine('{"type":"stream_event","event":{"message":{"content":[{"content":{"text":"nested stream"}}]}}}')
+    ).toEqual({ delta: "nested stream", debug: "" });
+  });
+
   it("passes through structured result (target_field + value) as raw JSON in delta", () => {
     const raw = '{"target_field":"strategy","value":{"tone":"直接"}}';
     const result = parseStreamLine(raw);

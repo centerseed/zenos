@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "zenos": {
+      "type": "http",
+      "url": "https://example.com/mcp?api_key=mytoken"
+    }
+  }
+}

@@ -37,7 +37,7 @@
     },
     {
       "name": "architect",
-      "version": "0.10.2",
+      "version": "0.11.0",
       "path": "architect",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -51,7 +51,7 @@
     },
     {
       "name": "developer",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "path": "developer",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -65,7 +65,7 @@
     },
     {
       "name": "pm",
-      "version": "0.5.1",
+      "version": "0.6.0",
       "path": "pm",
       "files": ["SKILL.md"],
       "owner": "Barry"
@@ -86,7 +86,7 @@
     },
     {
       "name": "feature",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "path": "workflows/feature",
       "files": ["SKILL.md"],
       "owner": "Barry"

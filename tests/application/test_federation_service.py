@@ -42,13 +42,23 @@ class FakeTrustedAppRepo:
     async def get_by_name(self, app_name: str) -> TrustedApp | None:
         return next((a for a in self._apps.values() if a.app_name == app_name), None)
 
-    async def create(self, app_name: str, app_secret_hash: str, allowed_issuers: list[str], allowed_scopes: list[str]) -> TrustedApp:
+    async def create(
+        self,
+        app_name: str,
+        app_secret_hash: str,
+        allowed_issuers: list[str],
+        allowed_scopes: list[str],
+        default_workspace_id: str | None = None,
+        auto_link_email_domains: list[str] | None = None,
+    ) -> TrustedApp:
         app = TrustedApp(
             app_id="new-app-id",
             app_name=app_name,
             app_secret_hash=app_secret_hash,
             allowed_issuers=allowed_issuers,
             allowed_scopes=allowed_scopes,
+            default_workspace_id=default_workspace_id,
+            auto_link_email_domains=auto_link_email_domains or [],
         )
         self._apps[app.app_id] = app
         return app
@@ -400,8 +410,21 @@ class TestAdminOperations:
             app_secret="some-secret",  # pragma: allowlist secret
             allowed_issuers=["https://securetoken.google.com/proj"],
             allowed_scopes=["read"],
+            default_workspace_id="workspace-001",
         )
         assert "error" not in result
         assert result["app_name"] == "new-app"
         assert "app_id" in result
         assert result["allowed_scopes"] == ["read"]
+        assert result["default_workspace_id"] == "workspace-001"
+
+    async def test_register_trusted_app_requires_workspace_id(self) -> None:
+        """AC-FAP-08: register_trusted_app without default_workspace_id returns validation error."""
+        svc = _make_service()
+        result = await svc.register_trusted_app(
+            app_name="no-workspace-app",
+            app_secret="some-secret",  # pragma: allowlist secret
+            allowed_issuers=["https://securetoken.google.com/proj"],
+            allowed_scopes=["read"],
+        )
+        assert result["error"] == "VALIDATION_ERROR"

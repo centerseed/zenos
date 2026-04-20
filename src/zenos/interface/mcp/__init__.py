@@ -16,6 +16,7 @@ Architecture:
   task.py          — task + _task_handler tool
   analyze.py       — analyze tool
   journal.py       — journal_write, journal_read tools
+  recent_updates.py — recent_updates tool
   governance.py    — governance_guide, find_gaps, common_neighbors tools
   source.py        — read_source, batch_update_sources tools
   attachment.py    — upload_attachment tool
@@ -325,6 +326,7 @@ from zenos.interface.mcp.task import task as _task_fn, _task_handler
 from zenos.interface.mcp.plan import plan as _plan_fn, _plan_handler
 from zenos.interface.mcp.analyze import analyze as _analyze_fn
 from zenos.interface.mcp.journal import journal_write as _journal_write_fn, journal_read as _journal_read_fn
+from zenos.interface.mcp.recent_updates import recent_updates as _recent_updates_fn
 from zenos.interface.mcp.governance import (
     governance_guide as _governance_guide_fn,
     find_gaps as _find_gaps_fn,
@@ -348,6 +350,7 @@ plan = mcp.tool(tags={"write"})(require_scope("task")(_plan_fn))
 analyze = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_analyze_fn))
 journal_write = mcp.tool(tags={"write"})(require_scope("write")(_journal_write_fn))
 journal_read = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_journal_read_fn))
+recent_updates = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_recent_updates_fn))
 governance_guide = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_governance_guide_fn))
 find_gaps = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_find_gaps_fn))
 common_neighbors = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_common_neighbors_fn))
@@ -423,6 +426,7 @@ __all__ = [
     "analyze",
     "journal_write",
     "journal_read",
+    "recent_updates",
     "governance_guide",
     "find_gaps",
     "common_neighbors",

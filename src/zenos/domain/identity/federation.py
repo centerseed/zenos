@@ -27,6 +27,8 @@ class TrustedApp:
     allowed_issuers: list[str] = field(default_factory=list)
     allowed_scopes: list[str] = field(default_factory=lambda: ["read"])
     status: str = "active"
+    default_workspace_id: str | None = None
+    auto_link_email_domains: list[str] = field(default_factory=list)
 
     def is_active(self) -> bool:
         return self.status == "active"
@@ -38,6 +40,25 @@ class TrustedApp:
         """Return only the subset of requested scopes that this app permits."""
         permitted = set(self.allowed_scopes)
         return [s for s in requested if s in permitted]
+
+    def can_autolink_email(self, email: str, email_verified: bool) -> bool:
+        """Return True if this email qualifies for domain auto-link.
+
+        Requires:
+        - email_verified is True
+        - email domain matches one of auto_link_email_domains
+        - default_workspace_id is set (needed to provision a guest partner)
+        """
+        if not email_verified:
+            return False
+        if not self.auto_link_email_domains:
+            return False
+        if not self.default_workspace_id:
+            return False
+        if "@" not in email:
+            return False
+        domain = email.split("@", 1)[1].lower()
+        return domain in {d.lower() for d in self.auto_link_email_domains}
 
 
 @dataclass

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from zenos.application.knowledge.ontology_service import DocumentLinkageValidationError
+from zenos.application.knowledge.ontology_service import DocumentLinkageValidationError, SnapshotTooLargeError
 from zenos.infrastructure.github_adapter import GitHubAdapter
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.sql_common import SCHEMA, get_pool
@@ -32,6 +32,19 @@ from zenos.interface.mcp._visibility import (
 from zenos.interface.mcp._audit import _audit_log
 
 logger = logging.getLogger(__name__)
+
+
+def _snapshot_too_large_rejection(exc: SnapshotTooLargeError) -> dict:
+    return _unified_response(
+        status="rejected",
+        data={
+            "error": {
+                "code": "SNAPSHOT_TOO_LARGE",
+                "http_status": 413,
+            },
+        },
+        rejection_reason=str(exc),
+    )
 
 
 def _document_linkage_rejection(exc: DocumentLinkageValidationError) -> dict:
@@ -313,6 +326,7 @@ async def write(
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary, linked_entity_ids（必填）。更新語意為 merge update（未提供欄位不清空）。
                linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
+               選填：material_change（bool）；當 true 時，change_summary 必填，否則視為未完成。
                可用 sync_mode 做文件治理批次同步：
                  - rename: 文件改名
                  - reclassify: 重新分類（改 tags/type）
@@ -486,6 +500,20 @@ async def write(
 
         elif collection == "documents":
             # Backward compat: collection="documents" now creates entity(type="document")
+            material_change = bool(data.get("material_change"))
+            change_summary = str(data.get("change_summary") or "").strip()
+            if material_change and not change_summary:
+                return _unified_response(
+                    status="rejected",
+                    data={
+                        "error": {
+                            "code": "CHANGE_SUMMARY_REQUIRED",
+                            "field": "change_summary",
+                        },
+                        "message": "material_change documents require change_summary",
+                    },
+                    rejection_reason="material_change_requires_change_summary",
+                )
             if data.get("sync_mode"):
                 result = await _mcp.ontology_service.sync_document_governance(data)
                 serialized = _serialize(result)
@@ -513,6 +541,8 @@ async def write(
                     data,
                     partner=_current_partner.get(),
                 )
+            except SnapshotTooLargeError as exc:
+                return _snapshot_too_large_rejection(exc)
             except DocumentLinkageValidationError as exc:
                 return _document_linkage_rejection(exc)
             serialized = _serialize(result)
@@ -526,12 +556,20 @@ async def write(
             bundle_suggestions = getattr(result, "_bundle_suggestions", None) or []
             delivery_suggestions = await _document_delivery_suggestions(serialized)
             auto_publish_suggestions = await _maybe_auto_publish_document(serialized)
+
+            # Helper Ingest Contract: noop detection + cross-doc duplicate warnings
+            helper_meta = getattr(result, "_helper_upsert_meta", {}) or {}
+            helper_warnings: list[str] = list(getattr(result, "_helper_warnings", None) or [])
+            all_warnings = list(preflight_warnings or []) + helper_warnings
+            resp_data = dict(serialized)
+            if helper_meta.get("noop"):
+                resp_data["noop"] = True
             return _unified_response(
-                data=serialized,
-                warnings=preflight_warnings or None,
+                data=resp_data,
+                warnings=all_warnings or None,
                 suggestions=(bundle_suggestions + delivery_suggestions + auto_publish_suggestions) or None,
                 context_bundle=await _build_context_bundle(linked_entity_ids=linked_ids),
-                governance_hints=_build_governance_hints(warnings=preflight_warnings),
+                governance_hints=_build_governance_hints(warnings=all_warnings),
             )
 
         elif collection == "protocols":

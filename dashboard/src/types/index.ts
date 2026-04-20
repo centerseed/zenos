@@ -165,6 +165,15 @@ export interface QualitySignals {
 export type TaskStatus = "todo" | "in_progress" | "review" | "done" | "cancelled";
 export type TaskPriority = "critical" | "high" | "medium" | "low";
 
+export interface HandoffEvent {
+  at: string;
+  fromDispatcher: string | null;
+  toDispatcher: string;
+  reason: string;
+  outputRef?: string | null;
+  notes?: string | null;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -220,6 +229,9 @@ export interface Task {
     uploaded_by?: string;
     created_at?: string;
   }>;
+  dispatcher?: string | null;
+  parentTaskId?: string | null;
+  handoffEvents?: HandoffEvent[];
   createdAt: Date;
   updatedAt: Date;
   completedAt: Date | null;

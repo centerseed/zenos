@@ -24,6 +24,8 @@ class SqlTrustedAppRepository:
             allowed_issuers=list(row["allowed_issuers"] or []),
             allowed_scopes=list(row["allowed_scopes"] or ["read"]),
             status=row["status"],
+            default_workspace_id=str(row["default_workspace_id"]) if row.get("default_workspace_id") else None,
+            auto_link_email_domains=list(row.get("auto_link_email_domains") or []),
         )
 
     async def get_by_id(self, app_id: str) -> TrustedApp | None:
@@ -57,18 +59,24 @@ class SqlTrustedAppRepository:
         app_secret_hash: str,
         allowed_issuers: list[str],
         allowed_scopes: list[str],
+        default_workspace_id: str | None = None,
+        auto_link_email_domains: list[str] | None = None,
     ) -> TrustedApp:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO zenos.trusted_apps (app_name, app_secret_hash, allowed_issuers, allowed_scopes)
-                VALUES ($1, $2, $3, $4)
+                INSERT INTO zenos.trusted_apps
+                    (app_name, app_secret_hash, allowed_issuers, allowed_scopes,
+                     default_workspace_id, auto_link_email_domains)
+                VALUES ($1, $2, $3, $4, $5, $6)
                 RETURNING *
                 """,
                 app_name,
                 app_secret_hash,
                 allowed_issuers,
                 allowed_scopes,
+                default_workspace_id,
+                auto_link_email_domains or [],
             )
         return self._row_to_model(dict(row))
 

@@ -49,7 +49,7 @@ from zenos.application.knowledge.source_service import SourceService
 from zenos.application.action.task_service import TaskService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.action import Task
-from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship, SourceType
+from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship, SourceType, Tags
 from zenos.application.identity.workspace_context import (
     active_partner_view,
     build_available_workspaces,
@@ -950,6 +950,19 @@ def _task_to_dict(t: Task) -> dict:
         "rejectionReason": t.rejection_reason,
         "result": t.result,
         "project": t.project,
+        "dispatcher": t.dispatcher,
+        "parentTaskId": t.parent_task_id,
+        "handoffEvents": [
+            {
+                "at": h.at,
+                "fromDispatcher": h.from_dispatcher,
+                "toDispatcher": h.to_dispatcher,
+                "reason": h.reason,
+                "outputRef": h.output_ref,
+                "notes": h.notes,
+            }
+            for h in (t.handoff_events or [])
+        ],
         "attachments": _attachments_with_proxy_url(t.attachments),
         "createdAt": t.created_at,
         "updatedAt": t.updated_at,
@@ -1767,7 +1780,7 @@ async def create_task(request: Request) -> Response:
         return _error_response("INVALID_INPUT", "title is required", 400, request=request)
 
     data: dict = {"title": title, "created_by": effective_id}
-    for _field in ("description", "priority", "assignee", "due_date", "project"):
+    for _field in ("description", "priority", "assignee", "due_date", "project", "linked_entities"):
         _val = body.get(_field)
         if _val is not None:
             data[_field] = _val
@@ -2065,6 +2078,66 @@ async def confirm_task(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Endpoint: POST /api/data/tasks/{taskId}/handoff
+# ──────────────────────────────────────────────
+
+
+async def handoff_task(request: Request) -> Response:
+    """Append a handoff event and move the task's dispatcher.
+
+    Body: { to_dispatcher, reason, output_ref?, notes? }
+    """
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    task_id = request.path_params.get("taskId")
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+
+    to_dispatcher = (body.get("to_dispatcher") or "").strip()
+    reason = (body.get("reason") or "").strip()
+    if not to_dispatcher:
+        return _error_response("INVALID_INPUT", "to_dispatcher is required", 400, request=request)
+    if not reason:
+        return _error_response("INVALID_INPUT", "reason is required", 400, request=request)
+
+    output_ref = body.get("output_ref")
+    notes = body.get("notes")
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        task_service = _make_task_service()
+        result = await task_service.handoff_task(
+            task_id,
+            to_dispatcher=to_dispatcher,
+            reason=reason,
+            output_ref=output_ref,
+            notes=notes,
+            updated_by=effective_id,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            return _error_response("NOT_FOUND", msg, 404, request=request)
+        return _error_response("INVALID_INPUT", msg, 400, request=request)
+    except Exception:
+        logger.exception("Failed to handoff task %s", task_id)
+        return _error_response("INTERNAL_ERROR", "Failed to handoff task", 500, request=request)
+    finally:
+        current_partner_id.reset(token)
+
+    logger.info("Handoff task %s → %s by partner %s", task_id, to_dispatcher, effective_id)
+    return _json_response({"task": _task_to_dict(result.task)}, request=request)
+
+
+# ──────────────────────────────────────────────
 # Endpoint: GET /api/data/quality-signals
 # ──────────────────────────────────────────────
 
@@ -2213,6 +2286,117 @@ async def get_governance_health(request: Request) -> Response:
 
 
 # ──────────────────────────────────────────────
+# Document Creation Endpoint
+# ──────────────────────────────────────────────
+
+
+async def create_doc(request: Request) -> Response:
+    """Create a new native document entity.
+
+    POST /api/docs
+    Body: {name: str, doc_role?: "index"|"single", status?: str, product_id?: str}
+    Returns: {doc_id, base_revision_id: null, entity}
+
+    Creates a type=document level=3 entity with a primary zenos_native source.
+    No document_revisions row is created — the first POST /content with
+    base_revision_id=null will create rev-1.
+    """
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("FORBIDDEN", "Current workspace cannot create documents", 403, request=request)
+    if is_guest(partner):
+        return _error_response("FORBIDDEN", "Guest cannot create documents", 403, request=request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+    if not isinstance(body, dict):
+        return _error_response("INVALID_INPUT", "Request body must be a JSON object", 400, request=request)
+
+    name = body.get("name")
+    if not isinstance(name, str) or not name.strip():
+        return _error_response("INVALID_INPUT", "name is required", 400, request=request)
+    name = name.strip()
+
+    doc_role = body.get("doc_role", "index")
+    if doc_role not in ("index", "single"):
+        return _error_response("INVALID_INPUT", "doc_role must be 'index' or 'single'", 400, request=request)
+
+    status = body.get("status", "draft")
+    if not isinstance(status, str) or not status.strip():
+        status = "draft"
+    else:
+        status = status.strip()
+
+    product_id = body.get("product_id")
+    if product_id is not None:
+        product_id = str(product_id).strip() or None
+
+    doc_id = uuid.uuid4().hex
+    canonical_path = f"/docs/{doc_id}"
+    source_id = uuid.uuid4().hex
+    primary_source = {
+        "source_id": source_id,
+        "type": "zenos_native",
+        "uri": canonical_path,
+        "is_primary": True,
+        "source_status": "valid",
+        "label": name,
+    }
+
+    entity = Entity(
+        id=doc_id,
+        name=name,
+        type="document",
+        level=3,
+        status=status,
+        summary="",
+        tags=Tags(what=[], why="", how="", who=[]),
+        sources=[primary_source],
+        doc_role=doc_role,
+        parent_id=product_id,
+        visibility="public",
+    )
+
+    await _ensure_repos()
+    ctx_token = current_partner_id.set(effective_id)
+    try:
+        saved_entity = await _entity_repo.upsert(entity)
+    finally:
+        current_partner_id.reset(ctx_token)
+
+    # Set canonical_path on the entity row (not managed by entity_repo.upsert).
+    pool = await get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""
+            UPDATE {SCHEMA}.entities
+            SET canonical_path = $1, updated_at = now()
+            WHERE partner_id = $2 AND id = $3
+            """,
+            canonical_path,
+            effective_id,
+            doc_id,
+        )
+
+    logger.info("Created document entity %s for partner %s", doc_id, effective_id)
+    return _json_response(
+        {
+            "doc_id": doc_id,
+            "base_revision_id": None,
+            "entity": _entity_to_dict(saved_entity),
+        },
+        request=request,
+    )
+
+
+# ──────────────────────────────────────────────
 # Document Delivery Endpoints
 # ──────────────────────────────────────────────
 
@@ -2288,15 +2472,30 @@ async def save_document_content(request: Request) -> Response:
     if not isinstance(content, str):
         return _error_response("INVALID_INPUT", "content must be a string", 400, request=request)
 
-    base_revision_id = body.get("base_revision_id")
-    if not isinstance(base_revision_id, str) or not base_revision_id.strip():
+    # base_revision_id must be present in the body (key must exist).
+    # Acceptable values:
+    #   - null / None  → first save (no prior revision); skips conflict check
+    #   - non-empty string → existing revision ID; conflict check is enforced
+    _SENTINEL = object()
+    _raw_base = body.get("base_revision_id", _SENTINEL)
+    if _raw_base is _SENTINEL:
         return _error_response(
             "INVALID_INPUT",
             "base_revision_id is required for direct document writes",
             400,
             request=request,
         )
-    base_revision_id = base_revision_id.strip()
+    if _raw_base is None:
+        base_revision_id = None  # first-save sentinel: skip conflict check
+    elif isinstance(_raw_base, str) and _raw_base.strip():
+        base_revision_id = _raw_base.strip()
+    else:
+        return _error_response(
+            "INVALID_INPUT",
+            "base_revision_id must be null (first save) or a non-empty revision ID string",
+            400,
+            request=request,
+        )
 
     await _ensure_repos()
     token = current_partner_id.set(effective_id)
@@ -2779,12 +2978,14 @@ dashboard_routes = [
     Route("/api/data/tasks/{taskId}/comments", create_comment, methods=["POST", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/comments", list_comments, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/confirm", confirm_task, methods=["POST", "OPTIONS"]),
+    Route("/api/data/tasks/{taskId}/handoff", handoff_task, methods=["POST", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/attachments/{attachmentId}", delete_task_attachment, methods=["DELETE", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/attachments", upload_task_attachment, methods=["POST", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}", update_task, methods=["PATCH", "OPTIONS"]),
     Route("/api/data/tasks", list_tasks, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks", create_task, methods=["POST", "OPTIONS"]),
     Route("/attachments/{attachment_id}", get_attachment, methods=["GET", "OPTIONS"]),
+    Route("/api/docs", create_doc, methods=["POST", "OPTIONS"]),
     Route("/api/docs/{docId}/publish", publish_document_snapshot, methods=["POST", "OPTIONS"]),
     Route("/api/docs/{docId}/content", save_document_content, methods=["POST", "OPTIONS"]),
     Route("/api/docs/{docId}", get_document_delivery, methods=["GET", "OPTIONS"]),

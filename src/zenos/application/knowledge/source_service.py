@@ -1,13 +1,30 @@
-"""SourceService — reads external document content via adapters.
+"""SourceService — reads external document content via adapters and manages
+helper-ingest upsert logic.
 
 Bridges entity/document metadata with actual file content
 by resolving the source URI through the appropriate adapter.
+
+New in SPEC-docs-native-edit-and-helper-ingest (Helper Ingest Contract):
+  - add_source / update_source accept external_id for upsert-by-key semantics.
+  - snapshot_summary inline storage (≤10KB language-model summary, not raw mirror).
+  - read_source returns staleness_hint when last_synced_at is stale.
+  - Duplicate external_id across docs triggers warning (not rejection).
 """
 
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
 from zenos.domain.knowledge import SourceType
 from zenos.domain.knowledge import EntityRepository, SourceAdapter
+from zenos.domain.doc_types import generate_source_id
+
+logger = logging.getLogger(__name__)
+
+# Number of days after which a source is considered stale
+STALENESS_DAYS = 14
 
 
 def _source_status(source: dict) -> str:
@@ -15,8 +32,80 @@ def _source_status(source: dict) -> str:
     return str(source.get("source_status") or source.get("status") or "valid")
 
 
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _compute_staleness_hint(source: dict) -> dict | None:
+    """Return a staleness_hint dict if the source is stale, else None.
+
+    Stale conditions (per SPEC P0-3):
+      1. last_synced_at is older than STALENESS_DAYS days.
+      2. external_updated_at > last_synced_at (helper pushed an older version or
+         remote updated since last sync).
+
+    Returns None if no staleness detected or if timestamps are absent.
+    """
+    last_synced_raw = source.get("last_synced_at")
+    external_updated_raw = source.get("external_updated_at")
+
+    if not last_synced_raw:
+        return None
+
+    try:
+        last_synced = _parse_iso(last_synced_raw)
+    except (ValueError, TypeError):
+        return None
+
+    now = _now_utc()
+    threshold = now - timedelta(days=STALENESS_DAYS)
+
+    if last_synced < threshold:
+        return {
+            "reason": "outdated",
+            "last_synced_at": last_synced.isoformat(),
+            "suggested_helper_prompt": (
+                "此 source 超過 14 天未同步。"
+                "建議執行 helper 重新同步：用 Notion MCP / GDrive MCP 讀取最新內容，"
+                "再用 ZenOS MCP write(update_source, external_id=...) 更新。"
+            ),
+        }
+
+    if external_updated_raw:
+        try:
+            external_updated = _parse_iso(external_updated_raw)
+        except (ValueError, TypeError):
+            return None
+        if external_updated > last_synced:
+            return {
+                "reason": "inverted_timestamps",
+                "last_synced_at": last_synced.isoformat(),
+                "external_updated_at": external_updated.isoformat(),
+                "suggested_helper_prompt": (
+                    "外部文件的 external_updated_at 晚於 last_synced_at，"
+                    "表示 ZenOS 持有的版本可能已過期。"
+                    "建議用 Notion MCP / GDrive MCP 重新同步。"
+                ),
+            }
+
+    return None
+
+
+def _parse_iso(ts: Any) -> datetime:
+    """Parse an ISO-8601 string or datetime into an aware datetime."""
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc)
+        return ts
+    s = str(ts).strip()
+    # Try stdlib fromisoformat (Python 3.11+ handles 'Z'; earlier needs manual fix)
+    s_fixed = s.replace("Z", "+00:00")
+    return datetime.fromisoformat(s_fixed)
+
+
 class SourceService:
-    """Application-layer service for reading external document sources."""
+    """Application-layer service for reading external document sources
+    and managing helper-ingest upsert operations."""
 
     def __init__(
         self,
@@ -26,6 +115,117 @@ class SourceService:
     ) -> None:
         self._entities = entity_repo
         self._adapter = source_adapter
+
+    # ------------------------------------------------------------------
+    # Helper Ingest: upsert_source
+    # ------------------------------------------------------------------
+
+    def upsert_source_in_sources(
+        self,
+        sources: list[dict],
+        *,
+        external_id: str,
+        new_source_data: dict,
+        now: datetime | None = None,
+    ) -> tuple[list[dict], str, bool]:
+        """Upsert a source within a sources list by external_id.
+
+        Returns (updated_sources, source_id, was_noop).
+
+        Logic:
+          - If a source with matching external_id already exists → update it
+            in-place, preserve source_id, update last_synced_at to now.
+          - If no match → append a new source with a fresh source_id.
+          - was_noop=True when external_updated_at and snapshot_summary are
+            unchanged vs. the existing record (no real content change).
+        """
+        if now is None:
+            now = _now_utc()
+
+        now_iso = now.isoformat()
+
+        # Find existing source with this external_id
+        existing_idx = next(
+            (i for i, s in enumerate(sources) if s.get("external_id") == external_id),
+            None,
+        )
+
+        if existing_idx is not None:
+            existing = sources[existing_idx]
+            source_id = existing.get("source_id") or generate_source_id()
+
+            # Detect no-op: neither external_updated_at nor snapshot_summary changed
+            new_ext_updated = new_source_data.get("external_updated_at")
+            new_snapshot = new_source_data.get("snapshot_summary")
+            old_ext_updated = existing.get("external_updated_at")
+            old_snapshot = existing.get("snapshot_summary")
+
+            was_noop = (new_ext_updated == old_ext_updated) and (new_snapshot == old_snapshot)
+
+            # Always update last_synced_at to now, regardless of noop
+            updated = dict(existing)
+            updated["last_synced_at"] = now_iso
+            updated["source_id"] = source_id
+
+            # Merge in new fields (skipping None values for optional fields)
+            for key in ("uri", "label", "type", "doc_type", "doc_status", "note", "is_primary"):
+                if key in new_source_data and new_source_data[key] is not None:
+                    updated[key] = new_source_data[key]
+
+            if "external_updated_at" in new_source_data:
+                updated["external_updated_at"] = new_source_data["external_updated_at"]
+
+            # snapshot_summary: allow explicit null to clear
+            if "snapshot_summary" in new_source_data:
+                updated["snapshot_summary"] = new_source_data["snapshot_summary"]
+
+            sources = list(sources)
+            sources[existing_idx] = updated
+            return sources, source_id, was_noop
+
+        # New source
+        source_id = generate_source_id()
+        new_src = {
+            "source_id": source_id,
+            "external_id": external_id,
+            "last_synced_at": now_iso,
+            "status": "valid",
+            "source_status": "valid",
+        }
+        for key in ("uri", "label", "type", "doc_type", "doc_status", "note", "is_primary",
+                    "external_updated_at", "snapshot_summary"):
+            if key in new_source_data and new_source_data[key] is not None:
+                new_src[key] = new_source_data[key]
+
+        sources = list(sources) + [new_src]
+        return sources, source_id, False
+
+    def find_duplicate_external_id_across_entities(
+        self,
+        entities: list[Any],
+        *,
+        external_id: str,
+        exclude_entity_id: str | None = None,
+    ) -> list[str]:
+        """Return entity IDs that already contain a source with the given external_id.
+
+        Used for cross-doc duplicate detection (warning, not rejection).
+        Excludes the entity with exclude_entity_id (so the caller's own doc
+        doesn't trigger a false positive after its own upsert).
+        """
+        matches: list[str] = []
+        for entity in entities:
+            if entity.id == exclude_entity_id:
+                continue
+            for src in (entity.sources or []):
+                if src.get("external_id") == external_id:
+                    matches.append(entity.id)
+                    break
+        return matches
+
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
 
     async def read_source(self, doc_id: str, *, source_uri: str | None = None) -> str:
         """Read the raw content of a document's source file.
@@ -149,6 +349,103 @@ class SourceService:
                 "source_status": "stale",
                 "suggested_action": "check_permission",
                 "proposed_uri": None,
+            }
+
+    async def read_source_with_snapshot(
+        self,
+        doc_id: str,
+        *,
+        source_id: str | None = None,
+        source_uri: str | None = None,
+    ) -> dict:
+        """Read source content, preferring snapshot_summary for helper-ingest sources.
+
+        For sources with a snapshot_summary, return the summary directly without
+        calling the external adapter.  For zenos_native sources, read from GCS
+        via the primary_snapshot_revision_id path.
+
+        Returns:
+            {"content": str, "source_id": str, "content_type": "snapshot_summary"|"full"}
+            {"error": "SNAPSHOT_UNAVAILABLE", "setup_hint": str} when no snapshot
+            {"error": "NOT_FOUND", ...}
+        """
+        entity = await self._entities.get_by_id(doc_id)
+        if entity is None:
+            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' not found"}
+
+        sources = entity.sources or []
+
+        # Select target source
+        target: dict | None = None
+        if source_id:
+            target = next((s for s in sources if s.get("source_id") == source_id), None)
+        elif source_uri:
+            target = next((s for s in sources if s.get("uri", "") == source_uri), None)
+        else:
+            # Primary fallback: prefer primary+valid, then any valid
+            target = next(
+                (s for s in sources if s.get("is_primary") and _source_status(s) == "valid"),
+                None,
+            )
+            if target is None:
+                target = next((s for s in sources if _source_status(s) == "valid"), None)
+            if target is None and sources:
+                target = sources[-1]
+
+        if target is None:
+            return {"error": "NOT_FOUND", "message": f"Document '{doc_id}' has no sources"}
+
+        sid = target.get("source_id", "")
+        stype = target.get("type", "")
+
+        # Helper-ingest sources: return snapshot_summary if available
+        if stype not in ("zenos_native", "github"):
+            snapshot = target.get("snapshot_summary")
+            if snapshot:
+                staleness = _compute_staleness_hint(target)
+                result: dict = {
+                    "content": snapshot,
+                    "source_id": sid,
+                    "content_type": "snapshot_summary",
+                }
+                if staleness:
+                    result["staleness_hint"] = staleness
+                return result
+            # No snapshot_summary — return unavailable with setup_hint
+            return {
+                "error": "SNAPSHOT_UNAVAILABLE",
+                "source_id": sid,
+                "setup_hint": (
+                    "此 source 尚無 snapshot_summary。"
+                    "建議用 Notion MCP 同步這份文件，或在 Dashboard 點重新同步。"
+                ),
+            }
+
+        # zenos_native: read via adapter (GCS) — adapter handles the /docs/{id} URI
+        uri = target.get("uri", "")
+        if not uri and self._adapter is None:
+            return {
+                "error": "SNAPSHOT_UNAVAILABLE",
+                "source_id": sid,
+                "setup_hint": "zenos_native source 尚未有 revision。請先在 Dashboard 儲存文件。",
+            }
+
+        try:
+            content = await self._adapter.read_content(uri)
+            staleness = _compute_staleness_hint(target)
+            result = {
+                "content": content,
+                "source_id": sid,
+                "content_type": "full",
+            }
+            if staleness:
+                result["staleness_hint"] = staleness
+            return result
+        except FileNotFoundError:
+            return {
+                "error": "SNAPSHOT_UNAVAILABLE",
+                "source_id": sid,
+                "setup_hint": "zenos_native source 尚未有 revision。請先在 Dashboard 儲存文件。",
             }
 
     async def _should_archive_entity(self, entity) -> bool:

@@ -86,6 +86,7 @@ describe("createTask", () => {
       assignee: "user-2",
       due_date: "2024-12-31",
       project: "Proj",
+      linked_entities: ["entity-1"],
     });
 
     const call = fakeFetch.mock.calls[0];
@@ -97,6 +98,7 @@ describe("createTask", () => {
       assignee: "user-2",
       due_date: "2024-12-31",
       project: "Proj",
+      linked_entities: ["entity-1"],
     });
   });
 

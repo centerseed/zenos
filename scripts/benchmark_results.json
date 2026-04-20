@@ -1,0 +1,1793 @@
+[
+  {
+    "capability": "l2_three_questions",
+    "accuracy": 0.8444444444444444,
+    "stability": 0.8,
+    "avg_latency_ms": 7433,
+    "mismatches": [
+      "  Firestore billing schema（只有工程師懂） (run 3): expected=fail, got=ERROR: litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+      "  客戶上手流程（跨角色共識） (run 1): expected=pass, got=ERROR: litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+      "  Sprint 14 排程（PM 專屬知識） (run 2): expected=fail, got=pass",
+      "  Sprint 14 排程（PM 專屬知識） (run 3): expected=fail, got=pass",
+      "  Git branching strategy（工程實務） (run 1): expected=fail, got=pass",
+      "  Git branching strategy（工程實務） (run 2): expected=fail, got=pass",
+      "  Git branching strategy（工程實務） (run 3): expected=fail, got=pass"
+    ],
+    "results": [
+      {
+        "test": "安全機制（good L2） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 6337,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是跑者、客服還是工程師，都能理解『為了防止受傷而自動調整訓練量』這一核心邏輯，不涉及特定專業知識門檻。",
+          "has_downstream_impact": true,
+          "impact_reason": "此機制直接關聯到『訓練計畫』、『訓練負荷』與『用戶狀態』等節點。若安全機制參數調整，會連帶影響訓練計畫的生成邏輯與用戶的訓練進度顯示。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運行的系統規則與狀態，而非單一事件。它作為系統的常態性防護機制，持續影響後續的訓練決策。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "安全機制（good L2） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 5850,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是跑者、客服還是工程師，都能理解『為了防止受傷而自動調整訓練量』這一核心邏輯，這是一個跨角色的業務共識，而非僅限於技術實作細節。",
+          "has_downstream_impact": true,
+          "impact_reason": "當『安全機制』的定義或閾值改變時，會直接影響『訓練計畫』、『訓練負荷計算模型』以及『用戶通知策略』，這些概念必須隨之調整以保持一致性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運行的系統狀態與規則，而非單一事件。它作為一種保護機制，在用戶使用產品的整個生命週期中持續存在並發揮作用。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "安全機制（good L2） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 7284,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是跑者、客服還是工程師，都能理解『為了防止受傷而自動調整訓練量』這一核心邏輯，不存在專業壁壘。",
+          "has_downstream_impact": true,
+          "impact_reason": "若此機制改變（例如調整安全閾值或演算法），會直接影響『訓練計畫』、『訓練負荷計算模型』以及『用戶通知策略』等其他節點，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運行的系統狀態與規則，而非單一事件，它會持續影響用戶的訓練體驗直到被修改。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "收費模型（good L2） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 5040,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "收費模型是商業模式的核心，無論是行銷、客服還是財務，對於公司如何獲利都有共同的認知基礎，且該定義跨角色皆可理解。",
+          "has_downstream_impact": true,
+          "impact_reason": "若收費模型改變，會直接影響「客戶權益」、「帳單計算邏輯」、「銷售話術」以及「合約條款」等其他概念，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的商業狀態，定義了公司在一段時間內的營運規則，而非單一事件。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "收費模型（good L2） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 7264,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "收費模型是商業模式的核心，無論是行銷、客服還是財務，對於公司如何獲利都有共同的認知基礎，且該定義跨角色皆可理解並達成共識。",
+          "has_downstream_impact": true,
+          "impact_reason": "當收費模型改變時，會直接影響『客戶權益』、『合約條款』、『帳單系統邏輯』以及『銷售話術』等其他概念，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的商業狀態，定義了公司在一段時間內的營運規則，而非單一事件。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "收費模型（good L2） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 10097,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "收費模型是商業模式的核心，無論是行銷、客服還是財務，對於公司如何獲利都有共同的認知基礎，且該定義跨角色皆可理解。",
+          "has_downstream_impact": true,
+          "impact_reason": "當收費模型改變時，會直接影響『客戶合約』、『帳單系統邏輯』、『銷售話術』以及『財務預測模型』等其他概念，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的商業狀態，定義了公司在一段時間內的營運規則，而非單一的交易事件。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "V2 訓練流程（good L2） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 7719,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "該流程定義了產品的核心運作邏輯，無論是跑者（使用者）、行銷（推廣重點）、客服（處理客訴依據）還是工程師（系統架構），都能理解並認同此循環機制是產品運作的基礎。",
+          "has_downstream_impact": true,
+          "impact_reason": "若此流程定義改變（例如從每週循環改為每日循環），將直接影響「訓練計畫」、「用戶目標」、「數據回顧模型」及「通知觸發機制」等相關節點的邏輯與關聯，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運作的狀態機制，而非單一事件。它描述了系統如何長期維持運作的規則，在被下一個版本（如 V3）取代前，它持續為真並指導所有相關決策。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "V2 訓練流程（good L2） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 7151,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是跑者、行銷、客服還是工程師，都能理解這是一個包含計畫、執行、回顧的循環機制，且該機制定義了產品的核心運作邏輯，不屬於特定專業領域的黑盒子。",
+          "has_downstream_impact": true,
+          "impact_reason": "若此流程定義改變（例如從每週循環改為每日循環），將直接影響「訓練計畫」、「用戶目標」、「AI 演算法參數」及「客服 SOP」等其他節點的定義與運作方式。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運作的業務邏輯狀態，而非單一事件。只要產品存在，此流程即持續定義系統如何處理用戶數據與生成內容。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "V2 訓練流程（good L2） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 6567,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是跑者、行銷、客服還是工程師，都能理解這是一個循環性的核心運作機制，且其定義跨越了技術與業務邊界，具備高度共識。",
+          "has_downstream_impact": true,
+          "impact_reason": "若此流程定義改變（例如從每週循環改為每日循環），將直接影響『訓練計畫』、『用戶目標』、『AI 模型參數』及『客服應對策略』等其他概念，耦合度高。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運作的狀態機制，而非單一事件。它描述的是系統如何運作的規則，在被下一個版本取代前，它持續為真並指導所有相關決策。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "MCP Server framework（技術細節，非共識） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 5471,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "技術選型細節（如 FastMCP、SSE、asyncio）屬於特定技術領域的專業知識，非技術背景的產品經理或業務人員無法判斷其真偽或必要性，僅後端工程師群體能理解。",
+          "has_downstream_impact": true,
+          "impact_reason": "若技術選型變更（例如從 FastMCP 改為其他框架），會直接影響到 AI Agent 的開發規範、部署架構以及與前端的介面協議，具有顯著的耦合性。",
+          "survives_over_time": true,
+          "time_reason": "技術選型是一種持續存在的狀態，在下一次架構重構或技術債清理前，它持續定義了系統的運作方式。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "MCP Server framework（技術細節，非共識） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6818,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "技術選型細節（如 FastMCP、SSE、Cloud Run）屬於特定技術領域的專業決策，非技術背景的角色（如產品經理、業務人員）難以理解其真偽或必要性，僅能被動接受結果，不具備跨角色的共識基礎。",
+          "has_downstream_impact": false,
+          "impact_reason": "雖然技術選型會影響開發實作，但作為一個「技術選型」概念本身，它在知識圖譜中缺乏與其他業務邏輯或架構節點的強耦合。修改此選型通常導致的是程式碼重構，而非知識圖譜中其他概念節點的連鎖更新。",
+          "survives_over_time": false,
+          "time_reason": "「技術選型」本質上是一個決策過程的結果，屬於一個時間點上的事件（Decision Event），而非持續存在的狀態。一旦選型完成並進入開發階段，該概念即轉化為具體的實作細節，不再作為一個獨立的狀態節點存在。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "MCP Server framework（技術細節，非共識） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 7681,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "技術選型細節（如 FastMCP、SSE、asyncio）屬於特定技術領域的專業知識，非技術背景的產品經理或業務人員無法判斷其真偽或必要性，僅後端工程師群體能理解。",
+          "has_downstream_impact": true,
+          "impact_reason": "若技術選型變更（例如從 FastMCP 改為其他框架），會直接影響到 AI Agent 的開發規範、部署架構以及與前端的介面協議，具有顯著的耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的架構決策狀態，在下一次技術重構或升級前，它會持續作為開發規範存在。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "今天部署了 hotfix（一次性事件） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 9131,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "任何角色（PM、工程師、QA）都能理解這是一個針對特定問題的修復行動，其定義與目的明確，不限於特定技術背景。",
+          "has_downstream_impact": false,
+          "impact_reason": "這是一個單一事件（Hotfix），其發生不會導致知識圖譜中其他概念（如功能定義、業務邏輯）發生結構性變更或需要重新檢視，它僅是狀態的修正，而非狀態本身。",
+          "survives_over_time": false,
+          "time_reason": "這是一個具體的事件（Event），發生在特定時間點且已結束，不具備持續描述系統狀態的屬性。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "今天部署了 hotfix（一次性事件） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 5145,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "任何角色（PM、工程師、QA）都能理解這是一個針對特定問題的修復行動，其事實真偽不依賴於特定專業知識。",
+          "has_downstream_impact": false,
+          "impact_reason": "這是一個單一事件的紀錄，修復完成後，該節點本身不會再引發其他知識圖譜節點的連鎖變更或重新檢視需求。",
+          "survives_over_time": false,
+          "time_reason": "這是一個具體的歷史事件（Hotfix 部署），而非一個持續存在的狀態。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "今天部署了 hotfix（一次性事件） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6314,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "這是一個具體的工程執行事件，其細節（如 task fallback 邏輯缺失）僅對工程師有意義，非工程背景的角色無法判斷其技術細節的真偽，屬於專業領域內的執行細節，而非跨角色的共識概念。",
+          "has_downstream_impact": false,
+          "impact_reason": "此事件為過去發生的修復動作，其本身不會導致知識圖譜中其他概念需要重新檢視或更新。它是一個終結的歷史紀錄，而非一個會引發連鎖反應的狀態節點。",
+          "survives_over_time": false,
+          "time_reason": "這是一個典型的「事件」（Event），發生在特定時間點並已結束，不具備持續描述系統狀態的屬性。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Dashboard 按鈕顏色（無下游影響） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6752,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "設計規範與視覺風格屬於跨角色共識，無論是 PM、設計師還是工程師，都能理解並認同這是一項關於產品視覺一致性的事實。",
+          "has_downstream_impact": false,
+          "impact_reason": "此概念描述的是具體的 UI 實作細節（顏色與 CSS 類別），若此樣式改變，影響的是具體的程式碼或 UI 元件，而非知識圖譜中的其他邏輯概念或業務規則。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續存在的狀態，定義了 Dashboard 按鈕在未被修改前的視覺標準。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Dashboard 按鈕顏色（無下游影響） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 9821,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "設計規範與視覺風格屬於跨角色共識，無論是 PM、設計師還是工程師，都能理解並認同這是一項既定的視覺標準。",
+          "has_downstream_impact": false,
+          "impact_reason": "此概念描述的是具體的 UI 實作細節（顏色與 CSS 類別），若此樣式改變，影響的是具體的 UI 元件或程式碼，而非知識圖譜中的其他邏輯概念或業務規則。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續存在的狀態，定義了系統在一段時間內的視覺呈現標準，直到下一次設計改版為止。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Dashboard 按鈕顏色（無下游影響） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 7785,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "雖然涉及技術細節，但「主按鈕樣式」作為視覺規範，任何角色（PM、設計師、工程師）都能理解其作為統一視覺標準的定義，不具備專業知識門檻。",
+          "has_downstream_impact": false,
+          "impact_reason": "此概念描述的是具體的 UI 實作細節（CSS 顏色值），若此樣式改變，通常僅需更新對應的 UI 元件或 CSS 變數，不會導致其他業務邏輯或架構概念需要重新檢視或連動更新。",
+          "survives_over_time": true,
+          "time_reason": "這是一個描述 UI 狀態的規範，在被下一次設計改版取代前，它會持續作為事實存在。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Firestore billing schema（只有工程師懂） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6899,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "此概念屬於技術實作細節（資料庫 Schema），僅後端工程師能理解其結構與意義，非跨角色共識。",
+          "has_downstream_impact": false,
+          "impact_reason": "Schema 的變更通常直接對應到程式碼邏輯的修改，而非知識圖譜中其他業務概念的連動更新，屬於實作層面的耦合。",
+          "survives_over_time": false,
+          "time_reason": "這是一個技術實作的定義，而非業務狀態。它描述的是「資料如何儲存」，而非「業務處於什麼狀態」。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Firestore billing schema（只有工程師懂） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 7267,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "此概念屬於技術實作細節（資料庫 Schema），僅後端工程師能理解其結構與意義，非跨角色共識。",
+          "has_downstream_impact": false,
+          "impact_reason": "此為實作層級的儲存結構，變更它通常只影響對應的程式碼邏輯，不會導致知識圖譜中其他業務邏輯節點需要重新檢視。",
+          "survives_over_time": true,
+          "time_reason": "這是一個描述資料儲存狀態的定義，在系統運作期間持續有效。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Firestore billing schema（只有工程師懂） (run 3)",
+        "expected": "fail",
+        "actual": "ERROR: litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+        "correct": false,
+        "latency_ms": 905,
+        "raw": {
+          "error": "litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n"
+        }
+      },
+      {
+        "test": "Phase 0 開發階段（有終止條件的狀態） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 8984,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "專案階段定義是跨部門溝通的基礎，無論是工程、產品還是業務角色，都能理解『Phase 0』代表資源投入程度與目標範圍的共識。",
+          "has_downstream_impact": true,
+          "impact_reason": "當階段從 Phase 0 變更為 Phase 1 時，會直接影響『資源配置策略』、『功能開發優先級』以及『驗證標準』等其他概念，具有顯著的連動效應。",
+          "survives_over_time": true,
+          "time_reason": "這是一個描述專案當前狀態的標籤，在進入下一階段前，該狀態持續為真並持續指導決策，屬於狀態而非單一事件。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "Phase 0 開發階段（有終止條件的狀態） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 12692,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "專案階段定義是跨部門溝通的基礎，無論是工程、產品還是業務角色，理解當前處於驗證階段皆能達成共識，並據此調整工作優先級。",
+          "has_downstream_impact": true,
+          "impact_reason": "當階段從 Phase 0 轉移至下一階段時，會直接影響「資源分配策略」、「功能開發範疇」以及「成功指標（KPI）」等其他概念，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的狀態，描述了 ZenOS 當前的生存模式與目標，在進入下一階段前，此狀態持續為真並指導決策。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "Phase 0 開發階段（有終止條件的狀態） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 6929,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "專案階段定義是跨部門共識的基礎，無論是工程、產品還是業務角色，都能理解『Phase 0』代表資源投入程度與驗證目標，不存在專業壁壘。",
+          "has_downstream_impact": true,
+          "impact_reason": "當專案階段從 Phase 0 變更為 Phase 1 時，會直接影響『資源配置策略』、『功能開發優先級』以及『客戶驗收標準』等其他節點，具有強耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的狀態，描述了 ZenOS 當前的運作模式與目標，直到階段轉換前，該狀態持續影響所有決策。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "客戶上手流程（跨角色共識） (run 1)",
+        "expected": "pass",
+        "actual": "ERROR: litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+        "correct": false,
+        "latency_ms": 1071,
+        "raw": {
+          "error": "litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n"
+        }
+      },
+      {
+        "test": "客戶上手流程（跨角色共識） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 8758,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是產品、行銷還是客服，對於『客戶需要完成註冊、設定 API key 並連線知識庫』這一連串步驟的必要性與定義皆有共識，這是業務運作的基礎框架。",
+          "has_downstream_impact": true,
+          "impact_reason": "當此流程變更（例如新增驗證步驟或變更 API key 格式），會直接影響『客戶體驗指標』、『客服支援手冊』以及『產品 Dashboard 設計』等其他節點，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續存在的業務狀態與規範，而非單一事件。只要產品存在，此流程即持續定義客戶如何進入系統，並作為決策依據。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "客戶上手流程（跨角色共識） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 9325,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是產品、行銷還是客服，對於『客戶如何從註冊到開始使用』的認知是一致的，這是一個跨部門共同關注的業務路徑，而非單一專業領域的術語。",
+          "has_downstream_impact": true,
+          "impact_reason": "此流程的變更會直接影響『產品功能設計』、『客服支援策略』以及『行銷漏斗轉換率』等概念，若流程變更，上述概念的定義與衡量指標皆需同步調整。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續存在的業務狀態與機制，而非單一事件。它描述的是系統如何引導客戶的長期邏輯，即便具體步驟會優化，該流程作為一個概念持續存在。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "漸進式信任機制（產品核心原則） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 6447,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是客戶、產品經理還是工程師，都能理解這是一種權限控管策略，且認同其目的是為了降低資安疑慮，不涉及特定專業技術門檻。",
+          "has_downstream_impact": true,
+          "impact_reason": "當此概念改變（例如信任層級定義變更），會直接影響「權限模型」、「資料存取策略」以及「使用者介面流程」等其他節點的設計與實作。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的安全策略狀態，而非單一事件，它定義了系統在任何時間點的運作模式。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "漸進式信任機制（產品核心原則） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 6449,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是客戶、產品經理還是工程師，都能理解這是一種『權限隨信任度動態調整』的機制，不涉及特定專業技術門檻，屬於產品設計哲學的共識。",
+          "has_downstream_impact": true,
+          "impact_reason": "當此概念改變（例如調整信任分級標準），會直接影響『權限模型』、『資料存取策略』以及『使用者引導流程（Onboarding）』等其他概念的定義與實作邏輯。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續存在的狀態機制，定義了系統在任何時間點的運作模式，而非單一發生的事件。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "漸進式信任機制（產品核心原則） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 10911,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "無論是客戶、產品經理還是工程師，都能理解這是一種『權限隨信任度動態調整』的機制，不涉及特定專業技術門檻，屬於產品設計哲學的共識。",
+          "has_downstream_impact": true,
+          "impact_reason": "當此概念改變（例如調整信任層級定義），會直接影響『權限模型』、『資料存取策略』以及『使用者引導流程（Onboarding）』等其他概念的設計與實作邏輯。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續存在的狀態模型，定義了系統在任何時間點的存取權限邊界，而非單一的事件。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "品質保證（產品功能共識） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 9110,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "品質保證作為一種機制，無論是跑者（使用者）、行銷（品牌承諾）、客服（處理客訴）還是工程師（系統維護），都能理解其作為信任基礎的必要性，不存在專業壁壘。",
+          "has_downstream_impact": true,
+          "impact_reason": "當品質保證的標準或層級改變時，會直接影響「課表生成邏輯」、「用戶信任度指標」、「客服處理流程」以及「行銷溝通策略」，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運行的系統狀態，而非單一事件。只要系統存在，品質保證機制就持續運作並影響決策，直到該機制被廢除或重構。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "品質保證（產品功能共識） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 5828,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "品質保證作為一個核心機制，無論是跑者（使用者）、行銷（品牌承諾）、客服（處理客訴）還是工程師（系統架構），都能理解其作為『防錯機制』的價值與必要性，不存在專業壁壘。",
+          "has_downstream_impact": true,
+          "impact_reason": "若品質保證的標準或層級發生變更（例如增加或減少審計層數），會直接影響『課表生成流程』、『用戶信任度指標』以及『客服處理 SOP』，具有顯著的連動效應。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運行的系統狀態與規範，而非單一事件。只要系統在運作，品質保證機制就持續存在並影響決策，直到該機制被正式廢除或重構。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "品質保證（產品功能共識） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 14796,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "品質保證作為一個核心價值與流程，無論是跑者（使用者）、行銷（品牌承諾）、客服（處理客訴）還是工程師（系統穩定性），都能理解其作為『確保課表正確性』的共同目標，不屬於特定專業領域的黑盒子。",
+          "has_downstream_impact": true,
+          "impact_reason": "若品質保證的定義或標準（如審計層級）發生變更，會直接影響『課表生成流程』、『用戶信任度指標』以及『客服處理 SOP』等相關節點，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續運作的狀態與機制，而非單一事件。只要系統存在，品質保證機制就必須持續運作並作為決策依據，直到該機制被正式廢除或重構。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "Sprint 14 排程（PM 專屬知識） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 8759,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "Sprint 排程是專案管理的核心共識，無論是 PM、工程師還是利害關係人，對於『Sprint 14 包含哪些功能』以及『時間區間』的定義，在解釋後均能達成一致的認知，不屬於特定專業領域的黑盒子。",
+          "has_downstream_impact": true,
+          "impact_reason": "若 Sprint 14 的排程變更（例如延後結束日期或調整 scope），會直接影響『Dashboard v2 重構』、『Task isolation』等功能節點的狀態，以及『資源分配』、『發布計畫』等相關概念，具有高度耦合性。",
+          "survives_over_time": false,
+          "time_reason": "雖然它描述的是一個狀態（排程內容），但它本質上是一個具有明確生命週期的『事件性容器』。Sprint 結束後，該實體即失去作為決策依據的價值，屬於暫時性的管理標記，而非長期存在的知識節點。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Sprint 14 排程（PM 專屬知識） (run 2)",
+        "expected": "fail",
+        "actual": "pass",
+        "correct": false,
+        "latency_ms": 11555,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "Sprint 排程是專案管理的核心共識，無論是 PM、工程師還是利害關係人，對於『Sprint 14 包含哪些功能』以及『時間區間』的定義，在溝通後都能達成一致的認知，不屬於特定專業領域的黑盒子。",
+          "has_downstream_impact": true,
+          "impact_reason": "Sprint 排程變更會直接連動影響『Feature 狀態』、『資源分配』以及『發布計畫』等節點。若 Sprint 14 延期或範圍變更，相關聯的 Feature 節點必須重新評估其交付時間與優先級。",
+          "survives_over_time": true,
+          "time_reason": "雖然 Sprint 有明確的起訖時間，但在該期間內，它作為一個『狀態容器』持續存在，定義了該時段內所有開發工作的邊界與目標，直到 Sprint 結束前，它都是決策的依據。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "Sprint 14 排程（PM 專屬知識） (run 3)",
+        "expected": "fail",
+        "actual": "pass",
+        "correct": false,
+        "latency_ms": 8118,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "Sprint 排程是專案管理的核心共識，無論是 PM、工程師還是利害關係人，對於『Sprint 14 包含哪些任務』以及『時間區間』的定義皆有一致的理解與依賴。",
+          "has_downstream_impact": true,
+          "impact_reason": "若 Sprint 14 排程變更（例如延期或範疇調整），會直接影響『Dashboard v2 重構』、『Task isolation』等任務的狀態、資源分配以及相關的里程碑節點，必須同步更新。",
+          "survives_over_time": true,
+          "time_reason": "雖然 Sprint 有明確的起訖時間，但在該期間內，它作為一個『狀態容器』持續定義了團隊的工作範疇與優先級，直到 Sprint 結束前，它都是決策的依據。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "Firestore index 設定（基礎設施細節） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 5278,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "Firestore Composite Index 屬於高度技術性的實作細節，非技術背景的角色（如 PM、設計師、業務）無法理解其真偽或必要性，僅後端工程師能判斷其技術細節。",
+          "has_downstream_impact": false,
+          "impact_reason": "該索引的變更僅影響資料庫查詢效能與程式碼部署，不會導致知識圖譜中其他業務邏輯或概念節點需要重新定義或檢視。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續存在的技術配置狀態，直到被刪除或修改為止。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Firestore index 設定（基礎設施細節） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 9070,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "Firestore Composite Index 是一個高度技術性的實作細節，屬於後端工程領域的專業知識。非技術角色（如產品經理、業務人員）無法理解其運作機制或真偽，僅能理解其帶來的效能結果，無法對該概念本身達成共識。",
+          "has_downstream_impact": false,
+          "impact_reason": "該概念屬於實作層面的技術債或效能優化手段。若移除或修改此索引，影響的是資料庫查詢效能（具體指標），而非知識圖譜中的其他業務邏輯概念或實體關係。它與業務領域模型解耦。",
+          "survives_over_time": true,
+          "time_reason": "這是一個描述系統狀態的技術配置，在被刪除或修改前，它持續存在並影響系統行為。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Firestore index 設定（基礎設施細節） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6900,
+        "raw": {
+          "is_consensus": false,
+          "consensus_reason": "Firestore Composite Index 是高度技術性的實作細節，僅限於後端工程師或資料庫管理員理解其必要性與運作機制。對於產品經理、設計師或業務人員而言，這屬於『黑盒子』，無法在不具備技術背景下理解其真偽。",
+          "has_downstream_impact": false,
+          "impact_reason": "雖然此索引影響查詢效能，但它本身是一個技術實作手段。若此索引變更或移除，影響的是『查詢效能』或『程式碼實作』，而非知識圖譜中的其他業務邏輯概念。它不具備與其他業務概念的強耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個描述資料庫狀態的設定，在被修改或刪除前會持續存在，符合狀態的定義。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "上週五的 demo（一次性事件） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 5977,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "任何角色都能理解這是一場針對特定投資人的展示活動，其目的與結果是客觀事實，不限於特定專業領域。",
+          "has_downstream_impact": false,
+          "impact_reason": "這是一個單一的歷史事件，其發生與否不會導致其他知識圖譜節點（如產品規格、公司策略、人員職責）必須進行邏輯上的更新或重構。",
+          "survives_over_time": false,
+          "time_reason": "這是一個具體的歷史事件（Event），發生在特定時間點即結束，不具備持續影響決策的狀態屬性。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "上週五的 demo（一次性事件） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 4669,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "任何角色都能理解這是一場針對特定投資人的展示活動，其目的與結果是客觀事實，不涉及專業壁壘。",
+          "has_downstream_impact": false,
+          "impact_reason": "這是一個單一事件，其發生與否不會導致知識圖譜中其他概念（如產品功能、公司策略、人員職責）的定義或關聯發生邏輯上的連鎖變動。",
+          "survives_over_time": false,
+          "time_reason": "這是一個具體的歷史事件（Event），而非持續存在的狀態（State）。事件發生後即結束，無法作為後續決策的持續性參考節點。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "上週五的 demo（一次性事件） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6767,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "任何角色都能理解這是一場發生過的會議，且其目的與結果（展示 demo、反應正面）是客觀事實，不因專業背景而異。",
+          "has_downstream_impact": false,
+          "impact_reason": "這是一個單一的歷史事件，它的發生不會導致其他知識圖譜節點（如產品規格、團隊架構、財務規劃）必須進行邏輯上的更新或重構。",
+          "survives_over_time": false,
+          "time_reason": "這是一個具體的歷史事件（Event），發生在特定時間點且已結束，不具備持續影響決策的狀態屬性。",
+          "verdict": "fail"
+        }
+      },
+      {
+        "test": "Git branching strategy（工程實務） (run 1)",
+        "expected": "fail",
+        "actual": "pass",
+        "correct": false,
+        "latency_ms": 7968,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "雖然具體操作細節由工程師執行，但「分支策略」定義了交付節奏與發布流程，PM、QA 與維運人員皆需依此理解版本發布的時機與穩定性，屬於跨角色的共同認知。",
+          "has_downstream_impact": true,
+          "impact_reason": "此策略直接影響「發布計畫」、「CI/CD 流水線配置」與「測試環境部署」等概念。若策略變更（例如從 squash merge 改為 rebase），上述流程與相關自動化腳本皆需同步調整。",
+          "survives_over_time": true,
+          "time_reason": "這是一種持續運作的規範與狀態，而非單一事件。它在開發週期中持續存在，直到被明確的策略變更所取代。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "Git branching strategy（工程實務） (run 2)",
+        "expected": "fail",
+        "actual": "pass",
+        "correct": false,
+        "latency_ms": 9371,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "雖然具體實作細節由工程師執行，但「分支策略」定義了交付節奏與發布流程，PM、QA 與維運人員皆需理解此策略以規劃工作與部署，屬於跨角色共識。",
+          "has_downstream_impact": true,
+          "impact_reason": "若分支策略改變（例如從 squash merge 改為 rebase 或引入 release branch），會直接影響 CI/CD 流水線配置、發布計畫、版本號管理規則以及 QA 的測試環境部署策略，具有高度耦合性。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的規範與狀態，定義了開發流程的運作模式，而非單一事件，在策略變更前會長期維持有效。",
+          "verdict": "pass"
+        }
+      },
+      {
+        "test": "Git branching strategy（工程實務） (run 3)",
+        "expected": "fail",
+        "actual": "pass",
+        "correct": false,
+        "latency_ms": 5492,
+        "raw": {
+          "is_consensus": true,
+          "consensus_reason": "雖然具體操作細節由工程師執行，但「分支策略」定義了軟體交付的節奏與品質標準，PM、QA 與維運人員皆需理解此策略以配合發布時程與測試流程，屬於跨角色共識。",
+          "has_downstream_impact": true,
+          "impact_reason": "此策略直接影響 CI/CD 流水線配置、自動化測試觸發條件、發布流程（Release Process）以及版本號管理邏輯，若策略變更，上述流程節點皆需同步調整。",
+          "survives_over_time": true,
+          "time_reason": "這是一個持續性的規範與狀態，定義了開發團隊在一段時間內必須遵循的規則，而非單一事件。",
+          "verdict": "pass"
+        }
+      }
+    ]
+  },
+  {
+    "capability": "incremental_routing",
+    "accuracy": 0.9047619047619048,
+    "stability": 0.9285714285714286,
+    "avg_latency_ms": 6223,
+    "mismatches": [
+      "  安全閾值調整→更新安全機制 (run 3): expected=update_existing, got=ERROR: litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+      "  競品定位（全新概念） (run 1): expected=create_new, got=update_existing",
+      "  競品定位（全新概念） (run 2): expected=create_new, got=update_existing",
+      "  競品定位（全新概念） (run 3): expected=create_new, got=update_existing"
+    ],
+    "results": [
+      {
+        "test": "安全閾值調整→更新安全機制 (run 1)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 7403,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-002",
+          "reason": "ACWR (Acute:Chronic Workload Ratio) 閾值的調整直接屬於「安全機制」的範疇，該機制的核心目的就是透過監控訓練負荷來防止受傷，調整閾值是該機制參數的具體優化。",
+          "suggested_changes": "更新安全機制參數設定：針對進階跑者將 ACWR 閾值調高至 1.5，針對新手調低至 1.1，以優化訓練負荷監控的精準度。"
+        }
+      },
+      {
+        "test": "安全閾值調整→更新安全機制 (run 2)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 8599,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-002",
+          "reason": "ACWR (Acute:Chronic Workload Ratio) 閾值的調整直接屬於「安全機制」中關於訓練負荷監控與保護的具體實作邏輯。",
+          "suggested_changes": "更新安全機制摘要：AI 透過監控訓練負荷（如 ACWR）來防止受傷。系統會根據跑者等級動態調整閾值（進階跑者 1.5，新手 1.1），若偵測到訓練量超出閾值，將自動降量保護跑者。"
+        }
+      },
+      {
+        "test": "安全閾值調整→更新安全機制 (run 3)",
+        "expected": "update_existing",
+        "actual": "ERROR: litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n",
+        "correct": false,
+        "latency_ms": 2134,
+        "raw": {
+          "error": "litellm.ServiceUnavailableError: GeminiException - {\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n"
+        }
+      },
+      {
+        "test": "V2 bug 修完→更新上線狀態 (run 1)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 10462,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-004",
+          "reason": "The new information directly updates the status of the 'V2 上線狀態' concept, specifically resolving the P0 bugs mentioned in its summary and indicating progress toward the launch gate.",
+          "suggested_changes": "Update summary to: 'TestFlight 測試完成，P0 bug 已修復並通過 QA。目前準備提交 App Store Review，等待 Launch gate 通過。'"
+        }
+      },
+      {
+        "test": "V2 bug 修完→更新上線狀態 (run 2)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 4522,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-004",
+          "reason": "The new information directly updates the status of the 'V2 上線狀態' concept, specifically resolving the P0 bugs mentioned in its summary and indicating progress toward the launch gate.",
+          "suggested_changes": "Update summary to: 'TestFlight 測試完成，P0 bug 已修復並通過 QA。準備提交 App Store Review，等待 Launch gate 通過。'"
+        }
+      },
+      {
+        "test": "V2 bug 修完→更新上線狀態 (run 3)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 7591,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-004",
+          "reason": "The new information directly updates the status of the 'V2 上線狀態' concept, specifically resolving the P0 bugs mentioned in its summary and indicating progress toward the launch gate.",
+          "suggested_changes": "Update summary to: 'TestFlight 測試完成，P0 bug 已修復並通過 QA。準備提交 App Store Review，等待 Launch gate 通過。'"
+        }
+      },
+      {
+        "test": "品質審計加第 5 層→更新品質保證 (run 1)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 6725,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-003",
+          "reason": "The new information directly expands the existing 'Quality Assurance' (l2-003) concept, which already defines a 4-layer audit process. Adding a 5th layer for time preference validation is a direct update to this mechanism.",
+          "suggested_changes": "Update the summary of l2-003 to reflect the expansion to 5 layers of AI audit, specifically adding 'time preference validation' as the 5th layer."
+        }
+      },
+      {
+        "test": "品質審計加第 5 層→更新品質保證 (run 2)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 5940,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-003",
+          "reason": "The new information directly expands the scope of the existing 'Quality assurance' concept, which currently defines a 4-layer audit process. Adding a 5th layer for time preference validation is a direct update to this mechanism.",
+          "suggested_changes": "Update the summary of l2-003 to reflect the expansion to 5 layers of AI audit, specifically including the validation of user time preferences (e.g., morning vs. afternoon availability)."
+        }
+      },
+      {
+        "test": "品質審計加第 5 層→更新品質保證 (run 3)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 8507,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-003",
+          "reason": "The new information directly expands the scope of the existing 'Quality assurance' concept, which currently defines a 4-layer audit process. Adding a 5th layer for time preference validation is a direct update to this mechanism.",
+          "suggested_changes": "Update the summary of l2-003 to reflect the expansion to 5 layers of AI audit, specifically adding the validation of user time preferences (e.g., morning/afternoon availability) as the 5th layer."
+        }
+      },
+      {
+        "test": "收費改成純月費→更新收費模型 (run 1)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 4699,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-005",
+          "reason": "The new information directly modifies the existing pricing model (l2-005) by replacing the three-tier structure with a flat monthly fee and changing the cost absorption policy.",
+          "suggested_changes": "Update summary to: '按公司收費，不按人頭。採用單一月費制，LLM 與儲存成本由公司吸收，不再區分使用量計費。'"
+        }
+      },
+      {
+        "test": "收費改成純月費→更新收費模型 (run 2)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 6337,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-005",
+          "reason": "新資訊直接修改了現有的收費模型定義，將原本的「三段式計費」變更為「單一月費制」，並明確了成本吸收方式。",
+          "suggested_changes": "更新 summary 為：按公司收費，不按人頭。採用單一月費制，LLM 與雲端儲存成本由公司吸收。"
+        }
+      },
+      {
+        "test": "收費改成純月費→更新收費模型 (run 3)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 4939,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-005",
+          "reason": "新資訊直接修改了現有的收費模型定義，將原本的「三段式計費」變更為「單一月費制」，並明確了成本吸收方式。",
+          "suggested_changes": "將 summary 從「按公司收費，不按人頭。三段式計費：月費基底 + AI 使用量 + 雲端儲存。」更新為「按公司收費，不按人頭。採用單一月費制，LLM 與儲存成本由公司吸收。」"
+        }
+      },
+      {
+        "test": "週回顧改成即時回饋→更新訓練流程 (run 1)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 5743,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-001",
+          "reason": "The new information directly modifies the core mechanism of the 'Training process V2' (l2-001), specifically changing the feedback loop structure from a three-step process (including a weekly review) to a two-step process with real-time feedback.",
+          "suggested_changes": "Update summary to: AI 每週幫跑者生成個人化課表。跑完之後即時回饋，根據回饋調整下週計畫。兩步循環：計畫 → 執行（含即時回饋）→ 下週計畫。"
+        }
+      },
+      {
+        "test": "週回顧改成即時回饋→更新訓練流程 (run 2)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 5261,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-001",
+          "reason": "The new information directly modifies the core operational cycle of the 'Training process V2' (l2-001), changing it from a three-step cycle (Plan-Execute-Review) to a two-step cycle (Plan-Execute with real-time feedback).",
+          "suggested_changes": "Update summary to: 'AI 每週幫跑者生成個人化課表。跑完之後即時回饋，根據回饋調整下週計畫。兩步循環：計畫 → 執行（含即時回饋）→ 下週計畫。'"
+        }
+      },
+      {
+        "test": "週回顧改成即時回饋→更新訓練流程 (run 3)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 4376,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-001",
+          "reason": "The new information directly modifies the core workflow of the 'Training process V2' concept, specifically changing the cycle structure and feedback mechanism.",
+          "suggested_changes": "Update summary to: AI 每週幫跑者生成個人化課表。跑完之後即時回饋，根據回饋調整下週計畫。兩步循環：計畫 → 執行（含即時回饋）→ 下週計畫。"
+        }
+      },
+      {
+        "test": "社群功能（全新概念） (run 1)",
+        "expected": "create_new",
+        "actual": "create_new",
+        "correct": true,
+        "latency_ms": 7399,
+        "raw": {
+          "action": "create_new",
+          "target_entity_id": "",
+          "reason": "The new information introduces a 'social/community' dimension (running groups, sharing plans, leader oversight) which is distinct from the existing L2 concepts that focus on individual AI training plans (l2-001), safety (l2-002), quality assurance (l2-003), deployment (l2-004), pricing (l2-005), and onboarding (l2-006). This represents a new strategic pillar for the product.",
+          "suggested_changes": "Create a new L2 entity named '社群互動機制' (Community Interaction Mechanism) with a summary: '跑者社群功能，包含跑團組建、訓練計畫分享、成員互助機制，以及團長對成員訓練狀況的監控與管理。'"
+        }
+      },
+      {
+        "test": "社群功能（全新概念） (run 2)",
+        "expected": "create_new",
+        "actual": "create_new",
+        "correct": true,
+        "latency_ms": 6336,
+        "raw": {
+          "action": "create_new",
+          "target_entity_id": "",
+          "reason": "The new information introduces a 'community' and 'social' dimension (running groups, peer interaction, leader oversight) which is distinct from the existing L2 concepts that focus on individual AI training plans, safety, quality assurance, and onboarding. It represents a new strategic pillar for the product.",
+          "suggested_changes": "Create a new L2 entity named '社群互動機制' (Community Interaction Mechanism) with the summary: '跑者社群功能，包含跑團組建、訓練計畫分享、成員互助與團長訓練監控，旨在透過社交連結提升訓練黏著度與透明度。'"
+        }
+      },
+      {
+        "test": "社群功能（全新概念） (run 3)",
+        "expected": "create_new",
+        "actual": "create_new",
+        "correct": true,
+        "latency_ms": 8866,
+        "raw": {
+          "action": "create_new",
+          "target_entity_id": "",
+          "reason": "The new information introduces a 'Community/Social' dimension (running groups, sharing plans, leader oversight) which is distinct from the existing individual-focused AI training (l2-001), safety (l2-002), or quality assurance (l2-003) concepts. It represents a strategic shift in product scope that meets the criteria for a new L2 concept.",
+          "suggested_changes": "Create a new L2 concept named '社群互動機制' (Community Interaction Mechanism) with the summary: '跑者可組成跑團，分享訓練計畫與互相鼓勵。團長具備檢視團員訓練狀況之權限，旨在透過社交互動提升訓練黏著度與團隊協作。'"
+        }
+      },
+      {
+        "test": "多語系支援（全新概念） (run 1)",
+        "expected": "create_new",
+        "actual": "create_new",
+        "correct": true,
+        "latency_ms": 5367,
+        "raw": {
+          "action": "create_new",
+          "target_entity_id": "",
+          "reason": "這是一項全新的戰略性擴張（日本市場），涉及產品介面、內容生成、客服與行銷等多個維度的調整，不屬於現有訓練流程、安全機制或品質保證等既有概念的範疇。",
+          "suggested_changes": "新增 L2 概念：名稱『國際化策略』，摘要：產品支援多語言與在地化市場的標準流程，包含介面翻譯、內容生成在地化及對應的客服與行銷支援。"
+        }
+      },
+      {
+        "test": "多語系支援（全新概念） (run 2)",
+        "expected": "create_new",
+        "actual": "create_new",
+        "correct": true,
+        "latency_ms": 15518,
+        "raw": {
+          "action": "create_new",
+          "target_entity_id": "",
+          "reason": "這是一項全新的市場擴張策略（日本市場），涉及多個部門（產品、客服、行銷）的跨角色共識，且具有長期的下游影響（在地化維護、多語言支援架構），不屬於現有任何 L2 概念的範疇。",
+          "suggested_changes": "新增 L2 概念：名稱為「國際化策略 (Internationalization)」，摘要為「支援多語言市場擴張，包含介面在地化、內容生成在地化及對應的客服與行銷流程調整。」"
+        }
+      },
+      {
+        "test": "多語系支援（全新概念） (run 3)",
+        "expected": "create_new",
+        "actual": "create_new",
+        "correct": true,
+        "latency_ms": 8103,
+        "raw": {
+          "action": "create_new",
+          "target_entity_id": "",
+          "reason": "The new information introduces a 'Localization/Internationalization' strategy (Japanese market entry), which is a cross-functional initiative affecting product UI, content generation, customer support, and marketing. It does not fit into existing L2 concepts like 'Training Process', 'Safety Mechanism', or 'Quality Assurance', as it represents a new strategic dimension of the product's scope.",
+          "suggested_changes": "Create a new L2 concept named '國際化策略 (Internationalization Strategy)' with summary: '產品支援多語言與在地化市場需求，包含介面翻譯、在地化內容生成及對應的客服與行銷流程調整，目前優先目標為日本市場。'"
+        }
+      },
+      {
+        "test": "競品定位（全新概念） (run 1)",
+        "expected": "create_new",
+        "actual": "update_existing",
+        "correct": false,
+        "latency_ms": 4097,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-001",
+          "reason": "The new information identifies 'AI Personalization' and 'Safety Mechanisms' as the core product differentiation and marketing positioning. This directly relates to the existing 'Training Process V2' (which covers AI personalization) and 'Safety Mechanisms' (which covers the safety valve). Since the information is about the strategic positioning of these existing features, it is best handled as an update to the core concepts defining these features.",
+          "suggested_changes": "Update the summary of l2-001 to explicitly mention that AI-generated personalized training plans are a core competitive differentiator. Additionally, ensure the summary of l2-002 reflects that the safety mechanism is a key market differentiator against competitors like Nike Run Club and Strava."
+        }
+      },
+      {
+        "test": "競品定位（全新概念） (run 2)",
+        "expected": "create_new",
+        "actual": "update_existing",
+        "correct": false,
+        "latency_ms": 5553,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-001",
+          "reason": "The new information explicitly identifies 'AI Personalization' and 'Safety Mechanism' as the core product positioning and competitive differentiation, which directly relates to the existing L2 concepts of 'Training Process V2' (AI schedule generation) and 'Safety Mechanism'. This information elevates these technical features to a strategic business consensus.",
+          "suggested_changes": "Update the summary of l2-001 to include: 'This feature serves as a core competitive differentiator for Paceriz, distinguishing it from market incumbents like Nike Run Club and Strava by combining AI-driven personalization with integrated safety valves.'"
+        }
+      },
+      {
+        "test": "競品定位（全新概念） (run 3)",
+        "expected": "create_new",
+        "actual": "update_existing",
+        "correct": false,
+        "latency_ms": 5260,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-001",
+          "reason": "The new information explicitly identifies 'AI Personalization' and 'Safety Mechanisms' as the core product differentiation and marketing positioning, which directly relates to the existing definitions of '訓練流程 V2' (AI personalization) and '安全機制' (safety valves). Since '訓練流程 V2' is the primary vehicle for the AI personalization feature, this information updates the strategic context of that entity.",
+          "suggested_changes": "Update the summary of l2-001 to include: 'This feature serves as a core competitive differentiator for Paceriz, positioning the app against competitors like Nike Run Club and Strava by integrating AI-driven personalization with safety-first training protocols.'"
+        }
+      },
+      {
+        "test": "修了一個 CSS bug（一次性事件） (run 1)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 7123,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "該資訊屬於技術細節（CSS 修復），屬於前端 UI 的實作層面，不涉及公司共識、業務邏輯或產品策略層面的 L2 概念。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "修了一個 CSS bug（一次性事件） (run 2)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 6242,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "該資訊屬於技術細節（CSS 修復），屬於前端 UI 的實作層面，不涉及公司共識、業務邏輯或產品策略層面的 L2 概念。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "修了一個 CSS bug（一次性事件） (run 3)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 6148,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這是一項技術性的 CSS 修復，屬於前端 UI 的實作細節，不涉及公司層級的業務邏輯、流程變更或共識，因此不適合納入 L2 概念層。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "重構了 Firestore query（技術細節） (run 1)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 4756,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這是一項技術重構（refactor），屬於底層實作細節，不涉及業務邏輯、公司共識或對外部使用者有影響的行為變更，因此不適合納入 L2 概念層。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "重構了 Firestore query（技術細節） (run 2)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 4332,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這是一項技術重構（refactor），屬於實作細節與效能優化，不涉及業務邏輯、公司共識或對使用者有直接影響的產品行為，因此不屬於 L2 治理層級。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "重構了 Firestore query（技術細節） (run 3)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 6480,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這是一項技術實作細節（資料庫查詢優化），屬於工程層面的優化，不涉及業務邏輯、公司共識或對外部使用者有影響的 L2 概念。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "更新了依賴版本（維運細節） (run 1)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 7147,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這是一項技術性的依賴套件升級（chore），屬於開發細節，不涉及業務邏輯、公司共識或產品功能層面的變更，因此不適合納入 L2 概念。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "更新了依賴版本（維運細節） (run 2)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 4727,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這是一項技術性的依賴套件更新（chore），屬於開發細節，不涉及業務邏輯、公司共識或產品功能層面的變更，因此不適合納入 L2 概念層。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "更新了依賴版本（維運細節） (run 3)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 6522,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這是一項技術依賴更新（dependency update），屬於技術細節，不涉及業務邏輯、公司共識或產品功能層面的變更，因此不屬於 L2 治理範疇。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "寫了一份內部 API 文件（L3 不是 L2） (run 1)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 4431,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這屬於技術實作細節與開發者文件，屬於工程層面的知識，不屬於公司層面的共識或業務邏輯（L2 概念）。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "寫了一份內部 API 文件（L3 不是 L2） (run 2)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 5444,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這屬於技術文件更新，屬於工程實作細節，不屬於公司層級的業務共識或產品策略。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "寫了一份內部 API 文件（L3 不是 L2） (run 3)",
+        "expected": "ignore",
+        "actual": "ignore",
+        "correct": true,
+        "latency_ms": 3594,
+        "raw": {
+          "action": "ignore",
+          "target_entity_id": "",
+          "reason": "這屬於技術文件更新，屬於工程實作細節，不屬於公司層級的業務共識或產品邏輯。",
+          "suggested_changes": ""
+        }
+      },
+      {
+        "test": "onboarding 流程大改版（更新 vs 新建的邊界） (run 1)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 7514,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-006",
+          "reason": "新資訊描述了客戶上手流程的重大優化，直接對應到現有的 '客戶上手流程' 概念，需要更新其流程描述以反映從手動 API key 設定轉變為 QR code 一鍵連線的變更。",
+          "suggested_changes": "將 summary 更新為：新客戶從註冊到第一次使用 AI agent 的完整流程：開帳號、掃 QR code 一鍵連線、AI agent 自動讀取公司知識。流程已優化為兩步驟。"
+        }
+      },
+      {
+        "test": "onboarding 流程大改版（更新 vs 新建的邊界） (run 2)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 5599,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-006",
+          "reason": "新資訊描述了客戶上手流程的具體優化與變更，直接對應到現有的 '客戶上手流程' 概念。",
+          "suggested_changes": "更新 summary 為：新客戶從註冊到第一次使用 AI agent 的完整流程：開帳號、掃描 QR code 一鍵連線、AI agent 自動讀取公司知識。流程已優化為兩步驟，移除手動設定 API key 的繁瑣步驟。"
+        }
+      },
+      {
+        "test": "onboarding 流程大改版（更新 vs 新建的邊界） (run 3)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 7939,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-006",
+          "reason": "新資訊描述了客戶上手流程的具體優化（從手動 API key 設定改為 QR code 一鍵連線，步驟簡化），這直接對應到現有的 '客戶上手流程' 概念，屬於該流程的重大更新。",
+          "suggested_changes": "更新 summary：新客戶從註冊到第一次使用 AI agent 的完整流程：開帳號、掃描 QR code 一鍵連線、AI agent 自動讀取公司知識。流程已優化為兩步驟，移除手動設定 API key 的繁瑣環節。"
+        }
+      },
+      {
+        "test": "信任機制加入企業管控（擴展既有概念） (run 1)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 3805,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-007",
+          "reason": "新資訊描述了『漸進式信任』機制的具體實作細節（管理員設定上限、員工權限限制），這與現有的 l2-007 概念核心一致，屬於對該概念的深化與規則定義。",
+          "suggested_changes": "更新 summary 為：AI agent 剛接上時只能讀取基本資訊，隨著使用者確認更多知識，AI 能做的事逐步增加。企業客戶管理員可設定信任層級上限，限制 AI agent 的資料存取範圍，員工無法自行提升權限。"
+        }
+      },
+      {
+        "test": "信任機制加入企業管控（擴展既有概念） (run 2)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 5265,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-007",
+          "reason": "新資訊描述了『漸進式信任』的具體實作細節，即管理員控制權限上限與員工權限限制，這與現有的『漸進式信任』概念核心一致，屬於對該概念的深化與規則補充。",
+          "suggested_changes": "更新 summary 為：AI agent 剛接上時只能讀取基本資訊，隨著使用者確認更多知識，AI 能做的事逐步增加。企業客戶管理員可設定信任層級上限，限制 AI agent 資料存取範圍，員工無法自行提升權限。"
+        }
+      },
+      {
+        "test": "信任機制加入企業管控（擴展既有概念） (run 3)",
+        "expected": "update_existing",
+        "actual": "update_existing",
+        "correct": true,
+        "latency_ms": 4598,
+        "raw": {
+          "action": "update_existing",
+          "target_entity_id": "l2-007",
+          "reason": "新資訊描述了『漸進式信任』的具體實作機制（管理員設定上限、限制存取層級），這與現有的 l2-007 概念核心一致，屬於對該概念的細化與補充。",
+          "suggested_changes": "更新 summary 為：AI agent 剛接上時只能讀取基本資訊，隨著使用者確認更多知識，AI 能做的事逐步增加。企業客戶管理員可設定信任層級上限，限制 AI agent 的資料存取範圍，員工無法自行提升權限。"
+        }
+      }
+    ]
+  },
+  {
+    "capability": "summary_language",
+    "accuracy": 0.8666666666666667,
+    "stability": 0.8,
+    "avg_latency_ms": 5087,
+    "mismatches": [
+      "  收費模型 summary（共識語言） (run 1): expected=pass, got=fail",
+      "  收費模型 summary（共識語言） (run 3): expected=pass, got=fail"
+    ],
+    "results": [
+      {
+        "test": "安全機制 summary（共識語言） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 3469,
+        "raw": {
+          "is_consensus_language": true,
+          "has_tech_jargon": false,
+          "has_marketing_fluff": false,
+          "anyone_understands": true,
+          "verdict": "pass",
+          "issues": [],
+          "rewrite_suggestion": ""
+        }
+      },
+      {
+        "test": "安全機制 summary（共識語言） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 4035,
+        "raw": {
+          "is_consensus_language": true,
+          "has_tech_jargon": false,
+          "has_marketing_fluff": false,
+          "anyone_understands": true,
+          "verdict": "pass",
+          "issues": [],
+          "rewrite_suggestion": ""
+        }
+      },
+      {
+        "test": "安全機制 summary（共識語言） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 3661,
+        "raw": {
+          "is_consensus_language": true,
+          "has_tech_jargon": false,
+          "has_marketing_fluff": false,
+          "anyone_understands": true,
+          "verdict": "pass",
+          "issues": [],
+          "rewrite_suggestion": ""
+        }
+      },
+      {
+        "test": "收費模型 summary（共識語言） (run 1)",
+        "expected": "pass",
+        "actual": "fail",
+        "correct": false,
+        "latency_ms": 4255,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": false,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "使用了技術術語 'AI 使用量'，這對非技術背景的人來說定義模糊，且 'AI' 本身屬於技術領域範疇。"
+          ],
+          "rewrite_suggestion": "公司收費方式不以員工人數計算。費用由三部分組成：每月固定基本費、系統使用量費用，以及雲端儲存空間費用。"
+        }
+      },
+      {
+        "test": "收費模型 summary（共識語言） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 5381,
+        "raw": {
+          "is_consensus_language": true,
+          "has_tech_jargon": false,
+          "has_marketing_fluff": false,
+          "anyone_understands": true,
+          "verdict": "pass",
+          "issues": [],
+          "rewrite_suggestion": ""
+        }
+      },
+      {
+        "test": "收費模型 summary（共識語言） (run 3)",
+        "expected": "pass",
+        "actual": "fail",
+        "correct": false,
+        "latency_ms": 4934,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": false,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "使用了技術術語 'AI'，對於非技術背景的讀者來說，這是一個過於籠統且帶有技術色彩的縮寫，建議改為更具體的描述。"
+          ],
+          "rewrite_suggestion": "公司收費方式不以使用人數計算。費用由三部分組成：每月固定基本費、系統使用量費用，以及雲端儲存空間費用。"
+        }
+      },
+      {
+        "test": "技術語言 summary（工程師視角） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 7931,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": false,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含過多技術術語，如 'Prompt'、'LLM'、'data model'，非技術背景人員無法理解。",
+            "描述過於聚焦於系統實作細節（如 Section-based、兩階段），而非系統的功能價值。"
+          ],
+          "rewrite_suggestion": "訓練計畫系統透過三個階段協助使用者規劃運動：首先根據目標與訓練方式設定訓練量；接著自動生成每週的訓練課表；最後針對訓練目標提供每週的執行總結與建議。"
+        }
+      },
+      {
+        "test": "技術語言 summary（工程師視角） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 4761,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": false,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含過多技術術語，如 'Prompt'、'LLM'、'data model'，非技術背景人員無法理解。",
+            "描述過於依賴系統實作細節（如 Section-based、兩階段），而非描述系統的功能價值。"
+          ],
+          "rewrite_suggestion": "訓練計畫系統包含三個階段：首先根據目標與訓練方法規劃訓練量；接著自動生成每週訓練課表；最後針對訓練目標產出每週的訓練總結報告。"
+        }
+      },
+      {
+        "test": "技術語言 summary（工程師視角） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6244,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": false,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "使用了技術術語：Prompt",
+            "使用了技術術語：LLM",
+            "使用了技術術語：data model",
+            "使用了技術術語：Section-based",
+            "使用了技術術語：target_type",
+            "使用了技術術語：methodology",
+            "使用了技術術語：Builder",
+            "內容過度依賴系統實作細節，而非描述功能本身"
+          ],
+          "rewrite_suggestion": "訓練計畫系統包含三個階段：首先根據目標類型與訓練方法，規劃整體的訓練量；接著自動生成每週的訓練課表；最後針對每週訓練成果進行總結與分析。"
+        }
+      },
+      {
+        "test": "行銷浮誇語言 (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6253,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": true,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含過多行銷術語（如：業界領先、革命性、顛覆傳統、前所未有），缺乏具體事實描述。",
+            "包含技術術語（如：AI Context 層），對於非技術背景人員來說過於抽象且難以理解。"
+          ],
+          "rewrite_suggestion": "ZenOS 是一個協助中小企業整理與運用內部知識的系統，能讓員工更快速地找到所需的資訊，提升工作效率。"
+        }
+      },
+      {
+        "test": "行銷浮誇語言 (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 6803,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": true,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含過多行銷術語（如：業界領先、革命性、顛覆傳統、前所未有），缺乏具體事實描述。",
+            "包含技術術語（如：AI Context 層），對於非技術背景人員來說過於抽象且難以理解。"
+          ],
+          "rewrite_suggestion": "ZenOS 是一個協助中小企業整合與管理內部知識的平台，旨在幫助員工更快速地找到所需的資訊，提升工作效率。"
+        }
+      },
+      {
+        "test": "行銷浮誇語言 (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 4355,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": true,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含過多行銷術語（如：業界領先、革命性、顛覆傳統、前所未有），缺乏具體事實描述。",
+            "包含技術術語（如：AI Context 層），對於非技術背景人員來說過於抽象且難以理解。"
+          ],
+          "rewrite_suggestion": "ZenOS 是一個協助中小企業整合與管理內部知識的平台，旨在幫助員工更快速地找到所需的資訊，提升工作效率。"
+        }
+      },
+      {
+        "test": "混合技術+行銷 (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 4625,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": true,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含過多技術術語：MCP-native、ontology engine、LiteLLM middleware、SSE streaming endpoint、AI agent。",
+            "包含行銷誇飾詞：全球首創、無縫接入。"
+          ],
+          "rewrite_suggestion": "這項整合功能讓不同的 AI 系統能夠直接讀取並使用我們的資料庫，簡化了 AI 連接與存取資料的過程。"
+        }
+      },
+      {
+        "test": "混合技術+行銷 (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 4310,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": true,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含行銷術語：'全球首創'",
+            "包含技術術語：'MCP-native', 'ontology engine', 'LiteLLM middleware', 'SSE streaming endpoint', 'AI agent'"
+          ],
+          "rewrite_suggestion": "這項整合功能讓不同的 AI 系統能夠直接讀取並使用我們的資料庫，實現更流暢的自動化協作。"
+        }
+      },
+      {
+        "test": "混合技術+行銷 (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 5289,
+        "raw": {
+          "is_consensus_language": false,
+          "has_tech_jargon": true,
+          "has_marketing_fluff": true,
+          "anyone_understands": false,
+          "verdict": "fail",
+          "issues": [
+            "包含過多技術術語：MCP-native、LLM、middleware、SSE streaming、endpoint",
+            "包含行銷誇飾詞：全球首創",
+            "語句過於抽象，非技術背景人員無法理解其具體功能與價值"
+          ],
+          "rewrite_suggestion": "這項功能讓不同的 AI 助理能夠直接讀取並使用我們的知識庫，實現資訊的即時同步與共享。"
+        }
+      }
+    ]
+  },
+  {
+    "capability": "impact_quality",
+    "accuracy": 1.0,
+    "stability": 1.0,
+    "avg_latency_ms": 4177,
+    "mismatches": [],
+    "results": [
+      {
+        "test": "收費→onboarding（具體場景） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 5111,
+        "raw": {
+          "has_concrete_scenario": true,
+          "specifies_what_changes": true,
+          "specifies_what_to_check": true,
+          "verdict": "pass",
+          "reason": "該關係明確指出當「收費模型」中的「定價」發生變更時，需要檢查「客戶上手流程」中的「報價說明」是否同步更新，具備具體的變更場景與檢查項目。"
+        }
+      },
+      {
+        "test": "收費→onboarding（具體場景） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 3881,
+        "raw": {
+          "has_concrete_scenario": true,
+          "specifies_what_changes": true,
+          "specifies_what_to_check": true,
+          "verdict": "pass",
+          "reason": "該關係明確指出當「收費模型」中的「定價」發生變動時，需要檢查「客戶上手流程」中的「報價說明」是否需要同步更新，具備具體的變更場景與檢查項目。"
+        }
+      },
+      {
+        "test": "收費→onboarding（具體場景） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 5554,
+        "raw": {
+          "has_concrete_scenario": true,
+          "specifies_what_changes": true,
+          "specifies_what_to_check": true,
+          "verdict": "pass",
+          "reason": "該關係明確指出當「收費模型」中的「定價」發生變更時，需要檢查「客戶上手流程」中的「報價說明」是否需要同步更新，符合具體場景與變更內容的定義。"
+        }
+      },
+      {
+        "test": "安全閾值→客服話術（具體場景） (run 1)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 3976,
+        "raw": {
+          "has_concrete_scenario": true,
+          "specifies_what_changes": true,
+          "specifies_what_to_check": true,
+          "verdict": "pass",
+          "reason": "該關係明確指出當『安全閾值』調整時，會導致『保護機制觸發條件』改變，進而需要更新『客服話術』的內容，符合具體場景與變更影響的判斷標準。"
+        }
+      },
+      {
+        "test": "安全閾值→客服話術（具體場景） (run 2)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 5241,
+        "raw": {
+          "has_concrete_scenario": true,
+          "specifies_what_changes": true,
+          "specifies_what_to_check": true,
+          "verdict": "pass",
+          "reason": "該關係明確指出當『安全閾值』發生調整時，會導致『保護機制觸發條件』改變，進而需要更新『客服話術』的內容，符合具體場景、變更內容與檢查項目的要求。"
+        }
+      },
+      {
+        "test": "安全閾值→客服話術（具體場景） (run 3)",
+        "expected": "pass",
+        "actual": "pass",
+        "correct": true,
+        "latency_ms": 4450,
+        "raw": {
+          "has_concrete_scenario": true,
+          "specifies_what_changes": true,
+          "specifies_what_to_check": true,
+          "verdict": "pass",
+          "reason": "該關係明確指出當「安全閾值」發生調整時，會導致「課表變輕是因為保護機制」的觸發條件改變，進而需要更新客服話術，符合具體場景、變更內容與檢查項目的要求。"
+        }
+      },
+      {
+        "test": "Dashboard depends_on Ontology（太模糊） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 3782,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "The description 'Dashboard 依賴 Ontology Engine' is too abstract. It fails to define a specific change scenario, does not specify what aspect of the Dashboard changes, and does not indicate what specific part of the Ontology Engine needs to be checked or impacted."
+        }
+      },
+      {
+        "test": "Dashboard depends_on Ontology（太模糊） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 5792,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "The description 'Dashboard 依賴 Ontology Engine' is too abstract. It fails to define a concrete scenario, does not specify what part of the Dashboard changes, and does not specify what part of the Ontology Engine needs to be checked."
+        }
+      },
+      {
+        "test": "Dashboard depends_on Ontology（太模糊） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 3809,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "The description 'Dashboard 依賴 Ontology Engine' is too abstract. It fails to specify a concrete scenario, what specific part of the Dashboard changes, or what specific part of the Ontology Engine needs to be checked as a result."
+        }
+      },
+      {
+        "test": "auto-inferred（自動生成，無具體內容） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 4256,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "The description 'auto-inferred relationship' is generic and lacks any specific context. It fails to define what aspect of the '訓練流程 V2' changes and what specific part of '品質保證' needs to be reviewed or updated as a result."
+        }
+      },
+      {
+        "test": "auto-inferred（自動生成，無具體內容） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 3665,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "The relationship description is 'auto-inferred' and lacks any specific context. It does not define what aspect of the '訓練流程 V2' changes, nor does it specify what part of '品質保證' needs to be checked or updated as a result."
+        }
+      },
+      {
+        "test": "auto-inferred（自動生成，無具體內容） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 3123,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "The relationship description is 'auto-inferred' and lacks any specific context. It fails to define what aspect of the '訓練流程 V2' changes and what specific part of '品質保證' needs to be reviewed or updated as a result."
+        }
+      },
+      {
+        "test": "A 影響 B（只說了方向沒說場景） (run 1)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 3217,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "該描述過於抽象，未說明『安全機制』具體發生了什麼變更（例如：新增防火牆規則、修補漏洞），也未說明『V2 上線狀態』具體需要檢查什麼（例如：是否延後上線、是否觸發審核流程）。"
+        }
+      },
+      {
+        "test": "A 影響 B（只說了方向沒說場景） (run 2)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 4147,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "該描述過於抽象，未說明「安全機制」具體發生了什麼變更（例如：新增驗證規則、修補漏洞），也未說明「V2 上線狀態」具體需要檢查什麼（例如：是否延後上線、是否觸發阻斷機制）。"
+        }
+      },
+      {
+        "test": "A 影響 B（只說了方向沒說場景） (run 3)",
+        "expected": "fail",
+        "actual": "fail",
+        "correct": true,
+        "latency_ms": 2661,
+        "raw": {
+          "has_concrete_scenario": false,
+          "specifies_what_changes": false,
+          "specifies_what_to_check": false,
+          "verdict": "fail",
+          "reason": "該描述過於抽象，未說明「安全機制」具體發生了什麼變更（例如：新增驗證規則、修補漏洞），也未說明「V2 上線狀態」具體需要檢查什麼（例如：是否延後上線、是否觸發阻斷機制）。"
+        }
+      }
+    ]
+  }
+]

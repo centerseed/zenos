@@ -1,16 +1,21 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useInk } from "@/lib/zen-ink/tokens";
 import type { TaskStatus, TaskPriority } from "@/types";
+import { Dropdown } from "@/components/zen/Dropdown";
+import { Select } from "@/components/zen/Select";
 
 interface TaskFiltersProps {
   selectedStatuses: TaskStatus[];
   selectedPriority: TaskPriority | null;
   selectedProject: string | null;
+  selectedDispatcher?: string | null;
   availableProjects: string[];
+  availableDispatchers?: string[];
   onStatusChange: (statuses: TaskStatus[]) => void;
   onPriorityChange: (priority: TaskPriority | null) => void;
   onProjectChange: (project: string | null) => void;
+  onDispatcherChange?: (dispatcher: string | null) => void;
 }
 
 const ALL_STATUSES: TaskStatus[] = [
@@ -31,106 +36,115 @@ const STATUS_LABELS: Record<string, string> = {
 
 const ALL_PRIORITIES: TaskPriority[] = ["critical", "high", "medium", "low"];
 
+const PRIORITY_OPTIONS = [
+  { value: "", label: "All priorities" },
+  ...ALL_PRIORITIES.map((p) => ({
+    value: p,
+    label: p.charAt(0).toUpperCase() + p.slice(1),
+  })),
+];
+
 export function TaskFilters({
   selectedStatuses,
   selectedPriority,
   selectedProject,
+  selectedDispatcher,
   availableProjects,
+  availableDispatchers,
   onStatusChange,
   onPriorityChange,
   onProjectChange,
+  onDispatcherChange,
 }: TaskFiltersProps) {
-  const [statusOpen, setStatusOpen] = useState(false);
-  const statusRef = useRef<HTMLDivElement>(null);
+  const t = useInk("light");
+  const { c, fontBody, radius } = t;
 
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      if (statusRef.current && !statusRef.current.contains(e.target as Node)) {
-        setStatusOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  const statusItems = ALL_STATUSES.map((s) => ({
+    value: s,
+    label: STATUS_LABELS[s],
+  }));
 
-  function toggleStatus(status: TaskStatus) {
-    if (selectedStatuses.includes(status)) {
-      onStatusChange(selectedStatuses.filter((s) => s !== status));
-    } else {
-      onStatusChange([...selectedStatuses, status]);
-    }
-  }
+  const projectOptions = [
+    { value: "", label: "All Products" },
+    ...availableProjects.map((p) => ({ value: p, label: p.toUpperCase() })),
+  ];
+
+  const dispatcherOptions = [
+    { value: "", label: "All dispatchers" },
+    ...(availableDispatchers ?? []).map((d) => ({ value: d, label: d })),
+  ];
+
+  const statusLabel =
+    selectedStatuses.length > 0
+      ? `Status (${selectedStatuses.length})`
+      : "Status";
 
   return (
-    <div className="flex items-center gap-3 flex-wrap">
+    <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
       {/* Status multi-select */}
-      <div className="relative" ref={statusRef}>
-        <button
-          onClick={() => setStatusOpen(!statusOpen)}
-          className="text-sm border border-border rounded-lg px-3 py-1.5 bg-card hover:bg-secondary text-foreground cursor-pointer"
-        >
-          Status{selectedStatuses.length > 0 ? ` (${selectedStatuses.length})` : ""}
-          <span className="ml-1 text-muted-foreground">&#9662;</span>
-        </button>
-        {statusOpen && (
-          <div className="absolute z-10 mt-1 bg-card border border-border rounded-lg shadow-lg py-1 w-48">
-            {ALL_STATUSES.map((status) => (
-              <label
-                key={status}
-                className="flex items-center gap-2 px-3 py-1.5 hover:bg-secondary cursor-pointer text-sm text-foreground"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedStatuses.includes(status)}
-                  onChange={() => toggleStatus(status)}
-                  className="rounded"
-                />
-                {STATUS_LABELS[status]}
-              </label>
-            ))}
-            {selectedStatuses.length > 0 && (
-              <button
-                onClick={() => onStatusChange([])}
-                className="w-full text-left px-3 py-1.5 text-xs text-blue-400 hover:bg-secondary cursor-pointer"
-              >
-                Clear all
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+      <Dropdown<TaskStatus>
+        t={t}
+        trigger={
+          <button
+            type="button"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              padding: "6px 12px",
+              fontSize: 13,
+              fontFamily: fontBody,
+              fontWeight: 400,
+              color: c.ink,
+              background: c.surfaceHi,
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: radius,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {statusLabel}
+            <span aria-hidden="true" style={{ fontSize: 10, color: c.inkMuted }}>▾</span>
+          </button>
+        }
+        items={statusItems}
+        selected={selectedStatuses}
+        multiple
+        onSelect={(next) => onStatusChange(next)}
+        aria-label="Status filter"
+      />
 
       {/* Project Select */}
-      <select
+      <Select
+        t={t}
         value={selectedProject ?? ""}
-        onChange={(e) =>
-          onProjectChange(e.target.value || null)
-        }
-        className="text-sm border border-border rounded-lg px-3 py-1.5 bg-card text-foreground cursor-pointer"
-      >
-        <option value="">All Products</option>
-        {availableProjects.map((p) => (
-          <option key={p} value={p}>
-            {p.toUpperCase()}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onProjectChange(v === "" ? null : v)}
+        options={projectOptions}
+        aria-label="Project filter"
+        style={{ width: "auto", minWidth: 130 }}
+      />
 
       {/* Priority single-select */}
-      <select
+      <Select
+        t={t}
         value={selectedPriority ?? ""}
-        onChange={(e) =>
-          onPriorityChange(e.target.value ? (e.target.value as TaskPriority) : null)
-        }
-        className="text-sm border border-border rounded-lg px-3 py-1.5 bg-card text-foreground cursor-pointer"
-      >
-        <option value="">All priorities</option>
-        {ALL_PRIORITIES.map((p) => (
-          <option key={p} value={p}>
-            {p.charAt(0).toUpperCase() + p.slice(1)}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => onPriorityChange(v === "" ? null : (v as TaskPriority))}
+        options={PRIORITY_OPTIONS}
+        aria-label="Priority filter"
+        style={{ width: "auto", minWidth: 130 }}
+      />
+
+      {/* Dispatcher single-select */}
+      {onDispatcherChange && (
+        <Select
+          t={t}
+          value={selectedDispatcher ?? ""}
+          onChange={(v) => onDispatcherChange(v === "" ? null : v)}
+          options={dispatcherOptions}
+          aria-label="Dispatcher filter"
+          style={{ width: "auto", minWidth: 150 }}
+        />
+      )}
     </div>
   );
 }

@@ -1,18 +1,12 @@
 "use client";
 
+import React from "react";
 import type { Task } from "@/types";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Chip } from "@/components/zen/Chip";
 import { extractFirstImage } from "./MarkdownRenderer";
 import { getOverdueDays, getTaskRiskBadges } from "@/lib/task-risk";
-import {
-  AlertTriangle,
-  ArrowUp,
-  Minus,
-  ArrowDown,
-  Layers,
-  Calendar,
-  Bot,
-} from "lucide-react";
+import { Calendar, Bot, GitBranch, CornerUpRight } from "lucide-react";
 
 interface TaskCardProps {
   task: Task;
@@ -20,36 +14,41 @@ interface TaskCardProps {
   entityNames?: Record<string, string>;
 }
 
-const priorityIcons: Record<string, React.ReactNode> = {
-  critical: <AlertTriangle className="w-3.5 h-3.5 text-red-400" />,
-  high: <ArrowUp className="w-3.5 h-3.5 text-orange-400" />,
-  medium: <Minus className="w-3.5 h-3.5 text-yellow-400" />,
-  low: <ArrowDown className="w-3.5 h-3.5 text-blue-400" />,
-};
-
-const priorityBg: Record<string, string> = {
-  critical: "bg-red-500/20 border-red-500/30",
-  high: "bg-orange-500/20 border-orange-500/30",
-  medium: "bg-yellow-500/20 border-yellow-500/30",
-  low: "bg-blue-500/20 border-blue-500/30",
-};
+function dispatcherShort(value: string | null | undefined): string | null {
+  if (!value) return null;
+  if (value.startsWith("agent:")) return value.slice(6).toUpperCase();
+  if (value === "human" || value.startsWith("human:")) return "HUMAN";
+  return value;
+}
 
 function formatDate(date: Date | null): string {
   if (!date) return "";
-  return date.toLocaleDateString("zh-TW", {
-    month: "short",
-    day: "numeric",
-  });
+  return date.toLocaleDateString("zh-TW", { month: "short", day: "numeric" });
+}
+
+function priorityTone(p: string): "accent" | "ocher" | "muted" {
+  if (p === "critical" || p === "high") return "accent";
+  if (p === "medium") return "ocher";
+  return "muted";
 }
 
 export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
+  const t = useInk("light");
+  const { c, fontBody, fontMono, radius } = t;
+
   const thumbnail = task.description ? extractFirstImage(task.description) : null;
   const overdue = getOverdueDays(task) !== null;
   const dueDateStr = formatDate(task.dueDate);
   const riskBadges = getTaskRiskBadges(task);
-  
-  const isAgentCreated = task.creatorName?.includes("agent") || task.createdBy?.includes("agent");
-  const mainName = task.assigneeName || task.assignee || task.creatorName || task.createdBy || "Unassigned";
+
+  const isAgentCreated =
+    task.creatorName?.includes("agent") || task.createdBy?.includes("agent");
+  const mainName =
+    task.assigneeName ||
+    task.assignee ||
+    task.creatorName ||
+    task.createdBy ||
+    "Unassigned";
   const displayName = mainName.replace(/^agent \(by (.*?)\)$/, "$1");
 
   const descPreview = task.description
@@ -62,109 +61,265 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
         .slice(0, 100)
     : null;
 
-  return (
-    <Card
-      className={`relative overflow-hidden transition-all duration-300 cursor-pointer group border-white/10 hover:border-blue-500/50 hover:shadow-[0_8px_30px_rgb(0,0,0,0.6)] hover:-translate-y-0.5 active:scale-[0.985] ${
-        overdue ? "bg-red-950/10" : "bg-[#141414]"
-      }`}
-      onClick={() => onSelect?.(task)}
-    >
-      {/* Selection Glow */}
-      <div className="absolute inset-0 bg-blue-500/[0.03] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+  // Overdue: 2px left vermillion border + vermSoft background tint
+  const cardStyle: React.CSSProperties = {
+    position: "relative",
+    overflow: "hidden",
+    cursor: "pointer",
+    background: overdue ? c.vermSoft : c.surface,
+    border: `1px solid ${c.inkHair}`,
+    borderLeft: overdue ? `2px solid ${c.vermillion}` : `1px solid ${c.inkHair}`,
+    borderRadius: radius,
+    transition: "box-shadow 0.2s, border-color 0.2s",
+  };
 
+  return (
+    <div
+      style={cardStyle}
+      onClick={() => onSelect?.(task)}
+      onMouseEnter={(e) => {
+        const el = e.currentTarget as HTMLDivElement;
+        el.style.borderColor = overdue ? c.vermillion : c.inkHairBold;
+        el.style.boxShadow = "0 4px 20px rgba(58, 52, 44, 0.10)";
+      }}
+      onMouseLeave={(e) => {
+        const el = e.currentTarget as HTMLDivElement;
+        el.style.borderColor = overdue ? c.vermillion : c.inkHair;
+        el.style.boxShadow = "none";
+      }}
+    >
+      {/* Thumbnail */}
       {thumbnail && (
-        <div className="relative w-full h-28 overflow-hidden border-b border-white/5">
+        <div
+          style={{
+            position: "relative",
+            width: "100%",
+            height: 112,
+            overflow: "hidden",
+            borderBottom: `1px solid ${c.inkHair}`,
+          }}
+        >
           <img
             src={thumbnail}
             alt=""
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110 opacity-80 group-hover:opacity-100"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              opacity: 0.85,
+            }}
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent" />
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              background: `linear-gradient(to top, rgba(20,18,16,0.40) 0%, transparent 60%)`,
+            }}
+          />
         </div>
       )}
 
-      <CardHeader className="pb-2 pt-3 px-3.5">
-        <div className="flex items-start justify-between gap-2">
-          <CardTitle className="text-[13px] font-bold text-white leading-snug group-hover:text-blue-300 transition-colors line-clamp-2">
-            {task.title}
-          </CardTitle>
-
+      {/* Header */}
+      <div style={{ padding: "10px 12px 6px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: 8,
+          }}
+        >
+          {/* B3-01: title uses fontBody (sans), fw=500, fs=13, ls=0.02em */}
           <span
-            className={`flex-shrink-0 p-1 rounded-md border ${priorityBg[task.priority] ?? "bg-secondary"}`}
+            style={{
+              fontFamily: fontBody,
+              fontSize: 13,
+              fontWeight: 500,
+              letterSpacing: "0.02em",
+              lineHeight: 1.35,
+              color: c.ink,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
           >
-            {priorityIcons[task.priority]}
+            {task.title}
           </span>
+
+          {/* B3-03: priority Chip tone mapped to accent/ocher/muted */}
+          <Chip t={t} tone={priorityTone(task.priority)} dot style={{ flexShrink: 0 }}>
+            {task.priority}
+          </Chip>
         </div>
 
         {descPreview && (
-          <p className="text-[11px] text-gray-300 mt-1.5 line-clamp-2 leading-relaxed font-normal opacity-90">
+          <p
+            style={{
+              fontFamily: fontBody,
+              fontSize: 11,
+              color: c.inkMuted,
+              marginTop: 6,
+              lineHeight: 1.55,
+              display: "-webkit-box",
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: "vertical",
+              overflow: "hidden",
+            }}
+          >
             {descPreview}
           </p>
         )}
-      </CardHeader>
+      </div>
 
-      <CardContent className="pt-0 pb-3 px-3.5 space-y-3">
-        {/* Tags */}
-        {task.linkedEntities.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {task.linkedEntities.slice(0, 2).map((id) => (
-              <span
-                key={id}
-                className="text-[9px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 border border-blue-500/20 font-bold tracking-tight"
+      {/* Body chips */}
+      <div style={{ padding: "0 12px 8px", display: "flex", flexDirection: "column", gap: 6 }}>
+        {/* Dispatcher + Subtask chips — B3-03: tone="muted" (no multi-colour) */}
+        {(task.dispatcher || task.parentTaskId) && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {task.dispatcher && (
+              <Chip
+                t={t}
+                tone={task.dispatcher.startsWith("human") ? "accent" : "muted"}
+                dot
               >
+                <GitBranch size={9} style={{ marginRight: 2 }} />
+                {dispatcherShort(task.dispatcher)}
+              </Chip>
+            )}
+            {task.parentTaskId && (
+              <Chip t={t} tone="muted" dot>
+                <CornerUpRight size={9} style={{ marginRight: 2 }} />
+                SUB
+              </Chip>
+            )}
+          </div>
+        )}
+
+        {/* Linked entity chips */}
+        {task.linkedEntities.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {task.linkedEntities.slice(0, 2).map((id) => (
+              <Chip key={id} t={t} tone="muted">
                 {entityNames[id] ?? id.slice(0, 6)}
-              </span>
+              </Chip>
             ))}
           </div>
         )}
 
+        {/* Risk badges */}
         {riskBadges.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             {riskBadges.map((badge) => (
-              <span
-                key={badge.kind}
-                className={`rounded-full border px-2 py-0.5 text-[10px] font-bold tracking-tight ${badge.className}`}
-              >
+              <Chip key={badge.kind} t={t} tone={overdue ? "accent" : "ocher"}>
                 {badge.label}
-              </span>
+              </Chip>
             ))}
           </div>
         )}
 
         {/* Footer */}
-        <div className="flex items-center justify-between text-[10px] border-t border-white/5 pt-2.5">
-          <div className="flex items-center gap-2">
-            <div className="relative">
-              <div className="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-[9px] font-black text-white shadow-md ring-1 ring-white/20">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            borderTop: `1px solid ${c.inkHair}`,
+            paddingTop: 8,
+            marginTop: 2,
+          }}
+        >
+          {/* Avatar + name */}
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <div style={{ position: "relative" }}>
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: "50%",
+                  background: c.vermSoft,
+                  border: `1px solid ${c.vermLine}`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 9,
+                  fontWeight: 700,
+                  color: c.vermillion,
+                  fontFamily: fontBody,
+                }}
+              >
                 {(displayName || "?")[0].toUpperCase()}
               </div>
               {isAgentCreated && (
-                <div className="absolute -bottom-1 -right-1 bg-black rounded-full p-0.5 ring-1 ring-white/20 shadow-xs">
-                  <Bot className="w-2.5 h-2.5 text-blue-400" />
+                <div
+                  style={{
+                    position: "absolute",
+                    bottom: -2,
+                    right: -2,
+                    background: c.surface,
+                    borderRadius: "50%",
+                    padding: 1,
+                    border: `1px solid ${c.inkHair}`,
+                  }}
+                >
+                  <Bot size={8} color={c.inkMuted} />
                 </div>
               )}
             </div>
-            <span className="truncate max-w-[80px] font-bold text-gray-200 group-hover:text-white">
+            <span
+              style={{
+                fontFamily: fontBody,
+                fontSize: 10,
+                fontWeight: 500,
+                color: c.inkMuted,
+                maxWidth: 80,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
               {displayName}
             </span>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          {/* Due date + project */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {dueDateStr && (
-              <div className={`flex items-center gap-1 font-bold ${overdue ? "text-red-400" : "text-gray-400"}`}>
-                <Calendar className="w-2.5 h-2.5" />
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 3,
+                  fontFamily: fontBody,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: overdue ? c.vermillion : c.inkMuted,
+                }}
+              >
+                <Calendar size={10} />
                 <span>{dueDateStr}</span>
               </div>
             )}
-            
+
             {task.project && (
-              <span className="px-1.5 py-0.5 rounded-[4px] bg-white/10 text-[9px] font-black uppercase tracking-widest text-gray-400 border border-white/10">
+              <span
+                style={{
+                  fontFamily: fontMono,
+                  fontSize: 9,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  color: c.inkFaint,
+                  padding: "2px 6px",
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: radius,
+                }}
+              >
                 {task.project}
               </span>
             )}
           </div>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

@@ -556,17 +556,28 @@ doc entity
 
 ## 明確不包含
 
-- **儲存文件內容** — ZenOS 是語意索引層，不存內容
-- **Content snapshot / 快取** — 不做內容副本
-- **Content fallback** — 外部 MCP 不可用時不自己去抓內容
-- **文件編輯器** — 不提供文件編輯功能
-- **文件版本控制** — 版本管理是原生系統的責任
-- **檔案上傳 / 託管** — 不做 file hosting
-- **全文搜尋** — ZenOS 的搜尋是語意索引層搜尋
-- **排程爬取外部系統** — 所有治理操作 on-demand
-- **MCP 設定管理** — ZenOS 不管使用者掛了哪些 MCP，只在 read_source 失敗時附帶 setup_hint
-- **強制建立 mcp_not_configured status** — 不引入新的 source_status 值，沿用現有 stale/unresolvable 機制
-- **Server 端 LLM 依賴於 bundle 主路徑** — 依 `ADR-039`，server 不得在 write / add_source / update_source 的主路徑上呼叫 LLM；`bundle_highlights` 與 `change_summary` 的語意內容一律由 agent 端 LLM 產生並透過 payload 傳入
+> **2026-04-20 Amendment（by SPEC-docs-native-edit-and-helper-ingest）**：移除「儲存文件內容」「Content snapshot / 快取」「文件編輯器」「檔案上傳 / 託管」四條原 exclusion，改為下方「合法儲存模式」說明。原文保留為刪除線供追溯。
+
+- ~~**儲存文件內容** — ZenOS 是語意索引層，不存內容~~ → 改為兩種合法儲存模式（見下）
+- ~~**Content snapshot / 快取** — 不做內容副本~~ → helper-supplied 摘要快取為合法 ≤10KB
+- **Content fallback** — 外部 MCP 不可用時不自己去抓內容（**仍保留**：ZenOS server 永遠不出網主動抓）
+- ~~**文件編輯器** — 不提供文件編輯功能~~ → Dashboard 原生 markdown 編輯器（Delivery Snapshot 模式）為合法
+- **文件版本控制** — 版本管理是原生系統的責任（**仍保留**）
+- ~~**檔案上傳 / 託管** — 不做 file hosting~~ → Local md 拖曳上傳（≤10KB summary 模式）為合法；非 md 格式 / 大檔案仍不做
+- **全文搜尋** — ZenOS 的搜尋是語意索引層搜尋（**仍保留**）
+- **排程爬取外部系統** — 所有治理操作 on-demand（**仍保留**）
+- **MCP 設定管理** — ZenOS 不管使用者掛了哪些 MCP，只在 read_source 失敗時附帶 setup_hint（**仍保留**）
+- **強制建立 mcp_not_configured status** — 不引入新的 source_status 值，沿用現有 stale/unresolvable 機制（**仍保留**）
+- **Server 端 LLM 依賴於 bundle 主路徑** — 依 `ADR-039`，server 不得在 write / add_source / update_source 的主路徑上呼叫 LLM；`bundle_highlights` 與 `change_summary` 的語意內容一律由 agent 端 LLM 產生並透過 payload 傳入（**仍保留**）
+
+### 合法儲存模式（2026-04-20 Amendment）
+
+ZenOS 支援以下兩種合法儲存模式，**不違反「語意索引層」定位**：
+
+1. **Delivery Snapshot（ZenOS 原生文件）**：用戶在 Dashboard 直接編輯 markdown，內容存 GCS private revision；source.type=`zenos_native`，URI=`/docs/{doc_id}`。詳細見 SPEC-document-delivery-layer + SPEC-docs-native-edit-and-helper-ingest。
+2. **Helper-supplied Summary（外部 source 的語意摘要）**：helper 推入 Notion / GDrive source 時可附帶 ≤10KB `snapshot_summary`（**語意摘要，不是 raw 全文 mirror**）。原始全文永遠在外部，要看請點 source.uri。
+
+兩者都不讓 ZenOS 變成「內容倉」——summary 是 helper distill 的語意產物；Delivery Snapshot 是用戶在 ZenOS 原生產生的文件（外部本來就沒這份）。
 
 ---
 

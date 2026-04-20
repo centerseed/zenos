@@ -99,6 +99,42 @@ function renderPanel() {
   );
 }
 
+function renderDebriefPanel() {
+  return render(
+    <CrmAiPanel
+      mode="debrief"
+      deal={{
+        id: "deal-1",
+        partnerId: "partner-1",
+        title: "企業流程導入",
+        companyId: "company-1",
+        ownerPartnerId: "owner-1",
+        funnelStage: "需求訪談",
+        deliverables: [],
+        isClosedLost: false,
+        isOnHold: false,
+        createdAt: new Date("2026-04-01T00:00:00Z"),
+        updatedAt: new Date("2026-04-01T00:00:00Z"),
+      }}
+      activities={[]}
+      company={null}
+      contacts={[]}
+      token="token"
+      triggerActivity={{
+        id: "activity-1",
+        dealId: "deal-1",
+        partnerId: "partner-1",
+        activityType: "會議",
+        activityAt: new Date("2026-04-15T00:00:00Z"),
+        summary: "本次會議摘要",
+        recordedBy: "owner-1",
+        isSystem: false,
+        createdAt: new Date("2026-04-15T00:00:00Z"),
+      }}
+    />
+  );
+}
+
 describe("CrmAiPanel", () => {
   it("auto-starts the first briefing turn when the panel opens and uses continue for follow-ups", async () => {
     mockStreamCoworkChat
@@ -152,6 +188,21 @@ describe("CrmAiPanel", () => {
     await waitFor(() => expect(screen.getByText("permission denied")).toBeInTheDocument());
   });
 
+  it("renders nested stream_event payloads from helper responses", async () => {
+    mockStreamCoworkChat.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({
+        type: "message",
+        requestId: "req-1",
+        line: '{"type":"stream_event","event":{"message":{"content":[{"content":{"text":"第一輪摘要"}}]}}}',
+      });
+      onEvent({ type: "done", requestId: "req-1", code: 0 });
+    });
+
+    renderPanel();
+
+    await waitFor(() => expect(screen.getByText("第一輪摘要")).toBeInTheDocument());
+  });
+
   it("does not send follow-up on plain Enter, but sends on Ctrl+Enter", async () => {
     mockStreamCoworkChat
       .mockImplementationOnce(async ({ onEvent }) => {
@@ -200,7 +251,9 @@ describe("CrmAiPanel", () => {
 
     renderPanel();
 
-    await waitFor(() => expect(screen.getByText(/等待本機確認：mcp__zenos__search/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getAllByText(/等待本機確認：mcp__zenos__search/).length).toBeGreaterThan(0)
+    );
     expect(screen.getByText("ZenOS 連線失敗")).toBeInTheDocument();
     expect(screen.getByText("缺 skill：/crm-briefing")).toBeInTheDocument();
   });
@@ -224,6 +277,20 @@ describe("CrmAiPanel", () => {
           requestId: "req-1",
         })
       )
+    );
+  });
+
+  it("shows debrief progress copy before the first streamed token arrives", async () => {
+    mockStreamCoworkChat.mockImplementation(async ({ signal }) => {
+      await new Promise((_resolve, reject) => {
+        signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+      });
+    });
+
+    renderDebriefPanel();
+
+    await waitFor(() =>
+      expect(screen.getByText("helper 已啟動，這一輪會先整理本次活動、既有 briefing 與承諾事項，再輸出 debrief。")).toBeInTheDocument()
     );
   });
 });

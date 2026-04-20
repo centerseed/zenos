@@ -1,10 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import React, { useState, useMemo } from "react";
 import type { Entity, Task, TaskStatus } from "@/types";
+import { useInk } from "@/lib/zen-ink/tokens";
 import { TaskCard } from "./TaskCard";
 import { TaskDetailDrawer } from "./TaskDetailDrawer";
-import { Layers, AlertTriangle } from "lucide-react";
+import { Dialog } from "@/components/zen/Dialog";
+import { Btn } from "@/components/zen/Btn";
+import { Divider } from "@/components/zen/Divider";
+import { InkMark } from "@/components/zen/InkMark";
 import {
   DndContext,
   DragEndEvent,
@@ -27,14 +31,13 @@ interface TaskBoardProps {
   onStatusChange?: (taskId: string, newStatus: string) => Promise<void>;
   onUpdateTask?: (taskId: string, updates: Record<string, unknown>) => Promise<void>;
   onConfirmTask?: (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => Promise<void>;
+  onHandoffTask?: (
+    taskId: string,
+    data: { to_dispatcher: string; reason: string; notes?: string | null }
+  ) => Promise<void>;
 }
 
-const DEFAULT_COLUMN_ORDER: TaskStatus[] = [
-  "todo",
-  "in_progress",
-  "review",
-  "done",
-];
+const DEFAULT_COLUMN_ORDER: TaskStatus[] = ["todo", "in_progress", "review", "done"];
 
 const COLUMN_LABELS: Record<string, string> = {
   todo: "待處理",
@@ -43,12 +46,13 @@ const COLUMN_LABELS: Record<string, string> = {
   done: "已完成",
 };
 
-const COLUMN_HEADER_COLORS: Record<string, string> = {
-  todo: "bg-blue-900/50 text-blue-400",
-  in_progress: "bg-yellow-900/50 text-yellow-400",
-  review: "bg-purple-900/50 text-purple-400",
-  done: "bg-green-900/50 text-green-400",
-};
+// Status → Chip-like dot colour for column header indicator
+function statusDotColor(status: string, vermillion: string, jade: string, ocher: string, inkFaint: string): string {
+  if (status === "done") return jade;
+  if (status === "in_progress") return ocher;
+  if (status === "review") return vermillion;
+  return inkFaint;
+}
 
 // ─── DraggableTaskCard ────────────────────────────────────────────────────────
 
@@ -71,13 +75,13 @@ function DraggableTaskCard({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={`cursor-grab active:cursor-grabbing ${isDragging ? "opacity-40" : ""}`}
+      style={{
+        cursor: "grab",
+        opacity: isDragging ? 0.4 : 1,
+        outline: "none",
+      }}
     >
-      <TaskCard
-        task={task}
-        onSelect={onSelect}
-        entityNames={entityNames}
-      />
+      <TaskCard task={task} onSelect={onSelect} entityNames={entityNames} />
     </div>
   );
 }
@@ -93,21 +97,63 @@ function DroppableColumn({
   children: React.ReactNode;
   isEmpty: boolean;
 }) {
+  const t = useInk("light");
+  const { c } = t;
   const { setNodeRef, isOver } = useDroppable({ id: status });
 
   return (
     <div
       ref={setNodeRef}
-      className={`bg-card/40 backdrop-blur-sm rounded-b-xl p-2.5 space-y-4 flex-1 overflow-y-auto border-x border-b border-border/60 shadow-inner min-h-[200px] transition-all ${
-        isOver ? "ring-2 ring-primary/40 bg-primary/5" : ""
-      }`}
+      style={{
+        background: isOver ? c.vermSoft : c.paperWarm,
+        border: `1px solid ${isOver ? c.vermillion : c.inkHair}`,
+        borderTop: "none",
+        borderRadius: `0 0 ${t.radius}px ${t.radius}px`,
+        padding: 10,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        flex: 1,
+        overflowY: "auto",
+        minHeight: 200,
+        // B3-06: drag-over ring = 2px vermillion border (set above via isOver)
+        transition: "background 0.15s, border-color 0.15s",
+      }}
     >
       {isEmpty ? (
-        <div className={`flex flex-col items-center justify-center py-12 transition-opacity ${isOver ? "opacity-60" : "opacity-30"}`}>
-          <div className={`w-10 h-10 rounded-full border-2 border-dashed mb-3 ${isOver ? "border-primary/60" : "border-muted-foreground"}`} />
-          <p className="text-[10px] font-medium tracking-tight">目前沒有任務</p>
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "48px 0",
+            opacity: isOver ? 0.6 : 0.3,
+          }}
+        >
+          <div
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: "50%",
+              border: `2px dashed ${isOver ? c.vermillion : c.inkMuted}`,
+              marginBottom: 10,
+            }}
+          />
+          <p
+            style={{
+              fontFamily: t.fontBody,
+              fontSize: 10,
+              fontWeight: 500,
+              color: c.inkMuted,
+            }}
+          >
+            目前沒有任務
+          </p>
         </div>
-      ) : children}
+      ) : (
+        children
+      )}
     </div>
   );
 }
@@ -124,14 +170,19 @@ export function TaskBoard({
   onStatusChange,
   onUpdateTask,
   onConfirmTask,
+  onHandoffTask,
 }: TaskBoardProps) {
+  const t = useInk("light");
+  const { c, fontBody, fontMono, radius } = t;
+
   const [internalSelectedTask, setInternalSelectedTask] = useState<Task | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
-  // Warning dialog for bad status jumps
+  // B3-02: warn dialog state for bad status jumps
   const [pendingDrag, setPendingDrag] = useState<{ taskId: string; newStatus: string } | null>(null);
   const [dragWarning, setDragWarning] = useState<string | null>(null);
 
-  const selectedTask = controlledSelectedTask !== undefined ? controlledSelectedTask : internalSelectedTask;
+  const selectedTask =
+    controlledSelectedTask !== undefined ? controlledSelectedTask : internalSelectedTask;
   const setSelectedTask = (task: Task | null) => {
     if (onSelectTask) {
       onSelectTask(task);
@@ -140,11 +191,13 @@ export function TaskBoard({
     setInternalSelectedTask(task);
   };
 
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
 
   const activeColumns = useMemo(() => {
     if (visibleStatuses.length > 0) {
-      return DEFAULT_COLUMN_ORDER.filter(s => visibleStatuses.includes(s));
+      return DEFAULT_COLUMN_ORDER.filter((s) => visibleStatuses.includes(s));
     }
     return DEFAULT_COLUMN_ORDER;
   }, [visibleStatuses]);
@@ -154,7 +207,7 @@ export function TaskBoard({
     const data: Record<string, { planId: string | null; tasks: Task[] }[]> = {};
 
     for (const status of DEFAULT_COLUMN_ORDER) {
-      let statusTasks = tasks.filter(t => t.status === status);
+      let statusTasks = tasks.filter((t) => t.status === status);
 
       if (status === "done") {
         statusTasks.sort((a, b) => {
@@ -167,27 +220,41 @@ export function TaskBoard({
       const planGroups: Record<string, Task[]> = {};
       const noPlanTasks: Task[] = [];
 
-      for (const t of statusTasks) {
-        if (t.planId) {
-          if (!planGroups[t.planId]) planGroups[t.planId] = [];
-          planGroups[t.planId].push(t);
+      for (const task of statusTasks) {
+        if (task.planId) {
+          if (!planGroups[task.planId]) planGroups[task.planId] = [];
+          planGroups[task.planId].push(task);
         } else {
-          noPlanTasks.push(t);
+          noPlanTasks.push(task);
         }
       }
 
-      const sortedGroups = Object.entries(planGroups).map(([planId, groupTasks]) => ({
-        planId,
-        tasks: groupTasks.sort((a, b) => (a.planOrder ?? 0) - (b.planOrder ?? 0)),
-      })).sort((a, b) => a.planId.localeCompare(b.planId));
+      const sortedGroups = Object.entries(planGroups)
+        .map(([planId, groupTasks]) => ({
+          planId,
+          tasks: groupTasks.sort((a, b) => (a.planOrder ?? 0) - (b.planOrder ?? 0)),
+        }))
+        .sort((a, b) => a.planId.localeCompare(b.planId));
 
       let finalGroups = [
         ...sortedGroups,
-        ...(noPlanTasks.length > 0 ? [{ planId: null, tasks: noPlanTasks.sort((a, b) => {
-          if (status === "done") return 0;
-          const pMap: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 };
-          return pMap[a.priority] - pMap[b.priority];
-        }) }] : []),
+        ...(noPlanTasks.length > 0
+          ? [
+              {
+                planId: null,
+                tasks: noPlanTasks.sort((a, b) => {
+                  if (status === "done") return 0;
+                  const pMap: Record<string, number> = {
+                    critical: 0,
+                    high: 1,
+                    medium: 2,
+                    low: 3,
+                  };
+                  return pMap[a.priority] - pMap[b.priority];
+                }),
+              },
+            ]
+          : []),
       ];
 
       if (status === "todo" || status === "done") {
@@ -224,7 +291,7 @@ export function TaskBoard({
 
     const taskId = active.id as string;
     const newStatus = over.id as string;
-    const task = tasks.find(t => t.id === taskId);
+    const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === newStatus) return;
 
     // Warning: todo → done (skipping stages)
@@ -250,105 +317,217 @@ export function TaskBoard({
     setDragWarning(null);
   }
 
-  // Update selected task when tasks array changes (after optimistic update)
+  function cancelDrag() {
+    setPendingDrag(null);
+    setDragWarning(null);
+  }
+
   const selectedTaskUpToDate = useMemo(() => {
     if (!selectedTask) return null;
-    return tasks.find(t => t.id === selectedTask.id) ?? selectedTask;
+    return tasks.find((t) => t.id === selectedTask.id) ?? selectedTask;
   }, [selectedTask, tasks]);
 
   return (
     <>
       <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-        <div className="flex flex-col md:flex-row gap-5 md:overflow-x-auto pb-6 scrollbar-thin scrollbar-thumb-muted-foreground/20 scrollbar-track-transparent">
-          {activeColumns.map((status) => {
-            const groups = boardData[status] || [];
-            const totalCountInView = groups.reduce((acc, g) => acc + g.tasks.length, 0);
-            const totalCountActual = tasks.filter(t => t.status === status).length;
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 20,
+            paddingBottom: 24,
+            overflowX: "auto",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              gap: 20,
+              minWidth: "fit-content",
+            }}
+          >
+            {activeColumns.map((status) => {
+              const groups = boardData[status] || [];
+              const totalCountInView = groups.reduce((acc, g) => acc + g.tasks.length, 0);
+              const totalCountActual = tasks.filter((t) => t.status === status).length;
+              const dotColor = statusDotColor(status, c.vermillion, c.jade, c.ocher, c.inkFaint);
 
-            return (
-              <div key={status} className="w-full md:flex-shrink-0 md:w-[320px] flex flex-col h-full max-h-[calc(100vh-140px)]">
+              return (
                 <div
-                  className={`rounded-t-xl px-4 py-3 flex items-center justify-between shadow-sm z-10 ${COLUMN_HEADER_COLORS[status] ?? "bg-secondary text-muted-foreground"}`}
+                  key={status}
+                  style={{
+                    width: 320,
+                    flexShrink: 0,
+                    display: "flex",
+                    flexDirection: "column",
+                    maxHeight: "calc(100vh - 140px)",
+                  }}
                 >
-                  <span className="text-[11px] font-bold uppercase tracking-widest">
-                    {COLUMN_LABELS[status] ?? status}
-                    {(status === "todo" || status === "done") && totalCountActual > 20 && (
-                      <span className="ml-1 opacity-60 normal-case font-normal text-[9px]">(Top 20)</span>
-                    )}
-                  </span>
-                  <span className="text-[10px] font-bold rounded-full bg-white/10 px-2 py-0.5 border border-white/5">
-                    {totalCountActual}
-                  </span>
-                </div>
-
-                <DroppableColumn status={status} isEmpty={totalCountInView === 0}>
-                  {groups.map((group, gIdx) => (
-                    <div key={group.planId || `no-plan-${gIdx}`} className="space-y-2">
-                      {group.planId && (
-                        <div className="flex items-center gap-1.5 px-1 py-1 mb-1">
-                          <Layers className="w-3 h-3 text-purple-400" />
-                          <span className="text-[10px] font-bold text-purple-400/90 uppercase tracking-tighter truncate max-w-[200px]">
-                            Plan: {entityNames[group.planId] || group.planId.slice(-6)}
-                          </span>
-                          <div className="flex-1 h-[1px] bg-purple-500/20" />
-                        </div>
+                  {/* Column header */}
+                  <div
+                    style={{
+                      background: c.surface,
+                      border: `1px solid ${c.inkHair}`,
+                      borderBottom: "none",
+                      borderRadius: `${radius}px ${radius}px 0 0`,
+                      padding: "10px 14px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                      {/* Status dot */}
+                      <span
+                        style={{
+                          width: 6,
+                          height: 6,
+                          borderRadius: "50%",
+                          background: dotColor,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontFamily: fontMono,
+                          fontSize: 10,
+                          fontWeight: 400,
+                          letterSpacing: "0.18em",
+                          textTransform: "uppercase",
+                          color: c.inkMuted,
+                        }}
+                      >
+                        {COLUMN_LABELS[status] ?? status}
+                      </span>
+                      {(status === "todo" || status === "done") && totalCountActual > 20 && (
+                        <span
+                          style={{
+                            fontFamily: fontBody,
+                            fontSize: 9,
+                            color: c.inkFaint,
+                          }}
+                        >
+                          (Top 20)
+                        </span>
                       )}
-                      <div className={`space-y-2.5 ${group.planId ? "pl-1 border-l border-purple-500/20" : ""}`}>
-                        {group.tasks.map((task) => (
-                          <DraggableTaskCard
-                            key={task.id}
-                            task={task}
-                            onSelect={setSelectedTask}
-                            entityNames={entityNames}
-                          />
-                        ))}
-                      </div>
                     </div>
-                  ))}
-                </DroppableColumn>
-              </div>
-            );
-          })}
+                    <span
+                      style={{
+                        fontFamily: fontMono,
+                        fontSize: 10,
+                        fontWeight: 400,
+                        color: c.inkFaint,
+                        background: c.paperWarm,
+                        border: `1px solid ${c.inkHair}`,
+                        borderRadius: radius,
+                        padding: "1px 7px",
+                      }}
+                    >
+                      {totalCountActual}
+                    </span>
+                  </div>
+
+                  <DroppableColumn status={status} isEmpty={totalCountInView === 0}>
+                    {groups.map((group, gIdx) => (
+                      <div key={group.planId || `no-plan-${gIdx}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {/* B3-08: Plan group header — InkMark + Divider */}
+                        {group.planId && (
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              padding: "4px 2px 2px",
+                            }}
+                          >
+                            <InkMark size={14} ink={c.inkMuted} seal={c.vermillion} sealInk={c.paper} />
+                            <span
+                              style={{
+                                fontFamily: fontMono,
+                                fontSize: 9,
+                                letterSpacing: "0.14em",
+                                textTransform: "uppercase",
+                                color: c.inkMuted,
+                                maxWidth: 180,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {entityNames[group.planId] || group.planId.slice(-6)}
+                            </span>
+                            <div style={{ flex: 1 }}>
+                              <Divider ink={c.inkHair} />
+                            </div>
+                          </div>
+                        )}
+                        {/* Plan group task list */}
+                        <div
+                          style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 8,
+                            paddingLeft: group.planId ? 6 : 0,
+                            borderLeft: group.planId ? `1px solid ${c.inkHair}` : "none",
+                          }}
+                        >
+                          {group.tasks.map((task) => (
+                            <DraggableTaskCard
+                              key={task.id}
+                              task={task}
+                              onSelect={setSelectedTask}
+                              entityNames={entityNames}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </DroppableColumn>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <DragOverlay>
           {activeTask && (
-            <div className="opacity-80 rotate-1 scale-[1.03] shadow-2xl">
-              <TaskCard
-                task={activeTask}
-                onSelect={() => {}}
-                entityNames={entityNames}
-              />
+            <div style={{ opacity: 0.85, transform: "rotate(1deg) scale(1.03)", boxShadow: "0 24px 60px rgba(58,52,44,0.12)" }}>
+              <TaskCard task={activeTask} onSelect={() => {}} entityNames={entityNames} />
             </div>
           )}
         </DragOverlay>
       </DndContext>
 
-      {/* Drag warning dialog */}
-      {dragWarning && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-card border border-border rounded-2xl p-6 mx-4 max-w-sm w-full space-y-4 shadow-2xl">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-400 flex-shrink-0 mt-0.5" />
-              <p className="text-sm text-foreground">{dragWarning}</p>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={confirmDrag}
-                className="flex-1 px-3 py-2 text-xs font-bold bg-yellow-600 text-white rounded-lg hover:bg-yellow-700"
-              >
-                強制執行
-              </button>
-              <button
-                onClick={() => { setPendingDrag(null); setDragWarning(null); }}
-                className="flex-1 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground rounded-lg hover:bg-secondary"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* B3-02: Drag warning — zen/Dialog */}
+      <Dialog
+        t={t}
+        open={!!dragWarning}
+        onOpenChange={(v) => { if (!v) cancelDrag(); }}
+        title="確認操作"
+        size="sm"
+        footer={
+          <>
+            <Btn t={t} variant="ghost" onClick={cancelDrag}>
+              取消
+            </Btn>
+            <Btn t={t} variant="seal" onClick={confirmDrag}>
+              強制執行
+            </Btn>
+          </>
+        }
+      >
+        <p
+          style={{
+            fontFamily: t.fontBody,
+            fontSize: 13,
+            lineHeight: 1.6,
+            color: c.inkMuted,
+            margin: 0,
+          }}
+        >
+          {dragWarning}
+        </p>
+      </Dialog>
 
       <TaskDetailDrawer
         task={selectedTaskUpToDate}
@@ -357,6 +536,7 @@ export function TaskBoard({
         entitiesById={entitiesById}
         onUpdateTask={onUpdateTask}
         onConfirmTask={onConfirmTask}
+        onHandoffTask={onHandoffTask}
       />
     </>
   );

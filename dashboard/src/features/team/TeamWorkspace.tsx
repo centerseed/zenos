@@ -1,5 +1,7 @@
 "use client";
 
+import React, { useState } from "react";
+import { useInk } from "@/lib/zen-ink/tokens";
 import { LoadingState } from "@/components/LoadingState";
 import type { Partner } from "@/types";
 import {
@@ -13,7 +15,340 @@ import {
   WORKSPACE_ROLE_OPTIONS,
   useTeamWorkspace,
 } from "@/features/team/useTeamWorkspace";
+import { Input } from "@/components/zen/Input";
+import { Select } from "@/components/zen/Select";
+import { Chip } from "@/components/zen/Chip";
+import { Dialog } from "@/components/zen/Dialog";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function labelBtn(
+  c: ReturnType<typeof useInk>["c"],
+  fontBody: string,
+  radius: number,
+  opts: {
+    children: React.ReactNode;
+    onClick?: () => void;
+    type?: "button" | "submit";
+    disabled?: boolean;
+    variant: "ink" | "ghost" | "danger" | "muted";
+    size?: "sm" | "md";
+    "aria-label"?: string;
+  }
+) {
+  const { children, onClick, type = "button", disabled = false, variant, size = "md", "aria-label": ariaLabel } = opts;
+
+  const bgMap: Record<string, string> = {
+    ink: c.ink,
+    ghost: c.paperWarm,
+    danger: c.vermSoft,
+    muted: "transparent",
+  };
+  const fgMap: Record<string, string> = {
+    ink: c.paper,
+    ghost: c.ink,
+    danger: c.vermillion,
+    muted: c.inkMuted,
+  };
+  const bdMap: Record<string, string> = {
+    ink: "transparent",
+    ghost: c.inkHair,
+    danger: c.vermLine,
+    muted: "transparent",
+  };
+
+  const padding = size === "sm" ? "4px 10px" : "7px 14px";
+  const fontSize = size === "sm" ? 11 : 12;
+
+  return (
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        padding,
+        fontSize,
+        fontFamily: fontBody,
+        fontWeight: 500,
+        letterSpacing: "0.02em",
+        background: bgMap[variant],
+        color: fgMap[variant],
+        border: `1px solid ${bdMap[variant]}`,
+        borderRadius: radius,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
+        transition: "all .15s",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ─── StatusChip ───────────────────────────────────────────────────────────────
+
+function StatusChip({ status, t }: { status: Partner["status"]; t: ReturnType<typeof useInk> }) {
+  const toneMap: Record<Partner["status"], "jade" | "ocher" | "accent"> = {
+    active: "jade",
+    invited: "ocher",
+    suspended: "accent",
+  };
+  const labelMap: Record<Partner["status"], string> = {
+    active: "啟用中",
+    invited: "待啟用",
+    suspended: "已停用",
+  };
+  return (
+    <Chip t={t} tone={toneMap[status]} dot>
+      {labelMap[status]}
+    </Chip>
+  );
+}
+
+// ─── ScopeDialog ─────────────────────────────────────────────────────────────
+
+interface ScopeDialogProps {
+  t: ReturnType<typeof useInk>;
+  open: boolean;
+  onClose: () => void;
+  scopeEditor: NonNullable<ReturnType<typeof useTeamWorkspace>["scopeEditor"]>;
+  setScopeEditor: ReturnType<typeof useTeamWorkspace>["setScopeEditor"];
+  departmentOptions: string[];
+  projectEntities: ReturnType<typeof useTeamWorkspace>["projectEntities"];
+  partners: Partner[];
+  actionLoading: string | null;
+  handleScopeSave: ReturnType<typeof useTeamWorkspace>["handleScopeSave"];
+}
+
+function ScopeDialog({
+  t,
+  open,
+  onClose,
+  scopeEditor,
+  setScopeEditor,
+  departmentOptions,
+  projectEntities,
+  partners,
+  actionLoading,
+  handleScopeSave,
+}: ScopeDialogProps) {
+  const { c, fontBody, fontMono, radius } = t;
+  const isSaving = actionLoading === scopeEditor.partnerId;
+
+  return (
+    <Dialog
+      t={t}
+      open={open}
+      onOpenChange={(v) => { if (!v) onClose(); }}
+      title="編輯權限範圍"
+      description={scopeEditor.email}
+      size="md"
+      footer={
+        <>
+          {labelBtn(c, fontBody, radius, {
+            children: "取消",
+            onClick: onClose,
+            variant: "ghost",
+          })}
+          {labelBtn(c, fontBody, radius, {
+            children: isSaving ? "儲存中..." : "儲存範圍",
+            disabled: isSaving,
+            onClick: () => {
+              const target = partners.find((p) => p.id === scopeEditor.partnerId);
+              if (!target) return;
+              handleScopeSave(target, {
+                roles: scopeEditor.roles,
+                department: scopeEditor.department || "all",
+                workspaceRole: scopeEditor.workspaceRole,
+                authorizedEntityIds:
+                  scopeEditor.workspaceRole === "guest"
+                    ? scopeEditor.authorizedEntityIds
+                    : [],
+              });
+            },
+            variant: "ink",
+          })}
+        </>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {/* Roles */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: c.inkFaint, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+            角色
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {DEFAULT_ROLE_OPTIONS.map((role) => {
+              const checked = scopeEditor.roles.includes(role);
+              return (
+                <label
+                  key={role}
+                  style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontFamily: fontBody, color: c.ink, cursor: "pointer" }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={(e) => {
+                      setScopeEditor((prev) => {
+                        if (!prev) return prev;
+                        const next = new Set(prev.roles);
+                        if (e.target.checked) next.add(role);
+                        else next.delete(role);
+                        return { ...prev, roles: Array.from(next).sort() };
+                      });
+                    }}
+                  />
+                  {role}
+                </label>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Input
+              t={t}
+              value={scopeEditor.customRole}
+              onChange={(v) =>
+                setScopeEditor((prev) => (prev ? { ...prev, customRole: v } : prev))
+              }
+              placeholder="新增自訂角色"
+            />
+            {labelBtn(c, fontBody, radius, {
+              children: "新增",
+              variant: "ghost",
+              size: "sm",
+              onClick: () =>
+                setScopeEditor((prev) => {
+                  if (!prev) return prev;
+                  const v = prev.customRole.trim();
+                  if (!v) return prev;
+                  const next = new Set(prev.roles);
+                  next.add(v);
+                  return { ...prev, roles: Array.from(next).sort(), customRole: "" };
+                }),
+            })}
+          </div>
+        </div>
+
+        {/* Department */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: c.inkFaint, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+            部門
+          </div>
+          <Select
+            t={t}
+            value={scopeEditor.department}
+            onChange={(v) =>
+              setScopeEditor((prev) => (prev ? { ...prev, department: v ?? "all" } : prev))
+            }
+            options={departmentOptions.map((d) => ({ value: d, label: d }))}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <Input
+              t={t}
+              value={scopeEditor.customDepartment}
+              onChange={(v) =>
+                setScopeEditor((prev) =>
+                  prev ? { ...prev, customDepartment: v } : prev
+                )
+              }
+              placeholder="自訂部門名稱（可選）"
+            />
+            {labelBtn(c, fontBody, radius, {
+              children: "套用",
+              variant: "ghost",
+              size: "sm",
+              onClick: () =>
+                setScopeEditor((prev) => {
+                  if (!prev) return prev;
+                  const v = prev.customDepartment.trim();
+                  if (!v) return prev;
+                  return { ...prev, department: v, customDepartment: "" };
+                }),
+            })}
+          </div>
+        </div>
+
+        {/* Workspace role */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontFamily: fontMono, fontSize: 10, color: c.inkFaint, letterSpacing: "0.18em", textTransform: "uppercase" }}>
+            工作區角色
+          </div>
+          <Select
+            t={t}
+            value={scopeEditor.workspaceRole}
+            onChange={(v) =>
+              setScopeEditor((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      workspaceRole: (v ?? "member") as WorkspaceAssignment,
+                      authorizedEntityIds:
+                        v === "guest" ? prev.authorizedEntityIds : [],
+                    }
+                  : prev
+              )
+            }
+            options={WORKSPACE_ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+            aria-label="成員工作區角色"
+          />
+          {scopeEditor.workspaceRole === "guest" && (
+            <div
+              style={{
+                border: `1px solid ${c.inkHair}`,
+                borderRadius: radius,
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>
+                選擇訪客可存取的專案空間：
+              </div>
+              {projectEntities.length === 0 ? (
+                <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>尚無專案空間</div>
+              ) : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {projectEntities.map((entity) => (
+                    <label
+                      key={entity.id}
+                      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: fontBody, color: c.ink, cursor: "pointer" }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={scopeEditor.authorizedEntityIds.includes(entity.id)}
+                        onChange={(e) =>
+                          setScopeEditor((prev) => {
+                            if (!prev) return prev;
+                            const next = e.target.checked
+                              ? [...prev.authorizedEntityIds, entity.id]
+                              : prev.authorizedEntityIds.filter((id) => id !== entity.id);
+                            return { ...prev, authorizedEntityIds: next };
+                          })
+                        }
+                      />
+                      {entity.name}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </Dialog>
+  );
+}
+
+// ─── TeamPage ─────────────────────────────────────────────────────────────────
+
 function TeamPage() {
+  const t = useInk("light");
+  const { c, fontBody, fontHead, fontMono, radius } = t;
+
   const {
     actionLoading,
     canManageWorkspace,
@@ -52,84 +387,121 @@ function TeamPage() {
   const activeCount = partners.filter((p) => p.status === "active").length;
   const invitedCount = partners.filter((p) => p.status === "invited").length;
 
+  // Table header style
+  const thStyle: React.CSSProperties = {
+    textAlign: "left",
+    fontFamily: fontMono,
+    fontSize: 10,
+    fontWeight: 400,
+    color: c.inkFaint,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+    padding: "10px 20px",
+    borderBottom: `1px solid ${c.inkHair}`,
+  };
+
+  const panelStyle: React.CSSProperties = {
+    background: c.surface,
+    border: `1px solid ${c.inkHair}`,
+    borderRadius: radius,
+    padding: 24,
+    marginBottom: 16,
+  };
+
   return (
-    <div className="min-h-screen">
-      <main id="main-content" className="max-w-7xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
+    <div style={{ minHeight: "100vh", background: c.paper }}>
+      <main
+        id="main-content"
+        style={{ maxWidth: 1120, margin: "0 auto", padding: "32px 24px" }}
+      >
+        {/* Page header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
           <div>
-            <h2 className="text-lg font-semibold text-white">成員管理</h2>
-            <p className="text-sm text-muted-foreground mt-1">
+            <h2 style={{ fontFamily: fontHead, fontSize: 24, fontWeight: 500, color: c.ink, margin: 0, letterSpacing: "0.02em" }}>
+              成員管理
+            </h2>
+            <p style={{ fontFamily: fontBody, fontSize: 13, color: c.inkMuted, marginTop: 4, marginBottom: 0 }}>
               共 {partners.length} 位成員 &middot; {activeCount} 位啟用中
-              {invitedCount > 0 && ` \u00B7 ${invitedCount} 位待啟用`}
+              {invitedCount > 0 && ` · ${invitedCount} 位待啟用`}
             </p>
           </div>
         </div>
 
         {/* Invite Form */}
-        <div className="bg-card border border-border rounded-lg p-6 mb-6">
-          <h3 className="text-sm font-medium text-white mb-4">邀請新成員</h3>
-          <form onSubmit={handleInvite} className="flex flex-col gap-3">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center">
-              <input
-                type="email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="email@example.com"
-                aria-label="邀請成員信箱"
-                required
-                className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm text-white placeholder-muted-foreground focus:outline-none focus:border-ring transition-colors"
-              />
-              <select
-                value={inviteDepartment}
-                onChange={(e) => setInviteDepartment(e.target.value)}
-                className="bg-background border border-border rounded-lg px-4 py-2 text-sm text-white min-w-40"
-                aria-label="邀請預設部門"
-              >
-                {departmentOptions.map((department) => (
-                  <option key={department} value={department}>
-                    {department}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="submit"
-                aria-label="送出邀請"
-                disabled={inviting || !inviteEmail.trim()}
-                className="bg-primary hover:bg-primary/80 text-primary-foreground text-sm font-medium px-4 py-2 rounded-lg transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {inviting ? "送出中..." : "送出邀請"}
-              </button>
+        <div style={panelStyle}>
+          <h3 style={{ fontFamily: fontBody, fontSize: 13, fontWeight: 500, color: c.ink, marginTop: 0, marginBottom: 16 }}>
+            邀請新成員
+          </h3>
+          <form onSubmit={handleInvite} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <Input
+                    t={t}
+                    type="email"
+                    value={inviteEmail}
+                    onChange={setInviteEmail}
+                    placeholder="email@example.com"
+                    aria-label="邀請成員信箱"
+                  />
+                </div>
+                <div style={{ minWidth: 160 }}>
+                  <Select
+                    t={t}
+                    value={inviteDepartment}
+                    onChange={(v) => setInviteDepartment(v ?? "")}
+                    options={departmentOptions.map((d) => ({ value: d, label: d }))}
+                    aria-label="邀請預設部門"
+                  />
+                </div>
+                {labelBtn(c, fontBody, radius, {
+                  children: inviting ? "送出中..." : "送出邀請",
+                  type: "submit",
+                  disabled: inviting || !inviteEmail.trim(),
+                  variant: "ink",
+                  "aria-label": "送出邀請",
+                })}
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: fontBody, fontSize: 13, color: c.ink }}>工作區角色</span>
+                <div style={{ minWidth: 160 }}>
+                  <Select
+                    t={t}
+                    value={inviteWorkspaceRole}
+                    onChange={(v) => {
+                      const next = (v ?? "member") as WorkspaceAssignment;
+                      setInviteWorkspaceRole(next);
+                      if (next !== "guest") setSelectedL1Ids([]);
+                    }}
+                    options={WORKSPACE_ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
+                    aria-label="邀請工作區角色"
+                  />
+                </div>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-sm text-foreground">工作區角色</label>
-              <select
-                value={inviteWorkspaceRole}
-                onChange={(e) => {
-                  const next = e.target.value as WorkspaceAssignment;
-                  setInviteWorkspaceRole(next);
-                  if (next !== "guest") setSelectedL1Ids([]);
-                }}
-                aria-label="邀請工作區角色"
-                className="bg-background border border-border rounded-lg px-4 py-2 text-sm text-white min-w-40"
-              >
-                {WORKSPACE_ROLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+
             {inviteWorkspaceRole === "guest" && (
-              <div className="border border-border rounded-lg p-3 space-y-2">
-                <p className="text-xs text-muted-foreground">選擇訪客可存取的專案空間：</p>
+              <div
+                style={{
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: radius,
+                  padding: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>
+                  選擇訪客可存取的專案空間：
+                </p>
                 {projectEntities.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">尚無專案空間</p>
+                  <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>尚無專案空間</p>
                 ) : (
-                  <div className="flex flex-wrap gap-2">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {projectEntities.map((entity) => (
                       <label
                         key={entity.id}
-                        className="flex items-center gap-1.5 text-sm text-foreground cursor-pointer"
+                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: fontBody, color: c.ink, cursor: "pointer" }}
                       >
                         <input
                           type="checkbox"
@@ -150,44 +522,65 @@ function TeamPage() {
               </div>
             )}
           </form>
+
           {inviteMessage && (
             <p
-              className={`text-sm mt-3 ${
-                inviteMessage.type === "success" ? "text-green-400" : "text-red-400"
-              }`}
+              style={{
+                fontFamily: fontBody,
+                fontSize: 13,
+                marginTop: 12,
+                marginBottom: 0,
+                color: inviteMessage.type === "success" ? c.jade : c.vermillion,
+              }}
             >
               {inviteMessage.text}
             </p>
           )}
         </div>
 
-        <div className="bg-card border border-border rounded-lg p-6 mb-6 space-y-4">
-          <div className="flex items-center justify-between gap-4">
+        {/* Department Management */}
+        <div style={{ ...panelStyle, display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
             <div>
-              <h3 className="text-sm font-medium text-white">部門清單</h3>
-              <p className="text-xs text-muted-foreground mt-1">可新增、改名、刪除；刪除時既有成員會移回 all。</p>
+              <h3 style={{ fontFamily: fontBody, fontSize: 13, fontWeight: 500, color: c.ink, marginTop: 0, marginBottom: 4 }}>
+                部門清單
+              </h3>
+              <p style={{ fontFamily: fontBody, fontSize: 12, color: c.inkMuted, margin: 0 }}>
+                可新增、改名、刪除；刪除時既有成員會移回 all。
+              </p>
             </div>
-            <div className="flex w-full max-w-md items-center gap-2">
-              <input
-                value={newDepartment}
-                onChange={(e) => setNewDepartment(e.target.value)}
-                placeholder="新增部門名稱"
-                className="flex-1 bg-background border border-border rounded-lg px-4 py-2 text-sm text-white"
-              />
-              <button
-                type="button"
-                onClick={handleCreateDepartment}
-                className="bg-secondary hover:bg-secondary/80 text-foreground text-sm font-medium px-4 py-2 rounded-lg transition-all active:scale-95"
-              >
-                新增
-              </button>
+            <div style={{ display: "flex", gap: 8, flex: 1, maxWidth: 400 }}>
+              <div style={{ flex: 1 }}>
+                <Input
+                  t={t}
+                  value={newDepartment}
+                  onChange={setNewDepartment}
+                  placeholder="新增部門名稱"
+                />
+              </div>
+              {labelBtn(c, fontBody, radius, {
+                children: "新增",
+                onClick: handleCreateDepartment,
+                variant: "ghost",
+              })}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
             {departmentOptions.map((department) => (
               <div
                 key={department}
-                className="inline-flex items-center gap-2 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-foreground"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: 2,
+                  background: c.surfaceHi,
+                  padding: "4px 10px",
+                  fontSize: 12,
+                  fontFamily: fontBody,
+                  color: c.ink,
+                }}
               >
                 <span>{department}</span>
                 {department !== "all" && (
@@ -195,14 +588,32 @@ function TeamPage() {
                     <button
                       type="button"
                       onClick={() => handleRenameDepartment(department)}
-                      className="text-blue-300 transition-all hover:text-blue-200 active:scale-95"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        fontSize: 11,
+                        fontFamily: fontBody,
+                        color: c.inkMuted,
+                        cursor: "pointer",
+                        transition: "color .15s",
+                      }}
                     >
                       改名
                     </button>
                     <button
                       type="button"
                       onClick={() => handleDeleteDepartment(department)}
-                      className="text-rose-300 transition-all hover:text-rose-200 active:scale-95"
+                      style={{
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        fontSize: 11,
+                        fontFamily: fontBody,
+                        color: c.vermillion,
+                        cursor: "pointer",
+                        transition: "color .15s",
+                      }}
                     >
                       刪除
                     </button>
@@ -217,29 +628,36 @@ function TeamPage() {
         {loading ? (
           <LoadingState label="正在載入成員..." />
         ) : partners.length === 0 ? (
-          <div className="text-center py-12 bg-card rounded-lg border border-border">
-            <p className="text-muted-foreground">目前還沒有任何成員。</p>
+          <div
+            style={{
+              textAlign: "center",
+              padding: "48px 0",
+              background: c.surface,
+              borderRadius: radius,
+              border: `1px solid ${c.inkHair}`,
+            }}
+          >
+            <p style={{ fontFamily: fontBody, fontSize: 13, color: c.inkMuted, margin: 0 }}>
+              目前還沒有任何成員。
+            </p>
           </div>
         ) : (
-          <div className="bg-card border border-border rounded-lg overflow-hidden">
-            <table className="w-full">
+          <div
+            style={{
+              background: c.surface,
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: radius,
+              overflow: "hidden",
+            }}
+          >
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
-                    信箱
-                  </th>
-                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
-                    名稱
-                  </th>
-                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
-                    權限範圍
-                  </th>
-                  <th className="text-left text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
-                    狀態
-                  </th>
-                  <th className="text-right text-xs font-medium text-muted-foreground uppercase tracking-wider px-6 py-3">
-                    操作
-                  </th>
+                <tr>
+                  <th style={thStyle}>信箱</th>
+                  <th style={thStyle}>名稱</th>
+                  <th style={thStyle}>權限範圍</th>
+                  <th style={thStyle}>狀態</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -260,122 +678,175 @@ function TeamPage() {
                       : accessMode === "internal"
                         ? "內部成員"
                         : "未指派空間";
+
+                  const accessChipTone =
+                    accessMode === "scoped"
+                      ? "ocher"
+                      : accessMode === "internal"
+                        ? "muted"
+                        : "muted";
+
+                  const tdStyle: React.CSSProperties = {
+                    padding: "14px 20px",
+                    borderBottom: `1px solid ${c.inkHair}`,
+                    fontFamily: fontBody,
+                    fontSize: 13,
+                    color: c.ink,
+                    opacity: p.status === "invited" ? 0.6 : 1,
+                  };
+
                   return (
-                    <tr
-                      key={p.id}
-                      className={`border-b border-border last:border-b-0 transition-colors ${
-                        p.status === "invited" ? "opacity-60" : ""
-                      }`}
-                    >
-                      <td className="px-6 py-4 text-sm text-white">{p.email}</td>
-                      <td className="px-6 py-4 text-sm text-muted-foreground">
+                    <tr key={p.id}>
+                      <td style={tdStyle}>{p.email}</td>
+                      <td style={{ ...tdStyle, color: c.inkMuted }}>
                         {p.displayName || "--"}
                       </td>
-                      <td className="px-6 py-4">
-                        <div className="space-y-2 min-w-[220px]">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                              partnerWorkspaceRole === "owner"
-                                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
-                                : "bg-secondary text-muted-foreground border border-border"
-                            }`}
+                      <td style={tdStyle}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 220 }}>
+                          <Chip
+                            t={t}
+                            tone={partnerWorkspaceRole === "owner" ? "accent" : "muted"}
                           >
                             {roleLabel}
-                          </span>
+                          </Chip>
                           {partnerWorkspaceRole !== "owner" && (
-                            <div className="space-y-1">
-                              <div className="flex flex-wrap items-center gap-1">
-                                <span
-                                  className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium border ${
-                                    accessMode === "scoped"
-                                      ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                      : accessMode === "internal"
-                                        ? "bg-blue-500/10 text-blue-300 border-blue-500/20"
-                                        : "bg-slate-500/10 text-slate-300 border-slate-500/20"
-                                  }`}
-                                >
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+                                <Chip t={t} tone={accessChipTone}>
                                   {accessModeLabel}
-                                </span>
+                                </Chip>
                                 {isScopedPartner(p) && (
-                                  <span className="text-[11px] text-muted-foreground">
+                                  <span style={{ fontSize: 11, color: c.inkMuted, fontFamily: fontBody }}>
                                     授權 {p.authorizedEntityIds!.length} 個專案空間
                                   </span>
                                 )}
                               </div>
-                              <div className="flex flex-wrap gap-1">
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                                 {(p.roles || []).length === 0 ? (
-                                  <span className="text-[11px] text-muted-foreground">角色：（未設定）</span>
+                                  <span style={{ fontSize: 11, color: c.inkMuted, fontFamily: fontBody }}>角色：（未設定）</span>
                                 ) : (
                                   (p.roles || []).map((r) => (
-                                    <span
-                                      key={`${p.id}-${r}`}
-                                      className="inline-flex items-center px-2 py-0.5 rounded text-[11px] bg-blue-500/10 text-blue-300 border border-blue-500/20"
-                                    >
+                                    <Chip key={`${p.id}-${r}`} t={t} tone="muted">
                                       {r}
-                                    </span>
+                                    </Chip>
                                   ))
                                 )}
                               </div>
-                              <div className="text-[11px] text-muted-foreground">
-                                部門：<span className="text-foreground">{p.department || "all"}</span>
+                              <div style={{ fontSize: 11, color: c.inkMuted, fontFamily: fontBody }}>
+                                部門：<span style={{ color: c.ink }}>{p.department || "all"}</span>
                               </div>
                             </div>
                           )}
                         </div>
                       </td>
-                      <td className="px-6 py-4">
-                        <StatusBadge status={p.status} />
+                      <td style={tdStyle}>
+                        <StatusChip status={p.status} t={t} />
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td style={{ ...tdStyle, textAlign: "right" }}>
                         {isSelf ? (
-                          <span className="text-xs text-muted-foreground">你自己</span>
+                          <span style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>你自己</span>
                         ) : (
-                          <div className="flex items-center justify-end gap-2">
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
                             {partnerWorkspaceRole !== "owner" && p.status !== "invited" && (
                               <button
+                                type="button"
                                 onClick={() => openScopeEditor(p)}
                                 aria-label={`編輯 ${p.email} 的權限範圍`}
                                 disabled={isLoading}
-                                className="text-xs text-blue-400 hover:text-blue-300 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  fontSize: 12,
+                                  fontFamily: fontBody,
+                                  color: c.inkMuted,
+                                  cursor: isLoading ? "not-allowed" : "pointer",
+                                  opacity: isLoading ? 0.5 : 1,
+                                  transition: "color .15s",
+                                }}
                               >
                                 編輯範圍
                               </button>
                             )}
                             {p.status === "active" && (
                               <button
+                                type="button"
                                 onClick={() => handleStatusChange(p, "suspended")}
                                 aria-label={`停用 ${p.email}`}
                                 disabled={isLoading}
-                                className="text-xs text-red-400 hover:text-red-300 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  fontSize: 12,
+                                  fontFamily: fontBody,
+                                  color: c.vermillion,
+                                  cursor: isLoading ? "not-allowed" : "pointer",
+                                  opacity: isLoading ? 0.5 : 1,
+                                  transition: "color .15s",
+                                }}
                               >
                                 停用
                               </button>
                             )}
                             {p.status === "suspended" && (
                               <button
+                                type="button"
                                 onClick={() => handleStatusChange(p, "active")}
                                 aria-label={`重新啟用 ${p.email}`}
                                 disabled={isLoading}
-                                className="text-xs text-green-400 hover:text-green-300 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  fontSize: 12,
+                                  fontFamily: fontBody,
+                                  color: c.jade,
+                                  cursor: isLoading ? "not-allowed" : "pointer",
+                                  opacity: isLoading ? 0.5 : 1,
+                                  transition: "color .15s",
+                                }}
                               >
                                 重新啟用
                               </button>
                             )}
                             {p.status === "invited" && (
-                                <button
-                                  onClick={() => handleResendInvite(p)}
-                                  aria-label={`Resend invite to ${p.email}`}
-                                  disabled={isLoading}
-                                  className="text-xs text-muted-foreground hover:text-white transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                  重新寄送
-                                </button>
+                              <button
+                                type="button"
+                                onClick={() => handleResendInvite(p)}
+                                aria-label={`Resend invite to ${p.email}`}
+                                disabled={isLoading}
+                                style={{
+                                  background: "none",
+                                  border: "none",
+                                  padding: 0,
+                                  fontSize: 12,
+                                  fontFamily: fontBody,
+                                  color: c.inkMuted,
+                                  cursor: isLoading ? "not-allowed" : "pointer",
+                                  opacity: isLoading ? 0.5 : 1,
+                                  transition: "color .15s",
+                                }}
+                              >
+                                重新寄送
+                              </button>
                             )}
                             <button
+                              type="button"
                               onClick={() => handleDeleteInvite(p)}
                               aria-label={`Delete invite for ${p.email}`}
                               disabled={isLoading}
-                              className="text-xs text-red-400 hover:text-red-300 transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{
+                                background: "none",
+                                border: "none",
+                                padding: 0,
+                                fontSize: 12,
+                                fontFamily: fontBody,
+                                color: c.vermillion,
+                                cursor: isLoading ? "not-allowed" : "pointer",
+                                opacity: isLoading ? 0.5 : 1,
+                                transition: "color .15s",
+                              }}
                             >
                               刪除
                             </button>
@@ -391,216 +862,22 @@ function TeamPage() {
         )}
       </main>
 
+      {/* Scope editor dialog */}
       {scopeEditor && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
-          <div className="w-full max-w-lg rounded-xl border border-border bg-card p-5 space-y-4">
-            <div>
-              <h3 className="text-base font-semibold text-white">編輯權限範圍</h3>
-              <p className="text-xs text-muted-foreground mt-1">{scopeEditor.email}</p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground uppercase tracking-wide">角色</label>
-              <div className="grid grid-cols-2 gap-2">
-                {DEFAULT_ROLE_OPTIONS.map((role) => {
-                  const checked = scopeEditor.roles.includes(role);
-                  return (
-                    <label key={role} className="flex items-center gap-2 text-sm text-foreground">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          setScopeEditor((prev) => {
-                            if (!prev) return prev;
-                            const next = new Set(prev.roles);
-                            if (e.target.checked) next.add(role);
-                            else next.delete(role);
-                            return { ...prev, roles: Array.from(next).sort() };
-                          });
-                        }}
-                      />
-                      {role}
-                    </label>
-                  );
-                })}
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  value={scopeEditor.customRole}
-                  onChange={(e) =>
-                    setScopeEditor((prev) => (prev ? { ...prev, customRole: e.target.value } : prev))
-                  }
-                  placeholder="新增自訂角色"
-                  className="flex-1 bg-background border border-border rounded px-3 py-1.5 text-sm text-white"
-                />
-                <button
-                  className="text-xs px-3 py-1.5 rounded bg-secondary text-foreground"
-                  onClick={() =>
-                    setScopeEditor((prev) => {
-                      if (!prev) return prev;
-                      const v = prev.customRole.trim();
-                      if (!v) return prev;
-                      const next = new Set(prev.roles);
-                      next.add(v);
-                      return { ...prev, roles: Array.from(next).sort(), customRole: "" };
-                    })
-                  }
-                >
-                  新增
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground uppercase tracking-wide">部門</label>
-              <select
-                value={scopeEditor.department}
-                onChange={(e) =>
-                  setScopeEditor((prev) => (prev ? { ...prev, department: e.target.value } : prev))
-                }
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-white"
-              >
-                {departmentOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
-              <div className="flex items-center gap-2">
-                <input
-                  value={scopeEditor.customDepartment}
-                  onChange={(e) =>
-                    setScopeEditor((prev) => (prev ? { ...prev, customDepartment: e.target.value } : prev))
-                  }
-                  placeholder="自訂部門名稱（可選）"
-                  className="flex-1 bg-background border border-border rounded px-3 py-1.5 text-sm text-white"
-                />
-                <button
-                  className="text-xs px-3 py-1.5 rounded bg-secondary text-foreground"
-                  onClick={() =>
-                    setScopeEditor((prev) => {
-                      if (!prev) return prev;
-                      const v = prev.customDepartment.trim();
-                      if (!v) return prev;
-                      return { ...prev, department: v, customDepartment: "" };
-                    })
-                  }
-                >
-                  套用
-                </button>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-xs text-muted-foreground uppercase tracking-wide">工作區角色</label>
-              <select
-                value={scopeEditor.workspaceRole}
-                onChange={(e) =>
-                  setScopeEditor((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          workspaceRole: e.target.value as WorkspaceAssignment,
-                          authorizedEntityIds: e.target.value === "guest" ? prev.authorizedEntityIds : [],
-                        }
-                      : prev
-                  )
-                }
-                className="w-full bg-background border border-border rounded px-3 py-2 text-sm text-white"
-                aria-label="成員工作區角色"
-              >
-                {WORKSPACE_ROLE_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              {scopeEditor.workspaceRole === "guest" && (
-                <div className="border border-border rounded-lg p-3 space-y-2">
-                  <p className="text-xs text-muted-foreground">選擇訪客可存取的專案空間：</p>
-                  {projectEntities.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">尚無專案空間</p>
-                  ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {projectEntities.map((entity) => (
-                        <label
-                          key={entity.id}
-                          className="flex items-center gap-1.5 text-sm text-foreground cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={scopeEditor.authorizedEntityIds.includes(entity.id)}
-                            onChange={(e) =>
-                              setScopeEditor((prev) => {
-                                if (!prev) return prev;
-                                const next = e.target.checked
-                                  ? [...prev.authorizedEntityIds, entity.id]
-                                  : prev.authorizedEntityIds.filter((id) => id !== entity.id);
-                                return { ...prev, authorizedEntityIds: next };
-                              })
-                            }
-                          />
-                          {entity.name}
-                        </label>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                className="text-sm px-3 py-2 rounded bg-secondary text-foreground transition-all active:scale-95"
-                onClick={() => setScopeEditor(null)}
-              >
-                取消
-              </button>
-                <button
-                  className="text-sm px-3 py-2 rounded bg-primary text-primary-foreground transition-all active:scale-95 disabled:opacity-50"
-                  disabled={actionLoading === scopeEditor.partnerId}
-                  onClick={() => {
-                  const target = partners.find((p) => p.id === scopeEditor.partnerId);
-                  if (!target) return;
-                  handleScopeSave(target, {
-                    roles: scopeEditor.roles,
-                    department: scopeEditor.department || "all",
-                    workspaceRole: scopeEditor.workspaceRole,
-                    authorizedEntityIds: scopeEditor.workspaceRole === "guest"
-                      ? scopeEditor.authorizedEntityIds
-                      : [],
-                  });
-                  }}
-              >
-                {actionLoading === scopeEditor.partnerId ? "儲存中..." : "儲存範圍"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <ScopeDialog
+          t={t}
+          open={!!scopeEditor}
+          onClose={() => setScopeEditor(null)}
+          scopeEditor={scopeEditor}
+          setScopeEditor={setScopeEditor}
+          departmentOptions={departmentOptions}
+          projectEntities={projectEntities}
+          partners={partners}
+          actionLoading={actionLoading}
+          handleScopeSave={handleScopeSave}
+        />
       )}
     </div>
-  );
-}
-
-function StatusBadge({ status }: { status: Partner["status"] }) {
-  const styles = {
-    active: "bg-green-500/10 text-green-400 border-green-500/20",
-    invited: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-    suspended: "bg-red-500/10 text-red-400 border-red-500/20",
-  };
-
-  const labels = {
-    active: "啟用中",
-    invited: "待啟用",
-    suspended: "已停用",
-  };
-
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium border ${styles[status]}`}
-    >
-      {labels[status]}
-    </span>
   );
 }
 

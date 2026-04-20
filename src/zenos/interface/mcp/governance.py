@@ -70,8 +70,8 @@ async def governance_guide(
 
     _topic_versions = {
         "entity": "1.1",
-        "document": "1.2",
-        "bundle": "1.0",
+        "document": "2.2",
+        "bundle": "1.1",
         "task": "2.0",
         "capture": "1.1",
         "sync": "1.0",

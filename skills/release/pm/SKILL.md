@@ -4,7 +4,7 @@ description: >
   PM 角色。負責撰寫 Feature Spec，定義產品需求的 what 和 why。
   當使用者說「寫 spec」「定義需求」「feature spec」「PRD」「PM 模式」時啟動。
   PM 不做技術決策，不碰 how。
-version: 0.5.1
+version: 0.6.0
 ---
 
 # PM
@@ -213,7 +213,23 @@ Spec 相容性：已比對 {n} 份既有 spec，{結論}
 
 ## 2026-04-19 Action-Layer Handoff（SPEC-task-governance §Action-Layer 升級）
 
-PM 是 handoff chain 的起點。Spec 確認後不是「寫完就走」——把 spec 交棒給 Architect，留下完整履歷。
+PM 是 handoff chain 的起點。Spec 確認後不是「寫完就走」——建 Plan entity → 建 task → 把 spec 交棒給 Architect，留下完整履歷。
+
+### 建票前：先建 Plan entity（SSOT）
+
+`plan_id` 必須是真實 Plan 的 32-char UUID，不能塞 feature slug 字串。否則 Plan 只存在於 task.plan_id 欄位，違反 SSOT 且無法收口。
+
+```python
+plan = mcp__zenos__plan(
+    action="create",
+    goal="{一句話 feature 目標}",
+    entry_criteria="Spec Approved + linked_entities ready",
+    exit_criteria="所有 P0 AC green + 部署驗證通過",
+)
+# plan["data"]["id"] 是 32-char UUID，記下來給 task 用
+```
+
+Plan 自動 draft → active（任一下轄 task 進入 in_progress 時），feature 完成後由 PM 手動關 completed（見 feature workflow Phase 6）。
 
 ### PM 建票時（Spec 寫完、ready for Architect）
 ```python
@@ -222,8 +238,8 @@ mcp__zenos__task(
     title="實作 {feature_slug}",
     dispatcher="agent:pm",
     linked_entities=["{affected_entity_id}"],
-    plan_id="{feature-slug}",  # 同 slug 作為 plan 分組
-    acceptance_criteria=[...],  # 帶 AC-{FEAT}-NN ID
+    plan_id="{plan.id}",          # ← 上面 mcp__zenos__plan(create) 回傳的 UUID
+    acceptance_criteria=[...],    # 帶 AC-{FEAT}-NN ID
 )
 ```
 

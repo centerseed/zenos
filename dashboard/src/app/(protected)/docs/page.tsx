@@ -1,281 +1,334 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import React, { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { useInk } from "@/lib/zen-ink/tokens";
 import { useAuth } from "@/lib/auth";
-import { LoadingState } from "@/components/LoadingState";
-import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { Icon, ICONS } from "@/components/zen/Icons";
+import { Btn } from "@/components/zen/Btn";
+
+import { DocListSidebar } from "@/features/docs/DocListSidebar";
+import { DocEditor } from "@/features/docs/DocEditor";
+import { DocOutline } from "@/features/docs/DocOutline";
+import { DocSourceList } from "@/features/docs/DocSourceList";
+import { ReSyncPromptDialog } from "@/features/docs/ReSyncPromptDialog";
+
 import {
-  createDocumentShareLink,
-  getDocumentContent,
+  listDocs,
+  createDoc,
   getDocumentDelivery,
-  publishDocumentSnapshot,
-  saveDocumentMarkdown,
-  updateDocumentVisibility,
+  getDocumentContent,
 } from "@/lib/api";
-import type { EntityVisibility } from "@/types";
+import type { Entity } from "@/types";
+import type { DocSource } from "@/features/docs/DocSourceList";
 
-function DocumentReaderInner() {
-  const searchParams = useSearchParams();
-  const docId = searchParams.get("docId")?.trim() ?? "";
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface DocMeta {
+  id: string;
+  name: string;
+  summary: string;
+  visibility: Entity["visibility"];
+  sources: DocSource[];
+  doc_role?: "single" | "index" | null;
+  canonical_path?: string | null;
+  primary_snapshot_revision_id?: string | null;
+  last_published_at?: Date | null;
+  delivery_status?: "ready" | "stale" | "blocked" | null;
+}
+
+interface DocContent {
+  content: string;
+  revision_id: string | null;  // null = no revision yet (new doc or pre-existing without Delivery Snapshot)
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export default function DocsPage() {
+  const t = useInk();
+  const { c } = t;
   const { user } = useAuth();
+  const router = useRouter();
 
-  const [loading, setLoading] = useState(true);
-  const [publishing, setPublishing] = useState(false);
-  const [savingContent, setSavingContent] = useState(false);
-  const [savingVisibility, setSavingVisibility] = useState(false);
-  const [metadata, setMetadata] = useState<Awaited<ReturnType<typeof getDocumentDelivery>>>(null);
-  const [content, setContent] = useState<string>("");
-  const [draftContent, setDraftContent] = useState<string>("");
-  const [message, setMessage] = useState<string | null>(null);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [selectedVisibility, setSelectedVisibility] = useState<EntityVisibility>("public");
+  // Doc list
+  const [docs, setDocs] = useState<Entity[]>([]);
+  const [docsLoading, setDocsLoading] = useState(true);
 
-  const currentVisibility = useMemo(() => {
-    const visibility = metadata?.document?.visibility;
-    if (visibility === "restricted" || visibility === "confidential") return visibility;
-    return "public";
-  }, [metadata]);
+  // Selected doc
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [docMeta, setDocMeta] = useState<DocMeta | null>(null);
+  const [docContent, setDocContent] = useState<DocContent | null>(null);
+  const [docLoading, setDocLoading] = useState(false);
 
-  useEffect(() => {
-    setSelectedVisibility(currentVisibility);
-  }, [currentVisibility]);
+  // Re-sync dialog
+  const [resyncSource, setResyncSource] = useState<DocSource | null>(null);
+  const [resyncOpen, setResyncOpen] = useState(false);
 
-  useEffect(() => {
-    if (!docId) {
-      setLoading(false);
-      setMessage("缺少 docId，請從文件節點的 Reader 連結進入。");
-      return;
-    }
-    if (!user || !docId) return;
-    const authUser = user;
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setMessage(null);
-      try {
-        const token = await authUser.getIdToken();
-        const [meta, body] = await Promise.all([
-          getDocumentDelivery(token, docId),
-          getDocumentContent(token, docId),
-        ]);
-        if (cancelled) return;
-        setMetadata(meta);
-        setContent(body?.content ?? "");
-        setDraftContent(body?.content ?? "");
-        if (!body?.content) {
-          setMessage("這份文件尚未發布 snapshot。請先點擊 Publish Snapshot。");
-        }
-      } catch {
-        if (cancelled) return;
-        setMessage("載入文件失敗。");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, docId]);
+  // ─── Load doc list ─────────────────────────────────────────────────────────
 
-  async function handlePublish() {
-    if (!user || !docId) return;
-    setPublishing(true);
-    setMessage(null);
+  const loadDocs = useCallback(async () => {
+    if (!user) return;
+    setDocsLoading(true);
     try {
       const token = await user.getIdToken();
-      const result = await publishDocumentSnapshot(token, docId);
-      if (!result) {
-        setMessage("發布失敗。請確認 source 可讀（Phase 1 目前只支援 GitHub source）。");
-        return;
-      }
-      const [meta, body] = await Promise.all([
+      const list = await listDocs(token);
+      setDocs(list);
+    } catch (err) {
+      console.error("[DocsPage] loadDocs error:", err);
+    } finally {
+      setDocsLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    loadDocs();
+  }, [loadDocs]);
+
+  // ─── Load selected doc ─────────────────────────────────────────────────────
+
+  const loadDoc = useCallback(async (docId: string) => {
+    if (!user) return;
+    setDocLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const [metaRes, contentRes] = await Promise.all([
         getDocumentDelivery(token, docId),
         getDocumentContent(token, docId),
       ]);
-      setMetadata(meta);
-      setContent(body?.content ?? "");
-      setDraftContent(body?.content ?? "");
-      setMessage("Snapshot 發布完成。");
-    } finally {
-      setPublishing(false);
-    }
-  }
 
-  async function handleSaveMarkdown() {
-    if (!user || !docId) return;
-    const baseRevisionId =
-      metadata?.document?.primary_snapshot_revision_id ||
-      ((metadata?.document?.latest_revision as { id?: string } | null)?.id ?? null);
-    if (!baseRevisionId) {
-      setMessage("請先發布一次 snapshot，再保存 markdown。");
-      return;
+      if (metaRes?.document) {
+        setDocMeta({
+          ...metaRes.document,
+          sources: (metaRes.document.sources ?? []) as DocSource[],
+        });
+      }
+
+      if (contentRes) {
+        const revId =
+          (contentRes.revision as Record<string, unknown> | null | undefined)?.[
+            "revision_id"
+          ] as string | undefined ??
+          String((contentRes.revision as Record<string, unknown> | null | undefined)?.["id"] ?? "");
+        setDocContent({
+          content: contentRes.content ?? "",
+          revision_id: revId || null,
+        });
+      } else {
+        // No snapshot yet (new doc or pre-existing without Delivery). Start with empty editable state.
+        // First save sends base_revision_id=null → backend creates rev-1 (see dashboard_api.py:2488).
+        setDocContent({ content: "", revision_id: null });
+      }
+    } catch (err) {
+      console.error("[DocsPage] loadDoc error:", err);
+    } finally {
+      setDocLoading(false);
     }
-    setSavingContent(true);
-    setMessage(null);
+  }, [user]);
+
+  useEffect(() => {
+    if (selectedDocId) {
+      loadDoc(selectedDocId);
+    }
+  }, [selectedDocId, loadDoc]);
+
+  // ─── Create new doc ────────────────────────────────────────────────────────
+
+  const handleCreateNew = useCallback(async () => {
+    if (!user) return;
     try {
       const token = await user.getIdToken();
-      const result = await saveDocumentMarkdown(token, docId, draftContent, {
-        base_revision_id: baseRevisionId,
-      });
-      if (!result) {
-        setMessage("保存 markdown 失敗。");
-        return;
-      }
-      const [meta, body] = await Promise.all([
-        getDocumentDelivery(token, docId),
-        getDocumentContent(token, docId),
-      ]);
-      setMetadata(meta);
-      setContent(body?.content ?? "");
-      setDraftContent(body?.content ?? "");
-      setMessage("Markdown 已寫入 GCS snapshot。");
-    } finally {
-      setSavingContent(false);
+      const result = await createDoc(token, { name: "未命名文件" });
+      // Refresh list
+      await loadDocs();
+      // Navigate to editor for the new doc
+      setSelectedDocId(result.doc_id ?? result.entity?.id);
+    } catch (err) {
+      console.error("[DocsPage] createDoc error:", err);
     }
+  }, [user, loadDocs]);
+
+  // ─── Resync handler ────────────────────────────────────────────────────────
+
+  function handleResyncRequest(source: DocSource) {
+    setResyncSource(source);
+    setResyncOpen(true);
   }
 
-  async function handleSaveVisibility() {
-    if (!user || !docId) return;
-    setSavingVisibility(true);
-    setMessage(null);
-    try {
-      const token = await user.getIdToken();
-      const result = await updateDocumentVisibility(token, docId, selectedVisibility);
-      if (!result) {
-        setMessage("更新 visibility 失敗。");
-        return;
-      }
-      const meta = await getDocumentDelivery(token, docId);
-      setMetadata(meta);
-      setMessage("Visibility 已更新。");
-    } finally {
-      setSavingVisibility(false);
-    }
+  // ─── Save success ─────────────────────────────────────────────────────────
+
+  function handleSaveSuccess(newRevisionId: string) {
+    setDocContent((prev) => prev ? { ...prev, revision_id: newRevisionId } : prev);
   }
 
-  async function handleCreateShareLink() {
-    if (!user || !docId) return;
-    setMessage(null);
-    const token = await user.getIdToken();
-    const result = await createDocumentShareLink(token, docId, { expires_in_hours: 24 * 7 });
-    if (!result) {
-      setMessage("建立分享連結失敗。");
-      return;
-    }
-    const url = `${window.location.origin}${result.share_url}`;
-    setShareUrl(url);
-    try {
-      await navigator.clipboard.writeText(url);
-      setMessage("已建立分享連結並複製到剪貼簿。");
-    } catch {
-      setMessage("已建立分享連結。");
-    }
+  // ─── Reload doc (after conflict) ──────────────────────────────────────────
+
+  function handleReloadRequest() {
+    if (selectedDocId) loadDoc(selectedDocId);
   }
+
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-4">
-          <div>
-            <h1 className="text-lg font-semibold">{metadata?.document?.name ?? docId}</h1>
-            <p className="text-xs text-muted-foreground">
-              {metadata?.document?.canonical_path ?? `/docs/${docId}`} · {metadata?.document?.delivery_status ?? "unpublished"}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={handlePublish}
-              disabled={publishing}
-              className="rounded-md border border-primary/40 bg-primary/10 px-3 py-1.5 text-xs text-primary disabled:opacity-50"
-            >
-              {publishing ? "Publishing..." : "Publish Snapshot"}
-            </button>
-            <button
-              onClick={handleCreateShareLink}
-              className="rounded-md border border-border px-3 py-1.5 text-xs hover:bg-secondary/60"
-            >
-              Create Share Link
-            </button>
-            <button
-              onClick={handleSaveMarkdown}
-              disabled={savingContent}
-              className="rounded-md border border-emerald-400/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-300 disabled:opacity-50"
-            >
-              {savingContent ? "Saving..." : "Save Markdown"}
-            </button>
-          </div>
-        </div>
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "280px 1fr 300px",
+      minHeight: "calc(100vh - 56px)",
+      background: c.paper,
+    }}>
+      {/* Left sidebar — doc list */}
+      <DocListSidebar
+        docs={docs}
+        selectedId={selectedDocId}
+        onSelect={setSelectedDocId}
+        onCreateNew={handleCreateNew}
+        loading={docsLoading}
+      />
 
-        <div className="mb-4 flex flex-wrap items-end gap-2 rounded-xl border border-border bg-card p-4">
-          <label className="text-xs text-muted-foreground">Visibility</label>
-          <select
-            value={selectedVisibility}
-            onChange={(e) => setSelectedVisibility(e.target.value as EntityVisibility)}
-            className="rounded-md border border-border bg-background px-2 py-1 text-xs"
-          >
-            <option value="public">public</option>
-            <option value="restricted">restricted</option>
-            <option value="confidential">confidential</option>
-          </select>
-          <button
-            onClick={handleSaveVisibility}
-            disabled={savingVisibility}
-            className="rounded-md border border-border px-3 py-1 text-xs hover:bg-secondary/60 disabled:opacity-50"
-          >
-            {savingVisibility ? "Saving..." : "Save"}
-          </button>
-          {shareUrl && (
-            <a
-              href={shareUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-auto text-xs text-cyan-400 underline underline-offset-2"
-            >
-              Open Share Link
-            </a>
-          )}
-        </div>
-
-        {message && (
-          <div className="mb-4 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-            {message}
+      {/* Center — editor */}
+      <div style={{ overflowY: "auto", background: c.paper }}>
+        {docLoading && (
+          <div style={{ padding: 40, fontSize: 13, color: c.inkFaint, fontFamily: t.fontBody }}>
+            載入中…
           </div>
         )}
-
-        <section className="mb-4 rounded-xl border border-border bg-card p-4">
-          <div className="mb-2 text-xs text-muted-foreground">
-            Lightweight edit (GCS snapshot): 可直接修改 markdown 並儲存成最新 revision。
-          </div>
-          <textarea
-            value={draftContent}
-            onChange={(e) => setDraftContent(e.target.value)}
-            placeholder="在這裡貼上或編輯 markdown..."
-            className="h-56 w-full resize-y rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground"
+        {!selectedDocId && !docLoading && (
+          <EmptyState t={t} onCreateNew={handleCreateNew} />
+        )}
+        {selectedDocId && !docLoading && docContent && user && (
+          <DocEditorWrapper
+            docId={selectedDocId}
+            docMeta={docMeta}
+            docContent={docContent}
+            user={user}
+            onSaveSuccess={handleSaveSuccess}
+            onReloadRequest={handleReloadRequest}
           />
-        </section>
-
-        {loading ? (
-          <LoadingState label="Loading document..." />
-        ) : content ? (
-          <article className="rounded-xl border border-border bg-card p-5">
-            <MarkdownRenderer content={content} />
-          </article>
-        ) : (
-          <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">
-            尚無可讀內容。
-          </div>
         )}
-      </main>
+      </div>
+
+      {/* Right rail — outline + sources */}
+      <aside style={{
+        borderLeft: `1px solid ${c.inkHair}`,
+        background: c.paperWarm,
+        padding: "24px 16px",
+        overflowY: "auto",
+        display: "flex",
+        flexDirection: "column",
+        gap: 16,
+      }}>
+        {docMeta && (
+          <>
+            <DocOutlineSection
+              t={t}
+              content={docContent?.content ?? ""}
+            />
+
+            <div style={{ borderTop: `1px solid ${c.inkHair}`, paddingTop: 16 }}>
+              <div style={{ fontFamily: t.fontMono, fontSize: 10, color: c.inkFaint, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+                引用 · 來源
+              </div>
+              <DocSourceList
+                sources={docMeta.sources ?? []}
+                onResyncRequest={handleResyncRequest}
+              />
+            </div>
+          </>
+        )}
+      </aside>
+
+      {/* Re-sync dialog */}
+      <ReSyncPromptDialog
+        open={resyncOpen}
+        onOpenChange={setResyncOpen}
+        source={resyncSource}
+      />
     </div>
   );
 }
 
-export default function DocumentReaderPage() {
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+interface DocEditorWrapperProps {
+  docId: string;
+  docMeta: DocMeta | null;
+  docContent: DocContent;
+  user: { getIdToken: () => Promise<string> };
+  onSaveSuccess: (revId: string) => void;
+  onReloadRequest: () => void;
+}
+
+function DocEditorWrapper({
+  docId,
+  docMeta,
+  docContent,
+  user,
+  onSaveSuccess,
+  onReloadRequest,
+}: DocEditorWrapperProps) {
+  const [token, setToken] = useState<string>("");
+
+  useEffect(() => {
+    user.getIdToken().then(setToken).catch(console.error);
+  }, [user]);
+
+  if (!token) return null;
+
   return (
-    <Suspense fallback={<LoadingState label="Loading document..." />}>
-      <DocumentReaderInner />
-    </Suspense>
+    <DocEditor
+      docId={docId}
+      docMeta={docMeta as Parameters<typeof DocEditor>[0]["docMeta"]}
+      initialContent={docContent.content}
+      baseRevisionId={docContent.revision_id}
+      token={token}
+      onSaveSuccess={onSaveSuccess}
+      onReloadRequest={onReloadRequest}
+    />
+  );
+}
+
+function DocOutlineSection({
+  t,
+  content,
+}: {
+  t: ReturnType<typeof useInk>;
+  content: string;
+}) {
+  const { c } = t;
+  return (
+    <div>
+      <div style={{ fontFamily: t.fontMono, fontSize: 10, color: c.inkFaint, letterSpacing: "0.2em", textTransform: "uppercase", marginBottom: 10 }}>
+        大綱
+      </div>
+      <DocOutline content={content} />
+    </div>
+  );
+}
+
+function EmptyState({
+  t,
+  onCreateNew,
+}: {
+  t: ReturnType<typeof useInk>;
+  onCreateNew?: () => void;
+}) {
+  const { c, fontHead, fontBody } = t;
+  return (
+    <div style={{
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      justifyContent: "center",
+      minHeight: "60vh",
+      gap: 16,
+      color: c.inkFaint,
+    }}>
+      <Icon d={ICONS.doc} size={40} style={{ color: c.inkHair }} />
+      <div style={{ fontFamily: fontHead, fontSize: 18, color: c.inkMuted }}>
+        選擇一份文件或建立新文件
+      </div>
+      <Btn t={t} variant="outline" size="md" icon={ICONS.plus} onClick={onCreateNew}>
+        新文件
+      </Btn>
+    </div>
   );
 }

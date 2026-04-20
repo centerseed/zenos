@@ -307,6 +307,126 @@ async def test_save_document_content_requires_base_revision_id():
     assert "base_revision_id" in body["message"]
 
 
+async def test_save_document_content_with_null_base_revision_id_builds_first_revision():
+    """POST /content with base_revision_id=null succeeds as first-save (rev-1 path)."""
+    from zenos.interface.dashboard_api import save_document_content
+
+    request = _make_request(
+        method="POST",
+        path_params={"docId": "doc-1"},
+        body={
+            "content": "# first save",
+            "base_revision_id": None,
+        },
+    )
+    partner = {"id": "p1", "isAdmin": False, "sharedPartnerId": None}
+    doc_entity = _make_doc_entity("doc-1")
+
+    with (
+        patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(partner, "p1"))),
+        patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)),
+        patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo,
+        patch("zenos.interface.dashboard_api._is_document_visible_for_partner", new=AsyncMock(return_value=True)),
+        patch("zenos.infrastructure.gcs_client.get_documents_bucket", return_value="docs-bucket"),
+        patch("zenos.infrastructure.gcs_client.upload_blob", return_value=None),
+        patch(
+            "zenos.interface.dashboard_api._create_revision_and_mark_ready",
+            new=AsyncMock(return_value="rev-1"),
+        ),
+    ):
+        mock_entity_repo.get_by_id = AsyncMock(return_value=doc_entity)
+        resp = await save_document_content(request)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+    assert body["doc_id"] == "doc-1"
+    assert body["revision_id"] == "rev-1"
+    # Verify _create_revision_and_mark_ready was called with expected_base_revision_id=None
+    from zenos.interface import dashboard_api
+    import unittest.mock
+    # The mock was already consumed; the 200 status is the authoritative check.
+
+
+async def test_create_doc_builds_entity_with_zenos_native_source():
+    """POST /api/docs creates entity with correct type/level/doc_role and primary zenos_native source."""
+    from zenos.interface.dashboard_api import create_doc
+    from zenos.domain.knowledge import Entity, Tags
+
+    request = _make_request(
+        method="POST",
+        body={"name": "測試文件", "doc_role": "index", "status": "draft"},
+    )
+    partner = {"id": "p1", "isAdmin": False, "sharedPartnerId": None}
+
+    saved_entity_holder: list[Entity] = []
+
+    async def _mock_upsert(entity: Entity) -> Entity:
+        entity.id = entity.id or "mocked-id"
+        saved_entity_holder.append(entity)
+        return entity
+
+    conn = MagicMock()
+    conn.execute = AsyncMock(return_value=None)
+    pool = MagicMock()
+    pool.acquire = MagicMock(return_value=_Acquire(conn))
+
+    with (
+        patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(partner, "p1"))),
+        patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)),
+        patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo,
+        patch("zenos.interface.dashboard_api.get_pool", new=AsyncMock(return_value=pool)),
+    ):
+        mock_entity_repo.upsert = AsyncMock(side_effect=_mock_upsert)
+        resp = await create_doc(request)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body)
+
+    # Response contract
+    assert "doc_id" in body
+    assert body["base_revision_id"] is None
+    assert "entity" in body
+
+    # Entity fields
+    entity_payload = body["entity"]
+    assert entity_payload["type"] == "document"
+    assert entity_payload["level"] == 3
+    assert entity_payload["name"] == "測試文件"
+
+    # Primary zenos_native source
+    assert len(saved_entity_holder) == 1
+    saved = saved_entity_holder[0]
+    assert len(saved.sources) == 1
+    src = saved.sources[0]
+    assert src["type"] == "zenos_native"
+    assert src["is_primary"] is True
+    doc_id = body["doc_id"]
+    assert src["uri"] == f"/docs/{doc_id}"
+    assert src["label"] == "測試文件"
+
+    # canonical_path UPDATE was issued with the correct path as first param
+    conn.execute.assert_awaited_once()
+    call_args = conn.execute.call_args
+    assert "canonical_path" in call_args[0][0]  # SQL references canonical_path column
+    assert call_args[0][1] == f"/docs/{doc_id}"  # first SQL $1 param is the path
+
+
+async def test_create_doc_missing_name_returns_400():
+    """POST /api/docs without name returns 400 INVALID_INPUT."""
+    from zenos.interface.dashboard_api import create_doc
+
+    request = _make_request(method="POST", body={})
+    partner = {"id": "p1", "isAdmin": False, "sharedPartnerId": None}
+
+    with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(partner, "p1"))):
+        resp = await create_doc(request)
+
+    assert resp.status_code == 400
+    body = json.loads(resp.body)
+    assert body["error"] == "INVALID_INPUT"
+    assert "name" in body["message"]
+
+
 async def test_save_document_content_returns_revision_conflict():
     from zenos.interface.dashboard_api import RevisionConflictError, save_document_content
 

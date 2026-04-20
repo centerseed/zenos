@@ -6,6 +6,7 @@ import inspect
 import logging
 
 from zenos.domain.partner_access import is_guest
+from zenos.application.knowledge.source_service import _compute_staleness_hint
 
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
@@ -23,6 +24,10 @@ from zenos.interface.mcp._visibility import (
 from zenos.interface.mcp._audit import _audit_log
 
 logger = logging.getLogger(__name__)
+
+# Source types that can supply content via snapshot_summary (helper-ingest path).
+# All other types (github, zenos_native) go through the external adapter.
+_HELPER_SOURCE_TYPES = frozenset({"notion", "gdrive", "local", "upload", "wiki", "url"})
 
 
 async def read_source(doc_id: str, source_id: str | None = None) -> dict:
@@ -144,21 +149,61 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             if s.get("source_id") != current_sid and s.get("status") == "valid"
         ]
 
-        # If target source is stale/unresolvable, return info with setup_hint
-        if source_status in ("stale", "unresolvable"):
+        # --- Helper Ingest: snapshot_summary path for non-adapter source types ---
+        # For helper-supplied sources (notion, gdrive, local, etc.), we do NOT call
+        # the external adapter.  Instead we return snapshot_summary if present,
+        # or an unavailable response with setup_hint if absent.
+        if source_type in _HELPER_SOURCE_TYPES:
+            snapshot = target_source.get("snapshot_summary")
+            staleness = _compute_staleness_hint(target_source)
+            if snapshot:
+                resp = {
+                    "doc_id": doc_id,
+                    "content": snapshot,
+                    "content_type": "snapshot_summary",
+                }
+                if current_sid:
+                    resp["source_id"] = current_sid
+                if staleness:
+                    resp["staleness_hint"] = staleness
+                if alternative_sources:
+                    resp["alternative_sources"] = alternative_sources
+                return _unified_response(data=resp)
+            # No snapshot_summary available
             return _error_response(
-                error_code="SOURCE_UNAVAILABLE",
-                message=f"Source '{current_sid or uri}' is currently {source_status}",
+                error_code="SNAPSHOT_UNAVAILABLE",
+                message=f"Source '{current_sid or uri}' has no snapshot_summary",
                 extra_data={
                     "doc_id": doc_id,
                     "source_id": current_sid,
                     "source_type": source_type,
-                    "source_status": source_status,
                     "uri": uri,
-                    "setup_hint": _SETUP_HINTS.get(source_type, ""),
+                    "setup_hint": (
+                        "用 Notion MCP 同步這份文件，或在 Dashboard 點重新同步。"
+                    ),
                     "alternative_sources": alternative_sources,
-                    "all_sources_status": all_source_info,
                 },
+            )
+
+        # If target source is stale/unresolvable, return info with setup_hint
+        if source_status in ("stale", "unresolvable"):
+            staleness = _compute_staleness_hint(target_source)
+            extra: dict = {
+                "doc_id": doc_id,
+                "source_id": current_sid,
+                "source_type": source_type,
+                "source_status": source_status,
+                "uri": uri,
+                "setup_hint": _SETUP_HINTS.get(source_type, ""),
+                "alternative_sources": alternative_sources,
+                "all_sources_status": all_source_info,
+            }
+            if staleness:
+                extra["staleness_hint"] = staleness
+            return _error_response(
+                error_code="SOURCE_UNAVAILABLE",
+                message=f"Source '{current_sid or uri}' is currently {source_status}",
+                extra_data=extra,
             )
 
         # Read the actual content via adapter — pass selected URI so the
@@ -175,6 +220,9 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             resp = {"doc_id": doc_id, "content": result}
             if current_sid:
                 resp["source_id"] = current_sid
+            staleness = _compute_staleness_hint(target_source)
+            if staleness:
+                resp["staleness_hint"] = staleness
             if alternative_sources:
                 resp["alternative_sources"] = alternative_sources
             return _unified_response(data=resp)
@@ -182,19 +230,26 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             resp = {"doc_id": doc_id, "content": result["content"]}
             if current_sid:
                 resp["source_id"] = current_sid
+            staleness = _compute_staleness_hint(target_source)
+            if staleness:
+                resp["staleness_hint"] = staleness
             if alternative_sources:
                 resp["alternative_sources"] = alternative_sources
             return _unified_response(data=resp)
         # Error result from read_source_with_recovery — enrich with setup_hint
         if "error" in result:
+            staleness = _compute_staleness_hint(target_source)
+            extra_err: dict = {
+                **{k: v for k, v in result.items() if k not in {"error", "message"}},
+                "setup_hint": _SETUP_HINTS.get(result.get("source_type", source_type), ""),
+                "alternative_sources": alternative_sources,
+            }
+            if staleness:
+                extra_err["staleness_hint"] = staleness
             return _error_response(
                 error_code=str(result.get("error", "ADAPTER_ERROR")),
                 message=str(result.get("message", "Failed to read source")),
-                extra_data={
-                    **{k: v for k, v in result.items() if k not in {"error", "message"}},
-                    "setup_hint": _SETUP_HINTS.get(result.get("source_type", source_type), ""),
-                    "alternative_sources": alternative_sources,
-                },
+                extra_data=extra_err,
             )
         return _unified_response(data=result)
     except (ValueError, FileNotFoundError):

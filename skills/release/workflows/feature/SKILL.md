@@ -4,7 +4,7 @@ description: >
   從需求討論到任務建立的完整功能開發流程。PM 和 Architect 互相確認 Spec 後，才交付開發。
   當使用者說「我有新功能要做」「幫我規劃這個功能」「寫 spec 然後開任務」「/feature」時使用。
   流程：PM 訪談 → PM ↔ Architect 交叉確認 → Spec Reviewer 審查 → 用戶確認 → Architect 建任務。
-version: 1.0.0
+version: 1.1.0
 ---
 
 # /feature — 功能開發流程
@@ -108,20 +108,36 @@ PM 將完整 Spec 呈給用戶逐章確認。
 > 建票前必讀 `skills/governance/shared-rules.md` 的去重與 linked_entities 規則。
 > 2026-04-19 Action-Layer 升級：派工用顯性 handoff chain，不再隱性 subagent spawn。
 
-**PM 建 task + 交棒：**
+### 4.0 PM 先建 Plan entity（SSOT）
+
+`plan_id` 必須是 real Plan 的 UUID，不能塞 slug 字串。PM 在建第一張 task 之前先建 Plan：
+
+```python
+plan = mcp__zenos__plan(action="create",
+    goal="{一句話 feature 目標}",
+    entry_criteria="Spec Approved + linked_entities ready",
+    exit_criteria="所有 P0 AC green + 部署驗證通過")
+# plan["data"]["id"] 是 32-char UUID，下面所有 task 的 plan_id 都用這個 id
+```
+
+### 4.1 PM 建 task + 交棒
+
 ```python
 mcp__zenos__task(action="create",
     title="實作 {feature_slug}", dispatcher="agent:pm",
-    linked_entities=[...], plan_id="{slug}", acceptance_criteria=[...])
+    linked_entities=[...],
+    plan_id="{plan.id}",          # ← Plan UUID，非 slug
+    acceptance_criteria=[...])
 mcp__zenos__task(action="handoff", id="{task_id}",
     to_dispatcher="agent:architect", reason="spec ready",
     output_ref="docs/specs/SPEC-{slug}.md")
 ```
 
-**Architect 接手：**
+### 4.2 Architect 接手
+
 - 讀 task + `handoff_events` 取完整脈絡
 - 技術設計
-- 必要時拆 subtask（`parent_task_id=<parent>` + 繼承 `plan_id`，不能跨 plan）
+- 必要時拆 subtask（`parent_task_id=<parent>` + 繼承 `parent.plan_id` UUID，不能跨 plan）
 - 每張 task ready → handoff to `agent:developer`
 
 ---
@@ -168,7 +184,28 @@ Server 自動升 `status=review`。
 
 ---
 
-## Phase 6：寫入 Work Journal（必做）
+## Phase 6：Plan 閉環（必做）
+
+所有 task 進入 terminal state（done / cancelled）後，PM 把 Plan 收口：
+
+```python
+mcp__zenos__plan(action="update",
+    id="{plan.id}",
+    status="completed",
+    result="交付摘要：{功能描述}；commit：{SHA}；部署：{URL 或 Cloud Run revision}；驗證：{E2E 測試結果}")
+```
+
+副作用與約束：
+- Server 會檢查所有下轄 task 是否 terminal，任一未完成 → reject（訊息會列前 5 個未 terminal task id）
+- `result` 必填；空字串也會 reject
+- completed 後 Plan immutable，不可再改欄位
+- 若 feature 中途棄置 → `status="cancelled"` + 寫 `result` 說明原因
+
+責任人：PM（feature 發起人）。Architect / Developer / QA 不負責關 Plan。
+
+---
+
+## Phase 7：寫入 Work Journal（必做）
 
 **寫入前先查：**
 ```python
@@ -194,6 +231,9 @@ mcp__zenos__journal_write(
 ## 完成條件
 
 - [ ] Spec 狀態為 `Approved`
-- [ ] 所有 P0 需求都有對應 task（status: todo）
+- [ ] Plan entity 已建立（real UUID，非 slug）
+- [ ] 所有 P0 需求都有對應 task（status: todo，`plan_id` = Plan UUID）
 - [ ] 每個 task 有 linked_entities + acceptance_criteria
+- [ ] 所有 task 走完 handoff chain 到 terminal state
+- [ ] Plan status = completed 且 result 非空
 - [ ] Work journal 已寫入

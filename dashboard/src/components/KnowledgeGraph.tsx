@@ -31,11 +31,96 @@ interface KnowledgeGraphProps {
   blindspotsByEntity: Map<string, Blindspot[]>;
   onNodeClick: (entity: Entity) => void;
   onLinkClick?: (sourceId: string, targetId: string) => void;
+  onBackgroundClick?: () => void;
   hoveredSidebarNodeId?: string | null;
   focusedNodeId?: string | null;
   selectedPathIds?: string[];
   detailPanelOpen?: boolean;
+  variant?: "dark" | "ink";
+  showLegend?: boolean;
+  /** Override NODE_TYPE_COLORS (e.g. to swap in Zen Ink palette). */
+  nodeColorsOverride?: Record<string, string>;
+  /** Override label typography, e.g. `500 12px "Helvetica Neue",...`. */
+  labelFontFamily?: string;
+  /** Blindspot highlight color (e.g. vermillion for Zen Ink). Default red. */
+  blindspotColor?: string;
 }
+
+interface Palette {
+  bg: string;
+  nodeBorderIdle: string;
+  nodeBorderPath: string;
+  labelBg: string;
+  labelFg: string;
+  labelFgHover: string;
+  linkIdle: string;
+  linkDim: string;
+  linkActiveNeutral: string;
+  linkActiveAccent: string;
+  linkPath: string;
+  arrowIdle: string;
+  arrowActiveNeutral: string;
+  arrowActiveAccent: string;
+  legendBg: string;
+  legendBorder: string;
+  legendLabel: string;
+  tooltipBg: string;
+  tooltipBorder: string;
+  tooltipTitle: string;
+  tooltipMeta: string;
+  tooltipBody: string;
+}
+
+const DARK_PALETTE: Palette = {
+  bg: "#0A0A0B",
+  nodeBorderIdle: "rgba(255,255,255,0.15)",
+  nodeBorderPath: "rgba(255,255,255,0.92)",
+  labelBg: "rgba(10,10,11,0.7)",
+  labelFg: "#FAFAFA",
+  labelFgHover: "#FFFFFF",
+  linkIdle: "rgba(255,255,255,0.12)",
+  linkDim: "rgba(255,255,255,0.04)",
+  linkActiveNeutral: "rgba(255,255,255,0.6)",
+  linkActiveAccent: "rgba(54,225,202,0.72)",
+  linkPath: "rgba(255,255,255,0.9)",
+  arrowIdle: "rgba(255,255,255,0.25)",
+  arrowActiveNeutral: "rgba(255,255,255,0.45)",
+  arrowActiveAccent: "rgba(54,225,202,0.72)",
+  legendBg: "rgba(17,17,19,0.9)",
+  legendBorder: "rgba(255,255,255,0.1)",
+  legendLabel: "#A1A1AA",
+  tooltipBg: "#111113",
+  tooltipBorder: "#333",
+  tooltipTitle: "#FAFAFA",
+  tooltipMeta: "#71717A",
+  tooltipBody: "#A1A1AA",
+};
+
+// Zen Ink palette — light paper with ink accents
+const INK_PALETTE: Palette = {
+  bg: "#F4EFE4", // paper
+  nodeBorderIdle: "rgba(20,18,16,0.22)",
+  nodeBorderPath: "rgba(182,58,44,0.85)", // vermillion
+  labelBg: "rgba(244,239,228,0.88)",
+  labelFg: "#2B2722", // ink
+  labelFgHover: "#141210",
+  linkIdle: "rgba(20,18,16,0.18)",
+  linkDim: "rgba(20,18,16,0.06)",
+  linkActiveNeutral: "rgba(20,18,16,0.55)",
+  linkActiveAccent: "rgba(182,58,44,0.78)",
+  linkPath: "rgba(182,58,44,0.9)",
+  arrowIdle: "rgba(20,18,16,0.28)",
+  arrowActiveNeutral: "rgba(20,18,16,0.5)",
+  arrowActiveAccent: "rgba(182,58,44,0.8)",
+  legendBg: "rgba(244,239,228,0.92)",
+  legendBorder: "rgba(20,18,16,0.14)",
+  legendLabel: "#4B443C",
+  tooltipBg: "#FAF5E9",
+  tooltipBorder: "rgba(20,18,16,0.18)",
+  tooltipTitle: "#141210",
+  tooltipMeta: "#6B6359",
+  tooltipBody: "#2B2722",
+};
 
 function getTypeColor(type: string): string {
   return NODE_TYPE_COLORS[type] ?? DEFAULT_NODE_COLOR;
@@ -72,11 +157,29 @@ export default function KnowledgeGraph({
   blindspotsByEntity,
   onNodeClick,
   onLinkClick,
+  onBackgroundClick,
   hoveredSidebarNodeId,
   focusedNodeId,
   selectedPathIds = [],
   detailPanelOpen = false,
+  variant = "dark",
+  showLegend = true,
+  nodeColorsOverride,
+  labelFontFamily,
+  blindspotColor,
 }: KnowledgeGraphProps) {
+  const palette: Palette = variant === "ink" ? INK_PALETTE : DARK_PALETTE;
+  const isInk = variant === "ink";
+  const resolvedLabelFont =
+    labelFontFamily ?? `-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+  const resolvedBlindspot = blindspotColor ?? "#EF4444";
+  const getNodeColor = useCallback(
+    (type: string): string => {
+      if (nodeColorsOverride && nodeColorsOverride[type]) return nodeColorsOverride[type];
+      return NODE_TYPE_COLORS[type] ?? DEFAULT_NODE_COLOR;
+    },
+    [nodeColorsOverride],
+  );
   const [mounted, setMounted] = useState(false);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ForceGraph, setForceGraph] = useState<any>(null);
@@ -250,7 +353,7 @@ export default function KnowledgeGraph({
       const y = node.y as number;
       const isPaused = node.status === "paused";
       const hasBlindspot = node.hasBlindspot as boolean;
-      const color = getTypeColor(node.type as string);
+      const color = getNodeColor(node.type as string);
       const nodeId = node.id as string;
       
       const isHoveredOnGraph = hoveredNode === nodeId;
@@ -280,27 +383,60 @@ export default function KnowledgeGraph({
         ctx.stroke();
       }
 
-      // Outer glow for hovered node
-      if (isHovered) {
-        ctx.shadowBlur = 25;
-        ctx.shadowColor = color;
-      }
-      // Blindspot glow
-      else if (hasBlindspot) {
-        ctx.shadowBlur = 20;
-        ctx.shadowColor = "#EF4444";
+      // Outer glow for hovered node / blindspot — dark variant only (Zen Ink has no glow)
+      if (!isInk) {
+        if (isHovered) {
+          ctx.shadowBlur = 25;
+          ctx.shadowColor = color;
+        } else if (hasBlindspot) {
+          ctx.shadowBlur = 20;
+          ctx.shadowColor = resolvedBlindspot;
+        }
       }
 
-      // Draw node circle
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
+      if (isInk) {
+        // Zen Ink node: paper fill + colored hairline stroke + small type dot.
+        // Hover/selected: tint fill with color at low alpha + thicker stroke.
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        if (isHovered || isInPath) {
+          ctx.fillStyle = color;
+          ctx.globalAlpha *= 0.18;
+          ctx.fill();
+          ctx.globalAlpha = isDimmed ? 0.15 : isPaused ? 0.4 : 1;
+        } else {
+          ctx.fillStyle = palette.bg; // paper
+          ctx.fill();
+        }
+        ctx.lineWidth = isHovered || isInPath ? 1.6 : 1;
+        ctx.strokeStyle = color;
+        ctx.stroke();
+        // Inner type dot (identity)
+        ctx.beginPath();
+        ctx.arc(x, y, Math.max(2, radius * 0.32), 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+      } else {
+        // Dark variant (original): solid fill
+        ctx.beginPath();
+        ctx.arc(x, y, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = isInPath ? palette.nodeBorderPath : palette.nodeBorderIdle;
+        ctx.lineWidth = isInPath ? 1.8 : 0.5;
+        ctx.stroke();
+      }
 
-      // Subtle border ring
-      ctx.strokeStyle = isInPath ? "rgba(255,255,255,0.92)" : "rgba(255,255,255,0.15)";
-      ctx.lineWidth = isInPath ? 1.8 : 0.5;
-      ctx.stroke();
+      // Blindspot marker — Zen Ink: small vermillion ring outside node (no glow)
+      if (isInk && hasBlindspot) {
+        ctx.beginPath();
+        ctx.arc(x, y, radius + 3, 0, 2 * Math.PI);
+        ctx.strokeStyle = resolvedBlindspot;
+        ctx.lineWidth = 0.8;
+        ctx.globalAlpha = isDimmed ? 0.25 : 0.75;
+        ctx.stroke();
+        ctx.globalAlpha = isDimmed ? 0.15 : isPaused ? 0.4 : 1;
+      }
 
       // Reset shadow for label
       ctx.shadowBlur = 0;
@@ -308,7 +444,7 @@ export default function KnowledgeGraph({
 
       // Label — full entity name with wrapping for readability
       const fontSize = Math.max(12 / globalScale, 3);
-      ctx.font = `500 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif`;
+      ctx.font = `${isInk ? 400 : 500} ${fontSize}px ${resolvedLabelFont}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
 
@@ -320,17 +456,20 @@ export default function KnowledgeGraph({
       const textWidths = lines.map((line) => ctx.measureText(line).width);
       const textWidth = Math.max(...textWidths, 0);
 
-      ctx.fillStyle = "rgba(10,10,11,0.7)";
-      ctx.fillRect(x - textWidth / 2 - 4, textY - 2, textWidth + 8, blockHeight + 4);
+      // Zen Ink: only show label bg on hover; otherwise transparent text on paper.
+      if (!isInk || isHovered || isInPath) {
+        ctx.fillStyle = palette.labelBg;
+        ctx.fillRect(x - textWidth / 2 - 4, textY - 2, textWidth + 8, blockHeight + 4);
+      }
 
-      ctx.fillStyle = isHovered ? "#FFFFFF" : "#FAFAFA";
+      ctx.fillStyle = isHovered ? palette.labelFgHover : palette.labelFg;
       lines.forEach((line, index) => {
         ctx.fillText(line, x, textY + (index * lineHeight) + (lineHeight / 2));
       });
 
       ctx.restore();
     },
-    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, connectedNodes, pathNodeIds]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, connectedNodes, pathNodeIds, palette, isInk, getNodeColor, resolvedLabelFont, resolvedBlindspot]
   );
 
   // Pointer area for click detection
@@ -384,16 +523,16 @@ export default function KnowledgeGraph({
       const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
       const src = typeof link.source === "string" ? link.source : link.source?.id;
       const tgt = typeof link.target === "string" ? link.target : link.target?.id;
-      if (pathEdgeKeys.has(`${src}->${tgt}`)) return "rgba(255,255,255,0.9)";
-      if (!activeNodeId) return "rgba(255,255,255,0.12)";
+      if (pathEdgeKeys.has(`${src}->${tgt}`)) return palette.linkPath;
+      if (!activeNodeId) return palette.linkIdle;
       if (src === activeNodeId || tgt === activeNodeId) {
         return hoveredNode || hoveredSidebarNodeId
-          ? "rgba(255,255,255,0.6)"
-          : "rgba(54,225,202,0.72)";
+          ? palette.linkActiveNeutral
+          : palette.linkActiveAccent;
       }
-      return "rgba(255,255,255,0.04)";
+      return palette.linkDim;
     },
-    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, pathEdgeKeys]
+    [hoveredNode, hoveredSidebarNodeId, focusedNodeId, pathEdgeKeys, palette]
   );
 
   const linkWidth = useCallback(
@@ -425,13 +564,13 @@ export default function KnowledgeGraph({
   const nodeLabel = useCallback(
     (node: GraphNode) => {
       const typeLabel = NODE_TYPE_LABELS[node.type] ?? node.type;
-      return `<div style="background:#111113;border:1px solid #333;border-radius:8px;padding:8px 12px;max-width:280px;font-family:-apple-system,sans-serif;">
-        <div style="font-weight:600;font-size:13px;color:#FAFAFA;margin-bottom:4px;">${node.name}</div>
-        <div style="font-size:11px;color:#71717A;margin-bottom:4px;">${typeLabel} · ${node.status}</div>
-        <div style="font-size:11px;color:#A1A1AA;line-height:1.4;">${node.summary.slice(0, 100)}${node.summary.length > 100 ? "…" : ""}</div>
+      return `<div style="background:${palette.tooltipBg};border:1px solid ${palette.tooltipBorder};border-radius:8px;padding:8px 12px;max-width:280px;font-family:-apple-system,sans-serif;">
+        <div style="font-weight:600;font-size:13px;color:${palette.tooltipTitle};margin-bottom:4px;">${node.name}</div>
+        <div style="font-size:11px;color:${palette.tooltipMeta};margin-bottom:4px;">${typeLabel} · ${node.status}</div>
+        <div style="font-size:11px;color:${palette.tooltipBody};line-height:1.4;">${node.summary.slice(0, 100)}${node.summary.length > 100 ? "…" : ""}</div>
       </div>`;
     },
-    []
+    [palette]
   );
 
   const graphA11ySummary = useMemo(() => {
@@ -443,8 +582,9 @@ export default function KnowledgeGraph({
 
   const FG = ForceGraph;
 
-  // Legend items
-  const legendItems = Object.entries(NODE_TYPE_COLORS).map(([type, color]) => ({
+  // Legend items — use overridden palette if provided
+  const legendSource = nodeColorsOverride ?? NODE_TYPE_COLORS;
+  const legendItems = Object.entries(legendSource).map(([type, color]) => ({
     type,
     color,
     label: NODE_TYPE_LABELS[type] ?? type,
@@ -470,7 +610,7 @@ export default function KnowledgeGraph({
         graphData={graphData}
         width={dimensions.width}
         height={dimensions.height}
-        backgroundColor="#0A0A0B"
+        backgroundColor={palette.bg}
         nodeRelSize={6}
         nodeCanvasObject={nodeCanvasObject}
         nodeCanvasObjectMode={() => "replace"}
@@ -482,15 +622,15 @@ export default function KnowledgeGraph({
         linkDirectionalArrowRelPos={1}
         linkDirectionalArrowColor={(link: GraphLink) => {
           const activeNodeId = hoveredNode || hoveredSidebarNodeId || focusedNodeId;
-          if (!activeNodeId) return "rgba(255,255,255,0.25)";
+          if (!activeNodeId) return palette.arrowIdle;
           const src = typeof link.source === "string" ? link.source : (link.source as unknown as GraphNode)?.id;
           const tgt = typeof link.target === "string" ? link.target : (link.target as unknown as GraphNode)?.id;
           if (src === activeNodeId || tgt === activeNodeId) {
             return hoveredNode || hoveredSidebarNodeId
-              ? "rgba(255,255,255,0.45)"
-              : "rgba(54,225,202,0.72)";
+              ? palette.arrowActiveNeutral
+              : palette.arrowActiveAccent;
           }
-          return "rgba(255,255,255,0.12)";
+          return palette.linkIdle;
         }}
         linkLabel={() => ""}
         linkCanvasObject={linkCanvasObject}
@@ -500,6 +640,7 @@ export default function KnowledgeGraph({
           onNodeClick={handleNodeClick}
           onLinkClick={handleLinkClick}
           onNodeHover={handleNodeHover}
+          onBackgroundClick={onBackgroundClick}
         enableZoomInteraction={true}
         enablePanInteraction={true}
         warmupTicks={50}
@@ -508,21 +649,36 @@ export default function KnowledgeGraph({
       />
 
       {/* Legend */}
-      <div className="absolute top-3 right-3 bg-card/90 border border-border rounded-lg px-3 py-2 flex flex-col gap-1.5">
-        {legendItems.map((item) => (
-          <div key={item.type} className="flex items-center gap-2">
-            <div
-              className="w-2.5 h-2.5 rounded-full"
-              style={{ backgroundColor: item.color }}
-            />
-            <span className="text-[10px] text-muted-foreground">{item.label}</span>
+      {showLegend && (
+        <div
+          className="absolute top-3 right-3 rounded-lg px-3 py-2 flex flex-col gap-1.5"
+          style={{
+            background: palette.legendBg,
+            border: `1px solid ${palette.legendBorder}`,
+          }}
+        >
+          {legendItems.map((item) => (
+            <div key={item.type} className="flex items-center gap-2">
+              <div
+                className="w-2.5 h-2.5 rounded-full"
+                style={{ backgroundColor: item.color }}
+              />
+              <span className="text-[10px]" style={{ color: palette.legendLabel }}>
+                {item.label}
+              </span>
+            </div>
+          ))}
+          <div
+            className="flex items-center gap-2 mt-0.5 pt-1"
+            style={{ borderTop: `1px solid ${palette.legendBorder}` }}
+          >
+            <div className="w-2.5 h-2.5 rounded-full border border-red-500 bg-red-500/30" />
+            <span className="text-[10px]" style={{ color: palette.legendLabel }}>
+              Has Blindspot
+            </span>
           </div>
-        ))}
-        <div className="flex items-center gap-2 mt-0.5 pt-1 border-t border-border">
-          <div className="w-2.5 h-2.5 rounded-full border border-red-500 bg-red-500/30" />
-          <span className="text-[10px] text-muted-foreground">Has Blindspot</span>
         </div>
-      </div>
+      )}
       </>)}
     </div>
   );
