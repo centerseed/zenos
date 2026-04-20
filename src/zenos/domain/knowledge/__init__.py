@@ -26,6 +26,7 @@ from .models import (  # noqa: F401
 from .repositories import (  # noqa: F401
     BlindspotRepository,
     DocumentRepository,
+    EntityEntryRepository,
     EntityRepository,
     ProtocolRepository,
     RelationshipRepository,
@@ -57,6 +58,7 @@ __all__ = [
     # repositories
     "BlindspotRepository",
     "DocumentRepository",
+    "EntityEntryRepository",
     "EntityRepository",
     "ProtocolRepository",
     "RelationshipRepository",

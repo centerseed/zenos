@@ -88,6 +88,34 @@ class SqlDocumentRepository:
             links.setdefault(lr["document_id"], []).append(lr["entity_id"])
         return [_row_to_document(r, links.get(r["id"], [])) for r in rows]
 
+    async def find_by_id_prefix(
+        self, prefix: str, partner_id: str, limit: int = 11
+    ) -> list[Document]:
+        """Return documents whose id starts with prefix, scoped to partner_id.
+
+        limit=11 lets the caller distinguish "exactly 10" from "more than 10"
+        (SPEC-mcp-id-ergonomics AC-MIDE-03/04).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.documents"
+                f" WHERE id LIKE $1 || '%' AND partner_id = $2"
+                f" ORDER BY id LIMIT $3",
+                prefix, partner_id, limit,
+            )
+            if not rows:
+                return []
+            doc_ids = [r["id"] for r in rows]
+            link_rows = await conn.fetch(
+                f"SELECT document_id, entity_id FROM {SCHEMA}.document_entities"
+                f" WHERE partner_id = $1 AND document_id = ANY($2::text[])",
+                partner_id, doc_ids,
+            )
+        links: dict[str, list[str]] = {}
+        for lr in link_rows:
+            links.setdefault(lr["document_id"], []).append(lr["entity_id"])
+        return [_row_to_document(r, links.get(r["id"], [])) for r in rows]
+
     async def upsert(self, doc: Document) -> Document:
         pid = _get_partner_id()
         now = _now()

@@ -23,6 +23,7 @@ from zenos.interface.mcp._common import (
     _build_governance_hints,
     _build_context_bundle,
     _enrich_task_result,
+    _format_not_found,
 )
 from zenos.interface.mcp._visibility import (
     _check_write_visibility,
@@ -251,6 +252,7 @@ async def write(
     collection: str,
     data: dict,
     id: str | None = None,
+    id_prefix: str | None = None,
     workspace_id: str | None = None,
 ) -> dict:
     """建立或更新 ontology 中的知識條目。
@@ -350,6 +352,14 @@ async def write(
         err = _apply_workspace_override(workspace_id)
         if err is not None:
             return err
+    # AC-MIDE-05: write 絕對不支援 id_prefix — 防止 prefix 碰撞誤觸破壞性操作
+    # Check BEFORE _ensure_services() so we never bootstrap SQL just to reject
+    if id_prefix is not None:
+        return _unified_response(
+            status="rejected",
+            data={"hint": "write 類操作需完整 32-char id，避免 prefix 碰撞誤觸破壞性操作"},
+            rejection_reason="id_prefix_not_allowed_for_write_ops",
+        )
     await _ensure_services()
     try:
         if id:
@@ -664,7 +674,7 @@ async def write(
                     return _unified_response(
                         status="rejected",
                         data={},
-                        rejection_reason=f"Relationship '{id}' not found",
+                        rejection_reason=_format_not_found("Relationship", id),
                     )
                 _audit_log(
                     event_type="ontology.relationship.delete",
@@ -719,7 +729,7 @@ async def write(
                     return _unified_response(
                         status="rejected",
                         data={},
-                        rejection_reason=f"Entry '{id}' not found",
+                        rejection_reason=_format_not_found("Entry", id),
                     )
                 serialized = _serialize(updated)
                 return _unified_response(

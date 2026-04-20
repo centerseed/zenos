@@ -85,6 +85,34 @@ class SqlBlindspotRepository:
             links.setdefault(lr["blindspot_id"], []).append(lr["entity_id"])
         return [_row_to_blindspot(r, links.get(r["id"], [])) for r in rows]
 
+    async def find_by_id_prefix(
+        self, prefix: str, partner_id: str, limit: int = 11
+    ) -> list[Blindspot]:
+        """Return blindspots whose id starts with prefix, scoped to partner_id.
+
+        limit=11 lets the caller distinguish "exactly 10" from "more than 10"
+        (SPEC-mcp-id-ergonomics AC-MIDE-03/04).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.blindspots"
+                f" WHERE id LIKE $1 || '%' AND partner_id = $2"
+                f" ORDER BY id LIMIT $3",
+                prefix, partner_id, limit,
+            )
+            if not rows:
+                return []
+            bs_ids = [r["id"] for r in rows]
+            link_rows = await conn.fetch(
+                f"SELECT blindspot_id, entity_id FROM {SCHEMA}.blindspot_entities"
+                f" WHERE partner_id = $1 AND blindspot_id = ANY($2::text[])",
+                partner_id, bs_ids,
+            )
+        links: dict[str, list[str]] = {}
+        for lr in link_rows:
+            links.setdefault(lr["blindspot_id"], []).append(lr["entity_id"])
+        return [_row_to_blindspot(r, links.get(r["id"], [])) for r in rows]
+
     async def add(self, blindspot: Blindspot, *, conn: asyncpg.Connection | None = None) -> Blindspot:
         pid = _get_partner_id()
         now = _now()

@@ -155,6 +155,23 @@ class SqlEntityEntryRepository:
             )
         return int(row["cnt"]) if row else 0
 
+    async def find_by_id_prefix(
+        self, prefix: str, partner_id: str, limit: int = 11
+    ) -> list[EntityEntry]:
+        """Return entries whose id starts with prefix, scoped to partner_id.
+
+        limit=11 lets the caller distinguish "exactly 10" from "more than 10"
+        (SPEC-mcp-id-ergonomics AC-MIDE-03/04).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT * FROM {SCHEMA}.entity_entries"
+                f" WHERE id LIKE $1 || '%' AND partner_id = $2"
+                f" ORDER BY id LIMIT $3",
+                prefix, partner_id, limit,
+            )
+        return [_row_to_entry(r) for r in rows]
+
     async def search_content(self, query: str, limit: int = 20, department: str | None = None) -> list[dict]:
         """Search entries by content keyword, returning entries with entity context.
 

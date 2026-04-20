@@ -273,3 +273,12 @@ Server 自動：
 - reason 必填；用結構化格式 `"rejected: <instance>; class_fix: <class>"` 讓 Developer 一眼看懂要修什麼
 - 不要直接 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
 - 退回後可讀 `get(task).handoff_events` 比對前後派工履歷
+
+---
+
+## MCP ID 使用紀律
+
+- MCP entity/entry/task/document/blindspot 的 ID 是 32 字元 lowercase hex UUID
+- **任何會被自動化管線 consume 的文本（報告、分析、handoff 內容），ID 必須寫完整 32 字元**；只有純人類閱讀的摘要表可以縮寫
+- 若只記得前綴，先用 `get(id_prefix=...)` 或 `search(id_prefix=...)` 取完整 ID 再做 write/archive
+- 破壞性操作（write/confirm/task handoff）**只接受完整 ID**，不支援 prefix 比對

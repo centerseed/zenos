@@ -18,6 +18,7 @@ from zenos.interface.mcp._common import (
     _enrich_task_result,
     _unified_response,
     _error_response,
+    _validate_id_prefix,
 )
 from zenos.interface.mcp._visibility import (
     _is_entity_visible,
@@ -44,6 +45,102 @@ def _normalize_project_scope(value: object) -> str:
     return str(value).strip().lower()
 
 
+async def _resolve_id_prefix_for_search(
+    prefix: str, collection: str, partner_id: str,
+) -> dict:
+    """Handle id_prefix query for search — returns a _unified_response dict.
+
+    For search semantics:
+    - 0 matches → rejected "id_prefix matches 0 <collection>"
+    - 1..10 matches → ok, list result
+    - 11+ matches → rejected AMBIGUOUS_PREFIX + hint to narrow prefix
+
+    AC-MIDE-03/04 compliance.
+    """
+    import zenos.interface.mcp as mcp
+
+    # Normalize prefix to lowercase so uppercase input matches lowercase stored IDs
+    prefix = prefix.lower()
+
+    # Dispatch to per-collection repo
+    if collection in ("entities", "all"):
+        if mcp.entity_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="entity_repo not initialized",
+            )
+        items = await mcp.entity_repo.find_by_id_prefix(prefix, partner_id)
+        serialized = [{"id": e.id, "name": e.name, "type": e.type} for e in items]
+        resource_label = "entities"
+    elif collection == "documents":
+        if mcp.document_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="document_repo not initialized",
+            )
+        items = await mcp.document_repo.find_by_id_prefix(prefix, partner_id)
+        serialized = [{"id": d.id, "name": getattr(d, "title", d.id), "type": "document"} for d in items]
+        resource_label = "documents"
+    elif collection == "blindspots":
+        if mcp.blindspot_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="blindspot_repo not initialized",
+            )
+        items = await mcp.blindspot_repo.find_by_id_prefix(prefix, partner_id)
+        serialized = [{"id": b.id, "name": b.description[:60] if b.description else b.id, "type": "blindspot"} for b in items]
+        resource_label = "blindspots"
+    elif collection == "tasks":
+        if mcp.task_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="task_repo not initialized",
+            )
+        items = await mcp.task_repo.find_by_id_prefix(prefix, partner_id)
+        serialized = [{"id": t.id, "name": t.title, "type": "task"} for t in items]
+        resource_label = "tasks"
+    elif collection == "entries":
+        if mcp.entry_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="entry_repo not initialized",
+            )
+        items = await mcp.entry_repo.find_by_id_prefix(prefix, partner_id)
+        serialized = [{"id": e.id, "name": e.content[:60] if e.content else e.id, "type": e.type} for e in items]
+        resource_label = "entries"
+    else:
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message=(
+                f"id_prefix 不支援 collection '{collection}'。"
+                f"支援：entities, documents, blindspots, tasks, entries"
+            ),
+        )
+
+    count = len(items)
+
+    if count == 0:
+        return _unified_response(
+            status="rejected",
+            data={},
+            rejection_reason=f"id_prefix '{prefix}' matches 0 {resource_label}",
+        )
+
+    if count >= 11:
+        return _unified_response(
+            status="rejected",
+            data={"hint": "超過 10 筆，請增加 prefix 長度"},
+            rejection_reason="AMBIGUOUS_PREFIX",
+        )
+
+    # 1..10 matches → ok, list result (search semantics)
+    return _unified_response(
+        status="ok",
+        data={resource_label: serialized[:10]},
+    )
+
+
 async def search(
     query: str = "",
     collection: str = "all",
@@ -67,6 +164,7 @@ async def search(
     include: list[str] | None = None,
     mode: str = "hybrid",
     entity_id: str | None = None,
+    id_prefix: str | None = None,
 ) -> dict:
     """搜尋和列出 ontology 及任務中的所有內容。
 
@@ -160,6 +258,20 @@ async def search(
     include_set, include_err = validate_include(include, VALID_SEARCH_INCLUDES)
     if include_err is not None:
         return include_err
+
+    # id_prefix routing: handle before normal search dispatch
+    # (SPEC-mcp-id-ergonomics AC-MIDE-03/04)
+    if id_prefix is not None:
+        prefix_err = _validate_id_prefix(id_prefix)
+        if prefix_err:
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message=f"id_prefix 必須為 4+ 字元 hex：{prefix_err}",
+            )
+        partner_ctx = _current_partner.get() or {}
+        pid = str(partner_ctx.get("id") or "")
+        return await _resolve_id_prefix_for_search(id_prefix, collection, pid)
 
     results: dict = {}
     warnings: list[str] = []

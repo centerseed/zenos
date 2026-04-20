@@ -10,7 +10,7 @@ from zenos.domain.governance import (
     score_summary_quality,
 )
 
-from zenos.interface.mcp._common import _serialize, _unified_response, _error_response
+from zenos.interface.mcp._common import _serialize, _unified_response, _error_response, _format_not_found
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ async def analyze(
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Entity '{entity_id}' not found",
+                message=_format_not_found("Entity", entity_id),
             )
 
         partner_dept = "all"

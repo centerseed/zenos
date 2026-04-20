@@ -160,6 +160,32 @@ class SqlTaskRepository:
             linked_entities, blocked_by = await self._fetch_task_relations(conn, task_id, pid)
         return _row_to_task(row, linked_entities, blocked_by)
 
+    async def find_by_id_prefix(
+        self, prefix: str, partner_id: str, limit: int = 11
+    ) -> list[Task]:
+        """Return tasks whose id starts with prefix, scoped to partner_id.
+
+        limit=11 lets the caller distinguish "exactly 10" from "more than 10"
+        (SPEC-mcp-id-ergonomics AC-MIDE-03/04).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT t.*, "
+                f"COALESCE(NULLIF(NULLIF(p1.display_name, ''), 'Unknown'), p1.email, p1.id, t.created_by) as creator_name,"
+                f"COALESCE(NULLIF(NULLIF(p2.display_name, ''), 'Unknown'), p2.email, p2.id, t.assignee) as assignee_name"
+                f" FROM {SCHEMA}.tasks t"
+                f" LEFT JOIN {SCHEMA}.partners p1 ON t.created_by = p1.id"
+                f" LEFT JOIN {SCHEMA}.partners p2 ON t.assignee = p2.id"
+                f" WHERE t.id LIKE $1 || '%' AND t.partner_id = $2"
+                f" ORDER BY t.id LIMIT $3",
+                prefix, partner_id, limit,
+            )
+            if not rows:
+                return []
+            task_ids = [r["id"] for r in rows]
+            linked_map, blocker_map = await self._batch_fetch_task_relations(conn, task_ids, partner_id)
+        return self._rows_to_tasks(rows, linked_map, blocker_map)
+
     async def upsert(self, task: Task, *, conn: asyncpg.Connection | None = None) -> Task:
         pid = _get_partner_id()
         now = _now()

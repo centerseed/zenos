@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from zenos.interface.mcp._auth import _current_partner
 from zenos.interface.mcp._audit import _audit_log
-from zenos.interface.mcp._common import _unified_response, _error_response
+from zenos.interface.mcp._common import _unified_response, _error_response, _format_not_found
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ async def upload_attachment(
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Task '{task_id}' not found",
+                message=_format_not_found("Task", task_id),
             )
 
         from zenos.infrastructure.gcs_client import (

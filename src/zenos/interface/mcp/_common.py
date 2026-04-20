@@ -5,10 +5,12 @@ Contains:
 - _unified_response, _inject_workspace_context
 - _new_id, _parse_entity_level
 - _enrich_task_result, _build_context_bundle, _build_governance_hints
+- _validate_id_format, _format_not_found (ID ergonomics helpers)
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import asdict
 from datetime import datetime
@@ -16,6 +18,74 @@ from datetime import datetime
 logger_name = __name__
 import logging
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# ID format validation helpers (SPEC-mcp-id-ergonomics AC-MIDE-01/02)
+# ---------------------------------------------------------------------------
+
+_VALID_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+
+
+def _validate_id_format(id_value: str | None) -> str | None:
+    """Check ID format. Returns an error message string, or None if valid.
+
+    A valid ID is exactly 32 lowercase hex characters (uuid4().hex format).
+    Accepts None or empty string and returns "id is required" for both.
+    """
+    if id_value is None or id_value == "":
+        return "id is required"
+    if len(id_value) != 32:
+        return (
+            f"id length mismatch (expected 32, got {len(id_value)}). "
+            "ID 必須為 32 字元 hex。若只記得前綴，請用 search(id_prefix=...) 或 "
+            "get(id_prefix=...) 取完整 ID。"
+        )
+    if not _VALID_ID_RE.match(id_value.lower()):
+        return (
+            "id 含非 hex 字元。ID 必須為 32 字元 lowercase hex。"
+            "請用 search(id_prefix=...) 確認。"
+        )
+    return None
+
+
+_VALID_PREFIX_RE = re.compile(r"^[0-9a-f]{4,}$")
+
+
+def _validate_id_prefix(prefix: str) -> str | None:
+    """Validate an id_prefix value for prefix-match queries.
+
+    Returns an error message if invalid, or None if the prefix is acceptable.
+    Minimum 4 hex characters (16^4 = 65536 namespace, collision-safe for typical
+    partner data volumes per SPEC-mcp-id-ergonomics §Risk).
+    """
+    if not prefix:
+        return "id_prefix is required"
+    if not _VALID_PREFIX_RE.match(prefix.lower()):
+        if len(prefix) < 4:
+            return (
+                f"id_prefix 必須為 4+ 字元 hex（傳入長度 {len(prefix)}）。"
+                "最少 4 字元以避免過多碰撞。"
+            )
+        return (
+            f"id_prefix 含非 hex 字元。id_prefix 必須為純 lowercase hex（0-9, a-f）。"
+        )
+    return None
+
+
+def _format_not_found(resource: str, id_value: str) -> str:
+    """Build a unified not-found error message with ID format diagnostics.
+
+    If the id_value has a format problem (wrong length or non-hex),
+    the diagnostic hint is prepended so the caller knows immediately
+    why the lookup failed.
+    """
+    hint = _validate_id_format(id_value)
+    if hint:
+        return f"{resource} '{id_value}' not found — {hint}"
+    return (
+        f"{resource} '{id_value}' not found. "
+        f"請用 search(query=...) 或 search(id_prefix=...) 確認 ID 正確。"
+    )
 
 
 def _serialize(obj: object) -> dict:

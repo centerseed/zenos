@@ -22,6 +22,8 @@ class TaskRepository(TypingProtocol):
         status: list[str] | None = None,
         priority: str | None = None,
         linked_entity: str | None = None,
+        dispatcher: str | None = None,
+        parent_task_id: str | None = None,
         include_archived: bool = False,
         limit: int = 200,
         offset: int = 0,
@@ -35,6 +37,10 @@ class TaskRepository(TypingProtocol):
 
     async def list_pending_review(self) -> list[Task]:
         """Tasks in review status with confirmedByCreator=false."""
+        ...
+
+    async def find_by_id_prefix(self, prefix: str, partner_id: str, limit: int = 11) -> list[Task]:
+        """Return tasks whose id starts with prefix, scoped to partner_id."""
         ...
 
 

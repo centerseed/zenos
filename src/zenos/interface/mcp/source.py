@@ -13,6 +13,7 @@ from zenos.interface.mcp._common import (
     _unified_response,
     _build_governance_hints,
     _error_response,
+    _format_not_found,
 )
 from zenos.interface.mcp._visibility import (
     _is_entity_visible,
@@ -63,7 +64,7 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Document '{doc_id}' not found",
+                message=_format_not_found("Document", doc_id),
             )
         partner = _current_partner.get() or {}
         if partner and is_guest(partner):
@@ -72,19 +73,19 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message=f"Document '{doc_id}' not found",
+                    message=_format_not_found("Document", doc_id),
                 )
             if hasattr(doc_record, "visibility") and not _is_entity_visible(doc_record):
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message=f"Document '{doc_id}' not found",
+                    message=_format_not_found("Document", doc_id),
                 )
         elif hasattr(doc_record, "visibility") and not _is_entity_visible(doc_record):
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Document '{doc_id}' not found",
+                message=_format_not_found("Document", doc_id),
             )
 
         # --- ADR-022: source_id-aware source selection ---
@@ -200,7 +201,7 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
         return _error_response(
             status="rejected",
             error_code="NOT_FOUND",
-            message=f"Document '{doc_id}' not found",
+            message=_format_not_found("Document", doc_id),
         )
     except PermissionError:
         return _error_response(

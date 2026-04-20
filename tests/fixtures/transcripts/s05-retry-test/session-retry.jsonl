@@ -1,0 +1,4 @@
+{"timestamp":"2026-04-20T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_R1","name":"mcp__zenos__write","input":{"collection":"entries","id":"39f160f5"}}]}}
+{"timestamp":"2026-04-20T00:00:01.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_R1","content":[{"type":"text","text":"{\"status\":\"rejected\",\"rejection_reason\":\"Entry not found\"}"}]}]}}
+{"timestamp":"2026-04-20T00:00:05.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_R2","name":"mcp__zenos__write","input":{"collection":"entries","id":"39f160f5"}}]}}
+{"timestamp":"2026-04-20T00:00:06.000Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_R2","content":[{"type":"text","text":"{\"status\":\"rejected\",\"rejection_reason\":\"Entry not found\"}"}]}]}}

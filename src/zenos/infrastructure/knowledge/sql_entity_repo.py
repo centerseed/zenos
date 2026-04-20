@@ -210,6 +210,23 @@ class SqlEntityRepository:
             )
         return [_row_to_entity(r) for r in rows]
 
+    async def find_by_id_prefix(
+        self, prefix: str, partner_id: str, limit: int = 11
+    ) -> list[Entity]:
+        """Return entities whose id starts with prefix, scoped to partner_id.
+
+        limit=11 lets the caller distinguish "exactly 10" from "more than 10"
+        (SPEC-mcp-id-ergonomics AC-MIDE-03/04).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"SELECT {_ENTITY_COLS} FROM {SCHEMA}.entities"
+                f" WHERE id LIKE $1 || '%' AND partner_id = $2"
+                f" ORDER BY id LIMIT $3",
+                prefix, partner_id, limit,
+            )
+        return [_row_to_entity(r) for r in rows]
+
     async def update_source_status(
         self,
         entity_id: str,

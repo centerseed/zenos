@@ -161,6 +161,23 @@ mcp__zenos__confirm(
 
 ---
 
+### Step 7.5：MCP Reject Rate Gate（每次 iteration 結束前執行）
+
+```bash
+python3 scripts/dogfood/scan_mcp_reject_rate.py \
+  --transcripts-dir ~/.claude/projects/<project-slug>/ \
+  --format markdown
+```
+
+判斷標準：
+- **reject rate ≤ 5%**：正常，繼續
+- **reject rate > 5%**：必須寫進 iteration report，分析原因
+- **top_rejection_reasons 出現新類別**：必須寫進 iteration report，評估是否需要 skill 更新
+
+若 reject-rate 超標或出現新 rejection 類別，**不得跳過**直接進下一輪——先在追蹤表記錄，再決定是立即修復還是列入 backlog。
+
+---
+
 ### Step 8：Skill 肥大分析（靜態）
 
 不呼叫 MCP，直接分析 skill 檔案大小：

@@ -396,6 +396,15 @@ mcp__zenos__task(
 
 ---
 
+## MCP ID 使用紀律
+
+- MCP entity/entry/task/document/blindspot 的 ID 是 32 字元 lowercase hex UUID
+- **任何會被自動化管線 consume 的文本（報告、分析、handoff 內容），ID 必須寫完整 32 字元**；只有純人類閱讀的摘要表可以縮寫
+- 若只記得前綴，先用 `get(id_prefix=...)` 或 `search(id_prefix=...)` 取完整 ID 再做 write/archive
+- 破壞性操作（write/confirm/task handoff）**只接受完整 ID**，不支援 prefix 比對
+
+---
+
 ## 參考資料
 
 ZenOS 治理規則、task/journal MCP 語法、subagent 調度細節、決策框架：

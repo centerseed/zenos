@@ -211,3 +211,12 @@ mcp__zenos__task(
 
 ### QA FAIL 時
 QA 會把 task handoff 回給 `agent:developer`（reason="rejected: ..."）。你從 `get(task).handoff_events` 最後一條看到退回原因，修好後再次 handoff 給 QA。status 回到 `in_progress` 自動處理。
+
+---
+
+## MCP ID 使用紀律
+
+- MCP entity/entry/task/document/blindspot 的 ID 是 32 字元 lowercase hex UUID
+- **任何會被自動化管線 consume 的文本（報告、分析、handoff 內容），ID 必須寫完整 32 字元**；只有純人類閱讀的摘要表可以縮寫
+- 若只記得前綴，先用 `get(id_prefix=...)` 或 `search(id_prefix=...)` 取完整 ID 再做 write/archive
+- 破壞性操作（write/confirm/task handoff）**只接受完整 ID**，不支援 prefix 比對

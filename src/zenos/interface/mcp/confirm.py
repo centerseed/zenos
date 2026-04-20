@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 async def confirm(
     collection: str,
-    id: str,
+    id: str | None = None,
     accepted: bool | None = None,
     accept: bool | None = None,
     rejection_reason: str | None = None,
@@ -31,6 +31,7 @@ async def confirm(
     new_blindspot: dict | None = None,
     entity_entries: list[dict] | None = None,
     workspace_id: str | None = None,
+    id_prefix: str | None = None,
 ) -> dict:
     """確認（批准）一個 AI 產出的 draft 或驗收一個已完成的任務。
 
@@ -68,6 +69,14 @@ async def confirm(
         err = _apply_workspace_override(workspace_id)
         if err is not None:
             return err
+    # AC-MIDE-05: confirm 絕對不支援 id_prefix — 確認操作需完整 32-char id
+    # Check BEFORE _ensure_services() so we never bootstrap SQL just to reject
+    if id_prefix is not None:
+        return _unified_response(
+            status="rejected",
+            data={"hint": "write 類操作需完整 32-char id，避免 prefix 碰撞誤觸破壞性操作"},
+            rejection_reason="id_prefix_not_allowed_for_write_ops",
+        )
     await _ensure_services()
     try:
         warnings: list[str] = []

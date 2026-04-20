@@ -502,6 +502,7 @@ async def task(
     title: str | None = None,
     created_by: str | None = None,
     id: str | None = None,
+    id_prefix: str | None = None,
     description: str | None = None,
     assignee: str | None = None,
     priority: str | None = None,
@@ -612,6 +613,13 @@ async def task(
         updated_by: 不接受 caller 直接傳入；由 server 依當次 actor context 自動寫入
         workspace_id: 選填。切換到指定 workspace 執行任務操作（必須在你的可用列表內）。
     """
+    # AC-MIDE-05: task (handoff/update/delete) 絕對不支援 id_prefix
+    if id_prefix is not None:
+        return _unified_response(
+            status="rejected",
+            data={"hint": "write 類操作需完整 32-char id，避免 prefix 碰撞誤觸破壞性操作"},
+            rejection_reason="id_prefix_not_allowed_for_write_ops",
+        )
     if workspace_id:
         err = _apply_workspace_override(workspace_id)
         if err is not None:

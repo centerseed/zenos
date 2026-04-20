@@ -13,6 +13,8 @@ from zenos.interface.mcp._common import (
     _enrich_task_result,
     _unified_response,
     _error_response,
+    _format_not_found,
+    _validate_id_prefix,
 )
 from zenos.interface.mcp._include import (
     VALID_ENTITY_INCLUDES,
@@ -32,11 +34,105 @@ from zenos.interface.mcp._audit import _schedule_tool_event
 
 logger = logging.getLogger(__name__)
 
+async def _resolve_id_prefix_for_get(
+    prefix: str, collection: str, partner_id: str,
+) -> str | dict:
+    """Resolve an id_prefix to either a single full id or a rejection response.
+
+    Returns:
+        str — the single matched full id (caller should proceed with exact match)
+        dict — a _unified_response rejection (0, 2-10, or 11+ matches)
+    """
+    import zenos.interface.mcp as mcp
+
+    # Normalize prefix to lowercase so uppercase input matches lowercase stored IDs
+    prefix = prefix.lower()
+
+    # Dispatch to per-collection repo
+    if collection == "entities":
+        if mcp.entity_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="entity_repo not initialized",
+            )
+        items = await mcp.entity_repo.find_by_id_prefix(prefix, partner_id)
+        candidates = [{"id": e.id, "name": e.name, "type": e.type} for e in items]
+    elif collection == "documents":
+        if mcp.document_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="document_repo not initialized",
+            )
+        items = await mcp.document_repo.find_by_id_prefix(prefix, partner_id)
+        candidates = [{"id": d.id, "name": getattr(d, "title", d.id), "type": "document"} for d in items]
+    elif collection == "blindspots":
+        if mcp.blindspot_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="blindspot_repo not initialized",
+            )
+        items = await mcp.blindspot_repo.find_by_id_prefix(prefix, partner_id)
+        candidates = [{"id": b.id, "name": b.description[:60] if b.description else b.id, "type": "blindspot"} for b in items]
+    elif collection == "tasks":
+        if mcp.task_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="task_repo not initialized",
+            )
+        items = await mcp.task_repo.find_by_id_prefix(prefix, partner_id)
+        candidates = [{"id": t.id, "name": t.title, "type": "task"} for t in items]
+    elif collection == "entries":
+        if mcp.entry_repo is None:
+            return _error_response(
+                status="rejected", error_code="SERVICE_UNAVAILABLE",
+                message="entry_repo not initialized",
+            )
+        items = await mcp.entry_repo.find_by_id_prefix(prefix, partner_id)
+        candidates = [{"id": e.id, "name": e.content[:60] if e.content else e.id, "type": e.type} for e in items]
+    else:
+        # Unknown collection — will be handled by the main get() dispatch below
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message=(
+                f"id_prefix 不支援 collection '{collection}'。"
+                f"支援：entities, documents, blindspots, tasks, entries"
+            ),
+        )
+
+    count = len(items)
+
+    if count == 0:
+        return _unified_response(
+            status="rejected",
+            data={},
+            rejection_reason=f"id_prefix '{prefix}' matches 0 {collection}",
+        )
+
+    if count == 1:
+        # Unique match — return the resolved full id
+        return candidates[0]["id"]
+
+    if count >= 11:
+        return _unified_response(
+            status="rejected",
+            data={"hint": "超過 10 筆，請增加 prefix 長度"},
+            rejection_reason="AMBIGUOUS_PREFIX",
+        )
+
+    # 2–10 matches
+    return _unified_response(
+        status="rejected",
+        data={"candidates": candidates[:10]},
+        rejection_reason="AMBIGUOUS_PREFIX",
+    )
+
 
 async def get(
     collection: str,
     name: str | None = None,
     id: str | None = None,
+    id_prefix: str | None = None,
     workspace_id: str | None = None,
     include: list[str] | None = None,
     intent: str | None = None,
@@ -81,7 +177,10 @@ async def get(
     Args:
         collection: entities/documents/protocols/blindspots/tasks
         name: 項目名稱（entities 和 protocols 支援按名稱查詢）
-        id: 項目 ID（所有集合都支援）
+        id: 項目 ID（所有集合都支援，32-char hex）
+        id_prefix: 選填。ID 前綴查詢（至少 4 字元 hex）。與 id 互斥。
+            唯一匹配 → 回傳完整 payload；多筆 → rejected + AMBIGUOUS_PREFIX + candidates。
+            此參數對讀取操作有效；write/confirm/handoff 不接受 id_prefix。
         workspace_id: 選填。切換到指定 workspace 執行查詢（必須在你的可用列表內）。
         include: 選填。控制回傳欄位集合（僅 entities 有效）。
             支援值：summary / relationships / entries / impact_chain / sources / all
@@ -99,12 +198,40 @@ async def get(
         if err is not None:
             return err
     await _ensure_services()
-    if not name and not id:
+    # id and id_prefix are mutually exclusive
+    if id and id_prefix:
         return _error_response(
             status="rejected",
             error_code="INVALID_INPUT",
-            message="Must provide either name or id",
+            message="id 與 id_prefix 互斥，只能傳其中一個",
         )
+    if not name and not id and not id_prefix:
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message="Must provide either name, id, or id_prefix",
+        )
+
+    # Handle id_prefix routing: resolve prefix to a single id or reject
+    if id_prefix is not None:
+        prefix_err = _validate_id_prefix(id_prefix)
+        if prefix_err:
+            return _error_response(
+                status="rejected",
+                error_code="INVALID_INPUT",
+                message=f"id_prefix 必須為 4+ 字元 hex：{prefix_err}",
+            )
+        # Look up prefix against the appropriate repo
+        partner_ctx = _current_partner.get() or {}
+        pid = str(partner_ctx.get("id") or "")
+        prefix_result = await _resolve_id_prefix_for_get(
+            id_prefix, collection, pid,
+        )
+        if isinstance(prefix_result, dict):
+            # Already a response (0, 2+, or 11+ matches)
+            return prefix_result
+        # prefix_result is the resolved full ID — proceed as exact match
+        id = prefix_result
 
     partner = _current_partner.get() or {}
 
@@ -122,7 +249,7 @@ async def get(
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message=f"Entity '{id}' not found",
+                    message=_format_not_found("Entity", id),
                 )
             rels = await _mcp.relationship_repo.list_by_entity(id)
             from zenos.application.knowledge.ontology_service import EntityWithRelationships
@@ -141,19 +268,19 @@ async def get(
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message="Entity not found",
+                    message=_format_not_found("Entity", result.entity.id) if id else "Entity not found",
                 )
             if not _is_entity_visible(result.entity):
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message="Entity not found",
+                    message=_format_not_found("Entity", result.entity.id) if id else "Entity not found",
                 )
         elif not _is_entity_visible(result.entity):
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message="Entity not found",
+                message=_format_not_found("Entity", result.entity.id) if id else "Entity not found",
             )
 
         eid = result.entity.id
@@ -312,7 +439,7 @@ async def get(
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Document '{doc_id}' not found",
+                message=_format_not_found("Document", doc_id),
             )
         if partner and is_guest(partner):
             allowed_ids = await _guest_allowed_entity_ids()
@@ -320,19 +447,19 @@ async def get(
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message=f"Document '{doc_id}' not found",
+                    message=_format_not_found("Document", doc_id),
                 )
             if hasattr(result, "visibility") and not _is_entity_visible(result):
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message=f"Document '{doc_id}' not found",
+                    message=_format_not_found("Document", doc_id),
                 )
         elif not _is_entity_visible(result):
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Document '{doc_id}' not found",
+                message=_format_not_found("Document", doc_id),
             )
         serialized = _serialize(result)
         # ADR-022: enrich sources with canonical_type
@@ -354,13 +481,13 @@ async def get(
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Blindspot '{id}' not found",
+                message=_format_not_found("Blindspot", id),
             )
         if not await _is_blindspot_visible(result):
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Blindspot '{id}' not found",
+                message=_format_not_found("Blindspot", id),
             )
         return _unified_response(data=_inject_workspace_context(_serialize(result)))
 
@@ -376,14 +503,14 @@ async def get(
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Task '{id}' not found",
+                message=_format_not_found("Task", id),
             )
         task_obj, _ = enriched
         if not await _is_task_visible(task_obj):
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=f"Task '{id}' not found",
+                message=_format_not_found("Task", id),
             )
         return _unified_response(data=_inject_workspace_context(await _enrich_task_result(task_obj)))
 
