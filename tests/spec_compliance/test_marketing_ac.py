@@ -1234,9 +1234,17 @@ class TestCoworkHelper:
                 events = _read_sse_events(response, limit=1)
             capability = events[0][1]
             assert capability["mcp_ok"] is True
-            assert sorted(capability["skills_loaded"]) == sorted(
-                ["/marketing-intel", "/marketing-plan", "/marketing-generate", "/marketing-adapt", "/marketing-publish"]
-            )
+            expected_skills = {
+                "/marketing-intel",
+                "/marketing-plan",
+                "/marketing-generate",
+                "/marketing-adapt",
+                "/marketing-publish",
+                "/zenos-governance",
+                "skills/governance/task-governance.md",
+                "skills/governance/document-governance.md",
+            }
+            assert expected_skills.issubset(set(capability["skills_loaded"]))
         finally:
             harness.close()
 
