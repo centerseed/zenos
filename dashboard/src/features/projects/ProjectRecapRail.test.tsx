@@ -7,6 +7,15 @@ vi.mock("@/components/MarkdownRenderer", () => ({
   MarkdownRenderer: ({ content }: { content: string }) => <div>{content}</div>,
 }));
 
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    partner: {
+      activeWorkspaceId: "ws-active",
+      homeWorkspaceId: "ws-home",
+    },
+  }),
+}));
+
 vi.mock("@/lib/copilot/useCopilotChat", () => ({
   useCopilotChat: () => ({
     status: "idle",
