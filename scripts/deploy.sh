@@ -27,7 +27,7 @@ Usage: ./scripts/deploy.sh [--project <id>] [--hosting-url <url>] [--skip-tests]
 Options:
   --project <id>       Firebase project ID. Default: zenos-naruvia
   --hosting-url <url>  Hosting base URL for post-deploy verification.
-  --skip-tests         Skip test, lint, and build steps.
+  --skip-tests         Skip Python tests, dashboard tests, and lint. Build still runs.
 EOF
 }
 
@@ -67,13 +67,15 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-if [ -x "$ROOT_DIR/.venv/bin/python" ]; then
-  VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
-elif [ -x "$ROOT_DIR/.venv/bin/python3" ]; then
-  VENV_PYTHON="$ROOT_DIR/.venv/bin/python3"
-else
-  echo "Python venv not found under .venv/bin/. Expected python or python3." >&2
-  exit 1
+if [ "$SKIP_TESTS" = false ]; then
+  if [ -x "$ROOT_DIR/.venv/bin/python" ]; then
+    VENV_PYTHON="$ROOT_DIR/.venv/bin/python"
+  elif [ -x "$ROOT_DIR/.venv/bin/python3" ]; then
+    VENV_PYTHON="$ROOT_DIR/.venv/bin/python3"
+  else
+    echo "Python venv not found under .venv/bin/. Expected python or python3." >&2
+    exit 1
+  fi
 fi
 
 if command -v firebase >/dev/null 2>&1; then
@@ -90,7 +92,7 @@ echo ""
 echo "Project: $PROJECT_ID"
 echo "Hosting URL: $HOSTING_URL"
 if [ "$SKIP_TESTS" = true ]; then
-  echo "Mode: skip tests/lint/build"
+  echo "Mode: skip tests/lint (fresh build still runs)"
 fi
 echo ""
 
@@ -133,14 +135,15 @@ fi
 echo ""
 
 # Step 4: Dashboard build
-if [ "$SKIP_TESTS" = true ]; then
-  echo "[4/5] Skipping Dashboard build (--skip-tests)"
+echo "[4/5] Building Dashboard..."
+cd "$DASHBOARD_DIR"
+rm -rf out
+if [ -x "$DASHBOARD_DIR/node_modules/.bin/next" ]; then
+  "$DASHBOARD_DIR/node_modules/.bin/next" build
 else
-  echo "[4/5] Building Dashboard..."
-  cd "$DASHBOARD_DIR"
   npm run build
-  echo "  ✓ Build succeeded"
 fi
+echo "  ✓ Build succeeded"
 echo ""
 
 # Step 5: Deploy
