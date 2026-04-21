@@ -12,6 +12,9 @@ version: 2.1.1
 > **本文件是 bootstrap 流程**，僅用於 MCP 連線建立前的首次安裝和 global skill 自我更新。
 > MCP 連線建立後，正式安裝流程由 `skills/workflows/setup.md` 定義。
 > 兩者職責不同，不應保持步驟一致。（見 ADR-017 D1）
+>
+> Bootstrap 期間也要先問使用者：要裝在當前目錄還是家目錄。
+> 若沒有特別指定，預設推薦當前目錄；只有使用者明確要多專案共用時才選家目錄。
 
 整個過程大約 2 分鐘。
 
@@ -28,6 +31,12 @@ curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/
 ```
 
 > 這一步不影響當前執行（skill 已載入記憶體），但確保其他專案下次執行時拿到最新版。
+
+安裝完成後，記得用一句話補充：
+- `/zenos-setup`：首次完整安裝與後續更新
+- `/zenos-capture`：第一次建 ontology
+- `/zenos-sync`：日常 git-based 同步
+- `/zenos-governance`：治理掃描與修補
 
 ---
 

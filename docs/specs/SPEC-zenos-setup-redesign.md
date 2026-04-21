@@ -4,7 +4,7 @@ id: SPEC-zenos-setup-redesign
 status: Draft
 ontology_entity: TBD
 created: 2026-04-05
-updated: 2026-04-05 (v2 — 補入設計決策 2026-04-05)
+updated: 2026-04-21 (v3 — 補入安裝 target 選擇與安裝後使用說明)
 ---
 
 # Feature Spec: /zenos-setup Redesign
@@ -95,6 +95,21 @@ updated: 2026-04-05 (v2 — 補入設計決策 2026-04-05)
 - **Acceptance Criteria**：
   - Given 用戶詢問「我有兩個專案」，When setup 說明，Then 說明中明確告知每個 Claude Code 專案可以有獨立的 `.claude/mcp.json`
   - Given 用戶選擇全域設定，When 執行，Then mcp.json 寫入 `~/.claude/mcp.json`，並說明這會影響所有 Claude Code 專案
+
+#### 安裝目標選擇：當前目錄 vs 家目錄
+
+- **描述**：MCP 接通後，agent 必須主動詢問使用者要安裝到當前目錄還是家目錄；若使用者未指定，預設推薦當前目錄
+- **Acceptance Criteria**：
+  - Given agent 呼叫 `setup(platform=...)`，When 準備安裝，Then 回傳內容必須能讓 agent 清楚列出「當前目錄」與「家目錄」兩種 target
+  - Given 使用者沒有明確指定，When agent 引導安裝，Then 預設推薦當前目錄，而不是直接做全域安裝
+  - Given 使用者選擇家目錄，When 安裝完成，Then agent 必須明確說明這會影響其他專案
+
+#### 安裝完成後的 skill 使用說明
+
+- **描述**：安裝完成後，agent 必須用白話簡單解釋核心 workflow skills 什麼時候用，避免用戶只看到檔案被裝好，不知道接下來怎麼操作
+- **Acceptance Criteria**：
+  - Given 安裝完成，When agent 回覆完成摘要，Then 至少說明 `/zenos-setup`、`/zenos-capture`、`/zenos-sync`、`/zenos-governance` 的使用時機
+  - Given 用戶是首次安裝，When agent 完成回覆，Then 說明中必須指出 `/zenos-setup` 是後續更新的唯一入口
 
 ### P2（可以有）
 

@@ -9,11 +9,34 @@ version: 2.1.0
 
 # /zenos-setup — ZenOS 初始化與更新
 
+> 這是正式安裝 / 更新流程。
+> 首次 bootstrap 由 `setup(platform=...)` 先把 `zenos-setup` 放進來；
+> 之後首次完整安裝與所有後續更新，一律走 `/zenos-setup`。
+
 整個過程大約 2 分鐘。
 
 ---
 
-## Step 0：先判斷平台，再偵測 MCP 設定檔
+## Step 0：先確認安裝目標
+
+先確認這次要裝到哪裡：
+
+| 選項 | 推薦時機 |
+|------|---------|
+| 當前目錄 | 正在設定某個 repo，想讓治理規則與專案一起版本化 |
+| 家目錄 | 想讓多個專案共用同一套 agent / workflow skills |
+
+若使用者沒有特別指定，**預設推薦當前目錄**。
+
+安裝完成後，要用一句話補充這四個 skill 的用法：
+- `/zenos-setup`：安裝後首次完整安裝，或之後更新治理 / agent skills
+- `/zenos-capture`：第一次把專案或文件寫進 ontology
+- `/zenos-sync`：專案已有 ontology 後，跟著 git 變更做日常同步
+- `/zenos-governance`：做治理掃描、找缺口、要求 agent 自動修補
+
+---
+
+## Step 1：先判斷平台，再偵測 MCP 設定檔
 
 先判斷當前 agent 平台：
 
@@ -24,12 +47,12 @@ version: 2.1.0
 
 | 狀態 | 模式 | 下一步 |
 |------|------|--------|
-| 不存在 | 初次設定 | → Step 1 |
-| 存在，有 zenos server | 更新模式 | 從 URL 解析 project（不問 token）→ 跳到 Step 2 |
+| 不存在 | 初次設定 | → Step 2 |
+| 存在，有 zenos server | 更新模式 | 從 URL 解析 project（不問 token）→ 跳到 Step 3 |
 
 ---
 
-## Step 1：初次設定（僅初次）
+## Step 2：初次設定（僅初次）
 
 問用戶要 API token：
 
@@ -74,7 +97,7 @@ version: 2.1.0
 
 ---
 
-## Step 2：取 manifest + 安裝 skills
+## Step 3：取 manifest + 安裝 skills
 
 呼叫：
 
@@ -166,8 +189,13 @@ Workflow 檔案（`skills/workflows/`）也必須寫到**專案根目錄**，因
 
 ### Slash commands
 
-將 `payload["payload"]["slash_commands"]` 中每個 key-value 寫入 `.claude/commands/` 目錄。
-只寫 project-level（`.claude/commands/`），絕對不寫 `~/.claude/commands/`。
+若使用者選「當前目錄」：
+- 將 `payload["payload"]["slash_commands"]` 中每個 key-value 寫入 `.claude/commands/`
+- 將 governance / workflow 檔案寫到專案根目錄下的 `skills/`
+
+若使用者選「家目錄」：
+- 角色 skills 寫到 `~/.claude/skills/` 或 `~/.codex/skills/`
+- 不要假裝這是專案內安裝；回覆時要明說這會影響其他專案
 
 ### 寫入版本記錄
 
@@ -178,7 +206,7 @@ Workflow 檔案（`skills/workflows/`）也必須寫到**專案根目錄**，因
 
 ---
 
-## Step 3：Agent 安裝 + Project 設定
+## Step 4：Agent 安裝 + Project 設定
 
 ### 列出可用 projects
 
@@ -203,7 +231,7 @@ python3 scripts/sync_skills_from_release.py
 
 ---
 
-## Step 4：完成摘要
+## Step 5：完成摘要
 
 顯示：
 
@@ -222,6 +250,9 @@ Project: {選擇的專案名稱 或 「未設定」}
   /zenos-sync       — 同步變更
   /zenos-governance — 治理掃描
 ```
+
+完成摘要後，再用白話補一句：
+`/zenos-setup` 用來安裝或更新；`/zenos-capture` 用來第一次建庫；`/zenos-sync` 用來日常同步；`/zenos-governance` 用來治理掃描。
 
 ---
 

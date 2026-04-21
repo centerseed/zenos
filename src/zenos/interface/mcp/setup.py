@@ -19,8 +19,12 @@ async def setup(
 ) -> dict:
     """安裝或更新 ZenOS setup skill 到用戶的 AI agent 平台。
 
-    用戶完成 MCP 連線後呼叫此 tool，取得安裝 setup skill 的 curl 指令。
-    Claude 執行該指令後，再告知用戶執行 /zenos-setup 完成完整安裝。
+    用戶完成 MCP 連線後呼叫此 tool，讓當前 agent 依自己的 framework
+    取得最合適的安裝引導。payload 會同時提供：
+    - 首次安裝時如何先放入 `zenos-setup`
+    - 應詢問使用者安裝到當前目錄或家目錄
+    - 安裝完成後，怎麼用 `/zenos-setup`、`/zenos-capture`、`/zenos-sync`、`/zenos-governance`
+
     支援：Claude Code、Claude Web UI、OpenAI Codex / ChatGPT。
 
     使用時機：
@@ -40,8 +44,8 @@ async def setup(
 
     Returns:
         platform=None → {"action": "ask_platform", "options": [...]}
-        claude_code → {"action": "install_setup_skill", "command": "curl ...", "next_step": "/zenos-setup"}
-        claude_web/codex → {"action": "install", "payload": {...}}
+        claude_code / claude_web / codex
+            → {"action": "install", "installation_targets": [...], "usage_summary": [...], ...}
         platform invalid → {"error": "unsupported_platform"}
     """
     from zenos.interface.setup_content import get_bundle_version

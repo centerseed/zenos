@@ -6,9 +6,9 @@ ZenOS 的治理能力與操作流程。任何 AI agent 都可以讀取這些 ski
 
 ## 快速開始（任何專案、任何 agent 平台）
 
-### Step 1：取得 skills 並寫入你的專案
+### Step 1：讓當前 agent 判斷平台，先安裝 `zenos-setup`
 
-透過 ZenOS MCP setup tool 取得 skill 內容（依平台不同）：
+透過 ZenOS MCP setup tool 取得安裝引導（依平台不同）：
 
 | 平台 | 呼叫方式 |
 |------|---------|
@@ -19,10 +19,10 @@ ZenOS 的治理能力與操作流程。任何 AI agent 都可以讀取這些 ski
 Claude Code / Codex 目前的 setup tool 不再直接回傳 `payload.skill_files`。
 正確流程是：
 - 呼叫 `setup(platform=...)`
-- 讀 `manifest.skills` 取得 skill 清單
-- 依 `instructions` 從 GitHub raw URL 下載 release skill
-- 將 `skills/governance/*.md`、`skills/workflows/*.md` 寫入**專案根目錄**
-- 將 role skill 寫入 `~/.claude/skills/` 或 `~/.codex/skills/`
+- 先看 `installation_targets`，讓用戶選「當前目錄」或「家目錄」
+- 依 `recommended_install_flow` 與 `instructions`，先安裝 `zenos-setup`
+- 首次安裝完成後，立即執行 `/zenos-setup`
+- `/zenos-setup` 再負責安裝 / 更新完整治理 skills 與 agent skills
 
 ### Step 2：在專案的 agent 設定中加入載入指示
 
@@ -52,7 +52,7 @@ Claude Code / Codex 目前的 setup tool 不再直接回傳 `payload.skill_files
 
 ### 更新 skills
 
-SSOT 有新版時，重跑 Step 1 的 setup tool 呼叫，依最新 `instructions` 重新下載並覆蓋安裝。
+SSOT 有新版時，**不要再重跑首次 bootstrap**。直接執行 `/zenos-setup` 即可更新治理與 agent skills。
 
 ---
 
@@ -158,11 +158,11 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
 ### 對 Claude Code 用戶的完整設定步驟
 
 ```
-1. 執行 /zenos-setup
-   → MCP 連線（或跳過已通）
-   → 拉最新 skills/
-   → 生成 .claude/skills/ 薄殼
-   → 加入 CLAUDE.md 載入指示
+1. MCP 接通後先呼叫 `setup(platform="claude_code")`
+   → 問用戶裝在當前目錄還是家目錄
+   → 先安裝 `zenos-setup`
+   → 再執行 `/zenos-setup`
+   → 拉最新 skills/ 並加上 CLAUDE.md 載入指示
 
 2. 確認家目錄角色有治理表
    → 檢查 ~/.claude/skills/architect/SKILL.md 開頭有 「ZenOS 治理」段落
@@ -174,10 +174,10 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
 ### 對其他平台（Codex / ChatGPT / Gemini / 自建 agent）
 
 ```
-1. 取得 skills：
-   呼叫 setup(platform="codex")，依 `manifest` + `instructions`
-   從 GitHub 下載 release skill，並把 `skills/governance/`、`skills/workflows/`
-   寫入專案根目錄對應路徑。
+1. 先呼叫 `setup(platform="codex")`
+   → 問用戶裝在當前目錄還是家目錄
+   → 先安裝 `zenos-setup`
+   → 再依 `manifest` + `instructions` 完成正式安裝
 
 2. 在 agent 的 system prompt / Instructions 加入：
 

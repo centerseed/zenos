@@ -87,6 +87,88 @@ _PROJECT_DOCUMENTS_TIP = (
     "透過 ZenOS MCP setup tool 取得：呼叫 setup(platform='claude_web') 即可取得完整 skill 內容。"
 )
 
+_USAGE_SUMMARY = [
+    {
+        "skill": "/zenos-setup",
+        "when": "首次安裝完成後，或之後要更新治理 / agent skills 時",
+        "what_it_does": "同步最新治理規則、workflow skills、角色 skills，並補齊 prompt 載入指示",
+    },
+    {
+        "skill": "/zenos-capture",
+        "when": "第一次把既有專案接進 ZenOS，或想把一段對話 / 文件寫進 ontology 時",
+        "what_it_does": "建立或補充 ontology 基礎知識",
+    },
+    {
+        "skill": "/zenos-sync",
+        "when": "專案已有 ontology，之後跟著 git 變更做日常同步時",
+        "what_it_does": "掃最近變更並增量同步 ontology",
+    },
+    {
+        "skill": "/zenos-governance",
+        "when": "想檢查治理品質、找缺口、讓 agent 自動修補時",
+        "what_it_does": "跑治理掃描、補文件、建票或提出修復建議",
+    },
+]
+
+_LOCAL_INSTALL_RULES = [
+    "若你正在一個具體 repo / 專案目錄內工作，預設推薦安裝到當前目錄",
+    "若使用者明確說想讓所有專案共用同一套角色 skills，才改選家目錄",
+    "若是 Claude Web，沒有本地檔案系統，固定使用 Project Instructions 模式",
+]
+
+
+def _build_installation_targets(platform: str) -> list[dict]:
+    if platform == "claude_web":
+        return [
+            {
+                "id": "project_instructions",
+                "label": "Project Instructions",
+                "recommended": True,
+                "when_to_use": "Claude Web 沒有本地 skills 目錄時",
+                "writes_to": ["Claude Project Instructions"],
+                "notes": "這個平台不區分當前目錄或家目錄。",
+            }
+        ]
+
+    if platform == "claude_code":
+        return [
+            {
+                "id": "current_directory",
+                "label": "當前目錄",
+                "recommended": True,
+                "when_to_use": "正在設定某個專案，想讓治理規則與 workflow 跟 repo 一起走",
+                "writes_to": ["./skills/", "./CLAUDE.md", "./.claude/commands/"],
+                "notes": "推薦給首次把單一專案接上 ZenOS 的情境。",
+            },
+            {
+                "id": "home_directory",
+                "label": "家目錄",
+                "recommended": False,
+                "when_to_use": "想讓多個專案共用同一套角色 / workflow skills",
+                "writes_to": ["~/.claude/skills/", "~/.claude/agents/"],
+                "notes": "適合已熟悉 ZenOS、且希望全域共用的用戶。",
+            },
+        ]
+
+    return [
+        {
+            "id": "current_directory",
+            "label": "當前目錄",
+            "recommended": True,
+            "when_to_use": "你正替目前這個 repo 啟用 ZenOS，想把 AGENTS.md 與 skills 一起落在專案內",
+            "writes_to": ["./skills/", "./AGENTS.md"],
+            "notes": "Codex 預設推薦這個模式。",
+        },
+        {
+            "id": "home_directory",
+            "label": "家目錄",
+            "recommended": False,
+            "when_to_use": "想讓多個 repo 共用角色 skills，不想每個專案重裝一次",
+            "writes_to": ["~/.codex/skills/"],
+            "notes": "若選這個模式，仍應決定是否同步把專案治理指示寫回 AGENTS.md。",
+        },
+    ]
+
 # ──────────────────────────────────────────────
 # Governance overview（skip_overview=False 時附加）
 # ──────────────────────────────────────────────
@@ -176,6 +258,14 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
         "platform": "claude_code",
         "bundle_version": bundle_version,
         "skill_selection": selection,
+        "recommended_install_flow": [
+            "先確認目前是在單一專案內，還是要做全域安裝",
+            "先問使用者要裝在當前目錄還是家目錄；若沒有特別要求，預設推薦當前目錄",
+            "首次安裝先把 zenos-setup 裝進來，裝好後再執行 /zenos-setup 完成正式安裝或更新",
+        ],
+        "installation_targets": _build_installation_targets("claude_code"),
+        "usage_summary": list(_USAGE_SUMMARY),
+        "framework_notes": list(_LOCAL_INSTALL_RULES),
         "manifest": manifest,
         "packages": packages,
         "payload": {
@@ -185,13 +275,16 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
         },
         "instructions": [
             (
-                f"1. 從 GitHub 下載最新 skill：用 curl -sL "
-                f"{raw_base}/skills/release/{{skill.path}}/SKILL.md 取得各角色 skill，"
-                f"並用 {raw_base}/skills/workflows/*.md / skills/governance/*.md 安裝 workflow 與治理文件"
+                f"1. 先問使用者要裝在當前目錄還是家目錄；若沒有明確要求，預設推薦當前目錄。"
+                f"首次安裝時，先從 GitHub 用 curl -sL "
+                f"{raw_base}/skills/release/zenos-setup/SKILL.md 安裝 zenos-setup 本身。"
             ),
-            "2. 將 payload.slash_commands 寫入 .claude/commands/ 對應檔案",
-            "3. 把 payload.claude_md_addition 追加到專案根目錄 CLAUDE.md",
-            "4. 完成後執行 /zenos-setup 啟動完整安裝流程",
+            (
+                f"2. 若使用者選當前目錄：再從 {raw_base}/skills/workflows/*.md 與 "
+                f"{raw_base}/skills/governance/*.md 下載到專案下，並將 payload.slash_commands 寫入 .claude/commands/。"
+            ),
+            "3. 把 payload.claude_md_addition 加到對應 target 的 prompt 載入位置；專案模式用 CLAUDE.md。",
+            "4. 完成後執行 /zenos-setup，並用 usage_summary 簡單解釋 setup / capture / sync / governance 的用法。",
         ],
         "next_step": "/zenos-setup",
     }
@@ -212,6 +305,14 @@ def build_claude_web_payload(selection: str, skip_overview: bool) -> dict:
         "platform": "claude_web",
         "bundle_version": bundle_version,
         "skill_selection": selection,
+        "recommended_install_flow": [
+            "Claude Web 沒有本地 skills 目錄，固定走 Project Instructions 模式",
+            "不需要詢問當前目錄或家目錄",
+            "安裝完成後，直接按 usage_summary 使用對應 workflow",
+        ],
+        "installation_targets": _build_installation_targets("claude_web"),
+        "usage_summary": list(_USAGE_SUMMARY),
+        "framework_notes": list(_LOCAL_INSTALL_RULES),
         "packages": packages,
         "payload": {
             "project_instructions": _CLAUDE_WEB_PROJECT_INSTRUCTIONS,
@@ -222,6 +323,7 @@ def build_claude_web_payload(selection: str, skip_overview: bool) -> dict:
             "1. 開啟 claude.ai → 進入你的 Project 設定",
             "2. 在 Project Instructions 貼入 payload.project_instructions 的內容",
             "3. （建議）依 payload.project_documents_tip 下載並上傳 skill 文件到 Project",
+            "4. 安裝完成後，用 usage_summary 簡單向使用者解釋各 skill 何時用。",
         ],
     }
 
@@ -247,6 +349,14 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
         "platform": "codex",
         "bundle_version": bundle_version,
         "skill_selection": selection,
+        "recommended_install_flow": [
+            "先判斷目前是在 repo 內工作，還是要做全域共享安裝",
+            "先問使用者要裝在當前目錄還是家目錄；若沒有特別要求，預設推薦當前目錄",
+            "首次安裝先裝 zenos-setup，本輪之後都走 /zenos-setup 更新",
+        ],
+        "installation_targets": _build_installation_targets("codex"),
+        "usage_summary": list(_USAGE_SUMMARY),
+        "framework_notes": list(_LOCAL_INSTALL_RULES),
         "manifest": manifest,
         "packages": packages,
         "payload": {
@@ -255,19 +365,21 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
         },
         "instructions": [
             (
-                f"1. 從 GitHub 拉取最新 skills：對 manifest.skills 中每個 skill，"
-                f"用 Bash 執行 curl -sL {raw_base}/skills/release/{{skill.path}}/SKILL.md 下載內容"
+                f"1. 先問使用者要裝在當前目錄還是家目錄；若沒有明確要求，預設推薦當前目錄。"
+                f"首次安裝時，先用 curl -sL {raw_base}/skills/release/zenos-setup/SKILL.md 下載 zenos-setup。"
             ),
             (
                 "2. 安裝 skill 文件（addon-aware merge）：\n"
-                "   a. 對於 skills/governance/ 和 skills/workflows/ 下的文件：直接寫入（無 addon 機制）\n"
+                "   a. 若使用者選當前目錄：將 skills/governance/ 和 skills/workflows/ 直接寫入專案\n"
                 "   b. 對於 skills/release/{role}/SKILL.md：\n"
-                "      - 先確認 .codex/skills/{role}/SKILL.md 是否存在\n"
+                "      - 當前目錄模式：寫到你目前這個 Codex 專案採用的 project-local skills 路徑\n"
+                "      - 家目錄模式：寫到 ~/.codex/skills/{role}/SKILL.md\n"
+                "      - 寫入前先確認目標 SKILL.md 是否存在\n"
                 "      - 若存在：讀取其內容，找 '<!-- ZENOS_ADDON_SECTION_START -->' 標記\n"
                 "        - 找到標記 → 保留標記到檔案結尾的所有內容（addon section）\n"
                 "        - 未找到 → 代表舊版薄殼，addon section 視為不存在\n"
-                "      - 將新版 SKILL.md 的內容 + addon section 合併後寫入 .codex/skills/{role}/SKILL.md\n"
-                "      - 若 .codex/skills/{role}/SKILL.md 不存在：直接寫入新版內容 + 標準 addon loading section（見下方模板）\n"
+                "      - 將新版 SKILL.md 的內容 + addon section 合併後寫回目標路徑\n"
+                "      - 若目標 SKILL.md 不存在：直接寫入新版內容 + 標準 addon loading section（見下方模板）\n"
                 "   c. 標準 addon loading section 模板：\n"
                 "      ---\n"
                 "      <!-- ZENOS_ADDON_SECTION_START -->\n"
@@ -277,8 +389,8 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
                 "      若 `skills/addons/all/` 目錄存在，也讀取其中所有文件。\n"
                 "      <!-- ZENOS_ADDON_SECTION_END -->"
             ),
-            "3. 在專案根目錄的 AGENTS.md 加入 payload.agents_md_addition 的內容",
-            "4. 完成後呼叫 mcp__zenos__search(query='ZenOS', collection='entities') 驗證 MCP 連線",
+            "3. 當前目錄模式時，在專案根目錄的 AGENTS.md 加入 payload.agents_md_addition；家目錄模式則把同等指示加到全域 Codex system prompt。",
+            "4. 完成後呼叫 mcp__zenos__search(query='ZenOS', collection='entities') 驗證 MCP 連線，並用 usage_summary 向使用者簡單說明後續怎麼用。",
         ],
         "verification_command": "mcp__zenos__search(query='ZenOS', collection='entities')",
     }

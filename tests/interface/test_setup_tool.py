@@ -320,6 +320,23 @@ class TestSetupToolClaudeCode:
         assert "claude_md_addition" in data["payload"]
         assert len(data["payload"]["claude_md_addition"]) > 0
 
+    async def test_has_installation_targets(self):
+        from zenos.interface.mcp import setup
+        result = await setup(platform="claude_code")
+        data = _ok_data(result)
+        assert "installation_targets" in data
+        assert len(data["installation_targets"]) == 2
+        assert any(t["id"] == "current_directory" and t["recommended"] for t in data["installation_targets"])
+
+    async def test_has_usage_summary(self):
+        from zenos.interface.mcp import setup
+        result = await setup(platform="claude_code")
+        data = _ok_data(result)
+        assert "usage_summary" in data
+        skills = [item["skill"] for item in data["usage_summary"]]
+        assert "/zenos-setup" in skills
+        assert "/zenos-sync" in skills
+
     async def test_instructions_contain_github_fetch(self):
         """Instructions must tell agent to fetch from GitHub."""
         from zenos.interface.mcp import setup
@@ -371,6 +388,14 @@ class TestSetupToolClaudeWeb:
         assert "project_documents_tip" in payload
         assert len(payload["project_documents_tip"]) > 0
 
+    async def test_has_fixed_project_instruction_target(self):
+        from zenos.interface.mcp import setup
+        result = await setup(platform="claude_web")
+        data = _ok_data(result)
+        assert "installation_targets" in data
+        assert data["installation_targets"][0]["id"] == "project_instructions"
+        assert data["installation_targets"][0]["recommended"] is True
+
 
 class TestSetupToolCodex:
     """DC-4: setup(platform='codex') → manifest + agents_md_addition."""
@@ -406,6 +431,23 @@ class TestSetupToolCodex:
         data = _ok_data(result)
         assert "agents_md_addition" in data["payload"]
         assert len(data["payload"]["agents_md_addition"]) > 0
+
+    async def test_has_installation_targets(self):
+        from zenos.interface.mcp import setup
+        result = await setup(platform="codex")
+        data = _ok_data(result)
+        assert "installation_targets" in data
+        assert len(data["installation_targets"]) == 2
+        assert any(t["id"] == "current_directory" and t["recommended"] for t in data["installation_targets"])
+
+    async def test_has_usage_summary(self):
+        from zenos.interface.mcp import setup
+        result = await setup(platform="codex")
+        data = _ok_data(result)
+        assert "usage_summary" in data
+        skills = [item["skill"] for item in data["usage_summary"]]
+        assert "/zenos-capture" in skills
+        assert "/zenos-governance" in skills
 
     async def test_instructions_contain_github_fetch(self):
         from zenos.interface.mcp import setup

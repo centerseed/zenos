@@ -4,7 +4,7 @@ import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/zen/Toast";
 import { updatePreferences } from "@/lib/api";
 import { resolveActiveWorkspace } from "@/lib/partner";
 import {
@@ -56,10 +56,15 @@ function getPrompt(platform: Platform, apiKey: string): string {
    請根據你的平台，把這個 MCP server 加入設定。
 
 2. 安裝治理能力
-   連線成功後，請執行 setup() tool 安裝必要元件。
+   連線成功後，請先判斷你目前是 ${platform.name}，再呼叫對應的 setup(platform=...)。
+   接著請主動問我要安裝在當前目錄還是家目錄；若我沒特別指定，預設推薦當前目錄。
+   如果是首次安裝，先把 zenos-setup 裝進來。
 
-3. 更新 Skills 和 Agents
-   安裝完成後，請執行 /zenos-setup 更新 skills 和 agents。`;
+3. 完成正式安裝
+   zenos-setup 裝好後，請執行 /zenos-setup 完成正式安裝或後續更新。
+
+4. 安裝完成後說明
+   請用很短的方式告訴我 /zenos-setup、/zenos-capture、/zenos-sync、/zenos-governance 分別什麼時候用。`;
 }
 
 type SkillGroup = {
