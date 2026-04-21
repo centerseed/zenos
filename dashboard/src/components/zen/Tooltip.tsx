@@ -16,6 +16,10 @@ import { createPortal } from "react-dom";
 import { ZenInkTokens } from "@/lib/zen-ink/tokens";
 import { Z } from "./useOverlay";
 
+export function TooltipProvider({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+
 export interface TooltipProps {
   t: ZenInkTokens;
   content: React.ReactNode;

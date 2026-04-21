@@ -83,6 +83,7 @@ export function ZenShell({ children }: ZenShellProps) {
     { k: "home",      zh: "今日",      en: "Today",      icon: ICONS.zen },
     { k: "tasks",     zh: "任務",      en: "Tasks",      icon: ICONS.task },
     { k: "projects",  zh: "產品",      en: "Products",   icon: ICONS.folder },
+    { k: "projects",  zh: "產品",      en: "Products",   icon: ICONS.folder },
     { k: "clients",   zh: "客戶",      en: "Clients",    icon: ICONS.users },
     { k: "marketing", zh: "行銷",      en: "Growth",     icon: ICONS.trend },
     { k: "docs",      zh: "文件",      en: "Docs",       icon: ICONS.doc },
