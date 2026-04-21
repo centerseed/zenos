@@ -191,14 +191,16 @@ describe("Toast", () => {
     expect(remaining[0].textContent).toContain("First");
   });
 
-  it("throws when useToast called outside provider", () => {
+  it("returns a no-op toast api when used outside provider", () => {
     function Orphan() {
-      useToast();
+      const toast = useToast();
+      toast.showToast({ title: "noop" });
+      toast.pushToast({ title: "noop-2" });
+      toast.dismiss("toast-1");
+      toast.dismissAll();
       return null;
     }
-    // React logs an error boundary message; suppress with a spy
-    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(() => render(<Orphan />)).toThrow(/ToastProvider/);
-    spy.mockRestore();
+
+    expect(() => render(<Orphan />)).not.toThrow();
   });
 });
