@@ -8,7 +8,6 @@ import {
   beforeEach,
 } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { ProjectMilestoneStrip } from "@/features/projects/ProjectMilestoneStrip";
 import { ProjectOpenWorkPanel } from "@/features/projects/ProjectOpenWorkPanel";
 import { ProjectPlansOverview } from "@/features/projects/ProjectPlansOverview";
 import { ProjectProgressConsole } from "@/features/projects/ProjectProgressConsole";
@@ -111,6 +110,9 @@ function makePlanSummary(
     goal: overrides.goal ?? "Launch project progress console",
     status: overrides.status ?? "active",
     owner: overrides.owner ?? "Mina",
+    milestones: overrides.milestones ?? [
+      { id: "goal-1", name: "Console IA" },
+    ],
     tasks_summary: overrides.tasks_summary ?? { total: 5, by_status: { todo: 2, review: 1 } },
     open_count: overrides.open_count ?? 4,
     blocked_count: overrides.blocked_count ?? 1,
@@ -177,6 +179,7 @@ function makeProgressFixture(): ProjectProgressResponse {
       makePlanSummary({
         id: "plan-2",
         goal: "Project AI recap enablement",
+        milestones: [{ id: "goal-2", name: "AI rail rollout" }],
         blocked_count: 1,
         review_count: 0,
         overdue_count: 0,
@@ -279,7 +282,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
   });
 
   it("AC-PPC-01: Given 某產品底下有兩個 active plans When 使用者進入 /projects/[id] Then 第一層可見區域必須直接顯示這兩個 plans，而不是只顯示 task 摘要或空態", async function acPpc01ActivePlansFirstFold() {
-    render(<ProjectPlansOverview plans={makeProgressFixture().active_plans} />);
+    render(<ProjectPlansOverview plans={makeProgressFixture().active_plans} milestones={makeProgressFixture().milestones} />);
 
     const cards = screen.getAllByTestId("plan-card");
     expect(cards).toHaveLength(2);
@@ -288,7 +291,12 @@ describe("SPEC-project-progress-console acceptance tests", () => {
   });
 
   it("AC-PPC-02: Given 某 plan 有 goal、未完成 task、blocked task、review task When 查看 plan 卡 Then 必須直接看到 plan 名稱、未完成數、blocked 數、review 數與最近更新時間", async function acPpc02PlanCardMetrics() {
-    render(<ProjectPlansOverview plans={[makeProgressFixture().active_plans[0]]} />);
+    render(
+      <ProjectPlansOverview
+        plans={[makeProgressFixture().active_plans[0]]}
+        milestones={[makeProgressFixture().milestones[0]]}
+      />
+    );
     const card = screen.getByTestId("plan-card");
 
     expect(within(card).getByText("Launch project progress console")).toBeInTheDocument();
@@ -302,7 +310,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
   });
 
   it("AC-PPC-03: Given 某產品沒有任何 active plan When 進入 /projects/[id] Then 畫面必須明確顯示「目前沒有進行中的 plan」空態，而不是只剩空白 task 區", async function acPpc03NoActivePlanEmptyState() {
-    render(<ProjectPlansOverview plans={[]} />);
+    render(<ProjectPlansOverview plans={[]} milestones={[]} />);
 
     expect(screen.getByText("目前沒有進行中的 plan")).toBeInTheDocument();
   });
@@ -475,11 +483,15 @@ describe("SPEC-project-progress-console acceptance tests", () => {
   });
 
   it("AC-PPC-13: Given 某產品底下的 open work 連到不同 milestone When 查看產品頁 Then 使用者必須能辨識目前主要工作落在哪個 milestone 或階段，而不是只看到無脈絡的 plan/task", async function acPpc13MilestoneStageVisible() {
-    render(<ProjectMilestoneStrip milestones={makeProgressFixture().milestones} />);
+    const progress = makeProgressFixture();
+    render(<ProjectPlansOverview plans={progress.active_plans} milestones={progress.milestones} />);
 
-    expect(screen.getByText("Console IA")).toBeInTheDocument();
-    expect(screen.getByText("AI rail rollout")).toBeInTheDocument();
-    expect(screen.getByText("2 open item(s)")).toBeInTheDocument();
+    const groups = screen.getAllByTestId("plan-milestone-group");
+    expect(groups).toHaveLength(2);
+    expect(within(groups[0]).getAllByText("Console IA").length).toBeGreaterThan(0);
+    expect(within(groups[0]).getByText("Launch project progress console")).toBeInTheDocument();
+    expect(within(groups[1]).getAllByText("AI rail rollout").length).toBeGreaterThan(0);
+    expect(within(groups[1]).getByText("Project AI recap enablement")).toBeInTheDocument();
   });
 
   it("AC-PPC-14: Given 某產品最近一週有 task 狀態推進、review、handoff 或 plan 更新 When 查看產品頁 Then 應可看到近期推進摘要，而不是只能靠 task 卡片猜測", async function acPpc14RecentProgressSummaryVisible() {

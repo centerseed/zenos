@@ -204,6 +204,10 @@ export interface ProjectProgressPlanSummary {
   goal: string;
   status: string;
   owner: string | null;
+  milestones: Array<{
+    id: string;
+    name: string;
+  }>;
   tasks_summary: {
     total?: number;
     by_status?: Record<string, number>;
@@ -580,6 +584,44 @@ export async function getPlans(
   const qs = params.toString();
   const res = await apiFetch<{ plans: PlanSummary[] }>(`/api/data/plans${qs ? `?${qs}` : ""}`, token);
   return res.plans;
+}
+
+export async function createPlan(
+  token: string,
+  data: {
+    goal: string;
+    owner?: string | null;
+    entry_criteria?: string | null;
+    exit_criteria?: string | null;
+    project?: string | null;
+    project_id?: string | null;
+    status?: "draft" | "active";
+  },
+): Promise<PlanSummary> {
+  const res = await apiRequest<{ plan: PlanSummary }>("/api/data/plans", {
+    json: data,
+    method: "POST",
+    token,
+  });
+  return hydrateDates(res.plan) as PlanSummary;
+}
+
+export async function createMilestone(
+  token: string,
+  data: {
+    name: string;
+    summary?: string;
+    project_id: string;
+    status?: "planned" | "active";
+    owner?: string | null;
+  },
+): Promise<Entity> {
+  const res = await apiRequest<{ milestone: Entity }>("/api/data/milestones", {
+    json: data,
+    method: "POST",
+    token,
+  });
+  return hydrateDates(res.milestone) as Entity;
 }
 
 /** Fetch project progress aggregate payload for the project console. */
