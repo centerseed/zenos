@@ -394,6 +394,21 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(entry.build_prompt("")).toContain("still explain the current state and give a concrete next step");
   });
 
+  it("AC-PPC-08A: Given helper 要建立多步驟工作流 When 產品頁 bootstrap Claude Code Then contract 必須要求先建 plan，再用 plan_id 與 plan_order 建 task", async function acPpc08aPlanFirstContract() {
+    const entry = buildProjectRecapEntry({
+      progress: makeProgressFixture(),
+      preset: "claude_code",
+      nextStep: "Review current progress",
+    });
+
+    expect(entry.claude_code_bootstrap?.execution_contract).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("create a real plan first"),
+        expect.stringContaining("plan_id and plan_order"),
+      ])
+    );
+  });
+
   it("AC-PPC-09: Given 使用者已生成 AI recap，並選定下一步方向 When 點擊 copy prompt Then 系統必須提供一份包含產品 context、active plans、open work、blockers、AI recap 與下一步目標的可複製 prompt", async function acPpc09CopyPromptContainsContinuationContext() {
     const prompt = buildProjectContinuationPrompt(makeProgressFixture(), {
       preset: "claude_code",

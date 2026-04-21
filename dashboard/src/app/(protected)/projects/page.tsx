@@ -632,6 +632,10 @@ function InkProjectDetail({
     });
   }, []);
 
+  const handleAssistantUpdate = useCallback(() => {
+    void fetchDetail();
+  }, [fetchDetail]);
+
   const entity = detail?.context?.entity ?? null;
   const progressDetail = detail?.progress ?? null;
   const tasks = detail?.tasks ?? [];
@@ -1117,6 +1121,7 @@ function InkProjectDetail({
               onOpenTasks={() => setTab("tasks")}
               recapRailOpen={projectRecapOpen}
               onRecapRailOpenChange={setProjectRecapOpen}
+              onAssistantUpdate={handleAssistantUpdate}
             />
           ) : null
         ) : null}

@@ -20,11 +20,13 @@ export function ProjectProgressConsole({
   onOpenTasks,
   recapRailOpen,
   onRecapRailOpenChange,
+  onAssistantUpdate,
 }: {
   progress: ProjectProgressResponse;
   onOpenTasks: () => void;
   recapRailOpen?: boolean;
   onRecapRailOpenChange?: (next: boolean) => void;
+  onAssistantUpdate?: (recap: string) => void;
 }) {
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
@@ -218,6 +220,7 @@ export function ProjectProgressConsole({
         preset={preset}
         nextStep={selectedNextStep}
         onRecapChange={setLatestRecap}
+        onAssistantUpdate={onAssistantUpdate}
       />
     </>
   );

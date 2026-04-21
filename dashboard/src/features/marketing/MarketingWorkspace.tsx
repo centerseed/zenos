@@ -1541,6 +1541,7 @@ node server.mjs`;
         execution_contract: [
           "Operate as Claude Code CLI with the workspace-local .claude MCP/settings files.",
           "Treat marketing writes as governed ZenOS mutations: read task/document governance before creating or updating records.",
+          "If the requested work has ordered multi-step execution, create a plan first and attach every generated task with plan_id plus plan_order instead of using parent tasks as pseudo-plans.",
           "After any claimed ZenOS write, re-fetch the saved record before telling the user it is complete.",
         ],
       },

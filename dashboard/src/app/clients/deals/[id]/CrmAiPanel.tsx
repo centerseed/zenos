@@ -239,6 +239,7 @@ function createBriefingEntry(params: {
       execution_contract: [
         "Use the workspace-local .claude settings and MCP config for this deal scope.",
         "Load task/document governance before any ZenOS mutation.",
+        "If CRM follow-up work spans multiple ordered steps, create a real plan first and attach tasks with plan_id and plan_order instead of using parent tasks as a fake plan.",
         "Re-fetch created or updated ZenOS records before claiming success.",
       ],
     },
@@ -286,6 +287,7 @@ function createDebriefEntry(params: {
       execution_contract: [
         "Use the workspace-local .claude settings and MCP config for this deal scope.",
         "Load task/document governance before any ZenOS mutation.",
+        "If CRM follow-up work spans multiple ordered steps, create a real plan first and attach tasks with plan_id and plan_order instead of using parent tasks as a fake plan.",
         "Re-fetch created or updated ZenOS records before claiming success.",
       ],
     },

@@ -77,4 +77,22 @@ describe("ProjectRecapRail", () => {
     expect(screen.getByText("請整理一下")).toBeInTheDocument();
     expect(screen.getByText("這是整理後的 recap")).toBeInTheDocument();
   });
+
+  it("emits assistant updates so the product page can refresh after helper writes", () => {
+    const onAssistantUpdate = vi.fn();
+
+    render(
+      <ProjectRecapRail
+        open
+        onOpenChange={() => {}}
+        progress={makeProgress()}
+        preset="claude_code"
+        nextStep="Review current progress"
+        onRecapChange={() => {}}
+        onAssistantUpdate={onAssistantUpdate}
+      />
+    );
+
+    expect(onAssistantUpdate).toHaveBeenCalledWith("這是整理後的 recap");
+  });
 });

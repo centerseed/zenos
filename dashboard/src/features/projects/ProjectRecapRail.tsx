@@ -18,6 +18,7 @@ export function ProjectRecapRail({
   preset,
   nextStep,
   onRecapChange,
+  onAssistantUpdate,
 }: {
   open: boolean;
   onOpenChange: (next: boolean) => void;
@@ -25,6 +26,7 @@ export function ProjectRecapRail({
   preset: ProjectAgentPreset;
   nextStep: string;
   onRecapChange: (recap: string | null) => void;
+  onAssistantUpdate?: (recap: string) => void;
 }) {
   const { partner } = useAuth();
   const entry = useMemo(
@@ -65,6 +67,11 @@ export function ProjectRecapRail({
   useEffect(() => {
     onRecapChange(latestAssistant);
   }, [latestAssistant, onRecapChange]);
+
+  useEffect(() => {
+    if (!latestAssistant) return;
+    onAssistantUpdate?.(latestAssistant);
+  }, [latestAssistant, onAssistantUpdate]);
 
   return (
     <CopilotRailShell

@@ -72,6 +72,8 @@ export function buildProjectRecapEntry(options: {
       execution_contract: [
         "Use the workspace .claude/mcp.json and settings.local.json instead of assuming a global helper profile.",
         "Before any task or document mutation, call mcp__zenos__governance_guide for the relevant topic and read local governance files when they exist.",
+        "For any multi-step workstream, create a real plan first; do not use a parent task as a substitute for a plan.",
+        "Tasks inside that workstream must carry plan_id and plan_order, and only true decomposition work may add parent_task_id for subtasks.",
         "Never claim plan/task/doc creation succeeded until you re-fetch the written records from ZenOS and confirm returned ids.",
       ],
     },

@@ -89,12 +89,15 @@ vi.mock("@/features/projects/ProjectProgressConsole", () => ({
   ProjectProgressConsole: ({
     onOpenTasks,
     recapRailOpen,
+    onAssistantUpdate,
   }: {
     onOpenTasks: () => void;
     recapRailOpen?: boolean;
+    onAssistantUpdate?: () => void;
   }) => (
     <div data-testid="project-progress-console">
       <button onClick={onOpenTasks}>open-task-board</button>
+      <button onClick={() => onAssistantUpdate?.()}>assistant-updated</button>
       {recapRailOpen ? <div>project-recap-open</div> : null}
     </div>
   ),
@@ -607,5 +610,92 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByTestId("project-progress-console")).toBeInTheDocument();
     expect(screen.getByText("project-recap-open")).toBeInTheDocument();
+  });
+
+  it("refreshes project detail after helper updates the recap", async () => {
+    getProjectEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    getTasksByEntityMock.mockResolvedValue([]);
+    getProjectProgressMock.mockResolvedValue({
+      project: {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      active_plans: [],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [],
+    });
+    getEntityContextMock.mockResolvedValue({
+      entity: {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      impact_chain: [],
+      reverse_impact_chain: [],
+    });
+    getChildEntitiesMock.mockResolvedValue([]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+
+    const { default: ProjectsPage } = await import("./page");
+    render(<ProjectsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /ZenOS/ }));
+    await screen.findByTestId("project-progress-console");
+    const initialProgressCalls = getProjectProgressMock.mock.calls.length;
+    const initialTaskCalls = getTasksByEntityMock.mock.calls.length;
+    const initialContextCalls = getEntityContextMock.mock.calls.length;
+    expect(getProjectProgressMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "assistant-updated" }));
+
+    await waitFor(() => {
+      expect(getProjectProgressMock.mock.calls.length).toBeGreaterThan(initialProgressCalls);
+      expect(getTasksByEntityMock.mock.calls.length).toBeGreaterThan(initialTaskCalls);
+      expect(getEntityContextMock.mock.calls.length).toBeGreaterThan(initialContextCalls);
+    });
   });
 });

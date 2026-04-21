@@ -618,6 +618,7 @@ export function CrmAiPanel({
       execution_contract: [
         "Use the deal workspace .claude MCP/settings files and do not assume a global helper session has the right tenant key.",
         "Before any governed task or document write, load ZenOS task/document governance and call mcp__zenos__governance_guide.",
+        "For any ordered multi-step follow-up, create a real plan first and attach tasks with plan_id and plan_order instead of using parent tasks as a fake plan.",
         "Do not report CRM follow-up tasks or notes as created until ZenOS returns ids and you re-read them successfully.",
       ],
     },

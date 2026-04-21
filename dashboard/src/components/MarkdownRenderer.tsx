@@ -13,7 +13,7 @@ const components: Components = {
   table: ({ children, ...props }) => (
     <div className="overflow-x-auto my-2">
       <table
-        className="min-w-full text-xs border-collapse border border-border"
+        className="min-w-full text-xs border-collapse border border-border/60 bg-background/70"
         {...props}
       >
         {children}
@@ -21,20 +21,20 @@ const components: Components = {
     </div>
   ),
   thead: ({ children, ...props }) => (
-    <thead className="bg-secondary/50" {...props}>
+    <thead className="bg-foreground/[0.04]" {...props}>
       {children}
     </thead>
   ),
   th: ({ children, ...props }) => (
     <th
-      className="border border-border px-3 py-1.5 text-left font-semibold text-foreground"
+      className="border border-border/60 px-3 py-1.5 text-left font-semibold text-foreground"
       {...props}
     >
       {children}
     </th>
   ),
   td: ({ children, ...props }) => (
-    <td className="border border-border px-3 py-1.5 text-foreground" {...props}>
+    <td className="border border-border/60 px-3 py-1.5 text-foreground align-top" {...props}>
       {children}
     </td>
   ),
@@ -43,7 +43,7 @@ const components: Components = {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-blue-400 underline underline-offset-2 hover:text-blue-300 transition-colors"
+      className="text-[color:var(--zen-link,#9a4f2e)] underline underline-offset-2 transition-colors hover:opacity-80"
       {...props}
     >
       {children}
@@ -103,7 +103,7 @@ const components: Components = {
     const isBlock = className?.startsWith("language-");
     if (isBlock) {
       return (
-        <pre className="bg-secondary/60 rounded-md p-3 overflow-x-auto my-2 text-xs">
+        <pre className="my-2 overflow-x-auto rounded-[2px] border border-border/60 bg-foreground/[0.04] p-3 text-xs text-foreground">
           <code className={className} {...props}>
             {children}
           </code>
@@ -112,7 +112,7 @@ const components: Components = {
     }
     return (
       <code
-        className="bg-secondary/60 rounded px-1 py-0.5 text-xs font-mono"
+        className="rounded-[2px] border border-border/50 bg-foreground/[0.05] px-1.5 py-0.5 text-[0.8em] font-mono text-foreground"
         {...props}
       >
         {children}
@@ -121,7 +121,7 @@ const components: Components = {
   },
   blockquote: ({ children, ...props }) => (
     <blockquote
-      className="border-l-2 border-blue-500/50 pl-3 my-2 text-muted-foreground italic"
+      className="my-2 border-l-2 border-border/80 pl-3 text-muted-foreground italic"
       {...props}
     >
       {children}
