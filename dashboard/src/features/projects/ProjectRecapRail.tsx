@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
@@ -28,6 +28,7 @@ export function ProjectRecapRail({
   onRecapChange: (recap: string | null) => void;
   onAssistantUpdate?: (recap: string) => void;
 }) {
+  const [showRawTranscript, setShowRawTranscript] = useState(false);
   const { partner } = useAuth();
   const entry = useMemo(
     () =>
@@ -61,6 +62,14 @@ export function ProjectRecapRail({
   );
   const visibleMessages = useMemo(
     () => messages.filter((message) => message.role !== "system"),
+    [messages]
+  );
+  const rawTranscript = useMemo(
+    () =>
+      messages
+        .map((message) => `[${message.role}] ${message.content}`.trim())
+        .filter((line) => line.length > 0)
+        .join("\n\n"),
     [messages]
   );
 
@@ -109,6 +118,29 @@ export function ProjectRecapRail({
         emptyStateTitle="Product Progress Recap"
         emptyStateDescription="產生一份可決策的 recap，整理 plans、blockers、下一步與待決策點。"
       />
+      {rawTranscript ? (
+        <div className="mt-3 rounded-[2px] border border-border/30 bg-card">
+          <button
+            type="button"
+            data-testid="project-raw-transcript-toggle"
+            className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-muted-foreground"
+            onClick={() => setShowRawTranscript((value) => !value)}
+          >
+            <span>Claude Code 原文</span>
+            <span>{showRawTranscript ? "Hide" : "Show"}</span>
+          </button>
+          {showRawTranscript ? (
+            <pre
+              data-testid="project-raw-transcript"
+              className="overflow-x-auto border-t border-border/20 px-3 py-3 text-xs text-foreground"
+              style={{ whiteSpace: "pre-wrap" }}
+            >
+              {rawTranscript}
+              {streamingText ? `\n\n[assistant/streaming] ${streamingText}` : ""}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
     </CopilotRailShell>
   );
 }

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectRecapRail } from "@/features/projects/ProjectRecapRail";
 import type { ProjectProgressResponse } from "@/lib/api";
@@ -94,5 +94,25 @@ describe("ProjectRecapRail", () => {
     );
 
     expect(onAssistantUpdate).toHaveBeenCalledWith("這是整理後的 recap");
+  });
+
+  it("reveals the raw Claude Code transcript on demand", () => {
+    render(
+      <ProjectRecapRail
+        open
+        onOpenChange={() => {}}
+        progress={makeProgress()}
+        preset="claude_code"
+        nextStep="Review current progress"
+        onRecapChange={() => {}}
+      />
+    );
+
+    expect(screen.queryByTestId("project-raw-transcript")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByTestId("project-raw-transcript-toggle")[0]!);
+
+    expect(screen.getByTestId("project-raw-transcript")).toHaveTextContent("[system] 事件：rate_limit_event");
+    expect(screen.getByTestId("project-raw-transcript")).toHaveTextContent("[assistant] 這是整理後的 recap");
   });
 });
