@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import type { Entity } from "@/types";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Panel } from "@/components/zen/Panel";
+import { Chip } from "@/components/zen/Chip";
 
 interface ProjectCardProps {
   entity: Entity;
@@ -17,20 +19,21 @@ const statusColors: Record<string, string> = {
 };
 
 export function ProjectCard({ entity, moduleCount }: ProjectCardProps) {
+  const t = useInk("light");
   return (
     <Link href={`/projects?id=${entity.id}`}>
-      <Card className="ring-1 ring-border/80 hover:ring-blue-700/40 hover:shadow-sm transition-all cursor-pointer">
-        <CardHeader>
+      <Panel t={t} className="cursor-pointer transition-all hover:shadow-sm" style={{ boxShadow: "0 6px 18px rgba(58,52,44,0.06)" }}>
+        <div className="px-4 pt-4">
           <div className="flex items-start justify-between mb-1">
-            <CardTitle className="text-lg font-semibold text-foreground">{entity.name}</CardTitle>
-            <span
-              className={`text-xs px-2 py-1 rounded-full ${statusColors[entity.status] ?? "bg-secondary text-muted-foreground"}`}
-            >
+            <h3 className="text-lg font-semibold text-foreground">{entity.name}</h3>
+            <span className={statusColors[entity.status] ?? "text-muted-foreground"}>
+              <Chip t={t} tone="muted">
               {entity.status}
+              </Chip>
             </span>
           </div>
-        </CardHeader>
-        <CardContent>
+        </div>
+        <div className="px-4">
           <p className="text-muted-foreground text-sm mb-4 line-clamp-2">
             {entity.summary}
           </p>
@@ -41,8 +44,8 @@ export function ProjectCard({ entity, moduleCount }: ProjectCardProps) {
             {entity.updatedAt.toLocaleDateString("zh-TW")}
           </span>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </Panel>
     </Link>
   );
 }

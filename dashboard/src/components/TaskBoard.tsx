@@ -532,8 +532,10 @@ export function TaskBoard({
       <TaskDetailDrawer
         task={selectedTaskUpToDate}
         onClose={() => setSelectedTask(null)}
+        allTasks={tasks}
         entityNames={entityNames}
         entitiesById={entitiesById}
+        onSelectRelatedTask={setSelectedTask}
         onUpdateTask={onUpdateTask}
         onConfirmTask={onConfirmTask}
         onHandoffTask={onHandoffTask}

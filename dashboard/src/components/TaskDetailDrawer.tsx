@@ -3,7 +3,7 @@
 // headerExtras slot passed (null) for future Task L3 dispatcher badge / handoff tabs.
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import Link from "next/link";
 import type { Entity, Task, TaskComment } from "@/types";
 import { MarkdownRenderer } from "./MarkdownRenderer";
@@ -43,8 +43,10 @@ import { Dialog } from "./zen/Dialog";
 interface TaskDetailDrawerProps {
   task: Task | null;
   onClose: () => void;
+  allTasks?: Task[];
   entityNames?: Record<string, string>;
   entitiesById?: Record<string, Entity>;
+  onSelectRelatedTask?: (task: Task) => void;
   onTaskUpdated?: () => void;
   onUpdateTask?: (taskId: string, updates: Record<string, unknown>) => Promise<void>;
   onConfirmTask?: (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => Promise<void>;
@@ -130,6 +132,11 @@ function formatDate(date: Date | null): string {
   });
 }
 
+function formatTaskOrder(order: number | null | undefined): string {
+  if (!Number.isFinite(order)) return "—";
+  return String(order).padStart(2, "0");
+}
+
 function taskIdsToText(taskIds: string[] | undefined): string {
   return (taskIds ?? []).join(", ");
 }
@@ -189,7 +196,12 @@ function ContextCard({ entity }: { entity?: Entity; name: string }) {
   if (!entity) return null;
 
   return (
-    <Link href={`/knowledge-map?id=${entity.id}`} style={{ display: "block", textDecoration: "none" }}>
+    <Link
+      href={`/knowledge-map?id=${entity.id}`}
+      target="_blank"
+      rel="noreferrer"
+      style={{ display: "block", textDecoration: "none" }}
+    >
       <div
         style={{
           background: c.surface,
@@ -342,8 +354,10 @@ function InlineTextField({
 export function TaskDetailDrawer({
   task,
   onClose,
+  allTasks = [],
   entityNames = {},
   entitiesById = {},
+  onSelectRelatedTask,
   onTaskUpdated,
   onUpdateTask,
   onConfirmTask,
@@ -616,16 +630,127 @@ export function TaskDetailDrawer({
     onUpdateTask(localTask.id, { status: newStatus }).catch(() => setLocalTask(prev));
   }
 
+  const displayTask = localTask ?? task;
   const currentUserId = partner?.id;
   const canCancel = localTask && (
     currentUserId === localTask.assignee ||
     currentUserId === localTask.createdBy
   );
+  const planTasks = useMemo(() => {
+    if (!displayTask?.planId) return [];
+    return allTasks
+      .filter((item) => item.planId === displayTask.planId)
+      .sort((a, b) => {
+        const orderDiff = (a.planOrder ?? Number.MAX_SAFE_INTEGER) - (b.planOrder ?? Number.MAX_SAFE_INTEGER);
+        if (orderDiff !== 0) return orderDiff;
+        return a.updatedAt.getTime() - b.updatedAt.getTime();
+      });
+  }, [allTasks, displayTask?.planId]);
+  const taskMap = useMemo(() => {
+    const entries = new Map<string, Task>();
+    for (const item of allTasks) entries.set(item.id, item);
+    return entries;
+  }, [allTasks]);
+  const parentTask = displayTask?.parentTaskId ? taskMap.get(displayTask.parentTaskId) ?? null : null;
+  const childSubtasks = useMemo(() => {
+    return planTasks
+      .filter((item) => item.parentTaskId === displayTask?.id)
+      .sort((a, b) => (a.planOrder ?? Number.MAX_SAFE_INTEGER) - (b.planOrder ?? Number.MAX_SAFE_INTEGER));
+  }, [displayTask?.id, planTasks]);
+  const siblingTasks = useMemo(() => {
+    const parentId = displayTask?.parentTaskId ?? null;
+    return planTasks
+      .filter((item) => item.parentTaskId === parentId && item.id !== displayTask?.id)
+      .sort((a, b) => (a.planOrder ?? Number.MAX_SAFE_INTEGER) - (b.planOrder ?? Number.MAX_SAFE_INTEGER));
+  }, [displayTask?.id, displayTask?.parentTaskId, planTasks]);
+  const topLevelPlanTasks = useMemo(() => {
+    return planTasks.filter((item) => !item.parentTaskId);
+  }, [planTasks]);
+  const relatedTaskButtonStyle: React.CSSProperties = {
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: 12,
+    width: "100%",
+    textAlign: "left",
+    padding: "10px 12px",
+    background: c.surface,
+    border: `1px solid ${c.inkHair}`,
+    borderRadius: t.radius,
+    cursor: onSelectRelatedTask ? "pointer" : "default",
+  };
+  const renderRelatedTaskButton = (
+    relatedTask: Task,
+    options?: { active?: boolean; secondary?: string; nested?: boolean }
+  ) => (
+    <button
+      key={relatedTask.id}
+      type="button"
+      onClick={() => onSelectRelatedTask?.(relatedTask)}
+      disabled={!onSelectRelatedTask}
+      style={{
+        ...relatedTaskButtonStyle,
+        background: options?.active ? c.paperWarm : options?.nested ? c.paper : c.surface,
+        borderColor: options?.active ? c.vermLine : c.inkHair,
+        paddingLeft: options?.nested ? 16 : 12,
+        opacity: onSelectRelatedTask ? 1 : 0.96,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, minWidth: 0 }}>
+        <span
+          style={{
+            fontFamily: t.fontMono,
+            fontSize: 10,
+            fontWeight: 700,
+            letterSpacing: "0.14em",
+            textTransform: "uppercase",
+            color: options?.active ? c.vermillion : c.inkMuted,
+            flexShrink: 0,
+            paddingTop: 2,
+          }}
+        >
+          {formatTaskOrder(relatedTask.planOrder)}
+        </span>
+        <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+          <span
+            style={{
+              fontFamily: t.fontBody,
+              fontSize: options?.nested ? 12 : 13,
+              fontWeight: options?.active ? 600 : 500,
+              color: c.ink,
+              lineHeight: 1.45,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {relatedTask.title}
+          </span>
+          {options?.secondary && (
+            <span style={{ fontFamily: t.fontBody, fontSize: 11, color: c.inkFaint }}>
+              {options.secondary}
+            </span>
+          )}
+        </div>
+      </div>
+      <span
+        style={{
+          fontFamily: t.fontMono,
+          fontSize: 10,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+          color: options?.active ? c.vermillion : c.inkFaint,
+          flexShrink: 0,
+          paddingTop: 2,
+        }}
+      >
+        {options?.active ? "Current" : relatedTask.parentTaskId ? "Subtask" : "Task"}
+      </span>
+    </button>
+  );
 
-  if (!task) return null;
+  if (!displayTask) return null;
 
-  const availableTransitions = STATUS_TRANSITIONS[localTask?.status ?? task.status] ?? [];
-  const displayTask = localTask ?? task;
+  const availableTransitions = STATUS_TRANSITIONS[displayTask.status] ?? [];
 
   // ── Section label style (shared) ─────────────────────────────────────────
   const sectionLabel = (label: string) => (
@@ -987,8 +1112,164 @@ export function TaskDetailDrawer({
   const drawerBody = (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
 
+      {/* Hierarchy */}
+      {(displayTask.planId || parentTask || childSubtasks.length > 0 || siblingTasks.length > 0) && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {sectionLabel("Hierarchy")}
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.2fr 1fr",
+              gap: 16,
+              alignItems: "start",
+            }}
+          >
+            <div
+              style={{
+                background: c.paperWarm,
+                border: `1px solid ${c.inkHair}`,
+                borderRadius: t.radius,
+                padding: 16,
+                display: "flex",
+                flexDirection: "column",
+                gap: 14,
+              }}
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+                <div>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>Plan</div>
+                  <div style={{ fontFamily: t.fontBody, fontSize: 12, color: c.ink, lineHeight: 1.5, marginTop: 4 }}>
+                    {displayTask.planId ? entityNames[displayTask.planId] || displayTask.planId : "未掛 plan"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>Current</div>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 15, fontWeight: 700, color: c.vermillion, marginTop: 4 }}>
+                    #{formatTaskOrder(displayTask.planOrder)}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>Parent</div>
+                  <div style={{ fontFamily: t.fontBody, fontSize: 12, color: c.ink, lineHeight: 1.5, marginTop: 4 }}>
+                    {parentTask ? parentTask.title : "Top-level task"}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>Children</div>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 15, fontWeight: 700, color: c.ink, marginTop: 4 }}>
+                    {childSubtasks.length}
+                  </div>
+                </div>
+              </div>
+
+              {parentTask && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>
+                    Parent Task
+                  </div>
+                  {renderRelatedTaskButton(parentTask, { secondary: "Open parent task" })}
+                </div>
+              )}
+
+              {siblingTasks.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>
+                    Same Level
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {siblingTasks.map((item) => renderRelatedTaskButton(item))}
+                  </div>
+                </div>
+              )}
+
+              {childSubtasks.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>
+                    Subtasks
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                      paddingLeft: 14,
+                      borderLeft: `2px solid ${c.vermLine}`,
+                    }}
+                  >
+                    {childSubtasks.map((item) =>
+                      renderRelatedTaskButton(item, { nested: true, secondary: `${item.status} · ${item.priority}` })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {topLevelPlanTasks.length > 0 && (
+              <div
+                style={{
+                  background: c.surface,
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: t.radius,
+                  padding: 16,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontFamily: t.fontMono, fontSize: 9, textTransform: "uppercase", letterSpacing: "0.14em", color: c.inkFaint }}>
+                  Plan Outline
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {topLevelPlanTasks.map((item) => {
+                    const descendants = planTasks.filter((candidate) => candidate.parentTaskId === item.id);
+                    const isCurrentTop = item.id === displayTask.id || displayTask.parentTaskId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 8,
+                          padding: 12,
+                          borderRadius: t.radius,
+                          background: isCurrentTop ? c.paperWarm : c.paper,
+                          border: `1px solid ${isCurrentTop ? c.vermLine : c.inkHair}`,
+                        }}
+                      >
+                        {renderRelatedTaskButton(item, {
+                          active: item.id === displayTask.id,
+                          secondary: descendants.length > 0 ? `${descendants.length} subtasks` : undefined,
+                        })}
+                        {descendants.length > 0 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: 6,
+                              paddingLeft: 14,
+                              borderLeft: `1px solid ${c.inkHair}`,
+                            }}
+                          >
+                            {descendants.map((subtask) =>
+                              renderRelatedTaskButton(subtask, {
+                                active: subtask.id === displayTask.id,
+                                nested: true,
+                              })
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Meta fields */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 14 }}>
         {/* Owner */}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.12em", color: c.inkFaint, display: "flex", alignItems: "center", gap: 4 }}>
@@ -1050,30 +1331,48 @@ export function TaskDetailDrawer({
       </div>
 
       {/* Priority inline edit */}
-      {onUpdateTask && (
-        <div style={{ display: "flex", alignItems: "center", gap: 12, paddingTop: 12, borderTop: `1px solid ${c.inkHair}` }}>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: onUpdateTask ? "160px minmax(0, 1fr)" : "1fr 1fr",
+          gap: 16,
+          alignItems: "end",
+          paddingTop: 12,
+          borderTop: `1px solid ${c.inkHair}`,
+        }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: c.inkFaint }}>優先級</span>
-          <Select
-            t={t}
-            size="sm"
-            value={displayTask.priority}
-            onChange={(v) => v && handleFieldSave("priority", v)}
-            options={[
-              { value: "critical", label: "Critical", tone: "accent" },
-              { value: "high", label: "High", tone: "ocher" },
-              { value: "medium", label: "Medium" },
-              { value: "low", label: "Low", tone: "muted" },
-            ]}
-            style={{ maxWidth: 160 }}
-          />
+          {onUpdateTask ? (
+            <Select
+              t={t}
+              size="sm"
+              value={displayTask.priority}
+              onChange={(v) => v && handleFieldSave("priority", v)}
+              options={[
+                { value: "critical", label: "Critical", tone: "accent" },
+                { value: "high", label: "High", tone: "ocher" },
+                { value: "medium", label: "Medium" },
+                { value: "low", label: "Low", tone: "muted" },
+              ]}
+            />
+          ) : (
+            <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>{displayTask.priority}</span>
+          )}
         </div>
-      )}
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: c.inkFaint }}>導航</span>
+          <div style={{ fontFamily: t.fontBody, fontSize: 12, color: c.inkMuted, lineHeight: 1.6 }}>
+            先在這裡看 plan / parent / subtasks；知識圖譜會開新分頁，不會把目前這張 task 弄丟。
+          </div>
+        </div>
+      </div>
 
       {/* Context Cards */}
       {displayTask.linkedEntities.length > 0 && (
         <div>
           {sectionLabel("Contextual Assets")}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
             {displayTask.linkedEntities.map((id) => (
               <ContextCard key={id} name={id} entity={entitiesById[id]} />
             ))}
@@ -1587,7 +1886,7 @@ export function TaskDetailDrawer({
         open={!!task}
         onOpenChange={(open) => { if (!open) onClose(); }}
         side="right"
-        width={600}
+        width={760}
         header={drawerHeader}
         footer={drawerFooter}
         headerExtras={null}

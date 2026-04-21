@@ -299,13 +299,13 @@ export function TaskCreateDialog({
             />
           </FormField>
 
-          <FormField t={t} label="專案" htmlFor="task-project">
+          <FormField t={t} label="產品" htmlFor="task-product">
             <Input
               t={t}
-              id="task-project"
+              id="task-product"
               value={project}
               onChange={setProject}
-              placeholder="專案名稱"
+              placeholder="產品名稱"
             />
           </FormField>
         </div>

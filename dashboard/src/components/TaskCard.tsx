@@ -32,6 +32,11 @@ function priorityTone(p: string): "accent" | "ocher" | "muted" {
   return "muted";
 }
 
+function formatOrder(order: number | null | undefined): string {
+  if (!Number.isFinite(order)) return "--";
+  return String(order).padStart(2, "0");
+}
+
 export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
   const t = useInk("light");
   const { c, fontBody, fontMono, radius } = t;
@@ -66,9 +71,13 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
     position: "relative",
     overflow: "hidden",
     cursor: "pointer",
-    background: overdue ? c.vermSoft : c.surface,
+    background: task.parentTaskId ? c.paperWarm : overdue ? c.vermSoft : c.surface,
     border: `1px solid ${c.inkHair}`,
-    borderLeft: overdue ? `2px solid ${c.vermillion}` : `1px solid ${c.inkHair}`,
+    borderLeft: task.parentTaskId
+      ? `3px solid ${c.vermLine}`
+      : overdue
+        ? `2px solid ${c.vermillion}`
+        : `1px solid ${c.inkHair}`,
     borderRadius: radius,
     transition: "box-shadow 0.2s, border-color 0.2s",
   };
@@ -121,6 +130,34 @@ export function TaskCard({ task, onSelect, entityNames = {} }: TaskCardProps) {
 
       {/* Header */}
       <div style={{ padding: "10px 12px 6px" }}>
+        {(task.planId || task.parentTaskId || task.planOrder !== null) && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              flexWrap: "wrap",
+              marginBottom: 8,
+              fontFamily: fontMono,
+              fontSize: 9,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: c.inkFaint,
+            }}
+          >
+            {task.planId && (
+              <span style={{ color: c.inkMuted }}>
+                {entityNames[task.planId] ?? task.planId.slice(-6)}
+              </span>
+            )}
+            {task.planOrder !== null && task.planOrder !== undefined && (
+              <span style={{ color: c.vermillion }}>#{formatOrder(task.planOrder)}</span>
+            )}
+            {task.parentTaskId && (
+              <span style={{ color: c.inkMuted }}>Subtask</span>
+            )}
+          </div>
+        )}
         <div
           style={{
             display: "flex",

@@ -3,20 +3,20 @@ import { render, screen, cleanup, fireEvent, waitFor, within } from "@testing-li
 import type { Entity, QualitySignals } from "@/types";
 
 // Mock Radix Sheet — renders children without portal behavior
-vi.mock("@/components/ui/sheet", () => ({
+vi.mock("@/components/zen/legacy", async () => {
+  const actual = await vi.importActual<typeof import("@/components/zen/legacy")>("@/components/zen/legacy");
+  return {
+    ...actual,
   Sheet: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SheetContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SheetHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   SheetTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
   SheetDescription: ({ children }: { children: React.ReactNode }) => <p>{children}</p>,
-}));
-
-// Mock Badge to render as a span
-vi.mock("@/components/ui/badge", () => ({
   Badge: ({ children, className }: { children: React.ReactNode; className?: string }) => (
     <span className={className}>{children}</span>
   ),
-}));
+  };
+});
 
 vi.mock("@/lib/constants", () => ({
   NODE_TYPE_COLORS: { product: "#6366F1", module: "#8B5CF6" },

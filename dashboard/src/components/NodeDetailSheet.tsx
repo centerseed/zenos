@@ -17,8 +17,8 @@ import {
   SheetHeader,
   SheetTitle,
   SheetDescription,
-} from "@/components/ui/sheet";
-import { Badge } from "@/components/ui/badge";
+} from "@/components/zen/legacy";
+import { Badge } from "@/components/zen/legacy";
 import Link from "next/link";
 import {
   NODE_TYPE_COLORS,

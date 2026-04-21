@@ -1,7 +1,6 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import ProjectsPage from "@/app/(protected)/projects/page";
 
 const getProjectEntitiesMock = vi.hoisted(() => vi.fn());
 const getProjectProgressMock = vi.hoisted(() => vi.fn());
@@ -274,6 +273,7 @@ describe("ProjectsPage", () => {
     ]);
     getTasksByEntityMock.mockResolvedValue([]);
 
+    const { default: ProjectsPage } = await import("./page");
     render(<ProjectsPage />);
 
     expect(await screen.findByText("個人")).toBeInTheDocument();

@@ -138,6 +138,86 @@ describe("TaskDetailDrawer — B4 Zen migration", () => {
     expect(screen.getAllByText("Developer").length).toBeGreaterThan(0);
   });
 
+  it("renders hierarchy panels and allows switching to related tasks", () => {
+    const parentTask = makeTask({
+      id: "parent-task",
+      title: "Parent Task",
+      planId: "plan-1",
+      planOrder: 2,
+    });
+    const currentTask = makeTask({
+      id: "current-task",
+      title: "Current Subtask",
+      planId: "plan-1",
+      planOrder: 3,
+      parentTaskId: "parent-task",
+    });
+    const siblingTask = makeTask({
+      id: "sibling-task",
+      title: "Sibling Subtask",
+      planId: "plan-1",
+      planOrder: 4,
+      parentTaskId: "parent-task",
+    });
+    const topLevelTask = makeTask({
+      id: "top-level",
+      title: "Another Top Level",
+      planId: "plan-1",
+      planOrder: 6,
+    });
+    const onSelectRelatedTask = vi.fn();
+
+    render(
+      <TaskDetailDrawer
+        task={currentTask}
+        allTasks={[parentTask, currentTask, siblingTask, topLevelTask]}
+        entityNames={{ "plan-1": "日本法人合規 Plan" }}
+        onSelectRelatedTask={onSelectRelatedTask}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText("Hierarchy")).toBeDefined();
+    expect(screen.getByText("Plan Outline")).toBeDefined();
+    expect(screen.getAllByText("Current Subtask").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Sibling Subtask").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Parent Task").length).toBeGreaterThan(0);
+
+    screen.getAllByRole("button", { name: /Sibling Subtask/i })[0].click();
+    expect(onSelectRelatedTask).toHaveBeenCalledWith(expect.objectContaining({ id: "sibling-task" }));
+  });
+
+  it("opens contextual asset links in a new tab", () => {
+    const entity = {
+      id: "product-1",
+      name: "個人",
+      type: "product" as const,
+      summary: "個人知識圖譜",
+      tags: { what: ["方法論"], why: "why", how: "how", who: ["Barry"] },
+      status: "active" as const,
+      parentId: null,
+      details: null,
+      confirmedByUser: true,
+      owner: null,
+      sources: [],
+      visibility: "public" as const,
+      lastReviewedAt: null,
+      createdAt: new Date("2026-04-20T10:00:00Z"),
+      updatedAt: new Date("2026-04-20T10:00:00Z"),
+    };
+
+    render(
+      <TaskDetailDrawer
+        task={makeTask({ linkedEntities: ["product-1"] })}
+        entitiesById={{ "product-1": entity }}
+        onClose={vi.fn()}
+      />
+    );
+
+    const link = screen.getByRole("link", { name: /個人/i });
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
+
   it("closes via onClose when close button is clicked", () => {
     const onClose = vi.fn();
     render(<TaskDetailDrawer task={makeTask()} onClose={onClose} />);
