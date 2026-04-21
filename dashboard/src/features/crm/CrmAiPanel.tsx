@@ -7,10 +7,12 @@
  * No AI logic lives here — only context pack assembly, display, and copy.
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Copy, Check, RefreshCw, PlugZap, ChevronDown, ChevronUp } from "lucide-react";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import { GraphContextBadge } from "@/components/ai/GraphContextBadge";
+import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
+import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import {
   cancelCoworkRequest,
@@ -34,6 +36,10 @@ import type { Deal, Activity, Company, Contact, FunnelStage, DealAiEntries } fro
 import { createAiInsight, patchDealStage, updateBriefing } from "@/lib/crm-api";
 import type { AiInsight } from "@/lib/crm-api";
 import { useInk } from "@/lib/zen-ink/tokens";
+import { Tabs } from "@/components/zen/Tabs";
+import { Textarea } from "@/components/zen/Textarea";
+import { Input } from "@/components/zen/Input";
+import { Btn } from "@/components/zen/Btn";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -369,6 +375,7 @@ function extractFollowUpDraft(markdown: string): FollowUpDraft | null {
 
 function CopyButton({ text, className = "" }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
+  const t = useInk("light");
 
   async function handleCopy() {
     try {
@@ -381,76 +388,67 @@ function CopyButton({ text, className = "" }: { text: string; className?: string
   }
 
   return (
-    <button
-      onClick={handleCopy}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors ${className}`}
-    >
+    <span className={className}>
+      <Btn
+        t={t}
+        size="sm"
+        variant="outline"
+        onClick={handleCopy}
+        icon={copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
+      >
       {copied ? (
         <>
-          <Check className="h-3 w-3 text-green-400" />
           已複製
         </>
       ) : (
         <>
-          <Copy className="h-3 w-3" />
           複製
         </>
       )}
-    </button>
+      </Btn>
+    </span>
   );
 }
 
 // ─── FollowUpDraftUI ─────────────────────────────────────────────────────────
 
 function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
+  const t = useInk("light");
   const [activeTab, setActiveTab] = useState<"line" | "email">("line");
   const [lineText, setLineText] = useState(draft.line);
   const [emailSubject, setEmailSubject] = useState(draft.email.subject);
   const [emailBody, setEmailBody] = useState(draft.email.body);
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
-      {/* Tab bar */}
-      <div className="flex border-b border-border bg-secondary/30">
-        <button
-          onClick={() => setActiveTab("line")}
-          className={`px-4 py-2 text-xs font-medium transition-colors ${
-            activeTab === "line"
-              ? "bg-background text-foreground border-b-2 border-primary"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          LINE
-        </button>
-        <button
-          onClick={() => setActiveTab("email")}
-          className={`px-4 py-2 text-xs font-medium transition-colors ${
-            activeTab === "email"
-              ? "bg-background text-foreground border-b-2 border-primary"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          Email
-        </button>
-      </div>
-
-      {/* Tab content */}
-      <div className="p-3 space-y-2">
-        {activeTab === "line" ? (
-          <>
+    <div style={{ border: `1px solid ${t.c.inkHair}`, borderRadius: 2, background: t.c.surface, padding: 12 }}>
+      <Tabs
+        t={t}
+        value={activeTab}
+        onChange={setActiveTab}
+        variant="underline"
+        items={[
+          { value: "line", label: "LINE" },
+          { value: "email", label: "Email" },
+        ]}
+        panels={{
+          line: (
+            <div className="space-y-2">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-muted-foreground">LINE 訊息草稿</span>
               <CopyButton text={lineText} />
             </div>
-            <textarea
+            <Textarea
+              t={t}
               value={lineText}
-              onChange={(e) => setLineText(e.target.value)}
+              onChange={setLineText}
               rows={6}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none font-mono"
+              resize="none"
+              fontVariant="mono"
             />
-          </>
-        ) : (
-          <>
+            </div>
+          ),
+          email: (
+            <div className="space-y-2">
             <div className="flex items-center justify-between mb-1">
               <span className="text-xs text-muted-foreground">Email 草稿</span>
               <CopyButton text={`主旨：${emailSubject}\n\n${emailBody}`} />
@@ -458,26 +456,27 @@ function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
             <div className="space-y-2">
               <div>
                 <label className="block text-xs text-muted-foreground mb-1">主旨</label>
-                <input
-                  type="text"
+                <Input
+                  t={t}
                   value={emailSubject}
-                  onChange={(e) => setEmailSubject(e.target.value)}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  onChange={setEmailSubject}
                 />
               </div>
               <div>
                 <label className="block text-xs text-muted-foreground mb-1">正文</label>
-                <textarea
+                <Textarea
+                  t={t}
                   value={emailBody}
-                  onChange={(e) => setEmailBody(e.target.value)}
+                  onChange={setEmailBody}
                   rows={8}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                  resize="none"
                 />
               </div>
             </div>
-          </>
-        )}
-      </div>
+            </div>
+          ),
+        }}
+      />
     </div>
   );
 }
@@ -1078,10 +1077,9 @@ export function CrmAiPanel({
     setStatus("idle");
   }
 
-  async function handleSendMessage() {
-    if (!userInput.trim() || status !== "idle") return;
-
-    const message = userInput.trim();
+  async function handleSendMessage(overrideInput?: string) {
+    const message = (overrideInput ?? userInput).trim();
+    if (!message || status !== "idle") return;
     setUserInput("");
     appendChatMessage({ role: "user", content: message });
     setTurnCountValue(turnCountRef.current + 1);
@@ -1130,6 +1128,10 @@ export function CrmAiPanel({
       : status === "loading"
         ? "正在整理 CRM 與知識圖譜內容…"
         : "Claude 已開始回應，等待首段內容…");
+  const viewportMessages = useMemo(
+    () => chatHistory.map((msg, index) => ({ ...msg, timestamp: index + 1 })),
+    [chatHistory]
+  );
 
   return (
     <CopilotRailShell
@@ -1248,7 +1250,7 @@ export function CrmAiPanel({
                 <div
                   className="mx-4 mt-4 px-3 py-2 text-xs"
                   style={{
-                    borderRadius: 14,
+                    borderRadius: 2,
                     border: `1px solid ${c.vermLine}`,
                     background: c.vermSoft,
                     color: c.vermillion,
@@ -1277,62 +1279,14 @@ export function CrmAiPanel({
 
               {/* Chat history — scrollable */}
               {chatHistory.length > 0 && (
-                <div className="overflow-y-auto max-h-[400px] space-y-4 p-4">
-                  {chatHistory.map((msg, i) => (
-                    <div key={i} className={msg.role === "user" ? "text-right" : ""}>
-                      <span className="text-xs text-muted-foreground">
-                        {msg.role === "user" ? "你" : "Claude"}
-                      </span>
-                      <div
-                        className={`mt-1 inline-block max-w-[80%] rounded-2xl p-3 text-left text-sm ${
-                          msg.role === "user" ? "ml-auto" : ""
-                        }`}
-                        style={
-                          msg.role === "user"
-                            ? {
-                                background: c.surfaceHi,
-                                border: `1px solid ${c.vermLine}`,
-                                color: c.ink,
-                              }
-                            : {
-                                background: c.surface,
-                                border: `1px solid ${c.inkHair}`,
-                                color: c.ink,
-                              }
-                        }
-                      >
-                        {msg.role === "assistant" ? (
-                          <MarkdownRenderer content={msg.content} className="text-sm text-foreground space-y-1" />
-                        ) : (
-                          <p className="text-sm text-foreground">{msg.content}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  {/* Streaming — show latest AI response inline */}
-                  {(status === "streaming" || status === "loading") && (
-                    <div>
-                      <span className="text-xs text-muted-foreground">Claude</span>
-                      <div
-                        className="mt-1 rounded-2xl p-3 text-sm"
-                        style={{
-                          background: c.surface,
-                          border: `1px solid ${c.inkHair}`,
-                        }}
-                      >
-                        {status === "loading" || !streamingText.trim() ? (
-                          <div className="flex items-center gap-2 text-muted-foreground">
-                            <RefreshCw className="h-3 w-3 animate-spin" />
-                            <span>{progressTitle}</span>
-                          </div>
-                        ) : (
-                          <MarkdownRenderer content={streamingText} className="text-sm text-foreground space-y-1" />
-                        )}
-                      </div>
-                    </div>
-                  )}
-
+                <div className="p-4">
+                  <CopilotChatViewport
+                    messages={viewportMessages}
+                    streamingText={status === "loading" ? progressTitle : streamingText}
+                    isStreaming={status === "streaming" || status === "loading"}
+                    emptyStateTitle="CRM 助手已啟動"
+                    emptyStateDescription="可以直接追問會議重點、下一步或草稿調整。"
+                  />
                   <div ref={chatEndRef} />
                 </div>
               )}
@@ -1442,27 +1396,17 @@ export function CrmAiPanel({
               {/* Input area — show after first response, while under turn limit */}
               {status !== "streaming" && status !== "loading" && chatHistory.length > 0 && turnCount < MAX_TURNS && (
                 <div className="border-t border-border p-3 space-y-2">
-                  <div className="flex gap-2 items-end">
-                    <textarea
-                      className="min-h-[72px] flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-y"
-                      placeholder="追問或調整重點..."
-                      value={userInput}
-                      onChange={(e) => setUserInput(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                          e.preventDefault();
-                          void handleSendMessage();
-                        }
-                      }}
-                    />
-                    <button
-                      onClick={() => void handleSendMessage()}
-                      disabled={!userInput.trim()}
-                      className="px-4 py-2 bg-primary text-primary-foreground rounded-md text-sm hover:bg-primary/90 disabled:opacity-50 transition-colors"
-                    >
-                      送出
-                    </button>
-                  </div>
+                  <CopilotInputBar
+                    status="idle"
+                    value={userInput}
+                    onValueChange={setUserInput}
+                    onSend={(input) => void handleSendMessage(input)}
+                    onCancel={() => void handleCancel()}
+                    onRetry={() => void startStream()}
+                    hasStructuredResult={false}
+                    placeholder="追問或調整重點..."
+                    sendOnPlainEnter={false}
+                  />
                   <p className="text-xs text-muted-foreground">
                     `Enter` 換行，`Cmd/Ctrl + Enter` 送出
                   </p>

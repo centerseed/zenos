@@ -27,6 +27,8 @@ import type {
 } from "@/lib/crm-api";
 import { CrmAiPanel } from "@/features/crm/CrmAiPanel";
 import { DealInsightsPanel } from "@/features/crm/DealInsightsPanel";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Divider } from "@/components/zen/Divider";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -178,6 +180,8 @@ interface ActivityItemProps {
 }
 
 function ActivityItem({ activity, matchingDebrief }: ActivityItemProps) {
+  const t = useInk("light");
+  const { c, fontMono } = t;
   const date = activity.activityAt;
   const dateStr =
     date instanceof Date
@@ -198,11 +202,16 @@ function ActivityItem({ activity, matchingDebrief }: ActivityItemProps) {
     <div className={`flex gap-3 ${activity.isSystem ? "opacity-60" : ""}`}>
       <div className="flex flex-col items-center">
         <div
-          className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${
-            activity.isSystem ? "bg-muted-foreground" : "bg-primary"
-          }`}
+          style={{
+            width: 8,
+            height: 8,
+            marginTop: 6,
+            borderRadius: "50%",
+            flexShrink: 0,
+            background: activity.isSystem ? c.inkFaint : c.vermillion,
+          }}
         />
-        <div className="w-px flex-1 bg-border mt-1" />
+        <Divider ink={c.inkHairBold} vertical style={{ flex: 1, marginTop: 4 }} />
       </div>
       <div className="pb-4 min-w-0 flex-1">
         <div className="flex items-center gap-2 flex-wrap mb-0.5">
@@ -215,17 +224,17 @@ function ActivityItem({ activity, matchingDebrief }: ActivityItemProps) {
           >
             {activity.activityType}
           </span>
-          <span className="text-xs text-muted-foreground">{dateStr}</span>
+          <span className="text-xs text-muted-foreground" style={{ fontFamily: fontMono }}>{dateStr}</span>
         </div>
         <p className="text-sm text-foreground">{activity.summary}</p>
 
         {/* Inline AI analysis — only for non-system activities that have a debrief */}
         {!activity.isSystem && matchingDebrief && debriefMeta && (
           <details className="mt-2 ml-0 text-sm">
-            <summary className="cursor-pointer text-blue-600 hover:text-blue-800 text-xs select-none">
+            <summary className="cursor-pointer text-xs select-none" style={{ color: c.vermillion }}>
               AI 分析 ▸
             </summary>
-            <div className="mt-1 pl-3 border-l-2 border-blue-200 text-muted-foreground space-y-1">
+            <div className="mt-1 pl-3 text-muted-foreground space-y-1" style={{ borderLeft: `2px solid ${c.vermLine}` }}>
               {debriefMeta.key_decisions && debriefMeta.key_decisions.length > 0 && (
                 <div>
                   <span className="text-xs font-medium text-foreground">關鍵決策：</span>
@@ -364,6 +373,8 @@ function NewActivityForm({
 // ─── DealDetailPage ───────────────────────────────────────────────────────────
 
 function DealDetailPage() {
+  const t = useInk("light");
+  const { c } = t;
   const { user, partner } = useAuth();
   const params = useParams();
   const [dealId, setDealId] = useState<string>("");
@@ -713,20 +724,36 @@ function DealDetailPage() {
             <label className="block text-xs text-muted-foreground mb-1.5">
               漏斗階段
             </label>
-            <div className="flex gap-1.5 flex-wrap">
+            <div className="flex gap-2 flex-wrap items-center">
               {FUNNEL_STAGES.map((stage) => (
-                <button
-                  key={stage}
-                  onClick={() => handleStageChange(stage)}
-                  disabled={stageUpdating}
-                  className={`px-3 py-1 text-xs rounded-full transition-colors ${
-                    deal.funnelStage === stage
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-secondary text-muted-foreground hover:bg-secondary/80 hover:text-foreground"
-                  } disabled:opacity-50`}
-                >
-                  {stage}
-                </button>
+                <div key={stage} className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleStageChange(stage)}
+                    disabled={stageUpdating}
+                    className="px-3 py-1 text-xs transition-colors disabled:opacity-50"
+                    style={{
+                      borderRadius: 2,
+                      border: `1px solid ${deal.funnelStage === stage ? c.vermLine : c.inkHair}`,
+                      background: deal.funnelStage === stage ? c.vermSoft : c.surfaceHi,
+                      color: deal.funnelStage === stage ? c.vermillion : c.inkMuted,
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 7,
+                        height: 7,
+                        marginRight: 6,
+                        borderRadius: "50%",
+                        background: deal.funnelStage === stage ? c.vermillion : c.inkHairBold,
+                      }}
+                    />
+                    {stage}
+                  </button>
+                  {stage !== FUNNEL_STAGES[FUNNEL_STAGES.length - 1] && (
+                    <div style={{ width: 18, height: 1, background: c.inkHairBold }} />
+                  )}
+                </div>
               ))}
             </div>
           </div>

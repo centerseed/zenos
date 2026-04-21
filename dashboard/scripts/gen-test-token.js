@@ -4,15 +4,35 @@
  * Usage: node scripts/gen-test-token.js
  * Output: custom token (stdout)
  */
-const { initializeApp, cert, getApps } = require("firebase-admin/app");
+const fs = require("fs");
+const { initializeApp, cert, applicationDefault, getApps } = require("firebase-admin/app");
 const { getAuth } = require("firebase-admin/auth");
 const path = require("path");
 
 const TEST_UID = "I9OVKDtIQPZIv7S6YtwlN1YG6xH3";
-const serviceAccount = require(path.join(__dirname, "qa-service-account.json"));
+const DEFAULT_SERVICE_ACCOUNT_ID = "firebase-adminsdk-fbsvc@zenos-naruvia.iam.gserviceaccount.com";
+
+function resolveCredentialOptions() {
+  const explicitPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const bundledPath = path.join(__dirname, "qa-service-account.json");
+  const jsonPath = explicitPath || bundledPath;
+
+  if (jsonPath && fs.existsSync(jsonPath)) {
+    const serviceAccount = require(jsonPath);
+    return { credential: cert(serviceAccount) };
+  }
+
+  return {
+    credential: applicationDefault(),
+    serviceAccountId:
+      process.env.FIREBASE_AUTH_SIGNER_SERVICE_ACCOUNT ||
+      process.env.PLAYWRIGHT_SERVICE_ACCOUNT_EMAIL ||
+      DEFAULT_SERVICE_ACCOUNT_ID,
+  };
+}
 
 if (getApps().length === 0) {
-  initializeApp({ credential: cert(serviceAccount) });
+  initializeApp(resolveCredentialOptions());
 }
 
 getAuth()

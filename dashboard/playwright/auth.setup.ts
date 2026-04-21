@@ -50,8 +50,9 @@ setup('authenticate', async ({ page, request }) => {
 
   // Step 4: Validate auth works by navigating with the IndexedDB shim active.
   await page.addInitScript({ path: initScriptFile });
-  await page.goto('/knowledge-map');
-  await expect(page.locator('header')).toBeVisible({ timeout: 25000 });
+  await page.goto('/home');
+  await expect(page.locator('main')).toBeVisible({ timeout: 25000 });
+  await expect(page.getByRole('button', { name: '今日 Today' })).toBeVisible({ timeout: 25000 });
 
   // Save a minimal storageState (empty origins — auth is managed by the init script)
   await page.context().storageState({ path: authFile });

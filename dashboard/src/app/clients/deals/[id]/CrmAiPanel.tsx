@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Copy, Check, PlugZap } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@/components/zen/legacy";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";

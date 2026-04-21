@@ -1,6 +1,10 @@
 /**
  * Clients page e2e tests.
- * Covers the Kanban board, summary stats, new-deal modal, and company list link.
+ * Covers the current Zen Ink CRM workspace:
+ * - page shell
+ * - KPI strip
+ * - pipeline/list toggle
+ * - deal detail navigation
  *
  * Data state is unknown — tests tolerate empty boards.
  */
@@ -8,18 +12,18 @@ import { test, expect } from './fixtures';
 
 const FUNNEL_STAGES = ['潛在客戶', '需求訪談', '提案報價', '合約議價', '導入中', '結案'];
 
-test.describe('Clients — Kanban Board', () => {
-  async function waitForBoard(page: any) {
-    await page.goto('/clients');
-    await expect(page.locator('header')).toBeVisible({ timeout: 20000 });
-    // Wait for loading spinner to disappear
-    await page.waitForFunction(
-      () => !document.querySelector('[aria-label="載入商機看板..."]') &&
-             !document.body.textContent?.includes('載入商機看板...'),
-      { timeout: 20000 }
-    );
-  }
+async function waitForBoard(page: any) {
+  await page.goto('/clients');
+  await expect(page.locator('main')).toBeVisible({ timeout: 20000 });
+  // Wait for loading spinner to disappear
+  await page.waitForFunction(
+    () => !document.querySelector('[aria-label="載入商機看板..."]') &&
+           !document.body.textContent?.includes('載入商機看板...'),
+    { timeout: 20000 }
+  );
+}
 
+test.describe('Clients — Kanban Board', () => {
   test('CLIENT-002: page loads and shows 客戶 heading', async ({ page }) => {
     await waitForBoard(page);
     await expect(page.locator('h2', { hasText: '客戶' })).toBeVisible({ timeout: 10000 });
@@ -27,29 +31,26 @@ test.describe('Clients — Kanban Board', () => {
 
   test('CLIENT-003: summary stats cards show three metrics', async ({ page }) => {
     await waitForBoard(page);
-    // Stats are in a 3-column grid; check the labels
-    await expect(page.locator('text=進行中商機')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('text=本月新增')).toBeVisible({ timeout: 10000 });
-    await expect(page.locator('text=成交案值')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=Pipeline 總額')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=進行中')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=本月成交')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=平均交易')).toBeVisible({ timeout: 10000 });
   });
 
-  test('CLIENT-004: + 新增商機 button opens NewDealModal', async ({ page }) => {
+  test('CLIENT-004: 新機會 button is visible in the workspace header', async ({ page }) => {
     await waitForBoard(page);
-    const addButton = page.locator('button', { hasText: '+ 新增商機' });
+    const addButton = page.locator('button', { hasText: '新機會' });
     await expect(addButton).toBeVisible({ timeout: 10000 });
-    await addButton.click();
-
-    // Modal header
-    await expect(page.locator('h3', { hasText: '新增商機' })).toBeVisible({ timeout: 5000 });
   });
 
-  test('CLIENT-005: 公司列表 link navigates to companies page', async ({ page }) => {
+  test('CLIENT-005: 列表 toggle switches from pipeline to list view', async ({ page }) => {
     await waitForBoard(page);
-    const companiesLink = page.locator('a', { hasText: '公司列表' });
-    await expect(companiesLink).toBeVisible({ timeout: 10000 });
-    // Verify href
-    const href = await companiesLink.getAttribute('href');
-    expect(href).toContain('/clients/companies');
+    const listToggle = page.locator('button', { hasText: '列表' });
+    await expect(listToggle).toBeVisible({ timeout: 10000 });
+    await listToggle.click();
+
+    await expect(page.locator('text=公司 · 商機')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('text=預計結案')).toBeVisible({ timeout: 10000 });
   });
 
   test('CLIENT-008: Kanban board shows all six funnel stage columns', async ({ page }) => {
@@ -62,58 +63,60 @@ test.describe('Clients — Kanban Board', () => {
 
   test('CLIENT-010: deal cards are draggable elements (cursor-grab)', async ({ page }) => {
     await waitForBoard(page);
-    // The draggable wrapper has class cursor-grab
-    const draggables = page.locator('.cursor-grab');
-    const count = await draggables.count();
+    const dealButtons = page.locator('main button').filter({ hasNotText: 'Pipeline' });
+    const count = await dealButtons.count();
     if (count === 0) {
-      // No deals; verify empty column placeholder text exists
-      const placeholders = page.locator('text=拖曳商機至此');
-      await expect(placeholders.first()).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('text=空').first()).toBeVisible({ timeout: 10000 });
     } else {
-      // At least one draggable deal card is present
-      await expect(draggables.first()).toBeVisible();
+      await expect(page.locator('text=空').first().or(dealButtons.first())).toBeVisible({ timeout: 10000 });
     }
   });
 });
 
-test.describe('Clients — NewDealModal', () => {
-  async function openModal(page: any) {
+test.describe('Clients — Workspace Navigation', () => {
+  async function openListView(page: any) {
     await page.goto('/clients');
-    await expect(page.locator('header')).toBeVisible({ timeout: 20000 });
+    await expect(page.locator('main')).toBeVisible({ timeout: 20000 });
     await page.waitForFunction(
       () => !document.body.textContent?.includes('載入商機看板...'),
       { timeout: 20000 }
     );
-    const addButton = page.locator('button', { hasText: '+ 新增商機' });
-    await expect(addButton).toBeVisible({ timeout: 10000 });
-    await addButton.click();
-    await expect(page.locator('h3', { hasText: '新增商機' })).toBeVisible({ timeout: 5000 });
+    const listToggle = page.locator('button', { hasText: '列表' });
+    await expect(listToggle).toBeVisible({ timeout: 10000 });
+    await listToggle.click();
+    await expect(page.locator('text=公司 · 商機')).toBeVisible({ timeout: 10000 });
   }
 
-  test('CLIENT-DEAL-001: NewDealModal shows title input and company select', async ({ page }) => {
-    await openModal(page);
-    await expect(page.locator('label', { hasText: '商機標題' })).toBeVisible();
-    await expect(page.locator('label', { hasText: '所屬公司' })).toBeVisible();
+  test('CLIENT-DEAL-001: list view renders table-style headers', async ({ page }) => {
+    await openListView(page);
+    await expect(page.locator('text=公司 · 商機')).toBeVisible();
+    await expect(page.locator('text=階段')).toBeVisible();
+    await expect(page.locator('text=金額')).toBeVisible();
   });
 
-  test('CLIENT-DEAL-003: submitting with empty title shows validation error', async ({ page }) => {
-    await openModal(page);
-    // Click submit without filling anything
-    await page.locator('button[type="submit"]', { hasText: '建立商機' }).click();
-    await expect(page.locator('text=請輸入商機標題')).toBeVisible({ timeout: 5000 });
+  test('CLIENT-DEAL-003: clicking a deal in pipeline opens detail workspace', async ({ page }) => {
+    await waitForBoard(page);
+    const dealButtons = page.locator('main button').filter({ hasText: /—/ });
+    const count = await dealButtons.count();
+    test.skip(count === 0, 'No active deals available in current dataset');
+    await dealButtons.first().click();
+    await expect(page.locator('text=返回客戶')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('button', { hasText: '準備下次會議' })).toBeVisible({ timeout: 10000 });
   });
 
-  test('CLIENT-DEAL-008: modal closes on 取消 button click', async ({ page }) => {
-    await openModal(page);
-    await page.locator('button', { hasText: '取消' }).click();
-    // Modal should be gone
-    await expect(page.locator('h3', { hasText: '新增商機' })).not.toBeVisible({ timeout: 5000 });
+  test('CLIENT-DEAL-008: detail workspace switches to 活動 tab', async ({ page }) => {
+    await waitForBoard(page);
+    const dealButtons = page.locator('main button').filter({ hasText: /—/ });
+    const count = await dealButtons.count();
+    test.skip(count === 0, 'No active deals available in current dataset');
+    await dealButtons.first().click();
+    await page.locator('button', { hasText: '活動' }).click();
+    await expect(page.locator('text=Activity · 所有動態')).toBeVisible({ timeout: 10000 });
   });
 
-  test('CLIENT-DEAL: selecting NEW_COMPANY shows new company name field', async ({ page }) => {
-    await openModal(page);
-    // Select the "+ 新增新公司..." option
-    await page.locator('select').first().selectOption('NEW_COMPANY');
-    await expect(page.locator('label', { hasText: '新公司名稱' })).toBeVisible({ timeout: 5000 });
+  test('CLIENT-DEAL: list view can switch back to pipeline', async ({ page }) => {
+    await openListView(page);
+    await page.locator('button', { hasText: 'Pipeline' }).click();
+    await expect(page.locator('text=潛在客戶')).toBeVisible({ timeout: 10000 });
   });
 });

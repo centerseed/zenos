@@ -346,7 +346,7 @@ describe("CrmAiPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "複製" }));
     await waitFor(() => expect(clipboardWrite).toHaveBeenCalledWith("請先整理會議摘要給客戶。"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Email" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Email" }));
     fireEvent.click(screen.getByRole("button", { name: /複製|已複製/ }));
     await waitFor(() =>
       expect(clipboardWrite).toHaveBeenCalledWith("主旨：會議後續\n\n這是 Email 內容。")
