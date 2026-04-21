@@ -369,6 +369,13 @@ async def _task_handler(
                 updates["blocked_by"] = normalized_blocked_by
             if source_metadata is not None:
                 updates["source_metadata"] = source_metadata
+            if linked_entities is not None:
+                normalized_linked_entities = _normalize_str_list(
+                    linked_entities, "linked_entities"
+                )
+                if isinstance(normalized_linked_entities, dict):
+                    return normalized_linked_entities
+                updates["linked_entities"] = normalized_linked_entities
             if acceptance_criteria is not None:
                 normalized_acceptance_criteria = _normalize_str_list(
                     acceptance_criteria, "acceptance_criteria"
@@ -376,6 +383,8 @@ async def _task_handler(
                 if isinstance(normalized_acceptance_criteria, dict):
                     return normalized_acceptance_criteria
                 updates["acceptance_criteria"] = normalized_acceptance_criteria
+            if project is not None:
+                updates["project"] = _normalize_project_scope(project)
             if due_date is not None:
                 try:
                     updates["due_date"] = datetime.fromisoformat(due_date)

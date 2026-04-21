@@ -143,6 +143,7 @@ def _deal_to_dict(d: Deal) -> dict:
         "notes": d.notes,
         "isClosedLost": d.is_closed_lost,
         "isOnHold": d.is_on_hold,
+        "lastActivityAt": d.last_activity_at,
         "createdAt": d.created_at,
         "updatedAt": d.updated_at,
     })

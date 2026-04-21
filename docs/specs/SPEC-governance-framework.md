@@ -207,7 +207,7 @@ ZenOS 的 ontology 有多層治理：L2 知識節點、L3 文件、Task（Action
 
 - `AC-propagation-1` Given 治理 spec PR 修改規則文字但未改 `governance_rules.py`，When CI 執行，Then lint fail
 - `AC-propagation-2` Given 治理 spec 處 `Under Review` 且 Layer 2/3 均同步，When reviewer approve，Then 可轉 `Approved`
-- `AC-propagation-3` Given `analyze(check_type="governance_ssot")` 執行，Then 可列出所有 Layer 2/3 不同步的治理 spec
+- `AC-propagation-3` Given governance SSOT CI lint 執行，Then 可列出所有 Layer 2/3 不同步的治理 spec，且 production server 不必暴露 `analyze(check_type="governance_ssot")`
 
 ---
 

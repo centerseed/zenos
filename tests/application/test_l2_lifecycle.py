@@ -237,6 +237,11 @@ class TestConfirmModuleImpactsGate:
     async def test_confirm_module_with_concrete_impacts_sets_active(self):
         """DC-4: confirm on draft module with concrete impacts → status=active."""
         repos = _mock_repos()
+        product = Entity(
+            id="prod-1", name="ZenOS", type="product",
+            summary="Platform", tags=Tags(what="platform", why="ai", how="ontology", who="pm"),
+            status="active",
+        )
         module = Entity(
             id="mod-1", name="Pricing Rules", type="module",
             summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
@@ -249,6 +254,7 @@ class TestConfirmModuleImpactsGate:
             description="pricing 改了→billing 監控要跟著看",
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[product, module])
         repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[concrete_rel])
         svc = _make_service(repos)
         result = await svc.confirm("entities", "mod-1")
@@ -293,9 +299,78 @@ class TestConfirmModuleImpactsGate:
         with pytest.raises(ValueError, match="L2 confirm 失敗"):
             await svc.confirm("entities", "mod-1")
 
+    async def test_confirm_module_with_only_completed_target_impacts_raises(self):
+        """Concrete impacts pointing only to non-active targets do not satisfy confirm gate."""
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1", name="Pricing Rules", type="module",
+            summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
+            status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
+        )
+        completed_target = Entity(
+            id="goal-1", name="Dogfood Test Product", type="goal",
+            summary="legacy goal", tags=Tags(what="dogfood", why="legacy", how="goal", who="pm"),
+            status="completed",
+        )
+        concrete_rel = Relationship(
+            id="rel-legacy", source_entity_id="mod-1", target_id="goal-1",
+            type=RelationshipType.IMPACTS,
+            description="pricing 改了→dogfood 驗證流程要跟著看",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[module, completed_target])
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[concrete_rel])
+        svc = _make_service(repos)
+        with pytest.raises(ValueError, match="指向 active entity"):
+            await svc.confirm("entities", "mod-1")
+
+    async def test_confirm_module_with_mixed_targets_succeeds_if_one_active_target_is_valid(self):
+        """Mixed impacts are acceptable as long as there is at least one concrete impacts edge to an active target."""
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1", name="CRM 客戶管理", type="module",
+            summary="Rules", tags=Tags(what="crm", why="sales", how="workflow", who="pm"),
+            status="draft", parent_id="prod-1",
+            details={"layer_decision": {"q1_persistent": True, "q2_cross_role": True, "q3_company_consensus": True}},
+        )
+        completed_target = Entity(
+            id="goal-1", name="Dogfood Test Product", type="goal",
+            summary="legacy goal", tags=Tags(what="dogfood", why="legacy", how="goal", who="pm"),
+            status="completed",
+        )
+        active_target = Entity(
+            id="mod-2", name="MCP 介面設計", type="module",
+            summary="api layer", tags=Tags(what="mcp", why="interop", how="api", who="architect"),
+            status="active",
+        )
+        rels = [
+            Relationship(
+                id="rel-legacy", source_entity_id="mod-1", target_id="goal-1",
+                type=RelationshipType.IMPACTS,
+                description="crm 改了→舊 dogfood 流程要跟著看",
+            ),
+            Relationship(
+                id="rel-valid", source_entity_id="mod-1", target_id="mod-2",
+                type=RelationshipType.IMPACTS,
+                description="crm 改了→MCP 介面欄位 mapping 要跟著看",
+            ),
+        ]
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[module, completed_target, active_target])
+        repos["relationship_repo"].list_by_entity = AsyncMock(return_value=rels)
+        svc = _make_service(repos)
+        result = await svc.confirm("entities", "mod-1")
+        assert result["confirmed_by_user"] is True
+
     async def test_confirm_module_stale_with_impacts_becomes_active(self):
         """DC-4: stale module with concrete impacts also transitions to active on confirm."""
         repos = _mock_repos()
+        product = Entity(
+            id="prod-1", name="ZenOS", type="product",
+            summary="Platform", tags=Tags(what="platform", why="ai", how="ontology", who="pm"),
+            status="active",
+        )
         module = Entity(
             id="mod-1", name="Pricing Rules", type="module",
             summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
@@ -308,6 +383,7 @@ class TestConfirmModuleImpactsGate:
             description="price 改了→checkout flow 要重新審",
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[product, module])
         repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[concrete_rel])
         svc = _make_service(repos)
         result = await svc.confirm("entities", "mod-1")
@@ -396,6 +472,11 @@ class TestConfirmModuleThreeQuestionGate:
     async def test_confirm_l2_with_complete_layer_decision_and_impacts_succeeds(self):
         """L2 confirm 三問全通過 + 有具體 impacts → 成功。"""
         repos = _mock_repos()
+        product = Entity(
+            id="prod-1", name="ZenOS", type="product",
+            summary="Platform", tags=Tags(what="platform", why="ai", how="ontology", who="pm"),
+            status="active",
+        )
         module = Entity(
             id="mod-1", name="Pricing Rules", type="module",
             summary="Rules", tags=Tags(what="pricing", why="rev", how="rules", who="pm"),
@@ -408,6 +489,7 @@ class TestConfirmModuleThreeQuestionGate:
             description="pricing 改了→billing 監控要跟著看",
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=module)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[product, module])
         repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[concrete_rel])
         svc = _make_service(repos)
         result = await svc.confirm("entities", "mod-1")
@@ -576,6 +658,14 @@ class TestConfirmSetsLastReviewedAt:
     async def test_confirm_entity_sets_last_reviewed_at(self):
         """Confirming any entity should set last_reviewed_at to current time."""
         repos = _mock_repos()
+        active_target = Entity(
+            id="e2",
+            name="Discount Rules",
+            type="module",
+            summary="Downstream pricing target",
+            tags=Tags(what="discount", why="pricing", how="rules", who="pm"),
+            status="active",
+        )
         existing_entity = Entity(
             id="e1",
             name="Pricing Module",
@@ -595,6 +685,7 @@ class TestConfirmSetsLastReviewedAt:
             description="pricing policy changed→discount rules need review",
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=existing_entity)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing_entity, active_target])
         repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[concrete_rel])
 
         captured: list[Entity] = []
@@ -619,6 +710,14 @@ class TestConfirmSetsLastReviewedAt:
     async def test_confirm_module_transitions_to_active_and_sets_reviewed_at(self):
         """Confirm a draft L2 module: status → active AND last_reviewed_at set."""
         repos = _mock_repos()
+        active_target = Entity(
+            id="m2",
+            name="UI Visibility",
+            type="module",
+            summary="Downstream feature gate target",
+            tags=Tags(what="ui", why="visibility", how="flags", who="pm"),
+            status="active",
+        )
         existing_entity = Entity(
             id="m1",
             name="Feature Module",
@@ -637,6 +736,7 @@ class TestConfirmSetsLastReviewedAt:
             description="feature flags changed→UI visibility must be updated",
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=existing_entity)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[existing_entity, active_target])
         repos["relationship_repo"].list_by_entity = AsyncMock(return_value=[concrete_rel])
 
         captured: list[Entity] = []

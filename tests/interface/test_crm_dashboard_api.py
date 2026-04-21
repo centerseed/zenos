@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 
@@ -24,6 +25,24 @@ def _make_request(
 
 
 class TestCrmDashboardApi:
+    def test_deal_to_dict_includes_last_activity_at(self):
+        from zenos.domain.crm_models import Deal
+        from zenos.interface.crm_dashboard_api import _deal_to_dict
+
+        activity_at = datetime(2026, 4, 21, 12, 30, tzinfo=timezone.utc)
+        deal = Deal(
+            id="deal-1",
+            partner_id="tenant-1",
+            title="ZenOS CRM",
+            company_id="company-1",
+            owner_partner_id="owner-1",
+            last_activity_at=activity_at,
+        )
+
+        payload = _deal_to_dict(deal)
+
+        assert payload["lastActivityAt"] == activity_at.isoformat()
+
     async def test_list_companies_returns_json_error_with_cors_on_failure(self):
         from zenos.interface.crm_dashboard_api import list_companies
 

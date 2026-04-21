@@ -14,6 +14,7 @@ against a real DB are tracked separately.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
@@ -27,6 +28,9 @@ import pytest
 
 PARTNER_ID = "partner_abc"
 NOW = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+
+_ORIGINAL_GET_EVENT_LOOP = asyncio.get_event_loop
 
 
 def _set_partner(monkeypatch):
@@ -66,6 +70,30 @@ def _make_pool(fetchrow=None, fetch=None, execute=None, executemany=None):
     pool.acquire = MagicMock(return_value=_AsyncContextManager(conn))
     pool.release = AsyncMock()
     return pool, conn
+
+
+@pytest.fixture(autouse=True)
+def _compat_current_event_loop(monkeypatch):
+    """Keep legacy sync tests working on Python 3.14+ where no default loop exists."""
+
+    created_loop: asyncio.AbstractEventLoop | None = None
+
+    def _compat_get_event_loop():
+        nonlocal created_loop
+        try:
+            return _ORIGINAL_GET_EVENT_LOOP()
+        except RuntimeError:
+            created_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(created_loop)
+            return created_loop
+
+    monkeypatch.setattr(asyncio, "get_event_loop", _compat_get_event_loop)
+    try:
+        yield
+    finally:
+        if created_loop is not None and not created_loop.is_closed():
+            created_loop.close()
+        asyncio.set_event_loop(None)
 
 
 from tests.conftest import AsyncContextManager as _AsyncContextManager

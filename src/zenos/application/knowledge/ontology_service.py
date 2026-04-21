@@ -3259,17 +3259,21 @@ class OntologyService:
 
                 # Gate 2: require at least one outgoing concrete impacts relationship
                 rels = await self._relationships.list_by_entity(entity.id)
+                all_entities = await self._entities.list_all()
+                entity_map = {e.id: e for e in all_entities if e.id}
                 has_concrete_impacts = any(
                     r.type == RelationshipType.IMPACTS
                     and r.source_entity_id == entity.id
                     and self._is_concrete_impacts_description(r.description)
+                    and ((target := entity_map.get(r.target_id)) is not None)
+                    and target.status == "active"
                     for r in rels
                 )
                 if not has_concrete_impacts:
                     raise ValueError(
-                        f"L2 confirm 失敗：'{entity.name}' 尚無具體 impacts 關聯。"
+                        f"L2 confirm 失敗：'{entity.name}' 尚無指向 active entity 的具體 impacts 關聯。"
                         f"請先用 write(collection='relationships') 補充至少 1 條具體 impacts "
-                        f"（格式：A 改了什麼→B 的什麼要跟著看），再 confirm。"
+                        f"（格式：A 改了什麼→B 的什麼要跟著看），且 target 必須存在並為 active，再 confirm。"
                     )
                 # Transition draft/stale → active on confirm
                 if entity.status in ("draft", "stale"):

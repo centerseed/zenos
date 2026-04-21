@@ -1091,6 +1091,38 @@ class TestWriteTool:
 
             assert result["status"] == "rejected"
 
+    async def test_write_relationship_delete_by_id_success(self):
+        from zenos.interface.mcp import write
+
+        with patch("zenos.interface.mcp.relationship_repo") as mock_rr:
+            mock_rr.remove_by_id = AsyncMock(return_value=1)
+
+            result = await write(
+                collection="relationships",
+                id="rel-1",
+                data={"action": "delete", "reason": "remove invalid impacts target"},
+            )
+
+            assert result["status"] == "ok"
+            assert result["data"]["id"] == "rel-1"
+            assert result["data"]["deleted"] is True
+            assert result["data"]["reason"] == "remove invalid impacts target"
+
+    async def test_write_relationship_delete_by_id_missing_returns_rejected(self):
+        from zenos.interface.mcp import write
+
+        with patch("zenos.interface.mcp.relationship_repo") as mock_rr:
+            mock_rr.remove_by_id = AsyncMock(return_value=0)
+
+            result = await write(
+                collection="relationships",
+                id="rel-missing",
+                data={"action": "delete", "reason": "cleanup"},
+            )
+
+            assert result["status"] == "rejected"
+            assert "Relationship" in result["rejection_reason"]
+
     async def test_write_documents_sync_mode_routes_to_sync_api(self):
         from zenos.interface.mcp import write
 
@@ -1929,6 +1961,30 @@ class TestTaskTool:
             assert linked[0]["id"] == entity_id
             assert "name" in linked[0]
 
+    async def test_update_task_forwards_linked_entities_and_project(self):
+        """task update must forward linked_entities/project into task_service updates."""
+        from zenos.interface.mcp import _task_handler
+        from zenos.application.action.task_service import TaskResult
+
+        t = _make_task(id="task-1", linked_entities=["ent-old"])
+        update_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
+            mock_ts.update_task = AsyncMock(return_value=update_result)
+            mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
+
+            result = await _task_handler(
+                action="update",
+                id="task-1",
+                linked_entities=["ent-1", "ent-2"],
+                project="ZenOS",
+            )
+
+            assert result["status"] == "ok"
+            _, updates = mock_ts.update_task.await_args.args
+            assert updates["linked_entities"] == ["ent-1", "ent-2"]
+            assert updates["project"] == "zenos"
+
 
 # ---------------------------------------------------------------------------
 # Tool 7: analyze
@@ -1993,6 +2049,36 @@ class TestAnalyzeTool:
             assert len(data["quality"]["l2_impacts_repairs"]) == 1
             assert data["quality"]["l2_backfill_count"] == 1
             assert data["quality"]["l2_backfill_proposals"][0]["entity_id"] == "mod-1"
+
+    async def test_analyze_impacts_includes_relationship_delete_repair_payload(self):
+        from zenos.interface.mcp import analyze
+
+        validity_report = [{
+            "source_entity_id": "mod-1",
+            "source_entity_name": "Governance",
+            "broken_impacts": [{
+                "relationship_id": "rel-123",
+                "impacts_description": "治理規則改了→confirm gate 要跟著看",
+                "target_entity_id": "ghost-id",
+                "target_entity_name": None,
+                "reason": "target_missing",
+                "suggested_action": "目標 entity 已不存在，建議移除此 impacts 關聯",
+            }],
+            "suggested_actions": ["標記 stale", "更新 impacts", "移除無效關聯"],
+        }]
+
+        with patch("zenos.interface.mcp.governance_service") as mock_gs:
+            mock_gs.check_impacts_target_validity = AsyncMock(return_value=validity_report)
+
+            result = await analyze(check_type="impacts")
+            data = _ok_data(result)
+
+            repair_action = data["quality"]["l2_impacts_validity"][0]["broken_impacts"][0]["repair_action"]
+            assert repair_action["tool"] == "write"
+            assert repair_action["collection"] == "relationships"
+            assert repair_action["id"] == "rel-123"
+            assert repair_action["data"]["action"] == "delete"
+            assert "target_missing" in repair_action["data"]["reason"]
 
     async def test_analyze_staleness(self):
         from zenos.interface.mcp import analyze

@@ -44,6 +44,8 @@ class RelationshipRepository(TypingProtocol):
 
     async def list_by_entity(self, entity_id: str) -> list[Relationship]: ...
 
+    async def list_all(self) -> list[Relationship]: ...
+
     async def find_duplicate(
         self, source_entity_id: str, target_id: str, rel_type: str,
     ) -> Relationship | None:
@@ -51,6 +53,10 @@ class RelationshipRepository(TypingProtocol):
         ...
 
     async def add(self, rel: Relationship) -> Relationship: ...
+
+    async def remove(self, source_entity_id: str, target_id: str, rel_type: str) -> int: ...
+
+    async def remove_by_id(self, rel_id: str) -> int: ...
 
 
 class DocumentRepository(TypingProtocol):

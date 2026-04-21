@@ -198,6 +198,38 @@ async def analyze(
             result["department"] = dept
         return result
 
+    def _attach_impacts_repair_actions(validity_report: list[dict]) -> list[dict]:
+        """Enrich broken impacts with executable repair payloads.
+
+        The delete capability already exists in `write(collection="relationships")`.
+        This helper turns validity diagnostics into an explicit repair path that
+        agents can execute without reverse-engineering the interface contract.
+        """
+        enriched: list[dict] = []
+        for module_entry in validity_report:
+            repaired_entry = dict(module_entry)
+            broken_repairs: list[dict] = []
+            for broken in module_entry.get("broken_impacts", []):
+                repaired_broken = dict(broken)
+                relationship_id = broken.get("relationship_id")
+                if relationship_id:
+                    repaired_broken["repair_action"] = {
+                        "tool": "write",
+                        "collection": "relationships",
+                        "id": relationship_id,
+                        "data": {
+                            "action": "delete",
+                            "reason": (
+                                "remove invalid impacts target "
+                                f"({broken.get('reason', 'unknown_reason')})"
+                            ),
+                        },
+                    }
+                broken_repairs.append(repaired_broken)
+            repaired_entry["broken_impacts"] = broken_repairs
+            enriched.append(repaired_entry)
+        return enriched
+
     # DF-20260419-L2c: single-entity consolidation proposal. Separated
     # diagnosis (check_type="quality" lists saturated entities, no LLM) from
     # execution (check_type="consolidate" runs one LLM call for one entity).
@@ -477,7 +509,7 @@ async def analyze(
         # L2 governance: impacts target validity
         try:
             validity_report = await _mcp.governance_service.check_impacts_target_validity()
-            results["quality"]["l2_impacts_validity"] = validity_report
+            results["quality"]["l2_impacts_validity"] = _attach_impacts_repair_actions(validity_report)
         except Exception:
             logger.warning("L2 impacts target validity check failed", exc_info=True)
 
@@ -606,7 +638,7 @@ async def analyze(
     if check_type == "impacts":
         try:
             validity_report = await _mcp.governance_service.check_impacts_target_validity()
-            results.setdefault("quality", {})["l2_impacts_validity"] = validity_report
+            results.setdefault("quality", {})["l2_impacts_validity"] = _attach_impacts_repair_actions(validity_report)
         except Exception:
             logger.warning("Impacts target validity check failed (impacts check_type)", exc_info=True)
 
