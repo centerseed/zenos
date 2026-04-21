@@ -1,4 +1,8 @@
-import type { CopilotEntryConfig, CopilotScopeEnvelope } from "@/lib/copilot/types";
+import type {
+  CopilotClaudeCodeBootstrap,
+  CopilotEntryConfig,
+  CopilotScopeEnvelope,
+} from "@/lib/copilot/types";
 
 function renderScope(scope: CopilotScopeEnvelope): string[] {
   return [
@@ -9,6 +13,21 @@ function renderScope(scope: CopilotScopeEnvelope): string[] {
     `campaign_id=${scope.campaign_id || ""}`,
     `deal_id=${scope.deal_id || ""}`,
     `scope_label=${scope.scope_label}`,
+  ];
+}
+
+function renderClaudeCodeBootstrap(
+  bootstrap: CopilotClaudeCodeBootstrap | undefined
+): string[] {
+  if (!bootstrap) return [];
+  return [
+    "[CLAUDE_CODE_BOOTSTRAP]",
+    `use_project_claude_config=${bootstrap.use_project_claude_config ? "true" : "false"}`,
+    `required_skills=${(bootstrap.required_skills || []).join(",")}`,
+    `governance_topics=${(bootstrap.governance_topics || []).join(",")}`,
+    `verify_zenos_write=${bootstrap.verify_zenos_write ? "true" : "false"}`,
+    ...(bootstrap.execution_contract || []).map((line, index) => `execution_contract_${index + 1}=${line}`),
+    "",
   ];
 }
 
@@ -28,6 +47,7 @@ export function buildCopilotPromptEnvelope(
     "[SCOPE]",
     ...renderScope(entry.scope),
     "",
+    ...renderClaudeCodeBootstrap(entry.claude_code_bootstrap),
     "[CONTEXT_PACK]",
     JSON.stringify(contextPack, null, 2),
     "",

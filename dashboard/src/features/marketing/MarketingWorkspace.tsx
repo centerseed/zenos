@@ -16,6 +16,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth";
+import { resolveCopilotWorkspaceId } from "@/lib/copilot/scope";
 import {
   cancelCoworkRequest,
   CoworkCapabilityCheck,
@@ -1527,8 +1528,26 @@ node server.mjs`;
       launch_behavior: "manual" as const,
       session_policy: "scoped_resume" as const,
       suggested_skill: promptContext ? promptContext.skill : fieldContext?.suggestedSkill,
+      claude_code_bootstrap: {
+        use_project_claude_config: true,
+        required_skills: [
+          promptContext ? promptContext.skill : fieldContext?.suggestedSkill || "/marketing-plan",
+          "/zenos-governance",
+          "skills/governance/task-governance.md",
+          "skills/governance/document-governance.md",
+        ].filter(Boolean),
+        governance_topics: ["task", "document"],
+        verify_zenos_write: true,
+        execution_contract: [
+          "Operate as Claude Code CLI with the workspace-local .claude MCP/settings files.",
+          "Treat marketing writes as governed ZenOS mutations: read task/document governance before creating or updating records.",
+          "After any claimed ZenOS write, re-fetch the saved record before telling the user it is complete.",
+        ],
+      },
       scope: {
+        workspace_id: resolveCopilotWorkspaceId(chatPartner),
         campaign_id: campaignId || undefined,
+        entity_ids: campaignId ? [campaignId] : undefined,
         scope_label: scopeLabel,
       },
       context_pack: runtimeContextPack || {},

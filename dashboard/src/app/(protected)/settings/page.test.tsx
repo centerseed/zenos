@@ -24,6 +24,8 @@ vi.mock("@/lib/auth", () => ({
       apiKey: "test-key-12345678", // pragma: allowlist secret
       authorizedEntityIds: [],
       sharedPartnerId: null,
+      activeWorkspaceId: "ws-active",
+      homeWorkspaceId: "ws-home",
       workspaceRole: "owner",
       isAdmin: true,
       status: "active",
@@ -41,6 +43,10 @@ vi.mock("@/lib/api", () => ({
   getPreferences: (...args: unknown[]) => getPreferencesMock(...args),
   updatePreferences: (...args: unknown[]) => updatePreferencesMock(...args),
   checkGoogleWorkspaceConnectorHealth: (...args: unknown[]) => checkGoogleWorkspaceConnectorHealthMock(...args),
+}));
+
+vi.mock("@/lib/api-client", () => ({
+  getStoredActiveWorkspaceId: () => "ws-active",
 }));
 
 vi.mock("@/lib/cowork-helper", () => ({
@@ -81,6 +87,11 @@ describe("SettingsPage", () => {
       ok: true,
       status: "ok",
       message: "helper 已連線",
+      workspaceProbe: {
+        ok: true,
+        workspaceId: "ws-active",
+        workspaceName: "Barry Workspace",
+      },
     });
     vi.stubGlobal(
       "fetch",
@@ -143,8 +154,13 @@ describe("SettingsPage", () => {
       expect(checkCoworkHelperHealthMock).toHaveBeenCalledWith(
         "http://127.0.0.1:4317",
         "mk-legacy-token",
+        "ws-active",
       );
     });
+
+    expect(
+      screen.getAllByText(/helper 已連線 · workspace=Barry Workspace · ws-active/i).length
+    ).toBeGreaterThan(0);
   });
 
   it("AC-GWPR-09: settings page saves google workspace connector settings", async () => {

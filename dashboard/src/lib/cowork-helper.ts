@@ -21,6 +21,16 @@ export interface CoworkCapabilityCheck {
   redactionRulesVersion?: string;
 }
 
+export interface CoworkWorkspaceProbe {
+  ok: boolean;
+  message?: string;
+  partnerId?: string;
+  partnerEmail?: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  availableWorkspaces?: Array<{ id: string; name: string }>;
+}
+
 export interface CoworkPermissionRequest {
   toolName: string;
   timeoutSeconds: number;
@@ -157,19 +167,24 @@ async function parseJsonSafely<T>(res: Response): Promise<T | null> {
   }
 }
 
-export async function checkCoworkHelperHealth(baseUrl: string, token?: string): Promise<{
+export async function checkCoworkHelperHealth(baseUrl: string, token?: string, workspaceId?: string): Promise<{
   ok: boolean;
   status: string;
   message?: string;
   capability?: CoworkCapabilityCheck | null;
+  workspaceProbe?: CoworkWorkspaceProbe | null;
 }> {
   const normalizedBaseUrl = normalizeBaseUrl(baseUrl);
+  const healthUrl = new URL(`${normalizedBaseUrl}/health`);
+  if (workspaceId?.trim()) {
+    healthUrl.searchParams.set("workspace_id", workspaceId.trim());
+  }
   const headers: Record<string, string> = {};
   if (token?.trim()) headers["X-Local-Helper-Token"] = token.trim();
 
   try {
     const res = await fetch(
-      `${normalizedBaseUrl}/health`,
+      healthUrl.toString(),
       buildHelperFetchInit(normalizedBaseUrl, { method: "GET", headers })
     );
     const body = await parseJsonSafely<{
@@ -181,6 +196,15 @@ export async function checkCoworkHelperHealth(baseUrl: string, token?: string): 
         missing_skills?: string[];
         allowed_tools?: string[];
         redaction_rules_version?: string;
+      };
+      workspace_probe?: {
+        ok?: boolean;
+        message?: string;
+        partner_id?: string;
+        partner_email?: string;
+        workspace_id?: string;
+        workspace_name?: string;
+        available_workspaces?: Array<{ id?: string; name?: string }>;
       };
     }>(res);
     const capability = body?.capability
@@ -195,12 +219,44 @@ export async function checkCoworkHelperHealth(baseUrl: string, token?: string): 
               : undefined,
         }
       : null;
+    const workspaceProbe = body?.workspace_probe
+      ? {
+          ok: Boolean(body.workspace_probe.ok),
+          message:
+            typeof body.workspace_probe.message === "string"
+              ? body.workspace_probe.message
+              : undefined,
+          partnerId:
+            typeof body.workspace_probe.partner_id === "string"
+              ? body.workspace_probe.partner_id
+              : undefined,
+          partnerEmail:
+            typeof body.workspace_probe.partner_email === "string"
+              ? body.workspace_probe.partner_email
+              : undefined,
+          workspaceId:
+            typeof body.workspace_probe.workspace_id === "string"
+              ? body.workspace_probe.workspace_id
+              : undefined,
+          workspaceName:
+            typeof body.workspace_probe.workspace_name === "string"
+              ? body.workspace_probe.workspace_name
+              : undefined,
+          availableWorkspaces: Array.isArray(body.workspace_probe.available_workspaces)
+            ? body.workspace_probe.available_workspaces.map((workspace) => ({
+                id: String(workspace?.id || ""),
+                name: String(workspace?.name || ""),
+              }))
+            : [],
+        }
+      : null;
     if (!res.ok) {
       return {
         ok: false,
         status: "error",
         message: body?.message || `helper responded ${res.status}`,
         capability,
+        workspaceProbe,
       };
     }
     return {
@@ -208,6 +264,7 @@ export async function checkCoworkHelperHealth(baseUrl: string, token?: string): 
       status: body?.status || "ok",
       message: body?.message,
       capability,
+      workspaceProbe,
     };
   } catch (error) {
     return {
@@ -215,6 +272,7 @@ export async function checkCoworkHelperHealth(baseUrl: string, token?: string): 
       status: "offline",
       message: error instanceof Error ? error.message : "helper unavailable",
       capability: null,
+      workspaceProbe: null,
     };
   }
 }

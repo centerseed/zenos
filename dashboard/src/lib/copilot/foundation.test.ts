@@ -67,6 +67,28 @@ describe("copilot envelope", () => {
     expect(envelope).toContain('"field_id": "strategy"');
     expect(envelope).toContain("[TASK_PROMPT]");
   });
+
+  it("includes claude code bootstrap instructions when provided", () => {
+    const envelope = buildCopilotPromptEnvelope(
+      makeEntry({
+        claude_code_bootstrap: {
+          use_project_claude_config: true,
+          required_skills: ["/zenos-governance", "skills/governance/task-governance.md"],
+          governance_topics: ["task", "document"],
+          verify_zenos_write: true,
+          execution_contract: ["Call governance_guide before mutations."],
+        },
+      }),
+      "請整理 backlog"
+    );
+
+    expect(envelope).toContain("[CLAUDE_CODE_BOOTSTRAP]");
+    expect(envelope).toContain("use_project_claude_config=true");
+    expect(envelope).toContain("required_skills=/zenos-governance,skills/governance/task-governance.md");
+    expect(envelope).toContain("governance_topics=task,document");
+    expect(envelope).toContain("verify_zenos_write=true");
+    expect(envelope).toContain("execution_contract_1=Call governance_guide before mutations.");
+  });
 });
 
 describe("structured result parser", () => {

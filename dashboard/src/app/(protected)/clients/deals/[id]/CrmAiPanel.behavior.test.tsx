@@ -6,6 +6,16 @@ const mockStreamCoworkChat = vi.fn();
 const mockCancelCoworkRequest = vi.fn();
 const mockCreateAiInsight = vi.fn();
 const mockUpdateBriefing = vi.fn();
+const mockPatchDealStage = vi.fn();
+
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    partner: {
+      activeWorkspaceId: "ws-active",
+      homeWorkspaceId: "ws-home",
+    },
+  }),
+}));
 
 vi.mock("@/lib/cowork-helper", () => ({
   streamCoworkChat: (...args: unknown[]) => mockStreamCoworkChat(...args),
@@ -27,7 +37,7 @@ vi.mock("@/lib/crm-api", async () => {
     ...actual,
     createAiInsight: (...args: unknown[]) => mockCreateAiInsight(...args),
     updateBriefing: (...args: unknown[]) => mockUpdateBriefing(...args),
-    patchDealStage: vi.fn(),
+    patchDealStage: (...args: unknown[]) => mockPatchDealStage(...args),
   };
 });
 
@@ -67,6 +77,19 @@ beforeEach(() => {
     status: "active",
     createdAt: "2026-04-15T00:00:00Z",
   });
+  mockPatchDealStage.mockResolvedValue({
+    id: "deal-1",
+    partnerId: "partner-1",
+    title: "企業流程導入",
+    companyId: "company-1",
+    ownerPartnerId: "owner-1",
+    funnelStage: "提案報價",
+    deliverables: [],
+    isClosedLost: false,
+    isOnHold: false,
+    createdAt: new Date("2026-04-01T00:00:00Z"),
+    updatedAt: new Date("2026-04-15T00:00:00Z"),
+  });
 });
 
 afterEach(() => {
@@ -99,7 +122,9 @@ function renderPanel() {
   );
 }
 
-function renderDebriefPanel() {
+function renderDebriefPanel(overrides?: {
+  onStageAdvanced?: (deal: unknown) => void;
+}) {
   return render(
     <CrmAiPanel
       mode="debrief"
@@ -120,6 +145,7 @@ function renderDebriefPanel() {
       company={null}
       contacts={[]}
       token="token"
+      onStageAdvanced={overrides?.onStageAdvanced}
       triggerActivity={{
         id: "activity-1",
         dealId: "deal-1",
@@ -291,6 +317,66 @@ describe("CrmAiPanel", () => {
 
     await waitFor(() =>
       expect(screen.getByText("helper 已啟動，這一輪會先整理本次活動、既有 briefing 與承諾事項，再輸出 debrief。")).toBeInTheDocument()
+    );
+  });
+
+  it("copies LINE and Email follow-up drafts to clipboard after debrief completes", async () => {
+    const clipboardWrite = vi.fn(async () => {});
+    Object.defineProperty(window.navigator, "clipboard", {
+      value: { writeText: clipboardWrite },
+      configurable: true,
+    });
+
+    mockStreamCoworkChat.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({
+        type: "message",
+        requestId: "req-debrief",
+        line: JSON.stringify({
+          text: "## LINE\n請先整理會議摘要給客戶。\n\n## Email\n主旨：會議後續\n\n這是 Email 內容。",
+        }),
+      });
+      onEvent({ type: "done", requestId: "req-debrief", code: 0 });
+    });
+
+    renderDebriefPanel();
+
+    await waitFor(() => expect(screen.getByText("Follow-up 草稿")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("LINE 訊息草稿")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "複製" }));
+    await waitFor(() => expect(clipboardWrite).toHaveBeenCalledWith("請先整理會議摘要給客戶。"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Email" }));
+    fireEvent.click(screen.getByRole("button", { name: /複製|已複製/ }));
+    await waitFor(() =>
+      expect(clipboardWrite).toHaveBeenCalledWith("主旨：會議後續\n\n這是 Email 內容。")
+    );
+  });
+
+  it("advances deal stage when clicking the stage advance button after debrief", async () => {
+    const onStageAdvanced = vi.fn();
+
+    mockStreamCoworkChat.mockImplementationOnce(async ({ onEvent }) => {
+      onEvent({
+        type: "message",
+        requestId: "req-debrief",
+        line: JSON.stringify({
+          text: "## 下一步\n- 進入提案報價",
+        }),
+      });
+      onEvent({ type: "done", requestId: "req-debrief", code: 0 });
+    });
+
+    renderDebriefPanel({ onStageAdvanced });
+
+    const button = await screen.findByRole("button", { name: "推進到「提案報價」" });
+    fireEvent.click(button);
+
+    await waitFor(() => expect(mockPatchDealStage).toHaveBeenCalledWith("token", "deal-1", "提案報價"));
+    await waitFor(() =>
+      expect(onStageAdvanced).toHaveBeenCalledWith(
+        expect.objectContaining({ funnelStage: "提案報價" })
+      )
     );
   });
 });

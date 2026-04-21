@@ -27,6 +27,14 @@ export interface StructuredResult {
   missing_keys?: string[];
 }
 
+export interface CopilotClaudeCodeBootstrap {
+  use_project_claude_config?: boolean;
+  required_skills?: string[];
+  governance_topics?: string[];
+  verify_zenos_write?: boolean;
+  execution_contract?: string[];
+}
+
 export interface CopilotEntryConfig {
   intent_id: string;
   title: string;
@@ -35,6 +43,7 @@ export interface CopilotEntryConfig {
   launch_behavior: CopilotLaunchBehavior;
   session_policy: CopilotSessionPolicy;
   suggested_skill?: string;
+  claude_code_bootstrap?: CopilotClaudeCodeBootstrap;
   scope: CopilotScopeEnvelope;
   context_pack: Record<string, unknown>;
   get_context_pack?: () => Record<string, unknown>;

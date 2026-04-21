@@ -24,6 +24,8 @@ import {
   CoworkStreamEvent,
 } from "@/lib/cowork-helper";
 import { sanitizeContextValue } from "@/config/ai-redaction-rules";
+import { useAuth } from "@/lib/auth";
+import { resolveCopilotWorkspaceId } from "@/lib/copilot/scope";
 import type { GraphContextResponse } from "@/lib/api";
 import { fetchGraphContext } from "@/lib/graph-context";
 import { buildCrmKnowledgePrompt, COWORK_MAX_TURNS, graphContextUnavailableNotice } from "@/lib/cowork-knowledge";
@@ -545,6 +547,7 @@ export function CrmAiPanel({
   initialBriefing,
   onBriefingSaved,
 }: CrmAiPanelProps) {
+  const { partner } = useAuth();
   const t = useInk("light");
   const { c, fontBody, fontHead, fontMono } = t;
   const [status, setStatus] = useState<AiStatus>("idle");
@@ -602,8 +605,26 @@ export function CrmAiPanel({
     launch_behavior: "auto_start" as const,
     session_policy: "ephemeral" as const,
     suggested_skill: mode === "briefing" ? "/crm-briefing" : "/crm-debrief",
+    claude_code_bootstrap: {
+      use_project_claude_config: true,
+      required_skills: [
+        mode === "briefing" ? "/crm-briefing" : "/crm-debrief",
+        "/zenos-governance",
+        "skills/governance/task-governance.md",
+        "skills/governance/document-governance.md",
+      ],
+      governance_topics: ["task", "document"],
+      verify_zenos_write: true,
+      execution_contract: [
+        "Use the deal workspace .claude MCP/settings files and do not assume a global helper session has the right tenant key.",
+        "Before any governed task or document write, load ZenOS task/document governance and call mcp__zenos__governance_guide.",
+        "Do not report CRM follow-up tasks or notes as created until ZenOS returns ids and you re-read them successfully.",
+      ],
+    },
     scope: {
+      workspace_id: resolveCopilotWorkspaceId(partner),
       deal_id: deal.id,
+      entity_ids: [deal.id],
       scope_label: `${deal.title} / ${mode === "briefing" ? "會議準備" : "活動 debrief"}`,
     },
     context_pack: {

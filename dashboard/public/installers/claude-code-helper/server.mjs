@@ -5,6 +5,13 @@ import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
 import path from "node:path";
+import {
+  createRuntimeState,
+  findConflictingRuns,
+  findRunForCancel,
+  registerRun,
+  unregisterRun,
+} from "./runtime-state.mjs";
 
 const PORT = Number.parseInt(process.env.PORT || "4317", 10);
 const HOST = "127.0.0.1";
@@ -25,9 +32,16 @@ const HELPER_TOOLS = process.env.HELPER_TOOLS ?? "";
 const ZENOS_API_KEY = String(process.env.ZENOS_API_KEY || "").trim();
 const ZENOS_PROJECT = String(process.env.ZENOS_PROJECT || "").trim();
 const ZENOS_MCP_URL = String(
-  process.env.ZENOS_MCP_URL || "https://zenos-mcp-s5oifosv3a-de.a.run.app/mcp"
+  process.env.ZENOS_MCP_URL || "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
+).trim();
+const ZENOS_SKILLS_RAW_BASE = String(
+  process.env.ZENOS_SKILLS_RAW_BASE || "https://raw.githubusercontent.com/centerseed/zenos/main"
 ).trim();
 const SESSION_STATE_FILE = path.join(homedir(), ".zenos-cowork-helper", "sessions.json");
+const SESSION_TTL_MS = Math.max(
+  60_000,
+  Number.parseInt(process.env.SESSION_TTL_MINUTES || "55", 10) * 60 * 1000 || 55 * 60 * 1000
+);
 const PERMISSION_TIMEOUT_SECONDS = Math.max(
   1,
   Number.parseInt(process.env.PERMISSION_TIMEOUT_SECONDS || "60", 10) || 60
@@ -43,12 +57,50 @@ const EXPECTED_CRM_SKILLS = [
   "/crm-briefing",
   "/crm-debrief",
 ];
+const EXPECTED_PROJECT_SKILLS = [
+  "/triage",
+];
+const EXPECTED_ZENOS_RELEASE_SKILLS = [
+  "/zenos-governance",
+  "/zenos-capture",
+  "/zenos-sync",
+];
+const EXPECTED_GOVERNANCE_FILES = [
+  "skills/governance/document-governance.md",
+  "skills/governance/task-governance.md",
+];
 const REDACTION_RULES_VERSION = process.env.REDACTION_RULES_VERSION || "2026-04-14";
 
-/** @type {Map<string, { sessionId: string, sessionName: string, cwd: string, updatedAt: string }>} */
+function buildSkillAssetDescriptor(name, relativePath) {
+  const normalizedPath = Array.isArray(relativePath) ? relativePath : String(relativePath).split("/");
+  return {
+    name,
+    relativePath: normalizedPath,
+    remoteUrl: `${ZENOS_SKILLS_RAW_BASE}/${normalizedPath.join("/")}`,
+  };
+}
+
+const EXPECTED_SKILL_ASSETS = [
+  ...EXPECTED_MARKETING_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", "workflows", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_CRM_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", "workflows", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_PROJECT_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", "workflows", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_ZENOS_RELEASE_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_GOVERNANCE_FILES.map((filePath) =>
+    buildSkillAssetDescriptor(filePath, filePath.split("/"))
+  ),
+];
+
+/** @type {Map<string, { sessionId: string, sessionName: string, cwd: string, createdAt: string, updatedAt: string }>} */
 const sessions = new Map();
-/** @type {Map<string, import("node:child_process").ChildProcess>} */
-const running = new Map();
+const runtimeState = createRuntimeState();
 
 function loadSessions() {
   try {
@@ -57,17 +109,47 @@ function loadSessions() {
     if (!parsed || typeof parsed !== "object") return;
     for (const [conversationId, value] of Object.entries(parsed)) {
       if (!value || typeof value !== "object") continue;
-      const row = /** @type {{ sessionId?: string, sessionName?: string, cwd?: string, updatedAt?: string }} */ (value);
+      const row = /** @type {{ sessionId?: string, sessionName?: string, cwd?: string, createdAt?: string, updatedAt?: string }} */ (value);
       if (!row.sessionName || !row.cwd) continue;
       sessions.set(conversationId, {
         sessionId: row.sessionId || randomUUID(),
         sessionName: row.sessionName,
         cwd: row.cwd,
+        createdAt: row.createdAt || row.updatedAt || new Date().toISOString(),
         updatedAt: row.updatedAt || new Date().toISOString(),
       });
     }
   } catch {
     // no-op
+  }
+}
+
+function isSessionExpired(row) {
+  const startedAt = Date.parse(row.createdAt || row.updatedAt || "");
+  if (!Number.isFinite(startedAt)) return true;
+  return Date.now() - startedAt > SESSION_TTL_MS;
+}
+
+function createSessionRecord(conversationId, cwd) {
+  const now = new Date().toISOString();
+  return {
+    sessionId: randomUUID(),
+    sessionName: `web-${conversationId}`,
+    cwd,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function purgeExpiredSessions() {
+  let changed = false;
+  for (const [conversationId, row] of sessions.entries()) {
+    if (!isSessionExpired(row)) continue;
+    sessions.delete(conversationId);
+    changed = true;
+  }
+  if (changed) {
+    saveSessions();
   }
 }
 
@@ -168,36 +250,50 @@ function resolveModel(inputModel) {
   return candidate;
 }
 
-function getOrCreateSession(conversationId, cwd) {
+function resolveSession(conversationId, cwd, mode) {
+  purgeExpiredSessions();
   const current = sessions.get(conversationId);
-  if (current) {
+  if (mode === "continue" && current) {
     if (!current.sessionId) {
       current.sessionId = randomUUID();
     }
     if (cwd && current.cwd !== cwd) {
       current.cwd = cwd;
-      current.updatedAt = new Date().toISOString();
-      sessions.set(conversationId, current);
-      saveSessions();
     }
-    return current;
+    current.updatedAt = new Date().toISOString();
+    sessions.set(conversationId, current);
+    saveSessions();
+    return { session: current, resumed: true };
   }
-  const sessionName = `web-${conversationId}`;
-  const created = {
-    sessionId: randomUUID(),
-    sessionName,
-    cwd,
-    updatedAt: new Date().toISOString(),
-  };
+
+  const created = createSessionRecord(conversationId, cwd);
   sessions.set(conversationId, created);
   saveSessions();
-  return created;
+  return { session: created, resumed: false };
 }
 
 function buildEnv() {
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
   return env;
+}
+
+function stopChildProcess(child) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  child.kill("SIGTERM");
+  setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
+  }, 250);
+}
+
+function stopRun(run, reason) {
+  const detached = unregisterRun(runtimeState, run.requestId) || run;
+  console.warn(
+    `[runtime] stopping request ${detached.requestId} (${detached.conversationId}) because ${reason}`
+  );
+  stopChildProcess(detached.child);
 }
 
 // ── Workspace Bootstrap ─────────────────────────────────────────────────────
@@ -227,24 +323,24 @@ function bootstrapWorkspace(cwd) {
   const claudeDir = path.join(cwd, ".claude");
   mkdirSync(claudeDir, { recursive: true });
 
-  // 1. MCP config — copy from ZenOS project root if workspace has none
+  // 1. MCP config — always bind zenos server to the current user's API key
   const mcpPath = path.join(claudeDir, "mcp.json");
   const existingMcp = safeReadJson(mcpPath);
-  if (!existingMcp?.mcpServers?.zenos) {
-    // Try to copy from the ZenOS project's own MCP config (has correct API key + project)
-    const projectMcpPath = path.join(HELPER_PROJECT_ROOT, ".claude", "mcp.json");
-    const projectMcp = safeReadJson(projectMcpPath);
-    if (projectMcp?.mcpServers?.zenos) {
-      const desiredMcp = { mcpServers: { zenos: projectMcp.mcpServers.zenos } };
-      writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
-      console.log(`[bootstrap] Copied MCP config from project root → ${mcpPath}`);
-    } else {
-      // Fallback: build URL from env vars (API key is scoped to the project)
-      const mcpUrl = `${ZENOS_MCP_URL}?api_key=${ZENOS_API_KEY}`;
-      const desiredMcp = { mcpServers: { zenos: { type: "http", url: mcpUrl } } };
-      writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
-      console.log(`[bootstrap] Created ${mcpPath} from env vars`);
-    }
+  const projectMcpPath = path.join(HELPER_PROJECT_ROOT, ".claude", "mcp.json");
+  const projectMcp = safeReadJson(projectMcpPath);
+  const desiredMcp = {
+    mcpServers: {
+      ...(projectMcp?.mcpServers || {}),
+      ...(existingMcp?.mcpServers || {}),
+      zenos: {
+        type: "http",
+        url: `${ZENOS_MCP_URL}?api_key=${ZENOS_API_KEY}`,
+      },
+    },
+  };
+  if (JSON.stringify(existingMcp || {}) !== JSON.stringify(desiredMcp)) {
+    writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
+    console.log(`[bootstrap] Wrote user-scoped MCP config → ${mcpPath}`);
   }
 
   // 2. Permissions — auto-approve ZenOS MCP tools
@@ -270,31 +366,22 @@ function bootstrapWorkspace(cwd) {
     console.log(`[bootstrap] Updated ${settingsPath} — added ${helperMissing.length} tools`);
   }
 
-  // 4. Ensure skill files exist in workspace
-  const allSkills = [...EXPECTED_MARKETING_SKILLS, ...EXPECTED_CRM_SKILLS];
-  const srcSkillsBase = path.join(HELPER_PROJECT_ROOT, "skills", "release", "workflows");
-  const dstSkillsBase = path.join(cwd, "skills", "release", "workflows");
-  const SKILLS_BASE_URL = "https://zenos-naruvia.web.app/installers/skills";
-  for (const skill of allSkills) {
-    const folderName = skill.replace(/^\//, "");
-    const dstDir = path.join(dstSkillsBase, folderName);
-    if (existsSync(path.join(dstDir, "SKILL.md"))) continue;
-    // Try 1: copy from local ZenOS project
-    const srcDir = path.join(srcSkillsBase, folderName);
-    if (existsSync(srcDir)) {
-      mkdirSync(dstDir, { recursive: true });
-      cpSync(srcDir, dstDir, { recursive: true });
-      console.log(`[bootstrap] Copied skill ${folderName} (local)`);
-      continue;
-    }
-    // Try 2: download from hosting
+  // 4. Ensure workflow + governance files exist in workspace
+  for (const asset of EXPECTED_SKILL_ASSETS) {
+    const dstPath = path.join(cwd, ...asset.relativePath);
+    if (existsSync(dstPath)) continue;
+    const srcPath = path.join(HELPER_PROJECT_ROOT, ...asset.relativePath);
     try {
-      mkdirSync(dstDir, { recursive: true });
-      const url = `${SKILLS_BASE_URL}/${folderName}/SKILL.md`;
-      execSync(`curl -fsSL "${url}" -o "${path.join(dstDir, "SKILL.md")}"`, { timeout: 10000 });
-      console.log(`[bootstrap] Downloaded skill ${folderName} (remote)`);
+      mkdirSync(path.dirname(dstPath), { recursive: true });
+      if (existsSync(srcPath)) {
+        cpSync(srcPath, dstPath, { recursive: false });
+        console.log(`[bootstrap] Copied ${asset.name} (local)`);
+        continue;
+      }
+      execSync(`curl -fsSL "${asset.remoteUrl}" -o "${dstPath}"`, { timeout: 10000 });
+      console.log(`[bootstrap] Downloaded ${asset.name} (remote)`);
     } catch {
-      console.warn(`[bootstrap] Could not get skill ${folderName} — skipping`);
+      console.warn(`[bootstrap] Could not get ${asset.name} — skipping`);
     }
   }
 }
@@ -327,15 +414,14 @@ function loadAllowedTools(cwd) {
   return allowed.map((item) => String(item || "").trim()).filter(Boolean);
 }
 
-function loadSkills(cwd, expectedSkills) {
-  const searchDirs = [
-    path.join(cwd, "skills", "release", "workflows"),
-    path.join(HELPER_PROJECT_ROOT, "skills", "release", "workflows"),
-  ];
-  return expectedSkills.filter((skillName) => {
-    const folderName = skillName.replace(/^\//, "");
-    return searchDirs.some((dir) => existsSync(path.join(dir, folderName, "SKILL.md")));
-  });
+function loadSkills(cwd, expectedAssets) {
+  return expectedAssets
+    .filter((asset) => {
+      const workspacePath = path.join(cwd, ...asset.relativePath);
+      const helperPath = path.join(HELPER_PROJECT_ROOT, ...asset.relativePath);
+      return existsSync(workspacePath) || existsSync(helperPath);
+    })
+    .map((asset) => asset.name);
 }
 
 function isAllowedTool(toolName, allowedTools) {
@@ -353,9 +439,10 @@ function isAllowedTool(toolName, allowedTools) {
 
 function buildCapabilitySnapshot(cwd) {
   const allowedTools = loadAllowedTools(cwd);
-  const allExpected = [...EXPECTED_MARKETING_SKILLS];
+  const allExpected = EXPECTED_SKILL_ASSETS;
   const skillsLoaded = loadSkills(cwd, allExpected);
-  const missingSkills = allExpected.filter((skill) => !skillsLoaded.includes(skill));
+  const expectedNames = allExpected.map((asset) => asset.name);
+  const missingSkills = expectedNames.filter((skill) => !skillsLoaded.includes(skill));
   const mcpOk = allowedTools.some((tool) => tool.startsWith("mcp__zenos__"));
   return {
     mcp_ok: mcpOk,
@@ -364,6 +451,64 @@ function buildCapabilitySnapshot(cwd) {
     allowed_tools: allowedTools,
     redaction_rules_version: REDACTION_RULES_VERSION,
   };
+}
+
+function getDashboardApiBase() {
+  return ZENOS_MCP_URL.replace(/\/mcp(?:\?.*)?$/i, "");
+}
+
+async function buildWorkspaceProbe(activeWorkspaceId) {
+  if (!ZENOS_API_KEY) {
+    return {
+      ok: false,
+      message: "ZENOS_API_KEY not set",
+    };
+  }
+
+  try {
+    const headers = {
+      Authorization: `Bearer ${ZENOS_API_KEY}`,
+    };
+    if (activeWorkspaceId) {
+      headers["X-Active-Workspace-Id"] = activeWorkspaceId;
+    }
+    const response = await fetch(`${getDashboardApiBase()}/api/partner/me`, {
+      method: "GET",
+      headers,
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body) {
+      return {
+        ok: false,
+        message: body?.message || `workspace probe failed (${response.status})`,
+      };
+    }
+    const available = Array.isArray(body.availableWorkspaces) ? body.availableWorkspaces : [];
+    const activeId = typeof body.activeWorkspaceId === "string" ? body.activeWorkspaceId : "";
+    const activeWorkspace =
+      available.find((workspace) => String(workspace?.id || "") === activeId) || null;
+    return {
+      ok: true,
+      partner_id: typeof body.id === "string" ? body.id : "",
+      partner_email: typeof body.email === "string" ? body.email : "",
+      workspace_id: activeId,
+      workspace_name:
+        typeof activeWorkspace?.name === "string"
+          ? activeWorkspace.name
+          : typeof body.displayName === "string"
+            ? body.displayName
+            : "",
+      available_workspaces: available.map((workspace) => ({
+        id: String(workspace?.id || ""),
+        name: String(workspace?.name || ""),
+      })),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "workspace probe failed",
+    };
+  }
 }
 
 function resolveMcpConfigPath(cwd) {
@@ -414,9 +559,16 @@ function startStreamingRun({
   cwd,
   maxTurns,
 }) {
-  const session = getOrCreateSession(conversationId, cwd);
+  const { session, resumed } = resolveSession(conversationId, cwd, mode);
   const requestId = randomUUID();
   const allowedTools = loadAllowedTools(session.cwd);
+
+  for (const conflict of findConflictingRuns(runtimeState, {
+    conversationId,
+    sessionId: session.sessionId,
+  })) {
+    stopRun(conflict, "superseded");
+  }
 
   const args = ["-p", "--verbose", "--output-format", "stream-json", "--include-partial-messages"];
   const mcpConfigPath = resolveMcpConfigPath(session.cwd);
@@ -430,7 +582,7 @@ function startStreamingRun({
   if (maxTurns && Number.isFinite(maxTurns)) {
     args.push("--max-turns", String(maxTurns));
   }
-  if (mode === "continue") {
+  if (mode === "continue" && resumed) {
     args.push("--resume", session.sessionId);
   } else {
     args.push("--session-id", session.sessionId, "--name", session.sessionName);
@@ -452,7 +604,12 @@ function startStreamingRun({
     env: buildEnv(),
     stdio: ["ignore", "pipe", "pipe"],
   });
-  running.set(requestId, child);
+  registerRun(runtimeState, {
+    requestId,
+    conversationId,
+    sessionId: session.sessionId,
+    child,
+  });
 
   let stdoutBuffer = "";
   let permissionState = null;
@@ -530,7 +687,7 @@ function startStreamingRun({
 
   child.on("close", (code, signal) => {
     clearPermissionTimer();
-    running.delete(requestId);
+    unregisterRun(runtimeState, requestId);
     if (stdoutBuffer.trim()) {
       sendSse(res, "message", { requestId, line: stdoutBuffer.trim() });
       stdoutBuffer = "";
@@ -545,7 +702,7 @@ function startStreamingRun({
 
   child.on("error", (error) => {
     clearPermissionTimer();
-    running.delete(requestId);
+    unregisterRun(runtimeState, requestId);
     sendSse(res, "stderr", {
       requestId,
       text: String(error.message || error),
@@ -589,14 +746,17 @@ const server = createServer(async (req, res) => {
     } catch {
       capability = buildCapabilitySnapshot(DEFAULT_CWD);
     }
+    const requestedWorkspaceId = String(url.searchParams.get("workspace_id") || "").trim();
+    const workspaceProbe = await buildWorkspaceProbe(requestedWorkspaceId || undefined);
     sendJson(
       res,
       200,
       {
         status: "ok",
         sessions: sessions.size,
-        running: running.size,
+        running: runtimeState.running.size,
         capability,
+        workspace_probe: workspaceProbe,
       },
       auth.origin
     );
@@ -637,24 +797,19 @@ const server = createServer(async (req, res) => {
 
   if (req.method === "POST" && pathname === "/v1/chat/cancel") {
     try {
-      const body = /** @type {{ requestId?: string }} */ (await parseRequestJson(req));
+      const body = /** @type {{ requestId?: string, conversationId?: string }} */ (await parseRequestJson(req));
       const requestId = String(body.requestId || "").trim();
-      if (!requestId) {
-        sendJson(res, 400, { status: "error", message: "requestId is required" }, auth.origin);
+      const conversationId = String(body.conversationId || "").trim();
+      if (!requestId && !conversationId) {
+        sendJson(res, 400, { status: "error", message: "requestId or conversationId is required" }, auth.origin);
         return;
       }
-      const child = running.get(requestId);
-      if (!child) {
+      const run = findRunForCancel(runtimeState, { requestId, conversationId });
+      if (!run) {
         sendJson(res, 404, { status: "error", message: "request not found" }, auth.origin);
         return;
       }
-      running.delete(requestId);
-      child.kill("SIGTERM");
-      setTimeout(() => {
-        if (child.exitCode === null && child.signalCode === null) {
-          child.kill("SIGKILL");
-        }
-      }, 250);
+      stopRun(run, "cancelled");
       sendJson(res, 200, { status: "ok" }, auth.origin);
       return;
     } catch (error) {

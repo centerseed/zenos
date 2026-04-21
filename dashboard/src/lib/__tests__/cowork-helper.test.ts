@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 describe("checkCoworkHelperHealth", () => {
-  it("returns ok=true when helper health endpoint responds 200", async () => {
+  it("returns ok=true and parses workspace probe when helper health endpoint responds 200", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -27,11 +27,17 @@ describe("checkCoworkHelperHealth", () => {
             skills_loaded: ["/marketing-plan"],
             redaction_rules_version: "2026-04-14",
           },
+          workspace_probe: {
+            ok: true,
+            workspace_id: "ws-active",
+            workspace_name: "Barry Workspace",
+            available_workspaces: [{ id: "ws-active", name: "Barry Workspace" }],
+          },
         }),
       })
     );
 
-    const result = await checkCoworkHelperHealth("http://127.0.0.1:4317");
+    const result = await checkCoworkHelperHealth("http://127.0.0.1:4317", "mk-token", "ws-active");
     expect(result.ok).toBe(true);
     expect(result.status).toBe("ok");
     expect(result.capability).toEqual({
@@ -41,7 +47,18 @@ describe("checkCoworkHelperHealth", () => {
       allowedTools: [],
       redactionRulesVersion: "2026-04-14",
     });
-    const [, options] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit & { targetAddressSpace?: string }];
+    expect(result.workspaceProbe).toEqual({
+      ok: true,
+      message: undefined,
+      partnerId: undefined,
+      partnerEmail: undefined,
+      workspaceId: "ws-active",
+      workspaceName: "Barry Workspace",
+      availableWorkspaces: [{ id: "ws-active", name: "Barry Workspace" }],
+    });
+    const [url, options] = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls[0] as [string, RequestInit & { targetAddressSpace?: string }];
+    expect(url).toBe("http://127.0.0.1:4317/health?workspace_id=ws-active");
+    expect((options.headers as Record<string, string>)["X-Local-Helper-Token"]).toBe("mk-token");
     expect(options.targetAddressSpace).toBe("loopback");
   });
 });

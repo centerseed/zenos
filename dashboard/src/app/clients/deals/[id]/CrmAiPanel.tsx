@@ -17,7 +17,9 @@ import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
 import { useCopilotChat } from "@/lib/copilot/useCopilotChat";
+import { resolveCopilotWorkspaceId } from "@/lib/copilot/scope";
 import type { CopilotEntryConfig } from "@/lib/copilot/types";
+import type { Partner } from "@/types";
 import { sanitizeContextValue } from "@/config/ai-redaction-rules";
 import type { Deal, Activity, Company, Contact, FunnelStage, DealAiEntries } from "@/lib/crm-api";
 import { patchDealStage } from "@/lib/crm-api";
@@ -210,6 +212,7 @@ function extractFollowUpDraft(markdown: string): FollowUpDraft | null {
 // ─── CrmAiPanel entry factories ───────────────────────────────────────────────
 
 function createBriefingEntry(params: {
+  partner?: Partner | null;
   deal: Deal;
   activities: Activity[];
   company: Company | null;
@@ -223,7 +226,28 @@ function createBriefingEntry(params: {
     launch_behavior: "manual",
     session_policy: "scoped_resume",
     suggested_skill: "/crm-briefing",
-    scope: { deal_id: params.deal.id, scope_label: params.deal.title },
+    claude_code_bootstrap: {
+      use_project_claude_config: true,
+      required_skills: [
+        "/crm-briefing",
+        "/zenos-governance",
+        "skills/governance/task-governance.md",
+        "skills/governance/document-governance.md",
+      ],
+      governance_topics: ["task", "document"],
+      verify_zenos_write: true,
+      execution_contract: [
+        "Use the workspace-local .claude settings and MCP config for this deal scope.",
+        "Load task/document governance before any ZenOS mutation.",
+        "Re-fetch created or updated ZenOS records before claiming success.",
+      ],
+    },
+    scope: {
+      workspace_id: resolveCopilotWorkspaceId(params.partner),
+      deal_id: params.deal.id,
+      entity_ids: [params.deal.id],
+      scope_label: params.deal.title,
+    },
     context_pack: { scene: "briefing", deal_id: params.deal.id },
     write_targets: [],
     build_prompt: (userInput: string) => {
@@ -236,6 +260,7 @@ function createBriefingEntry(params: {
 }
 
 function createDebriefEntry(params: {
+  partner?: Partner | null;
   deal: Deal;
   company: Company | null;
   triggerActivity: Activity;
@@ -248,7 +273,28 @@ function createDebriefEntry(params: {
     launch_behavior: "auto_start",
     session_policy: "ephemeral",
     suggested_skill: "/crm-debrief",
-    scope: { deal_id: params.deal.id, scope_label: params.deal.title },
+    claude_code_bootstrap: {
+      use_project_claude_config: true,
+      required_skills: [
+        "/crm-debrief",
+        "/zenos-governance",
+        "skills/governance/task-governance.md",
+        "skills/governance/document-governance.md",
+      ],
+      governance_topics: ["task", "document"],
+      verify_zenos_write: true,
+      execution_contract: [
+        "Use the workspace-local .claude settings and MCP config for this deal scope.",
+        "Load task/document governance before any ZenOS mutation.",
+        "Re-fetch created or updated ZenOS records before claiming success.",
+      ],
+    },
+    scope: {
+      workspace_id: resolveCopilotWorkspaceId(params.partner),
+      deal_id: params.deal.id,
+      entity_ids: [params.deal.id],
+      scope_label: params.deal.title,
+    },
     context_pack: { scene: "debrief", deal_id: params.deal.id },
     write_targets: [],
     build_prompt: (_userInput: string) =>

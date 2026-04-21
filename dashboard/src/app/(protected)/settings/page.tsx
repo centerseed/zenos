@@ -23,6 +23,7 @@ import {
   setDefaultHelperModel,
   setDefaultHelperToken,
 } from "@/lib/cowork-helper";
+import { getStoredActiveWorkspaceId } from "@/lib/api-client";
 import { resolveActiveWorkspace } from "@/lib/partner";
 import { useInk } from "@/lib/zen-ink/tokens";
 
@@ -469,14 +470,27 @@ export default function SettingsPage() {
   async function checkHelper() {
     setHelperHealth("checking");
     setHelperHint("正在檢查本機 helper");
-    const result = await checkCoworkHelperHealth(helperBaseUrl, helperToken);
+    const targetWorkspaceId =
+      getStoredActiveWorkspaceId() || partner?.activeWorkspaceId || partner?.homeWorkspaceId || undefined;
+    const result = await checkCoworkHelperHealth(helperBaseUrl, helperToken, targetWorkspaceId);
     if (result.ok) {
       setHelperHealth("connected");
-      setHelperHint(result.message || "helper 已連線");
+      if (result.workspaceProbe?.ok && result.workspaceProbe.workspaceId) {
+        const workspaceLabel = result.workspaceProbe.workspaceName
+          ? `${result.workspaceProbe.workspaceName} · ${result.workspaceProbe.workspaceId}`
+          : result.workspaceProbe.workspaceId;
+        setHelperHint(`helper 已連線 · workspace=${workspaceLabel}`);
+        return;
+      }
+      setHelperHint(
+        result.workspaceProbe?.message ||
+          result.message ||
+          "helper 已連線，但尚未確認 workspace probe"
+      );
       return;
     }
     setHelperHealth("error");
-    setHelperHint(result.message || "helper unavailable");
+    setHelperHint(result.workspaceProbe?.message || result.message || "helper unavailable");
   }
 
   async function saveGoogleWorkspaceSettings() {

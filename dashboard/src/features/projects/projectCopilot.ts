@@ -7,6 +7,7 @@ function serializePlans(progress: ProjectProgressResponse) {
   return progress.active_plans.map((plan) => ({
     goal: plan.goal,
     status: plan.status,
+    milestones: plan.milestones.map((milestone) => milestone.name),
     open_count: plan.open_count,
     blocked_count: plan.blocked_count,
     review_count: plan.review_count,
@@ -45,8 +46,9 @@ export function buildProjectRecapEntry(options: {
   progress: ProjectProgressResponse;
   preset: ProjectAgentPreset;
   nextStep: string;
+  workspaceId?: string;
 }): CopilotEntryConfig {
-  const { progress, preset, nextStep } = options;
+  const { progress, preset, nextStep, workspaceId } = options;
   const fallback = buildFallbackRecap(progress);
 
   return {
@@ -56,8 +58,25 @@ export function buildProjectRecapEntry(options: {
     mode: "artifact",
     launch_behavior: "manual",
     session_policy: "scoped_resume",
-    suggested_skill: "/project-progress-recap",
+    suggested_skill: "/triage",
+    claude_code_bootstrap: {
+      use_project_claude_config: true,
+      required_skills: [
+        "/triage",
+        "/zenos-governance",
+        "skills/governance/task-governance.md",
+        "skills/governance/document-governance.md",
+      ],
+      governance_topics: ["task", "document"],
+      verify_zenos_write: true,
+      execution_contract: [
+        "Use the workspace .claude/mcp.json and settings.local.json instead of assuming a global helper profile.",
+        "Before any task or document mutation, call mcp__zenos__governance_guide for the relevant topic and read local governance files when they exist.",
+        "Never claim plan/task/doc creation succeeded until you re-fetch the written records from ZenOS and confirm returned ids.",
+      ],
+    },
     scope: {
+      workspace_id: workspaceId,
       product_id: progress.project.id,
       project: progress.project.name,
       entity_ids: [progress.project.id],
@@ -91,4 +110,3 @@ export function buildProjectRecapEntry(options: {
       ].join("\n"),
   };
 }
-

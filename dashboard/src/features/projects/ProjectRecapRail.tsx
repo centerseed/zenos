@@ -5,6 +5,8 @@ import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import { buildProjectRecapEntry } from "@/features/projects/projectCopilot";
+import { useAuth } from "@/lib/auth";
+import { resolveCopilotWorkspaceId } from "@/lib/copilot/scope";
 import type { ProjectAgentPreset } from "@/features/projects/types";
 import type { ProjectProgressResponse } from "@/lib/api";
 import { useCopilotChat } from "@/lib/copilot/useCopilotChat";
@@ -24,9 +26,16 @@ export function ProjectRecapRail({
   nextStep: string;
   onRecapChange: (recap: string | null) => void;
 }) {
+  const { partner } = useAuth();
   const entry = useMemo(
-    () => buildProjectRecapEntry({ progress, preset, nextStep }),
-    [nextStep, preset, progress]
+    () =>
+      buildProjectRecapEntry({
+        progress,
+        preset,
+        nextStep,
+        workspaceId: resolveCopilotWorkspaceId(partner),
+      }),
+    [nextStep, partner, preset, progress]
   );
   const {
     status,

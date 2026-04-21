@@ -34,6 +34,9 @@ const ZENOS_PROJECT = String(process.env.ZENOS_PROJECT || "").trim();
 const ZENOS_MCP_URL = String(
   process.env.ZENOS_MCP_URL || "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
 ).trim();
+const ZENOS_SKILLS_RAW_BASE = String(
+  process.env.ZENOS_SKILLS_RAW_BASE || "https://raw.githubusercontent.com/centerseed/zenos/main"
+).trim();
 const SESSION_STATE_FILE = path.join(homedir(), ".zenos-cowork-helper", "sessions.json");
 const SESSION_TTL_MS = Math.max(
   60_000,
@@ -54,7 +57,46 @@ const EXPECTED_CRM_SKILLS = [
   "/crm-briefing",
   "/crm-debrief",
 ];
+const EXPECTED_PROJECT_SKILLS = [
+  "/triage",
+];
+const EXPECTED_ZENOS_RELEASE_SKILLS = [
+  "/zenos-governance",
+  "/zenos-capture",
+  "/zenos-sync",
+];
+const EXPECTED_GOVERNANCE_FILES = [
+  "skills/governance/document-governance.md",
+  "skills/governance/task-governance.md",
+];
 const REDACTION_RULES_VERSION = process.env.REDACTION_RULES_VERSION || "2026-04-14";
+
+function buildSkillAssetDescriptor(name, relativePath) {
+  const normalizedPath = Array.isArray(relativePath) ? relativePath : String(relativePath).split("/");
+  return {
+    name,
+    relativePath: normalizedPath,
+    remoteUrl: `${ZENOS_SKILLS_RAW_BASE}/${normalizedPath.join("/")}`,
+  };
+}
+
+const EXPECTED_SKILL_ASSETS = [
+  ...EXPECTED_MARKETING_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", "workflows", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_CRM_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", "workflows", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_PROJECT_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", "workflows", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_ZENOS_RELEASE_SKILLS.map((skill) =>
+    buildSkillAssetDescriptor(skill, ["skills", "release", skill.replace(/^\//, ""), "SKILL.md"])
+  ),
+  ...EXPECTED_GOVERNANCE_FILES.map((filePath) =>
+    buildSkillAssetDescriptor(filePath, filePath.split("/"))
+  ),
+];
 
 /** @type {Map<string, { sessionId: string, sessionName: string, cwd: string, createdAt: string, updatedAt: string }>} */
 const sessions = new Map();
@@ -281,24 +323,24 @@ function bootstrapWorkspace(cwd) {
   const claudeDir = path.join(cwd, ".claude");
   mkdirSync(claudeDir, { recursive: true });
 
-  // 1. MCP config — copy from ZenOS project root if workspace has none
+  // 1. MCP config — always bind zenos server to the current user's API key
   const mcpPath = path.join(claudeDir, "mcp.json");
   const existingMcp = safeReadJson(mcpPath);
-  if (!existingMcp?.mcpServers?.zenos) {
-    // Try to copy from the ZenOS project's own MCP config (has correct API key + project)
-    const projectMcpPath = path.join(HELPER_PROJECT_ROOT, ".claude", "mcp.json");
-    const projectMcp = safeReadJson(projectMcpPath);
-    if (projectMcp?.mcpServers?.zenos) {
-      const desiredMcp = { mcpServers: { zenos: projectMcp.mcpServers.zenos } };
-      writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
-      console.log(`[bootstrap] Copied MCP config from project root → ${mcpPath}`);
-    } else {
-      // Fallback: build URL from env vars (API key is scoped to the project)
-      const mcpUrl = `${ZENOS_MCP_URL}?api_key=${ZENOS_API_KEY}`;
-      const desiredMcp = { mcpServers: { zenos: { type: "http", url: mcpUrl } } };
-      writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
-      console.log(`[bootstrap] Created ${mcpPath} from env vars`);
-    }
+  const projectMcpPath = path.join(HELPER_PROJECT_ROOT, ".claude", "mcp.json");
+  const projectMcp = safeReadJson(projectMcpPath);
+  const desiredMcp = {
+    mcpServers: {
+      ...(projectMcp?.mcpServers || {}),
+      ...(existingMcp?.mcpServers || {}),
+      zenos: {
+        type: "http",
+        url: `${ZENOS_MCP_URL}?api_key=${ZENOS_API_KEY}`,
+      },
+    },
+  };
+  if (JSON.stringify(existingMcp || {}) !== JSON.stringify(desiredMcp)) {
+    writeFileSync(mcpPath, JSON.stringify(desiredMcp, null, 2), "utf8");
+    console.log(`[bootstrap] Wrote user-scoped MCP config → ${mcpPath}`);
   }
 
   // 2. Permissions — auto-approve ZenOS MCP tools
@@ -324,31 +366,22 @@ function bootstrapWorkspace(cwd) {
     console.log(`[bootstrap] Updated ${settingsPath} — added ${helperMissing.length} tools`);
   }
 
-  // 4. Ensure skill files exist in workspace
-  const allSkills = [...EXPECTED_MARKETING_SKILLS, ...EXPECTED_CRM_SKILLS];
-  const srcSkillsBase = path.join(HELPER_PROJECT_ROOT, "skills", "release", "workflows");
-  const dstSkillsBase = path.join(cwd, "skills", "release", "workflows");
-  const SKILLS_BASE_URL = "https://zenos-naruvia.web.app/installers/skills";
-  for (const skill of allSkills) {
-    const folderName = skill.replace(/^\//, "");
-    const dstDir = path.join(dstSkillsBase, folderName);
-    if (existsSync(path.join(dstDir, "SKILL.md"))) continue;
-    // Try 1: copy from local ZenOS project
-    const srcDir = path.join(srcSkillsBase, folderName);
-    if (existsSync(srcDir)) {
-      mkdirSync(dstDir, { recursive: true });
-      cpSync(srcDir, dstDir, { recursive: true });
-      console.log(`[bootstrap] Copied skill ${folderName} (local)`);
-      continue;
-    }
-    // Try 2: download from hosting
+  // 4. Ensure workflow + governance files exist in workspace
+  for (const asset of EXPECTED_SKILL_ASSETS) {
+    const dstPath = path.join(cwd, ...asset.relativePath);
+    if (existsSync(dstPath)) continue;
+    const srcPath = path.join(HELPER_PROJECT_ROOT, ...asset.relativePath);
     try {
-      mkdirSync(dstDir, { recursive: true });
-      const url = `${SKILLS_BASE_URL}/${folderName}/SKILL.md`;
-      execSync(`curl -fsSL "${url}" -o "${path.join(dstDir, "SKILL.md")}"`, { timeout: 10000 });
-      console.log(`[bootstrap] Downloaded skill ${folderName} (remote)`);
+      mkdirSync(path.dirname(dstPath), { recursive: true });
+      if (existsSync(srcPath)) {
+        cpSync(srcPath, dstPath, { recursive: false });
+        console.log(`[bootstrap] Copied ${asset.name} (local)`);
+        continue;
+      }
+      execSync(`curl -fsSL "${asset.remoteUrl}" -o "${dstPath}"`, { timeout: 10000 });
+      console.log(`[bootstrap] Downloaded ${asset.name} (remote)`);
     } catch {
-      console.warn(`[bootstrap] Could not get skill ${folderName} — skipping`);
+      console.warn(`[bootstrap] Could not get ${asset.name} — skipping`);
     }
   }
 }
@@ -381,15 +414,14 @@ function loadAllowedTools(cwd) {
   return allowed.map((item) => String(item || "").trim()).filter(Boolean);
 }
 
-function loadSkills(cwd, expectedSkills) {
-  const searchDirs = [
-    path.join(cwd, "skills", "release", "workflows"),
-    path.join(HELPER_PROJECT_ROOT, "skills", "release", "workflows"),
-  ];
-  return expectedSkills.filter((skillName) => {
-    const folderName = skillName.replace(/^\//, "");
-    return searchDirs.some((dir) => existsSync(path.join(dir, folderName, "SKILL.md")));
-  });
+function loadSkills(cwd, expectedAssets) {
+  return expectedAssets
+    .filter((asset) => {
+      const workspacePath = path.join(cwd, ...asset.relativePath);
+      const helperPath = path.join(HELPER_PROJECT_ROOT, ...asset.relativePath);
+      return existsSync(workspacePath) || existsSync(helperPath);
+    })
+    .map((asset) => asset.name);
 }
 
 function isAllowedTool(toolName, allowedTools) {
@@ -407,9 +439,10 @@ function isAllowedTool(toolName, allowedTools) {
 
 function buildCapabilitySnapshot(cwd) {
   const allowedTools = loadAllowedTools(cwd);
-  const allExpected = [...EXPECTED_MARKETING_SKILLS];
+  const allExpected = EXPECTED_SKILL_ASSETS;
   const skillsLoaded = loadSkills(cwd, allExpected);
-  const missingSkills = allExpected.filter((skill) => !skillsLoaded.includes(skill));
+  const expectedNames = allExpected.map((asset) => asset.name);
+  const missingSkills = expectedNames.filter((skill) => !skillsLoaded.includes(skill));
   const mcpOk = allowedTools.some((tool) => tool.startsWith("mcp__zenos__"));
   return {
     mcp_ok: mcpOk,
@@ -418,6 +451,64 @@ function buildCapabilitySnapshot(cwd) {
     allowed_tools: allowedTools,
     redaction_rules_version: REDACTION_RULES_VERSION,
   };
+}
+
+function getDashboardApiBase() {
+  return ZENOS_MCP_URL.replace(/\/mcp(?:\?.*)?$/i, "");
+}
+
+async function buildWorkspaceProbe(activeWorkspaceId) {
+  if (!ZENOS_API_KEY) {
+    return {
+      ok: false,
+      message: "ZENOS_API_KEY not set",
+    };
+  }
+
+  try {
+    const headers = {
+      Authorization: `Bearer ${ZENOS_API_KEY}`,
+    };
+    if (activeWorkspaceId) {
+      headers["X-Active-Workspace-Id"] = activeWorkspaceId;
+    }
+    const response = await fetch(`${getDashboardApiBase()}/api/partner/me`, {
+      method: "GET",
+      headers,
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body) {
+      return {
+        ok: false,
+        message: body?.message || `workspace probe failed (${response.status})`,
+      };
+    }
+    const available = Array.isArray(body.availableWorkspaces) ? body.availableWorkspaces : [];
+    const activeId = typeof body.activeWorkspaceId === "string" ? body.activeWorkspaceId : "";
+    const activeWorkspace =
+      available.find((workspace) => String(workspace?.id || "") === activeId) || null;
+    return {
+      ok: true,
+      partner_id: typeof body.id === "string" ? body.id : "",
+      partner_email: typeof body.email === "string" ? body.email : "",
+      workspace_id: activeId,
+      workspace_name:
+        typeof activeWorkspace?.name === "string"
+          ? activeWorkspace.name
+          : typeof body.displayName === "string"
+            ? body.displayName
+            : "",
+      available_workspaces: available.map((workspace) => ({
+        id: String(workspace?.id || ""),
+        name: String(workspace?.name || ""),
+      })),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      message: error instanceof Error ? error.message : "workspace probe failed",
+    };
+  }
 }
 
 function resolveMcpConfigPath(cwd) {
@@ -655,6 +746,8 @@ const server = createServer(async (req, res) => {
     } catch {
       capability = buildCapabilitySnapshot(DEFAULT_CWD);
     }
+    const requestedWorkspaceId = String(url.searchParams.get("workspace_id") || "").trim();
+    const workspaceProbe = await buildWorkspaceProbe(requestedWorkspaceId || undefined);
     sendJson(
       res,
       200,
@@ -663,6 +756,7 @@ const server = createServer(async (req, res) => {
         sessions: sessions.size,
         running: runtimeState.running.size,
         capability,
+        workspace_probe: workspaceProbe,
       },
       auth.origin
     );
