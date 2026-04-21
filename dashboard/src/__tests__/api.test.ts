@@ -517,6 +517,39 @@ describe("getProjectProgress", () => {
     expect(result.milestones).toEqual([]);
     expect(result.recent_progress.map((item) => item.id)).toEqual(["task-1"]);
   });
+
+  it("normalizes missing milestone arrays on active plans", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      project: {
+        id: "proj-1",
+        name: "Console",
+        type: "product",
+      },
+      active_plans: [
+        {
+          id: "plan-1",
+          goal: "Ship S01",
+          status: "active",
+          owner: "Barry",
+          tasks_summary: { total: 1, by_status: { todo: 1 } },
+          open_count: 1,
+          blocked_count: 0,
+          review_count: 0,
+          overdue_count: 0,
+          updated_at: "2026-04-21T01:00:00+00:00",
+          next_tasks: [],
+        },
+      ],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [],
+    }));
+
+    const result = await getProjectProgress(FAKE_TOKEN, "proj-1");
+
+    expect(result.active_plans[0]?.milestones).toEqual([]);
+    expect(result.active_plans[0]?.next_tasks).toEqual([]);
+  });
 });
 
 // ─── getPartnerMe ───

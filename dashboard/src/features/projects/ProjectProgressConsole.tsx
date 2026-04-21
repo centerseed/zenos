@@ -74,6 +74,7 @@ export function ProjectProgressConsole({
         }}
       >
         <div style={{ display: "grid", gap: 16 }}>
+          <ProjectMilestoneStrip milestones={progress.milestones} />
           <ProjectPlansOverview
             plans={progress.active_plans}
             milestones={progress.milestones}
@@ -101,13 +102,13 @@ export function ProjectProgressConsole({
                 marginBottom: 10,
               }}
             >
-              AI Recap / Continue
+              Product Task Copilot
             </div>
             <div style={{ fontFamily: fontHead, fontSize: 18, color: c.ink, fontWeight: 500 }}>
-              管理層摘要與 continuation prompt
+              直接討論這個專案的 milestone、plan 與 task
             </div>
             <p style={{ fontSize: 12, color: c.inkMuted, margin: "8px 0 14px", lineHeight: 1.6 }}>
-              先產生一份 AI recap，再直接複製到 Claude Code 或 Codex 繼續推進，不需要先進 task 詳情。
+              直接詢問目前在哪個 milestone、哪個 task 卡住、subtask 怎麼拆、下一步先做什麼。需要丟去 Claude Code 或 Codex 再用 continuation prompt。
             </p>
 
             <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -131,10 +132,10 @@ export function ProjectProgressConsole({
             </div>
 
             <label style={{ display: "block", fontSize: 11, color: c.inkMuted, marginBottom: 6 }}>
-              下一步方向
+              討論焦點
             </label>
             <select
-              aria-label="下一步方向"
+              aria-label="討論焦點"
               value={selectedNextStep}
               onChange={(event) => setSelectedNextStep(event.target.value)}
               style={{
@@ -167,7 +168,7 @@ export function ProjectProgressConsole({
                   cursor: "pointer",
                 }}
               >
-                產生 AI recap
+                開始任務討論
               </button>
               <button
                 type="button"
@@ -191,8 +192,8 @@ export function ProjectProgressConsole({
                 : copiedState === "error"
                   ? "複製失敗"
                   : latestRecap
-                    ? "已捕捉最新 AI recap，可直接複製 continuation prompt"
-                    : "尚未產生 AI recap，複製時會使用 fallback recap"}
+                    ? "已捕捉最新 task copilot 回覆，可直接複製 continuation prompt"
+                    : "尚未開始 task 討論，複製時會使用 fallback context"}
             </div>
 
             <div
@@ -205,11 +206,10 @@ export function ProjectProgressConsole({
                 lineHeight: 1.7,
               }}
             >
-              {latestRecap || buildFallbackRecap(progress)}
+              {latestRecap || `目前優先 milestone：${progress.milestones[0]?.name || "none"}。先從下列焦點切入：${selectedNextStep || nextStepOptions[0]?.value || buildFallbackRecap(progress)}`}
             </div>
           </section>
 
-          <ProjectMilestoneStrip milestones={progress.milestones} />
           <ProjectRecentProgress items={progress.recent_progress} />
         </div>
       </div>

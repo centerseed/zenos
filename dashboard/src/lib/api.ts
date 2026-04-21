@@ -257,9 +257,20 @@ export interface ProjectProgressResponse {
 function normalizeProjectProgress(
   response: ProjectProgressResponse
 ): ProjectProgressResponse {
-  const activePlans = (response.active_plans ?? []).filter((plan) => plan.open_count > 0);
+  const activePlans = (response.active_plans ?? [])
+    .map((plan) => ({
+      ...plan,
+      milestones: Array.isArray(plan.milestones) ? plan.milestones : [],
+      next_tasks: Array.isArray(plan.next_tasks) ? plan.next_tasks : [],
+    }))
+    .filter((plan) => plan.open_count > 0);
   const visiblePlanIds = new Set(activePlans.map((plan) => plan.id));
-  const openWorkGroups = (response.open_work_groups ?? []).filter((group) => group.open_count > 0);
+  const openWorkGroups = (response.open_work_groups ?? [])
+    .map((group) => ({
+      ...group,
+      tasks: Array.isArray(group.tasks) ? group.tasks : [],
+    }))
+    .filter((group) => group.open_count > 0);
   const milestones = (response.milestones ?? []).filter((milestone) => milestone.open_count > 0);
   const recentProgress = (response.recent_progress ?? []).filter((item) => {
     if (item.kind !== "plan") return true;

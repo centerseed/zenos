@@ -402,14 +402,15 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     });
     const prompt = entry.build_prompt("");
 
-    expect(prompt).toContain("1. 目前進度到哪裡");
-    expect(prompt).toContain("2. 正在進行的 plans");
-    expect(prompt).toContain("3. 主要 blockers 與風險");
+    expect(prompt).toContain("1. 目前所在 milestone / 階段");
+    expect(prompt).toContain("2. 正在進行的 plans 與 task 結構");
+    expect(prompt).toContain("3. blockers、風險與卡點");
     expect(prompt).toContain("4. 建議下一步");
-    expect(prompt).toContain("5. 需要使用者決策的點");
+    expect(prompt).toContain("5. 如果需要，直接回答使用者對 task / subtask / plan 的操作問題");
     expect(entry.context_pack.active_plans).toBeTruthy();
     expect(entry.context_pack.requested_next_step).toBe("Ship grouped open work");
-    expect(entry.context_pack.open_work_groups).toBeUndefined();
+    expect(entry.context_pack.open_work_groups).toBeTruthy();
+    expect(entry.context_pack.milestones).toBeTruthy();
   });
 
   it("AC-PPC-08: Given 產品目前無 active plan 或 open work 很少 When 觸發 AI recap Then AI 仍必須回覆當前狀態與下一步建議，不得只回傳「無資料」", async function acPpc08AiRecapHandlesSparseState() {
@@ -473,7 +474,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "產生 AI recap" }));
+    fireEvent.click(screen.getByRole("button", { name: "開始任務討論" }));
     fireEvent.click(await screen.findByRole("button", { name: "deliver-mock-recap" }));
     fireEvent.click(screen.getByRole("button", { name: "複製 continuation prompt" }));
 
@@ -506,6 +507,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     fireEvent.click(await screen.findByRole("button", { name: /ZenOS/ }));
 
     expect(await screen.findByTestId("project-progress-console")).toBeInTheDocument();
+    expect(screen.getByTestId("project-milestone-strip")).toBeInTheDocument();
     expect(screen.getByTestId("project-plans-overview")).toBeInTheDocument();
     expect(screen.getByTestId("project-open-work-panel")).toBeInTheDocument();
     expect(screen.getByTestId("project-recap-card")).toBeInTheDocument();

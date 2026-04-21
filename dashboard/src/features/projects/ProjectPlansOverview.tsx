@@ -442,7 +442,7 @@ export function ProjectPlansOverview({
           marginBottom: 14,
         }}
       >
-        Milestones → Current Plans
+        Milestones → Plans → Task Breakdown
       </div>
 
       {plans.length === 0 ? (

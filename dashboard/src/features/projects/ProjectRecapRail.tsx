@@ -106,8 +106,8 @@ export function ProjectRecapRail({
           onRetry={() => void retry()}
           hasStructuredResult={false}
           canSendEmpty
-          sendLabel={messages.length === 0 ? "產生 recap" : "續問"}
-          placeholder="補充你要 AI 強調的決策點，或直接送出產生 recap"
+          sendLabel={messages.length === 0 ? "開始討論" : "送出"}
+          placeholder="直接問這個 product 的 milestone、plan、task、subtask、blocker 或下一步"
         />
       }
     >
@@ -115,8 +115,8 @@ export function ProjectRecapRail({
         messages={visibleMessages}
         streamingText={streamingText}
         isStreaming={status === "loading" || status === "streaming"}
-        emptyStateTitle="Product Progress Recap"
-        emptyStateDescription="產生一份可決策的 recap，整理 plans、blockers、下一步與待決策點。"
+        emptyStateTitle="Product Task Copilot"
+        emptyStateDescription="直接討論這個 product 的 milestone、plans、tasks、subtasks、blockers 與下一步。"
       />
       {rawTranscript ? (
         <div className="mt-3 rounded-[2px] border border-border/30 bg-card">

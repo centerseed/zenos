@@ -21,6 +21,30 @@ function serializePlans(progress: ProjectProgressResponse) {
   }));
 }
 
+function serializeOpenWork(progress: ProjectProgressResponse) {
+  return progress.open_work_groups.map((group) => ({
+    plan_goal: group.plan_goal,
+    plan_status: group.plan_status,
+    open_count: group.open_count,
+    blocked_count: group.blocked_count,
+    review_count: group.review_count,
+    overdue_count: group.overdue_count,
+    tasks: group.tasks.map((task) => ({
+      title: task.title,
+      status: task.status,
+      blocked: task.blocked,
+      blocked_reason: task.blocked_reason,
+      overdue: task.overdue,
+      subtasks: task.subtasks.map((subtask) => ({
+        title: subtask.title,
+        status: subtask.status,
+        blocked: subtask.blocked,
+        overdue: subtask.overdue,
+      })),
+    })),
+  }));
+}
+
 export function buildProjectRecapEntry(options: {
   progress: ProjectProgressResponse;
   preset: ProjectAgentPreset;
@@ -32,8 +56,8 @@ export function buildProjectRecapEntry(options: {
 
   return {
     intent_id: `project-progress-${preset}`,
-    title: "AI Recap",
-    description: "Summarize the current product progress and suggest the next decision.",
+    title: "Task Copilot",
+    description: "Discuss this product's milestones, plans, tasks, blockers, and next actions.",
     mode: "artifact",
     launch_behavior: "manual",
     session_policy: "scoped_resume",
@@ -70,21 +94,27 @@ export function buildProjectRecapEntry(options: {
         name: progress.project.name,
         summary: progress.project.summary,
       },
+      milestones: progress.milestones.map((milestone) => ({
+        id: milestone.id,
+        name: milestone.name,
+        open_count: milestone.open_count,
+      })),
       active_plans: serializePlans(progress),
+      open_work_groups: serializeOpenWork(progress),
       requested_next_step: nextStep,
       fallback_recap: fallback,
     },
     build_prompt: () =>
       [
-        `Prepare a ${preset === "claude_code" ? "Claude Code" : "Codex"}-ready project recap for ${progress.project.name}.`,
-        "Treat the provided context as a plan-level snapshot, not a full task dump.",
+        `You are acting as the task copilot for ${progress.project.name} in ${preset === "claude_code" ? "Claude Code" : "Codex"}.`,
+        "Treat the provided context as the current milestone / plan / task snapshot for this product.",
         "Your output must cover these sections in order:",
-        "1. 目前進度到哪裡",
-        "2. 正在進行的 plans",
-        "3. 主要 blockers 與風險",
+        "1. 目前所在 milestone / 階段",
+        "2. 正在進行的 plans 與 task 結構",
+        "3. blockers、風險與卡點",
         "4. 建議下一步",
-        "5. 需要使用者決策的點",
-        "Keep it concise but decision-oriented. Do not dump raw tasks without synthesis.",
+        "5. 如果需要，直接回答使用者對 task / subtask / plan 的操作問題",
+        "Keep it concise and execution-oriented. Do not turn this into a management recap unless the user explicitly asks for one.",
         "If you need task governance detail or task-level evidence, use ZenOS MCP to fetch it and follow ZenOS task governance rules when reasoning about mutations.",
         "If the user asks to create or update work items, place them at the correct layer: plan vs task vs subtask, instead of flattening everything into tasks.",
         `Use this selected next step as the default recommendation unless the context clearly points to a better one: ${nextStep}.`,
