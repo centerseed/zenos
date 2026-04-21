@@ -1844,7 +1844,7 @@ async def get_project_progress(request: Request) -> Response:
                 "tasks": task_tree,
             })
 
-        if plan_payload and plan_status == "active":
+        if plan_payload and plan_status == "active" and counts["open_count"] > 0:
             top_level_tasks = [
                 task for task in open_tasks
                 if not task.parent_task_id or task.parent_task_id not in {candidate.id for candidate in open_tasks if candidate.id}
