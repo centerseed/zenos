@@ -189,6 +189,7 @@ export interface ProjectProgressTaskSummary {
   title: string;
   status: string;
   priority: string;
+  plan_order: number | null;
   assignee_name: string | null;
   due_date: Date | null;
   overdue: boolean;

@@ -1010,6 +1010,8 @@ def _progress_task_is_overdue(task: Task, now: datetime) -> bool:
 
 
 def _progress_task_sort_key(task: Task, now: datetime) -> tuple[int, float, float]:
+    if task.plan_order is not None:
+        return (-1000 + task.plan_order, 0.0, 0.0)
     rank = 4
     if _progress_task_is_blocked(task):
         rank = 0
@@ -1034,6 +1036,7 @@ def _build_progress_task_summary(
         "title": task.title,
         "status": _progress_task_status(task.status),
         "priority": task.priority,
+        "plan_order": task.plan_order,
         "assignee_name": task.assignee_name,
         "due_date": task.due_date,
         "overdue": _progress_task_is_overdue(task, now),
@@ -1750,7 +1753,6 @@ async def list_plans(request: Request) -> Response:
         current_partner_id.reset(token)
 
     return _json_response({"plans": plans}, request=request)
-
 
 # ──────────────────────────────────────────────
 # Endpoint: GET /api/data/projects/{id}/progress

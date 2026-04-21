@@ -1,7 +1,13 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useInk } from "@/lib/zen-ink/tokens";
-import type { ProjectProgressMilestone, ProjectProgressPlanSummary } from "@/features/projects/types";
+import type {
+  ProjectProgressMilestone,
+  ProjectProgressOpenWorkGroup,
+  ProjectProgressPlanSummary,
+  ProjectProgressTaskSummary,
+} from "@/features/projects/types";
 
 function formatShortDate(value: Date | null | undefined): string {
   if (!value) return "—";
@@ -72,9 +78,198 @@ function buildPlanGroups(
   return { groupedMilestones, unassignedPlans };
 }
 
-function PlanCard({ plan }: { plan: ProjectProgressPlanSummary }) {
+function formatOrder(task: ProjectProgressTaskSummary, fallbackIndex: number) {
+  const value = task.plan_order ?? fallbackIndex + 1;
+  return String(value).padStart(2, "0");
+}
+
+function statusTone(task: ProjectProgressTaskSummary) {
+  if (task.blocked) return "danger";
+  if (task.status === "review") return "warning";
+  if (task.overdue) return "danger";
+  if (task.status === "in_progress") return "active";
+  return "neutral";
+}
+
+function TaskRiskPill({
+  label,
+  tone,
+}: {
+  label: string;
+  tone: "danger" | "warning" | "active" | "neutral";
+}) {
+  const t = useInk("light");
+  const { c } = t;
+  const palette = {
+    danger: { border: c.vermLine, background: c.vermSoft, color: c.vermillion },
+    warning: {
+      border: "rgba(180, 132, 50, 0.28)",
+      background: "rgba(180, 132, 50, 0.10)",
+      color: c.ocher,
+    },
+    active: {
+      border: "rgba(95, 122, 69, 0.24)",
+      background: "rgba(95, 122, 69, 0.08)",
+      color: c.jade,
+    },
+    neutral: { border: c.inkHairBold, background: c.surface, color: c.inkMuted },
+  } as const;
+  const current = palette[tone];
+
+  return (
+    <span
+      style={{
+        border: `1px solid ${current.border}`,
+        background: current.background,
+        color: current.color,
+        padding: "3px 8px",
+        fontSize: 10,
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
+function TaskSubtaskList({ subtasks }: { subtasks: ProjectProgressTaskSummary[] }) {
+  const t = useInk("light");
+  const { c, fontMono } = t;
+
+  return (
+    <div data-testid="plan-subtask-list" style={{ display: "grid", gap: 8, marginTop: 12 }}>
+      {subtasks.map((subtask, index) => (
+        <div
+          key={subtask.id}
+          data-testid="plan-subtask-item"
+          style={{
+            display: "grid",
+            gridTemplateColumns: "48px minmax(0, 1fr)",
+            gap: 10,
+            borderTop: `1px solid ${c.inkHair}`,
+            paddingTop: 10,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: fontMono,
+              fontSize: 10,
+              color: c.inkFaint,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+            }}
+          >
+            {formatOrder(subtask, index)}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: c.ink, fontWeight: 500 }}>{subtask.title}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+              <TaskRiskPill label={subtask.status} tone={statusTone(subtask)} />
+              {subtask.blocked ? <TaskRiskPill label="blocked" tone="danger" /> : null}
+              {subtask.overdue ? <TaskRiskPill label="overdue" tone="danger" /> : null}
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PlanTaskRow({
+  task,
+  fallbackIndex,
+}: {
+  task: ProjectProgressTaskSummary;
+  fallbackIndex: number;
+}) {
+  const t = useInk("light");
+  const { c, fontMono } = t;
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      data-testid="plan-task-row"
+      style={{
+        border: `1px solid ${c.inkHair}`,
+        background: c.surface,
+      }}
+    >
+      <button
+        type="button"
+        data-testid="plan-task-toggle"
+        onClick={() => setOpen((value) => !value)}
+        style={{
+          width: "100%",
+          display: "grid",
+          gridTemplateColumns: "52px minmax(0, 1fr) auto",
+          gap: 12,
+          padding: "14px 16px",
+          textAlign: "left",
+          border: "none",
+          background: "transparent",
+          cursor: task.subtasks.length > 0 ? "pointer" : "default",
+        }}
+      >
+        <div
+          style={{
+            fontFamily: fontMono,
+            fontSize: 10,
+            color: c.inkFaint,
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+            paddingTop: 2,
+          }}
+        >
+          {formatOrder(task, fallbackIndex)}
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 14, color: c.ink, fontWeight: 500 }}>{task.title}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            <TaskRiskPill label={task.status} tone={statusTone(task)} />
+            {task.blocked ? <TaskRiskPill label="blocked" tone="danger" /> : null}
+            {task.overdue ? <TaskRiskPill label="overdue" tone="danger" /> : null}
+            {task.subtasks.length > 0 ? (
+              <TaskRiskPill
+                label={`${task.subtasks.length} subtask${task.subtasks.length > 1 ? "s" : ""}`}
+                tone="neutral"
+              />
+            ) : null}
+          </div>
+        </div>
+        <div
+          style={{
+            fontFamily: fontMono,
+            fontSize: 10,
+            color: c.inkFaint,
+            letterSpacing: "0.12em",
+            textTransform: "uppercase",
+            whiteSpace: "nowrap",
+            alignSelf: "center",
+          }}
+        >
+          {task.subtasks.length > 0 ? (open ? "Hide" : "Open") : "Task"}
+        </div>
+      </button>
+      {open && task.subtasks.length > 0 ? (
+        <div style={{ padding: "0 16px 14px 16px" }}>
+          <TaskSubtaskList subtasks={task.subtasks} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function PlanCard({
+  plan,
+  taskGroup,
+}: {
+  plan: ProjectProgressPlanSummary;
+  taskGroup?: ProjectProgressOpenWorkGroup;
+}) {
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
+  const topLevelTasks = taskGroup?.tasks ?? [];
 
   return (
     <article
@@ -161,6 +356,27 @@ function PlanCard({ plan }: { plan: ProjectProgressPlanSummary }) {
           </div>
         ))}
       </div>
+
+      {topLevelTasks.length > 0 ? (
+        <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
+          <div
+            style={{
+              fontFamily: fontMono,
+              fontSize: 10,
+              color: c.inkFaint,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+            }}
+          >
+            Task Breakdown
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {topLevelTasks.map((task, index) => (
+              <PlanTaskRow key={task.id} task={task} fallbackIndex={index} />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -168,13 +384,19 @@ function PlanCard({ plan }: { plan: ProjectProgressPlanSummary }) {
 export function ProjectPlansOverview({
   plans,
   milestones,
+  groups,
 }: {
   plans: ProjectProgressPlanSummary[];
   milestones: ProjectProgressMilestone[];
+  groups: ProjectProgressOpenWorkGroup[];
 }) {
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
   const { groupedMilestones, unassignedPlans } = buildPlanGroups(plans, milestones);
+  const groupsByPlan = useMemo(
+    () => new Map(groups.map((group) => [group.plan_id || "", group])),
+    [groups],
+  );
 
   return (
     <section
@@ -248,7 +470,7 @@ export function ProjectPlansOverview({
 
               <div style={{ display: "grid", gap: 12 }}>
                 {bucket.plans.map((plan) => (
-                  <PlanCard key={plan.id} plan={plan} />
+                  <PlanCard key={plan.id} plan={plan} taskGroup={groupsByPlan.get(plan.id)} />
                 ))}
               </div>
             </section>
@@ -258,23 +480,36 @@ export function ProjectPlansOverview({
             <section
               data-testid="plan-milestone-group-unassigned"
               style={{
-                border: `1px dashed ${c.inkHairBold}`,
-                background: c.paperWarm,
+                border: `1px solid ${c.inkHair}`,
+                background: c.surface,
                 padding: 16,
               }}
             >
-              <div style={{ marginBottom: 12 }}>
-                <div style={{ fontFamily: fontHead, fontSize: 20, color: c.ink, fontWeight: 500 }}>
-                  未綁 milestone
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontFamily: fontHead, fontSize: 20, color: c.ink, fontWeight: 500 }}>
+                    Unassigned
+                  </div>
+                  <div style={{ fontSize: 11, color: c.inkMuted, marginTop: 4 }}>
+                    尚未對齊 milestone 的 plans
+                  </div>
                 </div>
-                <div style={{ fontSize: 11, color: c.inkMuted, marginTop: 4 }}>
-                  這些 plan 還沒有掛到明確階段
+                <div
+                  style={{
+                    fontFamily: fontMono,
+                    fontSize: 10,
+                    color: c.inkFaint,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  Plan
                 </div>
               </div>
-
               <div style={{ display: "grid", gap: 12 }}>
                 {unassignedPlans.map((plan) => (
-                  <PlanCard key={plan.id} plan={plan} />
+                  <PlanCard key={plan.id} plan={plan} taskGroup={groupsByPlan.get(plan.id)} />
                 ))}
               </div>
             </section>

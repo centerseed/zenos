@@ -1284,6 +1284,7 @@ class TestGetProjectProgress:
         blocked_task.blocked_by = ["dep-1"]
         blocked_task.blocked_reason = "Waiting on shared schema"
         blocked_task.updated_at = datetime(2026, 4, 20, 8, 0, tzinfo=timezone.utc)
+        blocked_task.plan_order = 2
 
         review_task = _make_task("task-2")
         review_task.title = "Review API contract"
@@ -1291,6 +1292,7 @@ class TestGetProjectProgress:
         review_task.plan_id = "plan-1"
         review_task.linked_entities = ["proj-1", "goal-1"]
         review_task.updated_at = datetime(2026, 4, 19, 8, 0, tzinfo=timezone.utc)
+        review_task.plan_order = 3
 
         parent_task = _make_task("task-3")
         parent_task.title = "Finish client contract"
@@ -1299,6 +1301,7 @@ class TestGetProjectProgress:
         parent_task.linked_entities = ["proj-1", "goal-1"]
         parent_task.due_date = datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc)
         parent_task.updated_at = datetime(2026, 4, 18, 8, 0, tzinfo=timezone.utc)
+        parent_task.plan_order = 1
 
         subtask = _make_task("task-4")
         subtask.title = "Write TS types"
@@ -1307,6 +1310,7 @@ class TestGetProjectProgress:
         subtask.parent_task_id = "task-3"
         subtask.linked_entities = ["proj-1", "goal-1"]
         subtask.updated_at = datetime(2026, 4, 21, 8, 0, tzinfo=timezone.utc)
+        subtask.plan_order = 4
 
         async def list_all_side_effect(**kwargs):
             if kwargs.get("linked_entity") == "proj-1":
@@ -1345,12 +1349,14 @@ class TestGetProjectProgress:
         assert body["active_plans"][0]["blocked_count"] == 1
         assert body["active_plans"][0]["review_count"] == 1
         assert body["active_plans"][0]["overdue_count"] == 1
-        assert [task["id"] for task in body["active_plans"][0]["next_tasks"]] == ["task-1", "task-2", "task-3"]
+        assert [task["id"] for task in body["active_plans"][0]["next_tasks"]] == ["task-3", "task-1", "task-2"]
+        assert body["active_plans"][0]["next_tasks"][0]["plan_order"] == 1
 
         assert body["open_work_groups"][0]["plan_id"] == "plan-1"
         assert body["open_work_groups"][0]["plan_goal"] == "Ship S01 aggregate"
-        assert [task["id"] for task in body["open_work_groups"][0]["tasks"]] == ["task-1", "task-2", "task-3"]
-        assert body["open_work_groups"][0]["tasks"][2]["subtasks"][0]["id"] == "task-4"
+        assert [task["id"] for task in body["open_work_groups"][0]["tasks"]] == ["task-3", "task-1", "task-2"]
+        assert body["open_work_groups"][0]["tasks"][0]["subtasks"][0]["id"] == "task-4"
+        assert body["open_work_groups"][0]["tasks"][0]["subtasks"][0]["plan_order"] == 4
 
         assert body["milestones"] == [
             {"id": "goal-1", "name": "Milestone Alpha", "open_count": 4}

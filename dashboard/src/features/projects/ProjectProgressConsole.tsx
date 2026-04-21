@@ -77,6 +77,7 @@ export function ProjectProgressConsole({
           <ProjectPlansOverview
             plans={progress.active_plans}
             milestones={progress.milestones}
+            groups={progress.open_work_groups}
           />
           <ProjectOpenWorkPanel groups={progress.open_work_groups} onOpenTasks={onOpenTasks} />
         </div>

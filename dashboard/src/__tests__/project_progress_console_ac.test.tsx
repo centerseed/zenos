@@ -91,6 +91,7 @@ function makeTaskSummary(
     title: overrides.title ?? "Prepare API contract",
     status: overrides.status ?? "todo",
     priority: overrides.priority ?? "medium",
+    plan_order: overrides.plan_order ?? null,
     assignee_name: overrides.assignee_name ?? "Avery",
     due_date: overrides.due_date ?? new Date("2026-04-21T00:00:00Z"),
     overdue: overrides.overdue ?? false,
@@ -125,6 +126,7 @@ function makePlanSummary(
         makeTaskSummary({
           id: "task-next-1",
           title: "Ship grouped open work",
+          plan_order: 2,
         }),
       ],
   };
@@ -134,6 +136,7 @@ function makeProgressFixture(): ProjectProgressResponse {
   const parentTask = makeTaskSummary({
     id: "task-parent-1",
     title: "Ship grouped open work",
+    plan_order: 2,
     status: "review",
     overdue: true,
     subtasks: [
@@ -141,6 +144,7 @@ function makeProgressFixture(): ProjectProgressResponse {
         id: "task-sub-1",
         title: "Render nested subtasks",
         status: "todo",
+        plan_order: 5,
         parent_task_id: "task-parent-1",
       }),
     ],
@@ -148,6 +152,7 @@ function makeProgressFixture(): ProjectProgressResponse {
   const blockedTask = makeTaskSummary({
     id: "task-blocked-1",
     title: "Resolve API edge case",
+    plan_order: 1,
     blocked: true,
     blocked_reason: "Waiting for aggregate contract",
   });
@@ -282,7 +287,13 @@ describe("SPEC-project-progress-console acceptance tests", () => {
   });
 
   it("AC-PPC-01: Given 某產品底下有兩個 active plans When 使用者進入 /projects/[id] Then 第一層可見區域必須直接顯示這兩個 plans，而不是只顯示 task 摘要或空態", async function acPpc01ActivePlansFirstFold() {
-    render(<ProjectPlansOverview plans={makeProgressFixture().active_plans} milestones={makeProgressFixture().milestones} />);
+    render(
+      <ProjectPlansOverview
+        plans={makeProgressFixture().active_plans}
+        milestones={makeProgressFixture().milestones}
+        groups={makeProgressFixture().open_work_groups}
+      />
+    );
 
     const cards = screen.getAllByTestId("plan-card");
     expect(cards).toHaveLength(2);
@@ -295,12 +306,14 @@ describe("SPEC-project-progress-console acceptance tests", () => {
       <ProjectPlansOverview
         plans={[makeProgressFixture().active_plans[0]]}
         milestones={[makeProgressFixture().milestones[0]]}
+        groups={[makeProgressFixture().open_work_groups[0]]}
       />
     );
     const card = screen.getByTestId("plan-card");
+    const metrics = within(card).getAllByText("Open");
 
     expect(within(card).getByText("Launch project progress console")).toBeInTheDocument();
-    expect(within(card).getByText("Open")).toBeInTheDocument();
+    expect(metrics.length).toBeGreaterThan(0);
     expect(within(card).getByText("Blocked")).toBeInTheDocument();
     expect(within(card).getByText("Review")).toBeInTheDocument();
     expect(within(card).getByText("Overdue")).toBeInTheDocument();
@@ -310,7 +323,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
   });
 
   it("AC-PPC-03: Given 某產品沒有任何 active plan When 進入 /projects/[id] Then 畫面必須明確顯示「目前沒有進行中的 plan」空態，而不是只剩空白 task 區", async function acPpc03NoActivePlanEmptyState() {
-    render(<ProjectPlansOverview plans={[]} milestones={[]} />);
+    render(<ProjectPlansOverview plans={[]} milestones={[]} groups={[]} />);
 
     expect(screen.getByText("目前沒有進行中的 plan")).toBeInTheDocument();
   });
@@ -356,6 +369,27 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(screen.getAllByText("overdue").length).toBeGreaterThan(0);
   });
 
+  it("AC-PPC-06A: Given task 帶 plan_order 與 subtasks When 查看 Current Plans Then 必須顯示順序編號與可展開 subtask 清單", async function acPpc06aPlanOrderAndSubtasksInPlanCard() {
+    const progress = makeProgressFixture();
+    render(
+      <ProjectPlansOverview
+        plans={[progress.active_plans[0]]}
+        milestones={[progress.milestones[0]]}
+        groups={[progress.open_work_groups[0]]}
+      />
+    );
+
+    const row = screen.getByTestId("plan-task-row");
+    expect(within(row).getByText("02")).toBeInTheDocument();
+    expect(within(row).getByText("1 subtask")).toBeInTheDocument();
+
+    fireEvent.click(within(row).getByTestId("plan-task-toggle"));
+
+    expect(screen.getByTestId("plan-subtask-list")).toBeInTheDocument();
+    expect(screen.getByText("Render nested subtasks")).toBeInTheDocument();
+    expect(screen.getByText("05")).toBeInTheDocument();
+  });
+
   it("AC-PPC-07: Given 某產品有 active plans、未完成 task 與 blocker When 使用者觸發 AI recap Then AI 輸出必須同時涵蓋進度、plans、blockers、建議下一步與待決策點", async function acPpc07AiRecapContract() {
     const entry = buildProjectRecapEntry({
       progress: makeProgressFixture(),
@@ -370,7 +404,8 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(prompt).toContain("4. 建議下一步");
     expect(prompt).toContain("5. 需要使用者決策的點");
     expect(entry.context_pack.active_plans).toBeTruthy();
-    expect(entry.context_pack.open_work_groups).toBeTruthy();
+    expect(entry.context_pack.requested_next_step).toBe("Ship grouped open work");
+    expect(entry.context_pack.open_work_groups).toBeUndefined();
   });
 
   it("AC-PPC-08: Given 產品目前無 active plan 或 open work 很少 When 觸發 AI recap Then AI 仍必須回覆當前狀態與下一步建議，不得只回傳「無資料」", async function acPpc08AiRecapHandlesSparseState() {
@@ -499,7 +534,13 @@ describe("SPEC-project-progress-console acceptance tests", () => {
 
   it("AC-PPC-13: Given 某產品底下的 open work 連到不同 milestone When 查看產品頁 Then 使用者必須能辨識目前主要工作落在哪個 milestone 或階段，而不是只看到無脈絡的 plan/task", async function acPpc13MilestoneStageVisible() {
     const progress = makeProgressFixture();
-    render(<ProjectPlansOverview plans={progress.active_plans} milestones={progress.milestones} />);
+    render(
+      <ProjectPlansOverview
+        plans={progress.active_plans}
+        milestones={progress.milestones}
+        groups={progress.open_work_groups}
+      />
+    );
 
     const groups = screen.getAllByTestId("plan-milestone-group");
     expect(groups).toHaveLength(2);

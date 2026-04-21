@@ -420,6 +420,7 @@ describe("getProjectProgress", () => {
               title: "Backend aggregate",
               status: "blocked",
               priority: "high",
+              plan_order: 2,
               assignee_name: "Dev",
               due_date: "2026-04-20T00:00:00+00:00",
               overdue: true,
@@ -448,6 +449,7 @@ describe("getProjectProgress", () => {
     const result = await getProjectProgress(FAKE_TOKEN, "proj-1");
     expect(result.active_plans[0]?.updated_at).toBeInstanceOf(Date);
     expect(result.active_plans[0]?.next_tasks[0]?.due_date).toBeInstanceOf(Date);
+    expect(result.active_plans[0]?.next_tasks[0]?.plan_order).toBe(2);
     expect(result.recent_progress[0]?.updated_at).toBeInstanceOf(Date);
     expect(result.project.updatedAt).toBeInstanceOf(Date);
   });
