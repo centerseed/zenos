@@ -57,9 +57,9 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
 
   if (assignees.length === 0) {
     return (
-      <div className="bg-card rounded-lg border border-border p-6">
+      <div className="bg-panel rounded-lg border bd-hair p-6">
         <h3 className="text-sm font-semibold text-white mb-4">People x Products</h3>
-        <p className="text-sm text-muted-foreground text-center py-4">No tasks assigned yet</p>
+        <p className="text-sm text-dim text-center py-4">No tasks assigned yet</p>
       </div>
     );
   }
@@ -71,24 +71,24 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
   }
 
   return (
-    <div className="bg-card rounded-lg border border-border p-6">
+    <div className="bg-panel rounded-lg border bd-hair p-6">
       <h3 className="text-sm font-semibold text-white mb-4">People x Products</h3>
       <div className="overflow-x-auto">
         <table className="w-full">
           <thead>
             <tr>
-              <th className="text-left text-xs font-medium text-muted-foreground pb-3 pr-4">
+              <th className="text-left text-xs font-medium text-dim pb-3 pr-4">
                 Person
               </th>
               {entities.map((e) => (
                 <th
                   key={e.id}
-                  className="text-left text-xs font-medium text-muted-foreground pb-3 px-3"
+                  className="text-left text-xs font-medium text-dim pb-3 px-3"
                 >
                   {e.name}
                 </th>
               ))}
-              <th className="text-right text-xs font-medium text-muted-foreground pb-3 pl-4">
+              <th className="text-right text-xs font-medium text-dim pb-3 pl-4">
                 Summary
               </th>
             </tr>
@@ -102,7 +102,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
               ).length;
 
               return (
-                <tr key={assignee} className="border-t border-border">
+                <tr key={assignee} className="border-t bd-hair">
                   <td className="py-3 pr-4 text-sm font-medium text-foreground whitespace-nowrap">
                     {displayName(assignee)}
                   </td>
@@ -131,8 +131,8 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                       (t) => t.status === "done" || t.status === "cancelled"
                     );
 
-                    let cellBg = "bg-card";
-                    let cellBorder = "border border-border";
+                    let cellBg = "bg-panel";
+                    let cellBorder = "border bd-hair";
                     if (isOverdue) {
                       cellBorder = "border-2 border-orange-600";
                     } else if (allDone) {
@@ -153,7 +153,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                               />
                             ))}
                             {activeCount > 5 && (
-                              <span className="text-xs text-muted-foreground">+{activeCount - 5}</span>
+                              <span className="text-xs text-dim">+{activeCount - 5}</span>
                             )}
                           </div>
                           {highestStatus && (
@@ -167,7 +167,7 @@ export function PeopleMatrix({ tasks, entities, partners }: PeopleMatrixProps) {
                       </td>
                     );
                   })}
-                  <td className="py-3 pl-4 text-right text-xs text-muted-foreground whitespace-nowrap">
+                  <td className="py-3 pl-4 text-right text-xs text-dim whitespace-nowrap">
                     done {doneCount} / left {remaining}
                   </td>
                 </tr>

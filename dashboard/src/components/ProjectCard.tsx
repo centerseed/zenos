@@ -15,7 +15,7 @@ const statusColors: Record<string, string> = {
   active: "bg-green-900/50 text-green-400",
   paused: "bg-yellow-900/50 text-yellow-400",
   planned: "bg-blue-900/50 text-blue-400",
-  completed: "bg-secondary text-muted-foreground",
+  completed: "bg-soft text-dim",
 };
 
 export function ProjectCard({ entity, moduleCount }: ProjectCardProps) {
@@ -26,7 +26,7 @@ export function ProjectCard({ entity, moduleCount }: ProjectCardProps) {
         <div className="px-4 pt-4">
           <div className="flex items-start justify-between mb-1">
             <h3 className="text-lg font-semibold text-foreground">{entity.name}</h3>
-            <span className={statusColors[entity.status] ?? "text-muted-foreground"}>
+            <span className={statusColors[entity.status] ?? "text-dim"}>
               <Chip t={t} tone="muted">
               {entity.status}
               </Chip>
@@ -34,10 +34,10 @@ export function ProjectCard({ entity, moduleCount }: ProjectCardProps) {
           </div>
         </div>
         <div className="px-4">
-          <p className="text-muted-foreground text-sm mb-4 line-clamp-2">
+          <p className="text-dim text-sm mb-4 line-clamp-2">
             {entity.summary}
           </p>
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-4 text-xs text-dim">
           <span>{moduleCount} modules</span>
           <span>
             Updated{" "}

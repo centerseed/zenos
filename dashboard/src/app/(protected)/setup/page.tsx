@@ -204,8 +204,8 @@ node server.mjs`;
         className="mx-auto max-w-3xl space-y-6 px-4 py-8 sm:px-6"
       >
         {/* Section 1 — 選擇平台 */}
-        <section className="rounded-[28px] border border-border bg-card p-6">
-          <p className="text-xs uppercase tracking-[0.26em] text-muted-foreground">
+        <section className="rounded-[28px] border bd-hair bg-panel p-6">
+          <p className="text-xs uppercase tracking-[0.26em] text-dim">
             開始安裝
           </p>
           <h1 className="mt-2 text-2xl font-semibold text-foreground">
@@ -221,7 +221,7 @@ node server.mjs`;
                   className={`rounded-full border px-4 py-2 text-sm transition-colors ${
                     active
                       ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-100"
-                      : "border-border bg-background/70 text-muted-foreground hover:text-foreground"
+                      : "bd-hair bg-base text-dim hover:text-foreground"
                   }`}
                 >
                   {p.name}
@@ -232,15 +232,15 @@ node server.mjs`;
         </section>
 
         {/* Section 2 — Step 1: MCP 連結 */}
-        <section className="rounded-[28px] border border-border bg-card p-6">
-          <p className="text-xs uppercase tracking-[0.26em] text-muted-foreground">
+        <section className="rounded-[28px] border bd-hair bg-panel p-6">
+          <p className="text-xs uppercase tracking-[0.26em] text-dim">
             Step 1
           </p>
           <h2 className="mt-2 text-xl font-semibold text-foreground">
             複製你的 MCP 連結
           </h2>
 
-          <div className="mt-5 rounded-2xl border border-border bg-[#0f1418] p-4">
+          <div className="mt-5 rounded-zen border bd-hair bg-[#0f1418] p-4">
             <div className="flex items-start justify-between gap-3">
               <p
                 data-testid="mcp-url-display"
@@ -265,7 +265,7 @@ node server.mjs`;
             </div>
           </div>
 
-          <p className="mt-3 text-xs text-muted-foreground">
+          <p className="mt-3 text-xs text-dim">
             {platform.useSSE
               ? "此平台使用 SSE 協議 (/sse)。"
               : "此平台使用 Streamable HTTP 協議 (/mcp)。"}
@@ -273,15 +273,15 @@ node server.mjs`;
         </section>
 
         {/* Section 3 — Step 2: 貼給 AI 的指令 */}
-        <section className="rounded-[28px] border border-border bg-card p-6">
-          <p className="text-xs uppercase tracking-[0.26em] text-muted-foreground">
+        <section className="rounded-[28px] border bd-hair bg-panel p-6">
+          <p className="text-xs uppercase tracking-[0.26em] text-dim">
             Step 2
           </p>
           <h2 className="mt-2 text-xl font-semibold text-foreground">
             複製以下指令，貼到你的 AI 工具
           </h2>
 
-          <div className="mt-5 rounded-2xl border border-border bg-[#0f1418] p-4">
+          <div className="mt-5 rounded-zen border bd-hair bg-[#0f1418] p-4">
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
                 安裝指令
@@ -303,20 +303,20 @@ node server.mjs`;
         </section>
 
         {/* Section — Dashboard AI Helper (optional) */}
-        <section className="rounded-[28px] border border-border bg-card p-6">
-          <p className="text-xs uppercase tracking-[0.26em] text-muted-foreground">
+        <section className="rounded-[28px] border bd-hair bg-panel p-6">
+          <p className="text-xs uppercase tracking-[0.26em] text-dim">
             選用
           </p>
           <h2 className="mt-2 text-xl font-semibold text-foreground">
             Dashboard AI 功能
           </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 text-sm text-dim">
             讓 Dashboard 的行銷和 CRM 模組直接與 AI 對話。需要 Node.js 和
             Claude Code CLI。如果只用 CLI 不需要安裝。
           </p>
 
           {/* Step A: 啟動指令 */}
-          <div className="mt-5 rounded-2xl border border-border bg-[#0f1418] p-4">
+          <div className="mt-5 rounded-zen border bd-hair bg-[#0f1418] p-4">
             <div className="flex items-center justify-between gap-3">
               <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
                 在 Terminal 執行
@@ -332,7 +332,7 @@ node server.mjs`;
               {helperCommand}
             </pre>
           </div>
-          <p className="mt-2 text-xs text-muted-foreground">
+          <p className="mt-2 text-xs text-dim">
             路徑 <code className="text-slate-400">~/clients/ZenOS/tools/claude-cowork-helper</code>{" "}
             可能需要根據你的安裝位置調整。
           </p>
@@ -350,7 +350,7 @@ node server.mjs`;
                 className={`text-sm ${
                   helperStatus === "ok"
                     ? "text-emerald-400"
-                    : "text-muted-foreground"
+                    : "text-dim"
                 }`}
               >
                 {helperStatus === "ok" ? "已設定" : "已設定"}
@@ -360,9 +360,9 @@ node server.mjs`;
 
           {/* Step C: 連線狀態 */}
           {helperConfigured && (
-            <div className="mt-4 rounded-2xl border border-border bg-background/70 p-4">
+            <div className="mt-4 rounded-zen border bd-hair bg-base p-4">
               {helperStatus === "checking" && (
-                <span className="text-sm text-muted-foreground">
+                <span className="text-sm text-dim">
                   正在檢查連線...
                 </span>
               )}
@@ -381,8 +381,8 @@ node server.mjs`;
         </section>
 
         {/* Section 4 — Step 3: 安裝完成後的功能 */}
-        <section className="rounded-[28px] border border-border bg-card p-6">
-          <p className="text-xs uppercase tracking-[0.26em] text-muted-foreground">
+        <section className="rounded-[28px] border bd-hair bg-panel p-6">
+          <p className="text-xs uppercase tracking-[0.26em] text-dim">
             Step 3
           </p>
           <h2 className="mt-2 text-xl font-semibold text-foreground">
@@ -399,7 +399,7 @@ node server.mjs`;
                   {group.skills.map((skill) => (
                     <div
                       key={skill.name}
-                      className="rounded-2xl border border-border bg-background/70 p-4"
+                      className="rounded-zen border bd-hair bg-base p-4"
                     >
                       <p className="font-mono text-sm font-semibold text-emerald-300">
                         {skill.name}
@@ -407,7 +407,7 @@ node server.mjs`;
                       <p className="mt-1 text-sm text-foreground">
                         {skill.desc}
                       </p>
-                      <p className="mt-2 text-xs text-muted-foreground">
+                      <p className="mt-2 text-xs text-dim">
                         使用時機：{skill.when}
                       </p>
                     </div>
@@ -417,7 +417,7 @@ node server.mjs`;
             ))}
           </div>
 
-          <div className="mt-6 border-t border-border pt-4">
+          <div className="mt-6 border-t bd-hair pt-4">
             <Link
               href="/setup/skills"
               className="text-sm text-blue-400 hover:underline"

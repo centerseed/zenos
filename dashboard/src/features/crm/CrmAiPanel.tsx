@@ -434,7 +434,7 @@ function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
           line: (
             <div className="space-y-2">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">LINE 訊息草稿</span>
+              <span className="text-xs text-dim">LINE 訊息草稿</span>
               <CopyButton text={lineText} />
             </div>
             <Textarea
@@ -450,12 +450,12 @@ function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
           email: (
             <div className="space-y-2">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Email 草稿</span>
+              <span className="text-xs text-dim">Email 草稿</span>
               <CopyButton text={`主旨：${emailSubject}\n\n${emailBody}`} />
             </div>
             <div className="space-y-2">
               <div>
-                <label className="block text-xs text-muted-foreground mb-1">主旨</label>
+                <label className="block text-xs text-dim mb-1">主旨</label>
                 <Input
                   t={t}
                   value={emailSubject}
@@ -463,7 +463,7 @@ function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
                 />
               </div>
               <div>
-                <label className="block text-xs text-muted-foreground mb-1">正文</label>
+                <label className="block text-xs text-dim mb-1">正文</label>
                 <Textarea
                   t={t}
                   value={emailBody}
@@ -518,7 +518,7 @@ function StageAdvanceButton({ deal, token, onAdvanced }: StageAdvanceButtonProps
       <button
         onClick={handleAdvance}
         disabled={advancing}
-        className="px-4 py-2 text-sm rounded-lg bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors disabled:opacity-50"
+        className="px-4 py-2 text-sm rounded-lg bg-accent-soft text-primary border border-primary/30 hover:bg-accent-soft transition-colors disabled:opacity-50"
       >
         {advancing ? "更新中..." : `推進到「${nextStage}」`}
       </button>
@@ -1146,7 +1146,7 @@ export function CrmAiPanel({
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
           <div className="flex flex-wrap items-center gap-2">
             {mode === "briefing" && activeBriefing && (
-              <span className="rounded-full border border-border/40 px-2 py-0.5 text-[10px] text-muted-foreground">
+              <span className="rounded-full border bd-hair px-2 py-0.5 text-[10px] text-dim">
                 {((activeBriefing.metadata as BriefingMetadata | undefined)?.title?.trim()) ||
                   buildBriefingTitle(activeBriefing.createdAt)}
               </span>
@@ -1195,7 +1195,7 @@ export function CrmAiPanel({
           {(status === "done" || status === "error" || (mode === "briefing" && chatHistory.length > 0)) && (
             <button
               onClick={() => setCollapsed((c) => !c)}
-              className="rounded p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              className="rounded p-1 text-dim transition-colors hover:bg-soft hover:text-foreground"
               aria-label={collapsed ? "展開" : "收合"}
             >
               {collapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
@@ -1266,12 +1266,12 @@ export function CrmAiPanel({
                     <button
                       onClick={() => void handleSaveAsNewBriefing()}
                       disabled={savingAsNew || briefingSaving || status === "streaming" || status === "loading"}
-                      className="px-3 py-1.5 text-xs rounded-lg border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-50"
+                      className="px-3 py-1.5 text-xs rounded-lg border bd-hair text-dim hover:text-foreground hover:border-foreground/30 transition-colors disabled:opacity-50"
                     >
                       {savingAsNew ? "另存中..." : "另存新 briefing"}
                     </button>
                     {briefingSaving && (
-                      <span className="text-xs text-muted-foreground">儲存中...</span>
+                      <span className="text-xs text-dim">儲存中...</span>
                     )}
                   </div>
                 </div>
@@ -1354,9 +1354,9 @@ export function CrmAiPanel({
               {/* Streaming first response (no history yet) */}
               {status === "streaming" && chatHistory.length === 0 && streamingText && (
                 <div className="p-4">
-                  <span className="text-xs text-muted-foreground">Claude</span>
+                  <span className="text-xs text-dim">Claude</span>
                   <div
-                    className="mt-1 rounded-2xl p-3 text-sm"
+                    className="mt-1 rounded-zen p-3 text-sm"
                     style={{
                       background: c.surface,
                       border: `1px solid ${c.inkHair}`,
@@ -1372,7 +1372,7 @@ export function CrmAiPanel({
                 <div className="flex justify-end px-4 pb-2">
                   <button
                     onClick={handleCancel}
-                    className="px-3 py-1 text-xs rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 transition-colors"
+                    className="px-3 py-1 text-xs rounded-lg text-dim hover:text-foreground border bd-hair hover:border-foreground/30 transition-colors"
                   >
                     取消
                   </button>
@@ -1385,7 +1385,7 @@ export function CrmAiPanel({
                   <p className="text-sm text-red-400">{errorMsg ?? "發生錯誤"}</p>
                   <button
                     onClick={() => startStream()}
-                    className="px-4 py-1.5 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors flex items-center gap-1.5"
+                    className="px-4 py-1.5 text-xs rounded-lg bg-soft text-foreground hover:bg-soft transition-colors flex items-center gap-1.5"
                   >
                     <RefreshCw className="h-3 w-3" />
                     重試
@@ -1395,7 +1395,7 @@ export function CrmAiPanel({
 
               {/* Input area — show after first response, while under turn limit */}
               {status !== "streaming" && status !== "loading" && chatHistory.length > 0 && turnCount < MAX_TURNS && (
-                <div className="border-t border-border p-3 space-y-2">
+                <div className="border-t bd-hair p-3 space-y-2">
                   <CopilotInputBar
                     status="idle"
                     value={userInput}
@@ -1407,7 +1407,7 @@ export function CrmAiPanel({
                     placeholder="追問或調整重點..."
                     sendOnPlainEnter={false}
                   />
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-xs text-dim">
                     `Enter` 換行，`Cmd/Ctrl + Enter` 送出
                   </p>
                 </div>
@@ -1415,7 +1415,7 @@ export function CrmAiPanel({
 
               {/* Turn limit reached */}
               {turnCount >= MAX_TURNS && (
-                <div className="border-t border-border p-3 text-sm text-muted-foreground text-center">
+                <div className="border-t bd-hair p-3 text-sm text-dim text-center">
                   已達對話上限（{MAX_TURNS} 輪）。如需繼續，請關閉後重新開啟。
                 </div>
               )}
@@ -1430,7 +1430,7 @@ export function CrmAiPanel({
                         void navigator.clipboard.writeText(lastAssistant.content);
                       }
                     }}
-                    className="w-full py-2 text-sm border border-border rounded-md hover:bg-secondary/50 transition-colors text-muted-foreground"
+                    className="w-full py-2 text-sm border bd-hair rounded-md hover:bg-soft transition-colors text-dim"
                     style={{
                       background: c.surface,
                       borderColor: c.inkHairBold,
@@ -1514,7 +1514,7 @@ export function CrmAiPanel({
                     <div className="flex justify-end mt-2">
                       <button
                         onClick={handleCancel}
-                        className="px-3 py-1 text-xs rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 transition-colors"
+                        className="px-3 py-1 text-xs rounded-lg text-dim hover:text-foreground border bd-hair hover:border-foreground/30 transition-colors"
                       >
                         取消
                       </button>
@@ -1529,7 +1529,7 @@ export function CrmAiPanel({
                   <p className="text-sm text-red-400">{errorMsg ?? "發生錯誤"}</p>
                   <button
                     onClick={() => startStream()}
-                    className="px-4 py-1.5 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors flex items-center gap-1.5"
+                    className="px-4 py-1.5 text-xs rounded-lg bg-soft text-foreground hover:bg-soft transition-colors flex items-center gap-1.5"
                   >
                     <RefreshCw className="h-3 w-3" />
                     重試
@@ -1540,7 +1540,7 @@ export function CrmAiPanel({
               {/* Follow-up draft */}
               {status === "done" && followUp && (
                 <div className="space-y-2">
-                  <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  <h4 className="text-xs font-semibold text-dim uppercase tracking-wide">
                     Follow-up 草稿
                   </h4>
                   <FollowUpDraftUI draft={followUp} />
@@ -1549,8 +1549,8 @@ export function CrmAiPanel({
 
               {/* Stage advance */}
               {status === "done" && onStageAdvanced && (
-                <div className="pt-2 border-t border-border">
-                  <p className="text-xs text-muted-foreground mb-2">如 AI 建議推進漏斗階段：</p>
+                <div className="pt-2 border-t bd-hair">
+                  <p className="text-xs text-dim mb-2">如 AI 建議推進漏斗階段：</p>
                   <StageAdvanceButton deal={deal} token={token} onAdvanced={onStageAdvanced} />
                 </div>
               )}
@@ -1560,7 +1560,7 @@ export function CrmAiPanel({
                 <div className="flex justify-end">
                   <button
                     onClick={() => startStream()}
-                    className="px-3 py-1.5 text-xs rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-foreground/30 transition-colors flex items-center gap-1.5"
+                    className="px-3 py-1.5 text-xs rounded-lg text-dim hover:text-foreground border bd-hair hover:border-foreground/30 transition-colors flex items-center gap-1.5"
                   >
                     <RefreshCw className="h-3 w-3" />
                     重新生成

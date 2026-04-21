@@ -35,15 +35,15 @@ export function CopilotChatViewport({
   const hasContent = messages.length > 0 || streamingText;
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto rounded-[2px] border border-border/30 bg-card p-4">
+    <div className="flex h-full flex-col gap-3 overflow-y-auto rounded-[2px] border bd-hair bg-panel p-4">
       {!hasContent ? (
         // Empty state
         <div className="m-auto max-w-md text-center">
-          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[2px] border border-border/30 bg-card">
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[2px] border bd-hair bg-panel">
             <Bot className="h-5 w-5" style={{ color: c.vermillion }} />
           </div>
           <div className="text-sm font-medium text-foreground">{emptyStateTitle}</div>
-          <p className="mt-2 text-sm text-muted-foreground">{emptyStateDescription}</p>
+          <p className="mt-2 text-sm text-dim">{emptyStateDescription}</p>
         </div>
       ) : (
         <>
@@ -63,12 +63,12 @@ export function CopilotChatViewport({
                   {msg.content}
                 </div>
               ) : msg.role === "assistant" ? (
-                <div className="max-w-[85%] rounded-[2px] border border-border/30 bg-secondary/35 px-4 py-3 text-sm text-foreground">
+                <div className="max-w-[85%] rounded-[2px] border bd-hair bg-soft px-4 py-3 text-sm text-foreground">
                   <MarkdownRenderer content={msg.content} className="text-sm text-foreground space-y-1" />
                 </div>
               ) : (
                 // system
-                <div className="max-w-[85%] rounded-[2px] border border-border/20 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <div className="max-w-[85%] rounded-[2px] border bd-hair bg-muted/20 px-3 py-2 text-xs text-dim">
                   {msg.content}
                 </div>
               )}
@@ -78,7 +78,7 @@ export function CopilotChatViewport({
           {/* Streaming bubble */}
           {isStreaming && streamingText && (
             <div className="flex justify-start">
-              <div className="max-w-[85%] rounded-[2px] border border-border/30 bg-secondary/35 px-4 py-3 text-sm text-foreground">
+              <div className="max-w-[85%] rounded-[2px] border bd-hair bg-soft px-4 py-3 text-sm text-foreground">
                 <MarkdownRenderer content={streamingText} className="text-sm text-foreground space-y-1" />
                 <span
                   className="ml-1 inline-block h-3 w-0.5 animate-pulse rounded-full align-middle"

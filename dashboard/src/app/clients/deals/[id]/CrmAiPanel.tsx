@@ -322,7 +322,7 @@ function CopyButton({ text, className = "" }: { text: string; className?: string
   return (
     <button
       onClick={handleCopy}
-      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors ${className}`}
+      className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-soft text-foreground hover:bg-soft transition-colors ${className}`}
     >
       {copied ? (
         <>
@@ -348,15 +348,15 @@ function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
   const [emailBody, setEmailBody] = useState(draft.email.body);
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
+    <div className="border bd-hair rounded-zen overflow-hidden">
       {/* Tab bar */}
-      <div className="flex border-b border-border bg-secondary/30">
+      <div className="flex border-b bd-hair bg-soft">
         <button
           onClick={() => setActiveTab("line")}
           className={`px-4 py-2 text-xs font-medium transition-colors ${
             activeTab === "line"
-              ? "bg-background text-foreground border-b-2 border-primary"
-              : "text-muted-foreground hover:text-foreground"
+              ? "bg-base text-foreground border-b-2 border-primary"
+              : "text-dim hover:text-foreground"
           }`}
         >
           LINE
@@ -365,8 +365,8 @@ function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
           onClick={() => setActiveTab("email")}
           className={`px-4 py-2 text-xs font-medium transition-colors ${
             activeTab === "email"
-              ? "bg-background text-foreground border-b-2 border-primary"
-              : "text-muted-foreground hover:text-foreground"
+              ? "bg-base text-foreground border-b-2 border-primary"
+              : "text-dim hover:text-foreground"
           }`}
         >
           Email
@@ -378,39 +378,39 @@ function FollowUpDraftUI({ draft }: { draft: FollowUpDraft }) {
         {activeTab === "line" ? (
           <>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">LINE 訊息草稿</span>
+              <span className="text-xs text-dim">LINE 訊息草稿</span>
               <CopyButton text={lineText} />
             </div>
             <textarea
               value={lineText}
               onChange={(e) => setLineText(e.target.value)}
               rows={6}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none font-mono"
+              className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none font-mono"
             />
           </>
         ) : (
           <>
             <div className="flex items-center justify-between mb-1">
-              <span className="text-xs text-muted-foreground">Email 草稿</span>
+              <span className="text-xs text-dim">Email 草稿</span>
               <CopyButton text={`主旨：${emailSubject}\n\n${emailBody}`} />
             </div>
             <div className="space-y-2">
               <div>
-                <label className="block text-xs text-muted-foreground mb-1">主旨</label>
+                <label className="block text-xs text-dim mb-1">主旨</label>
                 <input
                   type="text"
                   value={emailSubject}
                   onChange={(e) => setEmailSubject(e.target.value)}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                  className="w-full bg-base border bd-hair rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                 />
               </div>
               <div>
-                <label className="block text-xs text-muted-foreground mb-1">正文</label>
+                <label className="block text-xs text-dim mb-1">正文</label>
                 <textarea
                   value={emailBody}
                   onChange={(e) => setEmailBody(e.target.value)}
                   rows={8}
-                  className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                  className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
                 />
               </div>
             </div>
@@ -458,7 +458,7 @@ function StageAdvanceButton({ deal, token, onAdvanced }: StageAdvanceButtonProps
       <button
         onClick={handleAdvance}
         disabled={advancing}
-        className="px-4 py-2 text-sm rounded-lg bg-primary/15 text-primary border border-primary/30 hover:bg-primary/25 transition-colors disabled:opacity-50"
+        className="px-4 py-2 text-sm rounded-lg bg-accent-soft text-primary border border-primary/30 hover:bg-accent-soft transition-colors disabled:opacity-50"
       >
         {advancing ? "更新中..." : `推進到「${nextStage}」`}
       </button>
@@ -629,13 +629,13 @@ export function CrmAiPanel({
         <div className="space-y-4 p-4">
           {followUp && (
             <div className="space-y-2">
-              <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Follow-up 草稿</h4>
+              <h4 className="text-xs font-semibold text-dim uppercase tracking-wide">Follow-up 草稿</h4>
               <FollowUpDraftUI draft={followUp} />
             </div>
           )}
           {onStageAdvanced && (
-            <div className="pt-2 border-t border-border">
-              <p className="text-xs text-muted-foreground mb-2">如 AI 建議推進漏斗階段：</p>
+            <div className="pt-2 border-t bd-hair">
+              <p className="text-xs text-dim mb-2">如 AI 建議推進漏斗階段：</p>
               <StageAdvanceButton deal={deal} token={token} onAdvanced={onStageAdvanced} />
             </div>
           )}

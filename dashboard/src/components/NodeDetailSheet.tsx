@@ -201,7 +201,7 @@ function MultiSelectField({
           })}
         </div>
       ) : (
-        <div className="rounded-md border border-dashed border-border/70 px-3 py-2 text-[10px] text-foreground/30">
+        <div className="rounded-md border border-dashed bd-hair px-3 py-2 text-[10px] text-foreground/30">
           No selection
         </div>
       )}
@@ -219,7 +219,7 @@ function MultiSelectField({
                 className={`rounded-lg border px-3 py-2 text-left transition-colors ${
                   checked
                     ? "border-cyan-400/40 bg-cyan-400/10 text-foreground"
-                    : "border-border bg-card/60 text-foreground/65 hover:border-foreground/25 hover:text-foreground"
+                    : "bd-hair bg-panel text-foreground/65 hover:border-foreground/25 hover:text-foreground"
                 }`}
               >
                 <div className="flex items-center justify-between gap-3">
@@ -228,7 +228,7 @@ function MultiSelectField({
                     className={`inline-flex h-4 w-4 items-center justify-center rounded border text-[10px] ${
                       checked
                         ? "border-cyan-300/60 bg-cyan-300/20 text-cyan-100"
-                        : "border-border/80 text-transparent"
+                        : "bd-hair text-transparent"
                     }`}
                   >
                     ✓
@@ -250,7 +250,7 @@ function MultiSelectField({
             value={manualValue ?? ""}
             onChange={(e) => onManualChange(e.target.value)}
             placeholder={manualPlaceholder}
-            className="w-full bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-foreground/20"
+            className="w-full bg-panel border bd-hair rounded px-2 py-1.5 text-xs text-foreground placeholder:text-foreground/20"
           />
         </div>
       )}
@@ -529,11 +529,11 @@ export default function NodeDetailSheet({
       <SheetContent
         side="right"
         showOverlay={false}
-        className="bg-card border-border text-foreground overflow-y-auto sm:max-w-md p-0"
+        className="bg-panel bd-hair text-foreground overflow-y-auto sm:max-w-md p-0"
       >
         {entity && (
           <div className="flex flex-col h-full">
-            <div className="p-6 border-b border-border bg-card sticky top-0 z-10">
+            <div className="p-6 border-b bd-hair bg-panel sticky top-0 z-10">
               <SheetHeader className="space-y-1">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -597,7 +597,7 @@ export default function NodeDetailSheet({
                       const source = (entity.sources || []).find((src) => src.source_id === highlight.source_id);
                       const url = source ? getSourceUrl(source) : null;
                       return (
-                        <div key={`${highlight.source_id}-${highlight.headline}`} className="rounded-md border border-border/40 bg-background/30 p-2">
+                        <div key={`${highlight.source_id}-${highlight.headline}`} className="rounded-md border bd-hair bg-base p-2">
                           <div className="flex items-center gap-2">
                             <Badge variant="outline" className={highlight.priority === "primary" ? "border-cyan-400/40 text-cyan-300 text-[9px] py-0 px-1 h-4" : "border-foreground/20 text-foreground/50 text-[9px] py-0 px-1 h-4"}>
                               {highlight.priority === "primary" ? "先讀這份" : highlight.priority}
@@ -650,7 +650,7 @@ export default function NodeDetailSheet({
                               onClick={() => onFocusNode?.(pathEntity.id)}
                               onMouseEnter={() => onHoverNode?.(pathEntity.id)}
                               onMouseLeave={() => onHoverNode?.(null)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-foreground/5 border border-border/40 hover:bg-foreground/10 text-xs text-foreground/75"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-foreground/5 border bd-hair hover:bg-foreground/10 text-xs text-foreground/75"
                             >
                               <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[pathEntity.type] }} />
                               {pathEntity.name}
@@ -684,7 +684,7 @@ export default function NodeDetailSheet({
                                     onClick={() => onFocusNode?.(target.id)}
                                     onMouseEnter={() => onHoverNode?.(target.id)}
                                     onMouseLeave={() => onHoverNode?.(null)}
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:bg-foreground/10"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border bd-hair hover:bg-foreground/10"
                                   >
                                     <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[target.type] }} />
                                     {target.name}
@@ -717,7 +717,7 @@ export default function NodeDetailSheet({
                                     onClick={() => onFocusNode?.(source.id)}
                                     onMouseEnter={() => onHoverNode?.(source.id)}
                                     onMouseLeave={() => onHoverNode?.(null)}
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:bg-foreground/10"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border bd-hair hover:bg-foreground/10"
                                   >
                                     <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[source.type] }} />
                                     {source.name}
@@ -731,7 +731,7 @@ export default function NodeDetailSheet({
                                     onClick={() => onFocusNode?.(target.id)}
                                     onMouseEnter={() => onHoverNode?.(target.id)}
                                     onMouseLeave={() => onHoverNode?.(null)}
-                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:bg-foreground/10"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border bd-hair hover:bg-foreground/10"
                                   >
                                     <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[target.type] }} />
                                     {target.name}
@@ -775,7 +775,7 @@ export default function NodeDetailSheet({
                               key={task.id}
                               onMouseEnter={() => onHoverNode?.(entity.id)}
                               onMouseLeave={() => onHoverNode?.(null)}
-                              className="group flex items-start gap-2 p-2 rounded-md bg-foreground/5 hover:bg-foreground/10 transition-colors border border-transparent hover:border-border/50"
+                              className="group flex items-start gap-2 p-2 rounded-md bg-foreground/5 hover:bg-foreground/10 transition-colors border border-transparent hover:bd-hair"
                             >
                               <div className="w-1 h-4 rounded-full mt-0.5 shrink-0 bg-orange-500/40" />
                               <div className="flex-1 min-w-0">
@@ -814,7 +814,7 @@ export default function NodeDetailSheet({
                         </div>
                         <div className="space-y-3">
                           {categorizedDocs.bundleDocs.map((doc) => (
-                            <div key={doc.id} className="rounded-lg border border-border/50 bg-foreground/[0.03] p-3">
+                            <div key={doc.id} className="rounded-lg border bd-hair bg-foreground/[0.03] p-3">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2">
@@ -867,7 +867,7 @@ export default function NodeDetailSheet({
                                 </div>
                               )}
                               {doc.changeSummary && (
-                                <div className="mt-3 rounded-md border border-border/40 bg-background/20 p-2">
+                                <div className="mt-3 rounded-md border bd-hair bg-base p-2">
                                   <div className="text-[10px] font-semibold uppercase text-foreground/35 mb-1">Recent Changes</div>
                                   <div className="text-[11px] text-foreground/55 leading-relaxed">{doc.changeSummary}</div>
                                 </div>
@@ -1034,7 +1034,7 @@ export default function NodeDetailSheet({
                                   onClick={() => onFocusNode?.(target.id)}
                                   onMouseEnter={() => onHoverNode?.(target.id)}
                                   onMouseLeave={() => onHoverNode?.(null)}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border bd-hair hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
                                 >
                                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[target.type] }} />
                                   {target.name}
@@ -1059,7 +1059,7 @@ export default function NodeDetailSheet({
                                   onClick={() => onFocusNode?.(source.id)}
                                   onMouseEnter={() => onHoverNode?.(source.id)}
                                   onMouseLeave={() => onHoverNode?.(null)}
-                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border border-border/40 hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-foreground/5 border bd-hair hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
                                 >
                                   <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[source.type] }} />
                                   {source.name}
@@ -1115,7 +1115,7 @@ export default function NodeDetailSheet({
                                 onClick={() => onFocusNode?.(target.id)}
                                 onMouseEnter={() => onHoverNode?.(target.id)}
                                 onMouseLeave={() => onHoverNode?.(null)}
-                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-foreground/5 border border-border/40 hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
+                                className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-foreground/5 border bd-hair hover:border-foreground/20 hover:bg-foreground/10 transition-all text-xs text-foreground/70"
                               >
                                 <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: NODE_TYPE_COLORS[target.type] }} />
                                 {target.name}
@@ -1200,13 +1200,13 @@ export default function NodeDetailSheet({
                     </div>
                   ) : (
                     /* --- Edit form --- */
-                    <div className="rounded-lg border border-border p-3 space-y-3 bg-foreground/[0.02]">
+                    <div className="rounded-lg border bd-hair p-3 space-y-3 bg-foreground/[0.02]">
                       <div>
                         <label className="text-[10px] text-foreground/40 block mb-1">Visibility level</label>
                         <select
                           value={visForm.visibility}
                           onChange={(e) => setVisForm((f) => ({ ...f, visibility: normalizeVisibility(e.target.value) }))}
-                          className="w-full bg-card border border-border rounded px-2 py-1.5 text-xs text-foreground"
+                          className="w-full bg-panel border bd-hair rounded px-2 py-1.5 text-xs text-foreground"
                         >
                           {VISIBILITY_OPTIONS.map((v) => (
                             <option key={v} value={v}>{VISIBILITY_LABELS[v]}</option>
@@ -1269,7 +1269,7 @@ export default function NodeDetailSheet({
                             setEditingVisibility(false);
                             setVisError(null);
                           }}
-                          className="text-xs px-3 py-1.5 rounded border border-border text-foreground/60 hover:text-foreground hover:border-foreground/30 transition-colors"
+                          className="text-xs px-3 py-1.5 rounded border bd-hair text-foreground/60 hover:text-foreground hover:border-foreground/30 transition-colors"
                         >
                           Cancel
                         </button>

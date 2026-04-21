@@ -43,7 +43,7 @@ function DealCard({ deal, companyName, lastActivityDate, isDragging }: DealCardP
 
   return (
     <div
-      className={`bg-card border border-border rounded-lg p-3 space-y-1.5 ${
+      className={`bg-panel border bd-hair rounded-lg p-3 space-y-1.5 ${
         isDragging ? "opacity-50" : ""
       }`}
     >
@@ -54,7 +54,7 @@ function DealCard({ deal, companyName, lastActivityDate, isDragging }: DealCardP
       >
         {deal.title}
       </Link>
-      <p className="text-xs text-muted-foreground truncate">{companyName}</p>
+      <p className="text-xs text-dim truncate">{companyName}</p>
       {deal.amountTwd && (
         <p className="text-xs text-foreground font-medium">
           NT$ {deal.amountTwd.toLocaleString()}
@@ -115,10 +115,10 @@ function KanbanColumn({ stage, deals, companiesMap, lastActivityMap }: KanbanCol
   return (
     <div className="flex flex-col min-w-[200px] w-[200px] shrink-0">
       <div className="flex items-center justify-between mb-2 px-1">
-        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+        <span className="text-xs font-semibold text-dim uppercase tracking-wide">
           {stage}
         </span>
-        <span className="text-xs bg-secondary text-muted-foreground rounded-full px-2 py-0.5">
+        <span className="text-xs bg-soft text-dim rounded-full px-2 py-0.5">
           {deals.length}
         </span>
       </div>
@@ -126,8 +126,8 @@ function KanbanColumn({ stage, deals, companiesMap, lastActivityMap }: KanbanCol
         ref={setNodeRef}
         className={`flex-1 min-h-[120px] rounded-lg p-2 space-y-2 transition-colors ${
           isOver
-            ? "bg-secondary/50 border-2 border-primary/40 border-dashed"
-            : "bg-secondary/20 border border-border"
+            ? "bg-soft border-2 border-primary/40 border-dashed"
+            : "bg-soft border bd-hair"
         }`}
       >
         {deals.map((deal) => (
@@ -139,7 +139,7 @@ function KanbanColumn({ stage, deals, companiesMap, lastActivityMap }: KanbanCol
           />
         ))}
         {deals.length === 0 && (
-          <p className="text-xs text-muted-foreground text-center py-4">
+          <p className="text-xs text-dim text-center py-4">
             拖曳商機至此
           </p>
         )}
@@ -198,14 +198,14 @@ function StaleThresholdsModal({ isOpen, onClose, user, onSaved }: StaleThreshold
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-base backdrop-blur-sm p-4">
+      <div className="bg-panel border bd-hair rounded-zen shadow-2xl w-full max-w-sm overflow-hidden">
+        <div className="p-4 border-b bd-hair flex items-center justify-between">
           <h3 className="font-semibold text-foreground">停滯提醒天數設定</h3>
           <button
             onClick={onClose}
             disabled={saving}
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="text-dim hover:text-foreground disabled:opacity-30"
           >
             ✕
           </button>
@@ -217,7 +217,7 @@ function StaleThresholdsModal({ isOpen, onClose, user, onSaved }: StaleThreshold
             </div>
           )}
           {loading ? (
-            <div className="py-6 text-center text-sm text-muted-foreground">載入中...</div>
+            <div className="py-6 text-center text-sm text-dim">載入中...</div>
           ) : (
             THRESHOLD_STAGES.map((stage) => (
               <div key={stage} className="flex items-center justify-between gap-4">
@@ -233,20 +233,20 @@ function StaleThresholdsModal({ isOpen, onClose, user, onSaved }: StaleThreshold
                         [stage]: parseInt(e.target.value, 10) || 0,
                       }))
                     }
-                    className="w-20 bg-secondary border border-border rounded px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
+                    className="w-20 bg-soft border bd-hair rounded px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-primary/50"
                   />
-                  <span className="text-sm text-muted-foreground">天</span>
+                  <span className="text-sm text-dim">天</span>
                 </div>
               </div>
             ))
           )}
         </div>
-        <div className="p-4 border-t border-border flex justify-end gap-2">
+        <div className="p-4 border-t bd-hair flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="px-4 py-2 text-sm text-foreground hover:bg-secondary rounded transition-colors disabled:opacity-50"
+            className="px-4 py-2 text-sm text-foreground hover:bg-soft rounded transition-colors disabled:opacity-50"
           >
             取消
           </button>
@@ -254,7 +254,7 @@ function StaleThresholdsModal({ isOpen, onClose, user, onSaved }: StaleThreshold
             type="button"
             onClick={handleSave}
             disabled={saving || loading}
-            className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
+            className="px-4 py-2 text-sm bg-accent-soft text-primary-foreground rounded hover:bg-accent-soft disabled:opacity-50 transition-colors"
           >
             {saving ? "儲存中..." : "儲存"}
           </button>
@@ -293,8 +293,8 @@ function DealHealthInsights({ user, refreshKey }: DealHealthInsightsProps) {
   if (loading) {
     return (
       <div className="mb-6 space-y-2">
-        <div className="h-4 w-32 bg-secondary rounded animate-pulse" />
-        <div className="h-16 bg-secondary rounded-lg animate-pulse" />
+        <div className="h-4 w-32 bg-soft rounded animate-pulse" />
+        <div className="h-16 bg-soft rounded-lg animate-pulse" />
       </div>
     );
   }
@@ -313,15 +313,15 @@ function DealHealthInsights({ user, refreshKey }: DealHealthInsightsProps) {
 
   return (
     <div className="mb-6">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+      <p className="text-xs font-semibold text-dim uppercase tracking-wide mb-2">
         Deal Health AI 洞察
       </p>
       {insights.length === 0 ? (
-        <div className="bg-card border border-border rounded-lg p-3 border-l-4 border-l-green-400 flex items-center gap-3">
+        <div className="bg-panel border bd-hair rounded-lg p-3 border-l-4 border-l-green-400 flex items-center gap-3">
           <span className="text-base">✅</span>
           <div>
             <p className="text-sm font-medium text-foreground">目前一切正常</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
+            <p className="text-xs text-dim mt-0.5">
               進行中 {pipeline_summary.active_deals} 案
               {pipeline_summary.estimated_monthly_close_twd > 0 &&
                 ` · 本月預計 $${pipeline_summary.estimated_monthly_close_twd.toLocaleString()}`}
@@ -334,7 +334,7 @@ function DealHealthInsights({ user, refreshKey }: DealHealthInsightsProps) {
             <a
               key={insight.deal_id}
               href={`/clients/deals/${insight.deal_id}`}
-              className="block bg-card border border-border rounded-lg p-3 border-l-4 border-l-orange-400 hover:bg-secondary/30 transition-colors"
+              className="block bg-panel border bd-hair rounded-lg p-3 border-l-4 border-l-orange-400 hover:bg-soft transition-colors"
             >
               <div className="flex items-start gap-2">
                 <span className="text-base mt-0.5">⚠️</span>
@@ -342,7 +342,7 @@ function DealHealthInsights({ user, refreshKey }: DealHealthInsightsProps) {
                   <p className="text-sm font-semibold text-foreground truncate">
                     {insight.deal_title}
                     {insight.company_name && (
-                      <span className="font-normal text-muted-foreground ml-1">
+                      <span className="font-normal text-dim ml-1">
                         · {insight.company_name}
                       </span>
                     )}
@@ -350,7 +350,7 @@ function DealHealthInsights({ user, refreshKey }: DealHealthInsightsProps) {
                   <p className="text-xs text-orange-400 mt-0.5">
                     停滯 {insight.days_stale} 天（{insight.stage}，門檻 {insight.threshold_days} 天）
                   </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{insight.suggestion}</p>
+                  <p className="text-xs text-dim mt-0.5">{insight.suggestion}</p>
                 </div>
               </div>
             </a>
@@ -467,14 +467,14 @@ function NewDealModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4">
-      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-base backdrop-blur-sm p-4">
+      <div className="bg-panel border bd-hair rounded-zen shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="p-4 border-b bd-hair flex items-center justify-between">
           <h3 className="font-semibold text-foreground">新增商機</h3>
           <button
             onClick={onClose}
             disabled={isSubmitting}
-            className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+            className="text-dim hover:text-foreground disabled:opacity-30"
           >
             ✕
           </button>
@@ -496,8 +496,8 @@ function NewDealModal({
                 setTitle(e.target.value);
                 if (errors.title) setErrors(prev => ({ ...prev, title: false }));
               }}
-              className={`w-full bg-secondary border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
-                errors.title ? "border-red-500" : "border-border"
+              className={`w-full bg-soft border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
+                errors.title ? "border-red-500" : "bd-hair"
               }`}
               placeholder="例如：AI 顧問專案"
             />
@@ -514,8 +514,8 @@ function NewDealModal({
                 setCompanyId(e.target.value);
                 if (errors.companyId) setErrors(prev => ({ ...prev, companyId: false }));
               }}
-              className={`w-full bg-secondary border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
-                errors.companyId ? "border-red-500" : "border-border"
+              className={`w-full bg-soft border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
+                errors.companyId ? "border-red-500" : "bd-hair"
               }`}
             >
               <option value="">請選擇公司...</option>
@@ -540,8 +540,8 @@ function NewDealModal({
                   setNewCompanyName(e.target.value);
                   if (errors.newCompanyName) setErrors(prev => ({ ...prev, newCompanyName: false }));
                 }}
-                className={`w-full bg-secondary border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
-                  errors.newCompanyName ? "border-red-500" : "border-border"
+                className={`w-full bg-soft border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50 transition-colors ${
+                  errors.newCompanyName ? "border-red-500" : "bd-hair"
                 }`}
                 placeholder="輸入公司全名"
               />
@@ -554,7 +554,7 @@ function NewDealModal({
               <select
                 value={stage}
                 onChange={(e) => setStage(e.target.value as FunnelStage)}
-                className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full bg-soft border bd-hair rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
               >
                 {FUNNEL_STAGES.map((s) => (
                   <option key={s} value={s}>
@@ -569,7 +569,7 @@ function NewDealModal({
                 type="number"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                className="w-full bg-secondary border border-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                className="w-full bg-soft border bd-hair rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
                 placeholder="選填"
               />
             </div>
@@ -578,14 +578,14 @@ function NewDealModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm text-foreground hover:bg-secondary rounded transition-colors"
+              className="px-4 py-2 text-sm text-foreground hover:bg-soft rounded transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={isSubmitting}
-              className="px-4 py-2 text-sm bg-primary text-primary-foreground rounded hover:bg-primary/90 disabled:opacity-50 transition-colors"
+              className="px-4 py-2 text-sm bg-accent-soft text-primary-foreground rounded hover:bg-accent-soft disabled:opacity-50 transition-colors"
             >
               {isSubmitting ? "建立中..." : "建立商機"}
             </button>
@@ -637,24 +637,24 @@ function ClientsPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setIsModalOpen(true)}
-              className="px-3 py-1.5 text-sm rounded bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="px-3 py-1.5 text-sm rounded bg-accent-soft text-primary-foreground hover:bg-accent-soft transition-colors"
             >
               + 新增商機
             </button>
             <Link
               href="/clients/companies"
-              className="px-3 py-1.5 text-sm rounded bg-secondary text-foreground hover:bg-secondary/80 transition-colors"
+              className="px-3 py-1.5 text-sm rounded bg-soft text-foreground hover:bg-soft transition-colors"
             >
               公司列表
             </Link>
             <button
               onClick={() => setIsSettingsOpen(true)}
-              className="px-3 py-1.5 text-sm rounded bg-secondary text-foreground hover:bg-secondary/80 transition-colors"
+              className="px-3 py-1.5 text-sm rounded bg-soft text-foreground hover:bg-soft transition-colors"
               title="停滯天數設定"
             >
               ⚙️
             </button>
-            <label className="flex items-center gap-1.5 text-sm text-muted-foreground cursor-pointer">
+            <label className="flex items-center gap-1.5 text-sm text-dim cursor-pointer">
               <input
                 type="checkbox"
                 checked={showInactive}
@@ -669,21 +669,21 @@ function ClientsPage() {
         {/* Summary stats */}
         {!loading && (
           <div className="grid grid-cols-3 gap-3 mb-6 max-w-xl">
-            <div className="bg-card border border-border rounded-lg p-3 text-center">
+            <div className="bg-panel border bd-hair rounded-lg p-3 text-center">
               <p className="text-2xl font-bold text-foreground">{activeDealsCount}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">進行中商機</p>
+              <p className="text-xs text-dim mt-0.5">進行中商機</p>
             </div>
-            <div className="bg-card border border-border rounded-lg p-3 text-center">
+            <div className="bg-panel border bd-hair rounded-lg p-3 text-center">
               <p className="text-2xl font-bold text-foreground">{newThisMonthCount}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">本月新增</p>
+              <p className="text-xs text-dim mt-0.5">本月新增</p>
             </div>
-            <div className="bg-card border border-border rounded-lg p-3 text-center">
+            <div className="bg-panel border bd-hair rounded-lg p-3 text-center">
               <p className="text-xl font-bold text-foreground">
                 {totalSignedAmount > 0
                   ? `${(totalSignedAmount / 10000).toFixed(0)}萬`
                   : "—"}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">成交案值</p>
+              <p className="text-xs text-dim mt-0.5">成交案值</p>
             </div>
           </div>
         )}

@@ -68,7 +68,7 @@ export function MorningReport({ tasks, partnerId, onSelectTask }: MorningReportP
   const hasRisk = buckets.some((bucket) => bucket.tasks.length > 0);
 
   return (
-    <section className="mb-6 rounded-2xl border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-4 sm:p-5">
+    <section className="mb-6 rounded-zen border border-white/10 bg-[linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0.02))] p-4 sm:p-5">
       <div className="mb-4 flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] font-black uppercase tracking-[0.24em] text-blue-300/80">Morning Report</p>
@@ -80,13 +80,13 @@ export function MorningReport({ tasks, partnerId, onSelectTask }: MorningReportP
       </div>
 
       {!hasRisk ? (
-        <div className="rounded-xl border border-dashed border-white/10 bg-black/20 px-4 py-8 text-center text-sm text-gray-300">
+        <div className="rounded-zen border border-dashed border-white/10 bg-black/20 px-4 py-8 text-center text-sm text-gray-300">
           今日無待處理風險
         </div>
       ) : (
         <div className="grid gap-3 lg:grid-cols-3">
           {buckets.map((bucket) => (
-            <div key={bucket.key} className="rounded-xl border border-white/8 bg-black/20 p-3">
+            <div key={bucket.key} className="rounded-zen border border-white/8 bg-black/20 p-3">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
                   {bucket.icon}

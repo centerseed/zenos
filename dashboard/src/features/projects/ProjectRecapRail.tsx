@@ -119,11 +119,11 @@ export function ProjectRecapRail({
         emptyStateDescription="直接討論這個 product 的 milestone、plans、tasks、subtasks、blockers 與下一步。"
       />
       {rawTranscript ? (
-        <div className="mt-3 rounded-[2px] border border-border/30 bg-card">
+        <div className="mt-3 rounded-[2px] border bd-hair bg-panel">
           <button
             type="button"
             data-testid="project-raw-transcript-toggle"
-            className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-muted-foreground"
+            className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-dim"
             onClick={() => setShowRawTranscript((value) => !value)}
           >
             <span>Claude Code 原文</span>
@@ -132,7 +132,7 @@ export function ProjectRecapRail({
           {showRawTranscript ? (
             <pre
               data-testid="project-raw-transcript"
-              className="overflow-x-auto border-t border-border/20 px-3 py-3 text-xs text-foreground"
+              className="overflow-x-auto border-t bd-hair px-3 py-3 text-xs text-foreground"
               style={{ whiteSpace: "pre-wrap" }}
             >
               {rawTranscript}

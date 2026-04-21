@@ -66,7 +66,7 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
           Your API Key
         </label>
         <div className="flex items-center gap-2">
-          <code className="flex-1 bg-secondary px-4 py-2 rounded text-sm font-mono text-foreground">
+          <code className="flex-1 bg-soft px-4 py-2 rounded text-sm font-mono text-foreground">
             {showKey ? apiKey : maskedKey}
           </code>
           <button
@@ -84,7 +84,7 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
         <label className="block text-sm font-medium text-foreground mb-2">
           Select your agent
         </label>
-        <div className="flex border-b border-border">
+        <div className="flex border-b bd-hair">
           {agentTabs.map((tab) => (
             <button
               key={tab.id}
@@ -93,7 +93,7 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
               className={`px-4 py-2 text-sm cursor-pointer ${
                 activeTab === tab.id
                   ? "border-b-2 border-blue-500 text-blue-400 font-medium"
-                  : "text-muted-foreground hover:text-white"
+                  : "text-dim hover:text-white"
               }`}
             >
               {tab.label}
@@ -104,20 +104,20 @@ export function McpConfigBlock({ apiKey }: McpConfigBlockProps) {
 
       {/* Config block */}
       <div className="relative">
-        <pre className="bg-background text-foreground rounded-lg p-4 text-sm overflow-x-auto border border-border">
+        <pre className="bg-base text-foreground rounded-lg p-4 text-sm overflow-x-auto border bd-hair">
           {config}
         </pre>
         <button
           onClick={handleCopy}
           aria-label="Copy MCP config"
-          className="absolute top-3 right-3 bg-secondary hover:bg-muted text-white text-xs px-3 py-1.5 rounded cursor-pointer transition-colors"
+          className="absolute top-3 right-3 bg-soft hover:bg-muted text-white text-xs px-3 py-1.5 rounded cursor-pointer transition-colors"
         >
           {copied ? "Copied!" : "Copy"}
         </button>
       </div>
 
       {activeTab === "claude-ai" && (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-dim">
           Paste this URL into Claude.ai → Connectors → Add custom connector
         </p>
       )}

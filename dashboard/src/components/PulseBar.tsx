@@ -32,14 +32,14 @@ export function PulseBar({ tasks }: PulseBarProps) {
     {
       label: "Overdue",
       value: overdue,
-      color: overdue > 0 ? "text-orange-400" : "text-muted-foreground",
-      bg: overdue > 0 ? "bg-orange-900/30" : "bg-secondary",
+      color: overdue > 0 ? "text-orange-400" : "text-dim",
+      bg: overdue > 0 ? "bg-orange-900/30" : "bg-soft",
     },
     { label: "Review", value: review, color: "text-purple-400", bg: "bg-purple-900/30" },
   ];
 
   return (
-    <div className="bg-card rounded-lg border border-border p-4">
+    <div className="bg-panel rounded-lg border bd-hair p-4">
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         {metrics.map((m) => (
           <div
@@ -47,7 +47,7 @@ export function PulseBar({ tasks }: PulseBarProps) {
             className={`rounded-lg p-4 text-center ${m.bg}`}
           >
             <div className={`text-2xl font-bold ${m.color}`}>{m.value}</div>
-            <div className="text-xs text-muted-foreground mt-1">{m.label}</div>
+            <div className="text-xs text-dim mt-1">{m.label}</div>
           </div>
         ))}
       </div>

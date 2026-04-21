@@ -37,7 +37,7 @@ export default function RootLayout({
         />
       </head>
       <body
-        className="bg-background text-foreground antialiased"
+        className="bg-base text-foreground antialiased"
         style={{
           fontFamily:
             '"Noto Sans TC", "Helvetica Neue", Helvetica, system-ui, sans-serif',
@@ -45,7 +45,7 @@ export default function RootLayout({
       >
         <a
           href="#main-content"
-          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] rounded bg-card px-3 py-2 text-sm text-foreground ring-1 ring-border"
+          className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] rounded bg-panel px-3 py-2 text-sm text-foreground ring-1 ring-border"
         >
           {APP_COPY.skipToContent}
         </a>

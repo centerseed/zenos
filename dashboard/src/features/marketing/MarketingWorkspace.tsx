@@ -135,7 +135,7 @@ const platformColor: Record<string, string> = {
 function MetricPill({ icon: Icon, value }: { icon: typeof Heart; value: number | undefined }) {
   if (!value) return null;
   return (
-    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+    <span className="flex items-center gap-1 text-xs text-dim">
       <Icon className="h-3 w-3" />
       {value}
     </span>
@@ -189,7 +189,7 @@ export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; on
 
   if (groups.length === 0) {
     return (
-      <div className="rounded-xl border border-border/40 bg-card/50 p-6 text-sm text-muted-foreground">
+      <div className="rounded-zen border bd-hair bg-panel p-6 text-sm text-dim">
         目前沒有可顯示的行銷項目。
       </div>
     );
@@ -222,7 +222,7 @@ export function CampaignList({ groups, onSelect }: { groups: CampaignGroup[]; on
                 return (
                   <div
                     key={campaign.id}
-                    className="group cursor-pointer rounded-xl border border-border/60 bg-card/80 shadow-[0_14px_34px_rgba(0,0,0,0.18)] transition-all hover:border-primary/20 hover:bg-card hover:shadow-[0_18px_40px_rgba(0,0,0,0.24)]"
+                    className="group cursor-pointer rounded-zen border bd-hair bg-panel shadow-[0_14px_34px_rgba(0,0,0,0.18)] transition-all hover:border-primary/20 hover:bg-panel hover:shadow-[0_18px_40px_rgba(0,0,0,0.24)]"
                     onClick={() => onSelect(campaign.id)}
                   >
                     <div className="space-y-3 p-4">
@@ -308,17 +308,17 @@ export function CampaignStarter({
     (projectType === "long_term" || (dateStart && dateEnd));
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card/80 p-4 shadow-[0_16px_36px_rgba(0,0,0,0.18)]">
+    <div className="rounded-zen border bd-hair bg-panel p-4 shadow-[0_16px_36px_rgba(0,0,0,0.18)]">
       <div className="mb-3">
         <h3 className="text-sm font-medium text-foreground">建立行銷項目</h3>
-        <p className="mt-1 text-xs text-muted-foreground">先選產品，再建立長期經營或短期活動項目。</p>
+        <p className="mt-1 text-xs text-dim">先選產品，再建立長期經營或短期活動項目。</p>
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         {productOptions.length > 0 ? (
           <select
             value={productId}
             onChange={(e) => setProductId(e.target.value)}
-            className="h-9 rounded-md border border-border/50 bg-background px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
+            className="h-9 rounded-md border bd-hair bg-base px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
           >
             {productOptions.map((product) => (
               <option key={product.id || product.name} value={product.id || ""}>
@@ -331,13 +331,13 @@ export function CampaignStarter({
             value={productId}
             onChange={(e) => setProductId(e.target.value)}
             placeholder="產品 ID（目前尚未載入產品清單）"
-            className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+            className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
           />
         )}
         <select
           value={projectType}
           onChange={(e) => setProjectType(e.target.value as "long_term" | "short_term")}
-          className="h-9 rounded-md border border-border/50 bg-background px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
+          className="h-9 rounded-md border bd-hair bg-base px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
         >
           <option value="long_term">長期經營</option>
           <option value="short_term">短期活動</option>
@@ -346,13 +346,13 @@ export function CampaignStarter({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="項目名稱（例如：官網 Blog）"
-          className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+          className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
         />
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="活動描述（選填）"
-          className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+          className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
         />
         {projectType === "short_term" && (
           <>
@@ -360,13 +360,13 @@ export function CampaignStarter({
               type="date"
               value={dateStart}
               onChange={(e) => setDateStart(e.target.value)}
-              className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
+              className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
             />
             <input
               type="date"
               value={dateEnd}
               onChange={(e) => setDateEnd(e.target.value)}
-              className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
+              className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
             />
           </>
         )}
@@ -427,7 +427,7 @@ export function StrategyAndPlan({
 
   const planStatusDot = {
     published: "bg-muted-foreground/40",
-    confirmed: "bg-primary",
+    confirmed: "bg-accent-soft",
     suggested: "bg-amber-400",
   } as const;
 
@@ -490,61 +490,61 @@ export function StrategyAndPlan({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-border/40 bg-card/60">
+      <div className="rounded-zen border bd-hair bg-panel">
         <button
           className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/10"
           onClick={() => setShowStrategy(!showStrategy)}
         >
           <Target className="h-4 w-4 shrink-0 text-primary" />
           <span className="flex-1 text-sm font-medium text-foreground">發文策略</span>
-          <span className="mr-1 text-xs text-muted-foreground">{strategy.frequency}</span>
-          {showStrategy ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+          <span className="mr-1 text-xs text-dim">{strategy.frequency}</span>
+          {showStrategy ? <ChevronUp className="h-4 w-4 text-dim" /> : <ChevronDown className="h-4 w-4 text-dim" />}
         </button>
         {showStrategy && (
-          <div className="grid gap-2 border-t border-border/30 px-4 py-3 sm:grid-cols-2">
+          <div className="grid gap-2 border-t bd-hair px-4 py-3 sm:grid-cols-2">
             <div>
-              <div className="text-[0.6rem] text-muted-foreground">目標受眾</div>
+              <div className="text-[0.6rem] text-dim">目標受眾</div>
               <div className="mt-0.5 text-xs text-foreground">{formatCsv(strategy.audience)}</div>
             </div>
             <div>
-              <div className="text-[0.6rem] text-muted-foreground">語氣風格</div>
+              <div className="text-[0.6rem] text-dim">語氣風格</div>
               <div className="mt-0.5 text-xs text-foreground">{strategy.tone}</div>
             </div>
             <div>
-              <div className="text-[0.6rem] text-muted-foreground">核心訊息</div>
+              <div className="text-[0.6rem] text-dim">核心訊息</div>
               <div className="mt-0.5 text-xs text-foreground">{strategy.coreMessage}</div>
             </div>
             <div>
-              <div className="text-[0.6rem] text-muted-foreground">發文平台</div>
+              <div className="text-[0.6rem] text-dim">發文平台</div>
               <div className="mt-0.5 text-xs text-foreground">{formatCsv(strategy.platforms)}</div>
             </div>
             {strategy.frequency && (
               <div>
-                <div className="text-[0.6rem] text-muted-foreground">發文頻率</div>
+                <div className="text-[0.6rem] text-dim">發文頻率</div>
                 <div className="mt-0.5 text-xs text-foreground">{strategy.frequency}</div>
               </div>
             )}
             {Object.keys(strategy.contentMix || {}).length > 0 && (
               <div>
-                <div className="text-[0.6rem] text-muted-foreground">內容比例</div>
+                <div className="text-[0.6rem] text-dim">內容比例</div>
                 <div className="mt-0.5 text-xs text-foreground">{formatContentMix(strategy.contentMix)}</div>
               </div>
             )}
             {strategy.campaignGoal && (
               <div>
-                <div className="text-[0.6rem] text-muted-foreground">活動目標</div>
+                <div className="text-[0.6rem] text-dim">活動目標</div>
                 <div className="mt-0.5 text-xs text-foreground">{strategy.campaignGoal}</div>
               </div>
             )}
             {strategy.ctaStrategy && (
               <div>
-                <div className="text-[0.6rem] text-muted-foreground">CTA 策略</div>
+                <div className="text-[0.6rem] text-dim">CTA 策略</div>
                 <div className="mt-0.5 text-xs text-foreground">{strategy.ctaStrategy}</div>
               </div>
             )}
             {strategy.referenceMaterials.length > 0 && (
               <div className="sm:col-span-2">
-                <div className="text-[0.6rem] text-muted-foreground">參考素材</div>
+                <div className="text-[0.6rem] text-dim">參考素材</div>
                 <div className="mt-0.5 text-xs text-foreground">{formatCsv(strategy.referenceMaterials)}</div>
               </div>
             )}
@@ -553,8 +553,8 @@ export function StrategyAndPlan({
       </div>
 
       {contentPlan && contentPlan.length > 0 && (
-        <div className="rounded-xl border border-border/40 bg-card/60">
-          <div className="flex items-center justify-between gap-3 border-b border-border/30 px-4 py-3">
+        <div className="rounded-zen border bd-hair bg-panel">
+          <div className="flex items-center justify-between gap-3 border-b bd-hair px-4 py-3">
             <div className="flex items-center gap-3">
               <Calendar className="h-4 w-4 shrink-0 text-primary" />
               <span className="text-sm font-medium text-foreground">內容排程</span>
@@ -637,26 +637,26 @@ export function StrategyAndPlan({
             {planRows.map((week, weekIndex) => (
               <div key={week.weekLabel} className="px-4 py-3">
                 <div className="mb-2 flex items-center gap-2">
-                  <span className={`text-xs font-medium ${week.isCurrent ? "text-foreground" : "text-muted-foreground"}`}>{week.weekLabel}</span>
+                  <span className={`text-xs font-medium ${week.isCurrent ? "text-foreground" : "text-dim"}`}>{week.weekLabel}</span>
                 </div>
                 <div className="space-y-1.5">
                   {week.days.map((day, i) =>
                     editingPlan ? (
-                      <div key={`${day.day}-${day.platform}-${i}`} className="grid gap-2 rounded-md border border-border/20 bg-background/50 p-2 text-xs sm:grid-cols-[64px_100px_1fr_72px]">
+                      <div key={`${day.day}-${day.platform}-${i}`} className="grid gap-2 rounded-md border bd-hair bg-base p-2 text-xs sm:grid-cols-[64px_100px_1fr_72px]">
                         <input
                           value={day.day}
                           onChange={(e) => updateDayField(weekIndex, i, "day", e.target.value)}
-                          className="h-8 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                          className="h-8 rounded-md border bd-hair bg-base px-2 text-xs text-foreground outline-none focus:border-primary/50"
                         />
                         <input
                           value={day.platform}
                           onChange={(e) => updateDayField(weekIndex, i, "platform", e.target.value)}
-                          className="h-8 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                          className="h-8 rounded-md border bd-hair bg-base px-2 text-xs text-foreground outline-none focus:border-primary/50"
                         />
                         <input
                           value={day.topic}
                           onChange={(e) => updateDayField(weekIndex, i, "topic", e.target.value)}
-                          className="h-8 rounded-md border border-border/50 bg-background px-2 text-xs text-foreground outline-none focus:border-primary/50"
+                          className="h-8 rounded-md border bd-hair bg-base px-2 text-xs text-foreground outline-none focus:border-primary/50"
                         />
                         <Button size="sm" variant="outline" className="h-8 text-[11px]" onClick={() => removeDay(weekIndex, i)}>
                           刪除
@@ -664,8 +664,8 @@ export function StrategyAndPlan({
                       </div>
                     ) : (
                       <div key={`${day.day}-${day.platform}-${i}`} className="flex items-center gap-3 text-xs">
-                        <span className="w-8 shrink-0 text-muted-foreground">{day.day}</span>
-                        <span className={`w-7 shrink-0 rounded px-1 py-0.5 text-center text-[0.55rem] font-medium ${platformColor[day.platform] || "bg-muted/20 text-muted-foreground"}`}>
+                        <span className="w-8 shrink-0 text-dim">{day.day}</span>
+                        <span className={`w-7 shrink-0 rounded px-1 py-0.5 text-center text-[0.55rem] font-medium ${platformColor[day.platform] || "bg-muted/20 text-dim"}`}>
                           {platformIcon[day.platform] || day.platform}
                         </span>
                         <span className="flex-1 text-foreground/85">{day.topic}</span>
@@ -682,7 +682,7 @@ export function StrategyAndPlan({
                   </div>
                 )}
                 {week.aiNote && (
-                  <div className="mt-2 flex items-start gap-1.5 text-[0.6rem] text-muted-foreground">
+                  <div className="mt-2 flex items-start gap-1.5 text-[0.6rem] text-dim">
                     <Sparkles className="mt-0.5 h-3 w-3 shrink-0 text-primary" />
                     <span>{week.aiNote}</span>
                   </div>
@@ -721,14 +721,14 @@ function PostCard({
   const isPlatformConfirmed = post.status === "platform_confirmed";
 
   return (
-    <div className={`rounded-xl border ${isReview ? "border-l-4 border-l-amber-400 border-amber-400/25" : "border-border/40"} bg-card/70`}>
+    <div className={`rounded-zen border ${isReview ? "border-l-4 border-l-amber-400 border-amber-400/25" : "bd-hair"} bg-panel`}>
       <div className="flex cursor-pointer items-center gap-3 p-3" onClick={() => setOpen(!open)}>
-        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${platformColor[post.platform] || "bg-muted/20 text-muted-foreground"}`}>
+        <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${platformColor[post.platform] || "bg-muted/20 text-dim"}`}>
           {platformIcon[post.platform] || post.platform}
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-medium text-foreground">{post.title}</div>
-          <div className="text-xs text-muted-foreground">{post.publishedAt || post.scheduledAt || ""}</div>
+          <div className="text-xs text-dim">{post.publishedAt || post.scheduledAt || ""}</div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {post.metrics && (
@@ -739,26 +739,26 @@ function PostCard({
             </div>
           )}
           <Badge variant="outline" className={`text-[0.55rem] ${sc.class}`}>{sc.label}</Badge>
-          {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+          {open ? <ChevronUp className="h-3.5 w-3.5 text-dim" /> : <ChevronDown className="h-3.5 w-3.5 text-dim" />}
         </div>
       </div>
 
       {open && (
-        <div className="space-y-4 border-t border-border/30 p-4">
+        <div className="space-y-4 border-t bd-hair p-4">
           <div className="grid gap-3 sm:grid-cols-[1fr_200px]">
-            <div className="rounded-lg border border-border/30 bg-background/60 p-4">
+            <div className="rounded-lg border bd-hair bg-base p-4">
               <div className="whitespace-pre-line text-sm leading-relaxed text-foreground/90">{post.preview}</div>
             </div>
             {post.imageDesc && (
-              <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-border/40 bg-muted/10 p-3 text-center">
-                <ImageIcon className="mb-2 h-6 w-6 text-muted-foreground/30" />
-                <p className="text-[0.6rem] leading-relaxed text-muted-foreground">{post.imageDesc}</p>
+              <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bd-hair bg-muted/10 p-3 text-center">
+                <ImageIcon className="mb-2 h-6 w-6 text-dim" />
+                <p className="text-[0.6rem] leading-relaxed text-dim">{post.imageDesc}</p>
               </div>
             )}
           </div>
 
           {post.aiReason && (
-            <div className="flex items-start gap-2 rounded-md border border-primary/10 bg-primary/5 px-3 py-2 text-xs">
+            <div className="flex items-start gap-2 rounded-md border border-primary/10 bg-accent-soft px-3 py-2 text-xs">
               <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
               <span className="text-foreground/80">{post.aiReason}</span>
             </div>
@@ -787,13 +787,13 @@ function PostCard({
                 >
                   帶進 AI
                 </CopilotLaunchButton>
-                <div className="text-xs text-muted-foreground">可以先跟 AI 討論，再決定核准或退回。</div>
+                <div className="text-xs text-dim">可以先跟 AI 討論，再決定核准或退回。</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <Button
                   size="sm"
                   disabled={isReviewing}
-                  className="h-8 gap-1.5 border border-primary/30 bg-primary/10 text-xs text-primary hover:bg-primary/20"
+                  className="h-8 gap-1.5 border border-primary/30 bg-accent-soft text-xs text-primary hover:bg-accent-soft"
                   onClick={(e) => {
                     e.stopPropagation();
                     onReview(post.id, "approve");
@@ -805,7 +805,7 @@ function PostCard({
                   size="sm"
                   variant="outline"
                   disabled={isReviewing}
-                  className="h-8 gap-1.5 text-xs text-muted-foreground"
+                  className="h-8 gap-1.5 text-xs text-dim"
                   onClick={(e) => {
                     e.stopPropagation();
                     onReview(post.id, "request_changes");
@@ -830,7 +830,7 @@ function PostCard({
           )}
 
           {isPlanned && postNextStepHint(post) && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 text-xs text-dim">
               <Zap className="h-3.5 w-3.5 text-primary" />
               {postNextStepHint(post)}
             </div>
@@ -838,7 +838,7 @@ function PostCard({
 
           {isConfirmed && postNextStepHint(post) && (
             <div className="space-y-2">
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-xs text-dim">
                 <Zap className="h-3.5 w-3.5 text-primary" />
                 {postNextStepHint(post)}
               </div>
@@ -896,7 +896,7 @@ function CommandRow({
   const [copied, setCopied] = useState(false);
 
   return (
-    <div className="rounded-md border border-border/40 bg-background/70 p-2.5">
+    <div className="rounded-md border bd-hair bg-base p-2.5">
       <div className="mb-1 flex items-center justify-between gap-2">
         <span className="text-[11px] font-medium text-foreground">{title}</span>
         <Button
@@ -917,7 +917,7 @@ function CommandRow({
           {copied ? "已複製" : "複製"}
         </Button>
       </div>
-      <code className="block overflow-x-auto whitespace-nowrap text-[11px] text-muted-foreground">{command}</code>
+      <code className="block overflow-x-auto whitespace-nowrap text-[11px] text-dim">{command}</code>
     </div>
   );
 }
@@ -935,30 +935,30 @@ export function FlowGuideSheet({ campaignId }: { campaignId: string | null }) {
         }
       />
       <SheetContent side="right" className="overflow-y-auto p-0 sm:max-w-md">
-        <SheetHeader className="border-b border-border/40">
+        <SheetHeader className="border-b bd-hair">
           <SheetTitle>怎麼操作（簡單版）</SheetTitle>
           <SheetDescription>你只要照下面 4 步做就可以。</SheetDescription>
         </SheetHeader>
         <div className="space-y-4 p-4 text-xs">
-          <section className="space-y-2 rounded-lg border border-border/40 bg-card/70 p-3">
+          <section className="space-y-2 rounded-lg border bd-hair bg-panel p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <Monitor className="h-4 w-4 text-primary" />
               第 1 步（在這頁）
             </div>
-            <div className="space-y-1 text-muted-foreground">
+            <div className="space-y-1 text-dim">
               <p>1. 選一個活動</p>
               <p>2. 按「建立主題」</p>
               <p>3. 等文案回來後，在這頁按「核准文案 / 要求修改」</p>
             </div>
           </section>
 
-          <section className="space-y-2 rounded-lg border border-border/40 bg-card/70 p-3">
+          <section className="space-y-2 rounded-lg border bd-hair bg-panel p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <Bot className="h-4 w-4 text-primary" />
               第 2 步（用 Claude 產內容）
             </div>
             <div className="space-y-2">
-              <div className="text-[11px] text-muted-foreground">
+              <div className="text-[11px] text-dim">
                 可直接在「建立行銷寫作計畫」右上角按 <strong>AI 討論（Beta）</strong>，或用下列指令在 cowork 執行。
               </div>
               <CommandRow
@@ -976,12 +976,12 @@ export function FlowGuideSheet({ campaignId }: { campaignId: string | null }) {
             </div>
           </section>
 
-          <section className="space-y-2 rounded-lg border border-border/40 bg-card/70 p-3">
+          <section className="space-y-2 rounded-lg border bd-hair bg-panel p-3">
             <div className="flex items-center gap-2 text-sm font-medium text-foreground">
               <Clock3 className="h-4 w-4 text-primary" />
               Runner 是什麼？
             </div>
-            <p className="text-muted-foreground">
+            <p className="text-dim">
               它是自動排程機器。你現在可以先忽略，先用上面 2 步把流程跑起來。
             </p>
           </section>
@@ -1089,13 +1089,13 @@ export function PromptManagerSheet({
         }
       />
       <SheetContent side="right" className="overflow-y-auto p-0 sm:max-w-2xl">
-        <SheetHeader className="border-b border-border/40">
+        <SheetHeader className="border-b bd-hair">
           <SheetTitle>行銷 Prompt SSOT</SheetTitle>
           <SheetDescription>全公司共用，同一份發布版本。</SheetDescription>
         </SheetHeader>
         <div className="space-y-4 p-4">
           {loading ? (
-          <div className="rounded-lg border border-border/60 bg-card/80 p-3 text-xs text-muted-foreground">載入中...</div>
+          <div className="rounded-lg border bd-hair bg-panel p-3 text-xs text-dim">載入中...</div>
           ) : activePrompt ? (
             <>
               <div className="flex flex-wrap gap-2">
@@ -1112,12 +1112,12 @@ export function PromptManagerSheet({
                 ))}
               </div>
 
-              <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <div className="rounded-lg border bd-hair bg-panel p-3">
                 <div className="mb-2 flex items-center justify-between gap-3 text-xs">
                   <span className="font-medium text-foreground">
                     {activePrompt.title} Draft
                   </span>
-                  <span className="text-muted-foreground">
+                  <span className="text-dim">
                     Published v{activePrompt.publishedVersion}
                   </span>
                 </div>
@@ -1126,7 +1126,7 @@ export function PromptManagerSheet({
                   onChange={(e) =>
                     setDrafts((prev) => ({ ...prev, [activePrompt.skill]: e.target.value }))
                   }
-                  className="min-h-[220px] w-full rounded-md border border-border/50 bg-background px-3 py-2 text-xs leading-relaxed text-foreground outline-none ring-0 focus:border-primary/50"
+                  className="min-h-[220px] w-full rounded-md border bd-hair bg-base px-3 py-2 text-xs leading-relaxed text-foreground outline-none ring-0 focus:border-primary/50"
                 />
                 <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                   <Button
@@ -1182,19 +1182,19 @@ export function PromptManagerSheet({
                 </div>
               </div>
 
-              <div className="rounded-lg border border-border/40 bg-card/60 p-3">
+              <div className="rounded-lg border bd-hair bg-panel p-3">
                 <div className="mb-2 text-xs font-medium text-foreground">版本紀錄</div>
                 <div className="space-y-2">
                   {activePrompt.history.map((item) => (
                     <div
                       key={`${activePrompt.skill}-${item.version}`}
-                      className="flex items-center justify-between rounded-md border border-border/40 bg-background/70 px-2.5 py-2"
+                      className="flex items-center justify-between rounded-md border bd-hair bg-base px-2.5 py-2"
                     >
                       <div className="min-w-0">
                         <div className="text-[11px] text-foreground">
                           v{item.version} {item.isPublished ? "（目前）" : ""}
                         </div>
-                        <div className="truncate text-[10px] text-muted-foreground">
+                        <div className="truncate text-[10px] text-dim">
                           {item.createdAt} · {item.createdBy || "unknown"} · {item.note || "—"}
                         </div>
                       </div>
@@ -1215,7 +1215,7 @@ export function PromptManagerSheet({
               </div>
             </>
           ) : (
-            <div className="rounded-lg border border-border/40 bg-card/60 p-3 text-xs text-muted-foreground">
+            <div className="rounded-lg border bd-hair bg-panel p-3 text-xs text-dim">
               沒有可用的 prompt。
             </div>
           )}
@@ -1853,7 +1853,7 @@ node server.mjs`;
     ? "border-destructive/35 bg-destructive/12 text-red-200"
     : helperConnected
       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-200"
-      : "border-border/40 bg-background/70 text-muted-foreground";
+      : "bd-hair bg-base text-dim";
   const hasCapabilityWarnings = Boolean(
     capability && (!capability.mcpOk || (capability.missingSkills && capability.missingSkills.length > 0))
   );
@@ -1910,7 +1910,7 @@ node server.mjs`;
               <div className="text-xs font-medium text-foreground">
                 {activeContextLabel ? `正在處理 ${activeContextLabel}` : "先從任一區塊把內容帶進 AI"}
               </div>
-              <div className="mt-1 text-[11px] text-muted-foreground">
+              <div className="mt-1 text-[11px] text-dim">
                 {applyPayload
                   ? "AI 已整理出可套用摘要，先看變更，再決定要不要寫回。"
                   : activeApplyHandler
@@ -1957,13 +1957,13 @@ node server.mjs`;
                 {changePreview.length > 0 && (
                   <div className="mb-3 space-y-2">
                     {changePreview.map((item) => (
-                      <div key={item.label} className="rounded-md border border-border/30 bg-background/70 px-3 py-2">
+                      <div key={item.label} className="rounded-md border bd-hair bg-base px-3 py-2">
                         <div className="mb-1 text-[11px] font-medium text-foreground">{item.label}</div>
                         <div className="grid gap-1 text-[11px] sm:grid-cols-[1fr_auto_1fr] sm:items-start sm:gap-2">
-                          <div className="rounded border border-border/20 bg-card/50 px-2 py-1.5 text-muted-foreground">
+                          <div className="rounded border bd-hair bg-panel px-2 py-1.5 text-dim">
                             {compactPreviewText(item.before)}
                           </div>
-                          <div className="hidden pt-1 text-muted-foreground sm:block">→</div>
+                          <div className="hidden pt-1 text-dim sm:block">→</div>
                           <div className="rounded border border-emerald-500/20 bg-emerald-500/5 px-2 py-1.5 text-foreground">
                             {compactPreviewText(item.after)}
                           </div>
@@ -1972,16 +1972,16 @@ node server.mjs`;
                     ))}
                   </div>
                 )}
-                <details className="rounded-md border border-border/20 bg-background/40 px-3 py-2">
-                  <summary className="cursor-pointer text-[11px] font-medium text-muted-foreground">查看原始 structured result</summary>
-                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                <details className="rounded-md border bd-hair bg-base px-3 py-2">
+                  <summary className="cursor-pointer text-[11px] font-medium text-dim">查看原始 structured result</summary>
+                  <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-[11px] text-dim">
                     {typeof applyPayload.value === "string" ? applyPayload.value : JSON.stringify(applyPayload.value, null, 2)}
                   </pre>
                 </details>
               </div>
             )}
 
-            <div className="mb-3 text-xs text-muted-foreground">
+            <div className="mb-3 text-xs text-dim">
               {activeApplyHandler
                 ? "先討論，再看變更摘要，最後決定是否寫回。"
                 : onUseOutput
@@ -1993,11 +1993,11 @@ node server.mjs`;
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder={activeContextLabel ? `直接說你想怎麼改 ${activeContextLabel}` : "直接輸入要討論的內容"}
-              className="min-h-[60px] w-full resize-none rounded-xl border border-border/50 bg-muted/30 px-4 py-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/50 focus:border-primary/50 focus:bg-muted/50"
+              className="min-h-[60px] w-full resize-none rounded-zen border bd-hair bg-muted/30 px-4 py-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50 focus:bg-muted/50"
             />
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-              <div className="text-xs text-muted-foreground">{running ? "Claude 正在回覆" : "Enter 換行"}</div>
+              <div className="text-xs text-dim">{running ? "Claude 正在回覆" : "Enter 換行"}</div>
               <div className="flex flex-wrap items-center gap-2">
                 {canSummarize && activeContextLabel && (
                   <Button
@@ -2045,7 +2045,7 @@ node server.mjs`;
               </div>
             </div>
             {turnLimitReached && (
-              <div className="mt-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
+              <div className="mt-3 rounded-zen border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-100">
                 已達對話上限，請整理當前結果或開啟新 session。
               </div>
             )}
@@ -2053,13 +2053,13 @@ node server.mjs`;
         }
       >
           <div className="space-y-3">
-            <div className="rounded-2xl border border-border/30 bg-card/45 p-3">
+            <div className="rounded-zen border bd-hair bg-panel p-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-sm font-medium text-foreground">
                     {activeContextLabel ? `討論這段：${activeContextLabel}` : "AI 工作區"}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-1 text-xs text-dim">
                     {activeContextLabel
                       ? "只保留目前欄位、project scope 和必要 context，討論完直接看變更摘要。"
                       : "先從任一區塊按「帶進 AI」，再開始討論。"}
@@ -2099,26 +2099,26 @@ node server.mjs`;
               </div>
             )}
 
-            <details className="rounded-xl border border-border/20 bg-background/60 p-3">
+            <details className="rounded-zen border bd-hair bg-base p-3">
               <summary className="cursor-pointer text-xs font-medium text-foreground">查看 prompt / context</summary>
               <div className="mt-3 grid gap-3">
                 {runtimeContextPack && (
-                  <div className="rounded-lg border border-border/20 bg-background/60 p-3">
+                  <div className="rounded-lg border bd-hair bg-base p-3">
                     <div className="mb-2 text-[11px] font-medium text-foreground">已載入上下文清單</div>
-                    <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">
+                    <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-dim">
                       {JSON.stringify(runtimeContextPack, null, 2)}
                     </pre>
                   </div>
                 )}
-                <div className="rounded-lg border border-border/20 bg-background/60 p-3">
+                <div className="rounded-lg border bd-hair bg-base p-3">
                   <div className="mb-2 text-[11px] font-medium text-foreground">Prompt 預覽</div>
-                  <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-muted-foreground">{promptPreview}</pre>
+                  <pre className="overflow-x-auto whitespace-pre-wrap text-[11px] text-dim">{promptPreview}</pre>
                 </div>
               </div>
             </details>
 
           {showDiagnostics && (
-            <div className="space-y-3 rounded-xl border border-border/40 bg-card/60 p-3">
+            <div className="space-y-3 rounded-zen border bd-hair bg-panel p-3">
               <div className="flex items-center justify-between">
                 <div className="text-xs font-medium text-foreground">Connector 設定</div>
                 <div className="flex items-center gap-2">
@@ -2144,8 +2144,8 @@ node server.mjs`;
 
               {showSetupGuide && (
                 <div className="space-y-2 text-[11px]">
-                  <div className="rounded border border-border/30 bg-background/70 p-2">
-                    <div className="mb-1 text-muted-foreground">1. 安裝 Connector helper</div>
+                  <div className="rounded border bd-hair bg-base p-2">
+                    <div className="mb-1 text-dim">1. 安裝 Connector helper</div>
                     <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperInstallCommand}</code>
                     <div className="mt-2 flex justify-end">
                       <Button
@@ -2162,13 +2162,13 @@ node server.mjs`;
                       </Button>
                     </div>
                   </div>
-                  <div className="rounded border border-border/30 bg-background/70 p-2">
-                    <div className="mb-1 text-muted-foreground">2. 貼 token 並啟動</div>
+                  <div className="rounded border bd-hair bg-base p-2">
+                    <div className="mb-1 text-dim">2. 貼 token 並啟動</div>
                     <input
                       value={helperToken}
                       onChange={(e) => setHelperTokenState(e.target.value)}
                       placeholder="貼一組 token（例如公司提供給你的）"
-                      className="mb-2 h-8 w-full rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                      className="mb-2 h-8 w-full rounded-md border bd-hair bg-base px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                     />
                     <code className="block overflow-x-auto whitespace-nowrap text-foreground">{helperSecureStartCommand}</code>
                     <div className="mt-2 flex justify-end gap-2">
@@ -2198,11 +2198,11 @@ node server.mjs`;
               )}
 
               <div className="grid gap-2 sm:grid-cols-[140px_1fr] sm:items-center">
-                <label className="text-[11px] text-muted-foreground">模型</label>
+                <label className="text-[11px] text-dim">模型</label>
                 <select
                   value={helperModel}
                   onChange={(e) => setHelperModelState(e.target.value)}
-                  className="h-8 rounded-md border border-border/50 bg-background px-2 text-[11px] text-foreground outline-none focus:border-primary/50"
+                  className="h-8 rounded-md border bd-hair bg-base px-2 text-[11px] text-foreground outline-none focus:border-primary/50"
                 >
                   <option value="sonnet">Sonnet（預設）</option>
                   <option value="opus">Opus</option>
@@ -2210,8 +2210,8 @@ node server.mjs`;
                 </select>
               </div>
 
-              <div className="flex items-center justify-between rounded border border-border/30 bg-background/70 px-2 py-1.5">
-                <span className="text-[11px] text-muted-foreground">進階設定（URL / CWD）</span>
+              <div className="flex items-center justify-between rounded border bd-hair bg-base px-2 py-1.5">
+                <span className="text-[11px] text-dim">進階設定（URL / CWD）</span>
                 <Button
                   size="sm"
                   variant="outline"
@@ -2228,13 +2228,13 @@ node server.mjs`;
                     value={helperBaseUrl}
                     onChange={(e) => setHelperBaseUrlState(e.target.value)}
                     placeholder="Helper URL（預設 http://127.0.0.1:4317）"
-                    className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                    className="h-8 rounded-md border bd-hair bg-base px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                   />
                   <input
                     value={helperCwd}
                     onChange={(e) => setHelperCwdState(e.target.value)}
                     placeholder="專案路徑 cwd（選填）"
-                    className="h-8 rounded-md border border-border/50 bg-background px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                    className="h-8 rounded-md border bd-hair bg-base px-2.5 text-xs text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                   />
                 </div>
               )}
@@ -2254,13 +2254,13 @@ node server.mjs`;
             >
               {logLines.length === 0 ? (
                 <div className="m-auto max-w-md text-center">
-                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-zen border border-white/10 bg-white/5">
                     <Bot className="h-5 w-5 text-foreground" />
                   </div>
                   <div className="text-sm font-medium text-foreground">
                     {activeContextLabel ? `已載入 ${activeContextLabel}` : helperConnected ? "先選一段內容帶進 AI" : "先連上 Connector"}
                   </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
+                  <div className="mt-1 text-xs text-dim">
                     {activeContextLabel ? "直接描述你要調整的方向，整理後可預覽 diff 再套用。" : "策略、排程、文風、主題與 prompt draft 都會沿用同一套使用方式。"}
                   </div>
                 </div>
@@ -2272,12 +2272,12 @@ node server.mjs`;
                   return (
                     <div key={`${index}-${line.slice(0, 20)}`} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                       <div
-                        className={`max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm shadow-sm ${
+                        className={`max-w-[88%] whitespace-pre-wrap rounded-zen px-4 py-3 text-sm shadow-sm ${
                           isUser
-                            ? "bg-primary/20 text-foreground"
+                            ? "bg-accent-soft text-foreground"
                             : isAssistant
                               ? "border border-emerald-500/20 bg-emerald-500/10 text-foreground"
-                              : "border border-white/8 bg-white/5 text-muted-foreground"
+                              : "border border-white/8 bg-white/5 text-dim"
                         }`}
                       >
                         {isAssistant ? (
@@ -2292,7 +2292,7 @@ node server.mjs`;
               )}
               {running && streamingOutput && (
                 <div className="flex justify-start">
-                  <div className="max-w-[88%] whitespace-pre-wrap rounded-2xl border border-emerald-500/15 bg-emerald-500/8 px-4 py-3 text-sm text-foreground">
+                  <div className="max-w-[88%] whitespace-pre-wrap rounded-zen border border-emerald-500/15 bg-emerald-500/8 px-4 py-3 text-sm text-foreground">
                     <MarkdownRenderer content={streamingOutput} className="text-sm text-foreground space-y-1" />
                     <span className="ml-1 inline-block h-3 w-1 animate-pulse rounded bg-foreground/60 align-middle" />
                   </div>
@@ -2300,7 +2300,7 @@ node server.mjs`;
               )}
               {running && currentToolUse && (
                 <div className="flex justify-start">
-                  <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-dim">
                     <span className="inline-block h-2 w-2 animate-spin rounded-full border border-muted-foreground/40 border-t-muted-foreground" />
                     {currentToolUse}
                   </div>
@@ -2393,11 +2393,11 @@ export function StrategyPlanner({
   }, [parseError, saveBlockers]);
 
   return (
-    <div className="rounded-xl border border-border/40 bg-card/70 p-4">
+    <div className="rounded-zen border bd-hair bg-panel p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">建立行銷寫作計畫</h3>
-          <p className="mt-1 text-xs text-muted-foreground">先和 AI 討論策略，不用你手填一堆欄位。</p>
+          <p className="mt-1 text-xs text-dim">先和 AI 討論策略，不用你手填一堆欄位。</p>
         </div>
         <CopilotLaunchButton
           onClick={() =>
@@ -2491,13 +2491,13 @@ export function StrategyPlanner({
         </CopilotLaunchButton>
       </div>
 
-      <div className="rounded-md border border-border/40 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+      <div className="rounded-md border bd-hair bg-base px-3 py-2 text-xs text-dim">
         AI 工作區會沿用同一套對話、權限、diff 與寫回流程。策略討論完可直接套用到下方欄位。
       </div>
       {parseError && <p className="mt-1 text-xs text-destructive">{parseError}</p>}
 
       <button
-        className="mt-2 flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground"
+        className="mt-2 flex items-center gap-2 text-xs text-dim hover:text-foreground"
         onClick={() => setShowManual((v) => !v)}
       >
         {showManual ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
@@ -2508,45 +2508,45 @@ export function StrategyPlanner({
           <div className="mt-2 grid gap-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-[11px] text-muted-foreground">目標受眾</label>
+                <label className="mb-1 block text-[11px] text-dim">目標受眾</label>
                 <input
                   value={audience}
                   onChange={(e) => setAudience(e.target.value)}
                   placeholder="逗號分隔"
-                  className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                  className="h-9 w-full rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-[11px] text-muted-foreground">語氣風格</label>
+                <label className="mb-1 block text-[11px] text-dim">語氣風格</label>
                 <input
                   value={tone}
                   onChange={(e) => setTone(e.target.value)}
                   placeholder="例如：專業但親切"
-                  className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                  className="h-9 w-full rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-[11px] text-muted-foreground">發文平台</label>
+                <label className="mb-1 block text-[11px] text-dim">發文平台</label>
                 <input
                   value={platforms}
                   onChange={(e) => setPlatforms(e.target.value)}
                   placeholder="逗號分隔"
-                  className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                  className="h-9 w-full rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                 />
               </div>
               {campaign.projectType === "long_term" && (
                 <>
                   <div>
-                    <label className="mb-1 block text-[11px] text-muted-foreground">發文頻率</label>
+                    <label className="mb-1 block text-[11px] text-dim">發文頻率</label>
                     <input
                       value={frequency}
                       onChange={(e) => setFrequency(e.target.value)}
                       placeholder="例如每週 2 篇"
-                      className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                      className="h-9 w-full rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                     />
                   </div>
                   <div>
-                    <label className="mb-1 block text-[11px] text-muted-foreground">內容比例</label>
+                    <label className="mb-1 block text-[11px] text-dim">內容比例</label>
                     <input
                       value={contentMix}
                       onChange={(e) => setContentMix(e.target.value)}
@@ -2556,51 +2556,51 @@ export function StrategyPlanner({
                         }
                       }}
                       placeholder="例如 education:70, product:30"
-                      className="h-9 w-full rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                      className="h-9 w-full rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
                     />
                     {contentMixParseError ? (
                       <p className="mt-1 text-[11px] text-destructive">{contentMixParseError}</p>
                     ) : contentMix.trim() && Object.keys(parsedContentMix).length > 0 ? (
-                      <p className="mt-1 text-[11px] text-muted-foreground">已辨識：{formatContentMix(parsedContentMix)}</p>
+                      <p className="mt-1 text-[11px] text-dim">已辨識：{formatContentMix(parsedContentMix)}</p>
                     ) : null}
                   </div>
                 </>
               )}
             </div>
             <div>
-              <label className="mb-1 block text-[11px] text-muted-foreground">核心訊息</label>
+              <label className="mb-1 block text-[11px] text-dim">核心訊息</label>
               <textarea
                 value={coreMessage}
                 onChange={(e) => setCoreMessage(e.target.value)}
                 placeholder="品牌想傳達的核心價值"
-                className="min-h-[48px] w-full resize-y rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                className="min-h-[48px] w-full resize-y rounded-md border bd-hair bg-base px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] text-muted-foreground">活動目標</label>
+              <label className="mb-1 block text-[11px] text-dim">活動目標</label>
               <textarea
                 value={campaignGoal}
                 onChange={(e) => setCampaignGoal(e.target.value)}
                 placeholder="選填"
-                className="min-h-[48px] w-full resize-y rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                className="min-h-[48px] w-full resize-y rounded-md border bd-hair bg-base px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] text-muted-foreground">CTA 策略</label>
+              <label className="mb-1 block text-[11px] text-dim">CTA 策略</label>
               <textarea
                 value={ctaStrategy}
                 onChange={(e) => setCtaStrategy(e.target.value)}
                 placeholder="選填"
-                className="min-h-[48px] w-full resize-y rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                className="min-h-[48px] w-full resize-y rounded-md border bd-hair bg-base px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
               />
             </div>
             <div>
-              <label className="mb-1 block text-[11px] text-muted-foreground">參考素材</label>
+              <label className="mb-1 block text-[11px] text-dim">參考素材</label>
               <textarea
                 value={referenceMaterials}
                 onChange={(e) => setReferenceMaterials(e.target.value)}
                 placeholder="連結或關鍵字，逗號分隔"
-                className="min-h-[48px] w-full resize-y rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+                className="min-h-[48px] w-full resize-y rounded-md border bd-hair bg-base px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
               />
             </div>
           </div>
@@ -2614,7 +2614,7 @@ export function StrategyPlanner({
       )}
 
       <div className="mt-3 flex items-center justify-between gap-3">
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-dim">
           {canSave ? "欄位已齊，可直接儲存。" : "長期經營項目需要頻率與內容比例才會寫回。"}
         </div>
         <Button
@@ -2764,11 +2764,11 @@ export function StyleManager({
   };
 
   return (
-    <div className="rounded-xl border border-border/40 bg-card/70 p-4">
+    <div className="rounded-zen border bd-hair bg-panel p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">文風管理</h3>
-          <p className="mt-1 text-xs text-muted-foreground">三層 style 可直接 CRUD；預覽測試會直連本機 helper 產出測試文案。</p>
+          <p className="mt-1 text-xs text-dim">三層 style 可直接 CRUD；預覽測試會直連本機 helper 產出測試文案。</p>
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className="text-[0.6rem]">
@@ -2824,7 +2824,7 @@ export function StyleManager({
 
       <div className="space-y-2">
         {allStyles.length === 0 ? (
-          <div className="rounded-md border border-border/30 bg-background/60 px-3 py-2 text-xs text-muted-foreground">
+          <div className="rounded-md border bd-hair bg-base px-3 py-2 text-xs text-dim">
             尚未建立文風。可先新增 project 級 style。
           </div>
         ) : (
@@ -2833,16 +2833,16 @@ export function StyleManager({
               key={style.id}
               type="button"
               onClick={() => beginEdit(style)}
-              className="flex w-full items-start justify-between rounded-md border border-border/30 bg-background/60 px-3 py-2 text-left"
+              className="flex w-full items-start justify-between rounded-md border bd-hair bg-base px-3 py-2 text-left"
             >
               <div>
                 <div className="text-xs font-medium text-foreground">{style.title}</div>
-                <div className="mt-1 text-[11px] text-muted-foreground">
+                <div className="mt-1 text-[11px] text-dim">
                   {style.level}
                   {style.platform ? ` / ${style.platform}` : ""}
                 </div>
               </div>
-              <div className="line-clamp-2 max-w-[60%] text-[11px] text-muted-foreground">{style.content}</div>
+              <div className="line-clamp-2 max-w-[60%] text-[11px] text-dim">{style.content}</div>
             </button>
           ))
         )}
@@ -2853,12 +2853,12 @@ export function StyleManager({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="文風標題"
-          className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+          className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
         />
         <select
           value={level}
           onChange={(e) => setLevel(e.target.value as MarketingStyle["level"])}
-          className="h-9 rounded-md border border-border/50 bg-background px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
+          className="h-9 rounded-md border bd-hair bg-base px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
         >
           <option value="project">Project 級</option>
           <option value="platform">Platform 級</option>
@@ -2869,7 +2869,7 @@ export function StyleManager({
             value={platform}
             onChange={(e) => setPlatform(e.target.value)}
             placeholder="platform（例如 threads）"
-            className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+            className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
           />
         )}
       </div>
@@ -2877,17 +2877,17 @@ export function StyleManager({
         value={content}
         onChange={(e) => setContent(e.target.value)}
         placeholder="輸入 markdown 文風內容"
-        className="mt-2 min-h-[96px] w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+        className="mt-2 min-h-[96px] w-full rounded-md border bd-hair bg-base px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
       />
-      <div className="mt-3 grid gap-2 rounded-lg border border-border/30 bg-background/60 p-3">
+      <div className="mt-3 grid gap-2 rounded-lg border bd-hair bg-base p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
             <div className="text-xs font-medium text-foreground">預覽測試</div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
+            <div className="mt-1 text-[11px] text-dim">
               直接走本機 helper，不經後端；會套用目前三層 style 組合。
             </div>
           </div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-[11px] text-dim">
             {composeStyleMarkdown(previewStyles, level === "platform" ? platform : undefined) ? "已載入 style 組合" : "尚無 style，會用中性語氣"}
           </div>
         </div>
@@ -2896,7 +2896,7 @@ export function StyleManager({
             value={previewTopic}
             onChange={(e) => setPreviewTopic(e.target.value)}
             placeholder="輸入範例主題"
-            className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+            className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
           />
           <Button
             size="sm"
@@ -2914,7 +2914,7 @@ export function StyleManager({
             {previewError}
           </div>
         )}
-        <div className="rounded-md border border-border/30 bg-card/60 px-3 py-2 text-xs text-muted-foreground">
+        <div className="rounded-md border bd-hair bg-panel px-3 py-2 text-xs text-dim">
           {previewOutput || "尚未生成預覽文案。"}
         </div>
       </div>
@@ -2965,11 +2965,11 @@ export function TopicStarter({
   const canSubmit = topic.trim().length >= 2 && !creatingTopic;
 
   return (
-    <div className="rounded-xl border border-border/40 bg-card/70 p-4">
+    <div className="rounded-zen border bd-hair bg-panel p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">建立行銷主題</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-dim">
             建立後會先進入主題規劃；下一步先做 <code>/marketing-intel</code>，也可直接跑 <code>/marketing-generate</code>。
           </p>
         </div>
@@ -3014,12 +3014,12 @@ export function TopicStarter({
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           placeholder="例如：跑步新手 7 天挑戰"
-          className="h-9 rounded-md border border-border/50 bg-background px-3 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+          className="h-9 rounded-md border bd-hair bg-base px-3 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
         />
         <select
           value={platform}
           onChange={(e) => setPlatform(e.target.value)}
-          className="h-9 rounded-md border border-border/50 bg-background px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
+          className="h-9 rounded-md border bd-hair bg-base px-2 text-sm text-foreground outline-none ring-0 focus:border-primary/50"
         >
           <option value="Threads">Threads</option>
           <option value="IG">IG</option>
@@ -3031,7 +3031,7 @@ export function TopicStarter({
         value={brief}
         onChange={(e) => setBrief(e.target.value)}
         placeholder="補充目標、角度或限制（選填）"
-        className="mt-2 min-h-[72px] w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-muted-foreground/70 focus:border-primary/50"
+        className="mt-2 min-h-[72px] w-full rounded-md border bd-hair bg-base px-3 py-2 text-sm text-foreground outline-none ring-0 placeholder:text-dim focus:border-primary/50"
       />
       <div className="mt-3 flex justify-end">
         <Button
@@ -3125,17 +3125,17 @@ export function CampaignDetail({
       <div className="flex items-center gap-3">
         <button
           onClick={onBack}
-          className="flex h-8 w-8 items-center justify-center rounded-lg border border-border/60 bg-card/80 text-muted-foreground hover:bg-card hover:text-foreground"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border bd-hair bg-panel text-dim hover:bg-panel hover:text-foreground"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="flex-1">
           <h2 className="text-lg font-semibold text-foreground">{campaign.name}</h2>
-          <p className="text-xs text-muted-foreground">{campaign.description}</p>
+          <p className="text-xs text-dim">{campaign.description}</p>
         </div>
       </div>
 
-      <div className="rounded-xl border border-border/40 bg-card/70 p-4">
+      <div className="rounded-zen border bd-hair bg-panel p-4">
         <div className="flex flex-wrap items-center gap-2">
           {phaseLabels.map((phase, index) => {
             const isCurrent = phase.key === currentStage;
@@ -3145,10 +3145,10 @@ export function CampaignDetail({
                 key={phase.key}
                 className={`rounded-full border px-2.5 py-1 text-[11px] ${
                   isCurrent
-                    ? "border-primary/40 bg-primary/10 text-primary"
+                    ? "border-primary/40 bg-accent-soft text-primary"
                     : isDone
                       ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                      : "border-border/40 bg-background/60 text-muted-foreground"
+                      : "bd-hair bg-base text-dim"
                 }`}
               >
                 {phase.label}
@@ -3156,38 +3156,38 @@ export function CampaignDetail({
             );
           })}
         </div>
-        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
+        <div className="mt-3 flex items-start justify-between gap-3 rounded-lg border border-primary/20 bg-accent-soft px-3 py-3">
           <div>
             <div className="text-sm font-medium text-foreground">{primaryCta.label}</div>
-            <div className="mt-1 text-xs text-muted-foreground">{primaryCta.hint}</div>
+            <div className="mt-1 text-xs text-dim">{primaryCta.hint}</div>
           </div>
           <Badge variant="outline" className="text-[0.65rem]">
             目前階段：{phaseLabels.find((item) => item.key === currentStage)?.label}
           </Badge>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-          <span className="rounded-full border border-border/30 bg-background/60 px-2.5 py-1">按「帶進 AI」開始</span>
-          <span className="rounded-full border border-border/30 bg-background/60 px-2.5 py-1">集中在同一個 AI 工作區討論</span>
-          <span className="rounded-full border border-border/30 bg-background/60 px-2.5 py-1">有 structured result 才套用</span>
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-dim">
+          <span className="rounded-full border bd-hair bg-base px-2.5 py-1">按「帶進 AI」開始</span>
+          <span className="rounded-full border bd-hair bg-base px-2.5 py-1">集中在同一個 AI 工作區討論</span>
+          <span className="rounded-full border bd-hair bg-base px-2.5 py-1">有 structured result 才套用</span>
         </div>
       </div>
 
       {campaign.blockReason && (
-        <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
+        <div className="flex items-start gap-3 rounded-zen border border-destructive/20 bg-destructive/5 p-4">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
           <div>
             <div className="text-sm font-medium text-foreground">{campaign.blockReason}</div>
-            <p className="mt-1 text-xs text-muted-foreground">解決後 AI 會自動開始準備內容。</p>
+            <p className="mt-1 text-xs text-dim">解決後 AI 會自動開始準備內容。</p>
           </div>
         </div>
       )}
 
       {anyFailedPost && (
-        <div className="flex items-start gap-3 rounded-xl border border-destructive/20 bg-destructive/5 p-4">
+        <div className="flex items-start gap-3 rounded-zen border border-destructive/20 bg-destructive/5 p-4">
           <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
           <div>
             <div className="text-sm font-medium text-foreground">AI 流程中斷</div>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-dim">
               {anyFailedPost.aiReason || "請先檢查 helper / 重新執行上一階段，再繼續後續流程。"}
             </p>
           </div>
@@ -3234,7 +3234,7 @@ export function CampaignDetail({
               onOpenCopilot={onOpenCopilot}
             />
           ) : (
-            <div className="rounded-xl border border-border/40 bg-card/70 p-4 text-xs text-muted-foreground">
+            <div className="rounded-zen border bd-hair bg-panel p-4 text-xs text-dim">
               先完成策略設定，再建立主題與排程；不要同時跳兩步。
             </div>
           )}
@@ -3309,7 +3309,7 @@ export function CampaignDetail({
 
           {published.length > 0 && (
             <section className="space-y-2">
-              <h3 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">已發佈</h3>
+              <h3 className="text-xs font-medium uppercase tracking-wide text-dim">已發佈</h3>
               {published.map((post) => (
                 <PostCard
                   key={post.id}
@@ -3363,14 +3363,14 @@ export default function MarketingPage() {
   } = useMarketingWorkspace();
 
   return (
-      <div className="min-h-screen bg-background text-foreground">
+      <div className="min-h-screen bg-base text-foreground">
         <main id="main-content" className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h1 className="text-[1.65rem] font-semibold tracking-[-0.03em] text-foreground">行銷主控台</h1>
               <p className="mt-1 text-sm font-medium text-[#bcd3e7]">Paceriz</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-card/70 p-1.5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]">
+            <div className="flex flex-wrap items-center gap-2 rounded-zen border bd-hair bg-panel p-1.5 shadow-[0_14px_34px_rgba(0,0,0,0.14)]">
               <PromptManagerSheet
                 user={user ? { getIdToken: () => user.getIdToken() } : null}
                 onError={setError}
@@ -3387,7 +3387,7 @@ export default function MarketingPage() {
           )}
 
           {loading ? (
-            <div className="rounded-xl border border-border/40 bg-card/50 p-6 text-sm text-muted-foreground">載入中...</div>
+            <div className="rounded-zen border bd-hair bg-panel p-6 text-sm text-dim">載入中...</div>
           ) : selectedId ? (
             <CampaignDetail
               campaign={selectedCampaign || selectedFromList || {

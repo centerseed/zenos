@@ -105,7 +105,7 @@ function ProductCard({ product }: { product: RealEntity }) {
   const healthTextColors = { healthy: "text-emerald-400", warning: "text-amber-400", critical: "text-red-400" };
 
   return (
-    <div className="rounded-2xl border border-[#27272A] bg-[#111113] overflow-hidden hover:border-[#3F3F46] transition-colors">
+    <div className="rounded-zen border border-[#27272A] bg-[#111113] overflow-hidden hover:border-[#3F3F46] transition-colors">
       {/* Header */}
       <div className="px-5 pt-5 pb-4 flex items-start gap-4">
         <div className={`w-11 h-11 rounded-full border-2 flex items-center justify-center shrink-0 ${healthColors[health]}`}>
@@ -247,7 +247,7 @@ export default function MockupBReal() {
 
         {/* Orphan blindspots — not linked to any product */}
         {orphanBlindspots.length > 0 && (
-          <div className="rounded-2xl border border-[#27272A] bg-[#111113] overflow-hidden">
+          <div className="rounded-zen border border-[#27272A] bg-[#111113] overflow-hidden">
             <div className="px-5 pt-5 pb-4 flex items-start gap-4">
               <div className="w-11 h-11 rounded-full border-2 border-[#FAFAFA]/10 bg-[#FAFAFA]/5 flex items-center justify-center shrink-0">
                 <span className="text-base text-[#FAFAFA]/40">?</span>

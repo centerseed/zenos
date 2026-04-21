@@ -1,148 +1,90 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
-
-@theme inline {
-    --font-heading: var(--font-sans);
-    --font-sans: var(--font-sans);
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
-    --color-ring: var(--ring);
-    --color-input: var(--input);
-    --color-border: var(--border);
-    --color-destructive: var(--destructive);
-    --color-accent-foreground: var(--accent-foreground);
-    --color-accent: var(--accent);
-    --color-muted-foreground: var(--muted-foreground);
-    --color-muted: var(--muted);
-    --color-secondary-foreground: var(--secondary-foreground);
-    --color-secondary: var(--secondary);
-    --color-primary-foreground: var(--primary-foreground);
-    --color-primary: var(--primary);
-    --color-popover-foreground: var(--popover-foreground);
-    --color-popover: var(--popover);
-    --color-card-foreground: var(--card-foreground);
-    --color-card: var(--card);
-    --color-foreground: var(--foreground);
-    --color-background: var(--background);
-    --radius-sm: calc(var(--radius) * 0.6);
-    --radius-md: calc(var(--radius) * 0.8);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) * 1.4);
-    --radius-2xl: calc(var(--radius) * 1.8);
-    --radius-3xl: calc(var(--radius) * 2.2);
-    --radius-4xl: calc(var(--radius) * 2.6);
-}
-
-/* Dark-only theme: all variables set to dark values directly on :root */
 :root {
-    --background: #08131f;
-    --foreground: #f5fbff;
-    --card: #102131;
-    --card-foreground: #f5fbff;
-    --card-border: #2a5070;
-    --popover: #0d1d2c;
-    --popover-foreground: #f5fbff;
-    --primary: #47e5d2;
-    --primary-foreground: #04111d;
-    --secondary: #193754;
-    --secondary-foreground: #edf8ff;
-    --muted: #13273b;
-    --muted-foreground: #b5cadf;
-    --accent: #21486b;
-    --accent-foreground: #f4fbff;
-    --destructive: #ef4444;
-    --border: #2a5070;
-    --input: #173149;
-    --ring: rgba(182, 58, 44, 0.55);
-    --chart-1: #47e5d2;
-    --chart-2: #60a5fa;
-    --chart-3: #8cf6e8;
-    --chart-4: #fb7185;
-    --chart-5: #2c638d;
-    --radius: 0.625rem;
-    --sidebar: #0b1826;
-    --sidebar-foreground: #f5fbff;
-    --sidebar-primary: #47e5d2;
-    --sidebar-primary-foreground: #04111d;
-    --sidebar-accent: #183754;
-    --sidebar-accent-foreground: #f5fbff;
-    --sidebar-border: #254867;
-    --sidebar-ring: rgba(182, 58, 44, 0.55);
-    --surface-1: rgba(16, 33, 49, 0.92);
-    --surface-2: rgba(22, 48, 72, 0.88);
-    --surface-3: rgba(28, 61, 90, 0.78);
-    --field-bg: rgba(15, 31, 47, 0.96);
-    --field-bg-hover: rgba(19, 39, 59, 0.98);
-    --field-border: rgba(89, 131, 168, 0.62);
-    --field-border-strong: rgba(108, 154, 194, 0.88);
-    --focus-ring: rgba(182, 58, 44, 0.14);
-    --focus-outline: rgba(182, 58, 44, 0.42);
-    --panel-shadow: 0 18px 40px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --zen-paper: #f4efe4;
+  --zen-paper-warm: #efe9db;
+  --zen-surface: #fbf8f1;
+  --zen-surface-hi: #ffffff;
+  --zen-ink: #141210;
+  --zen-ink-soft: #3a342c;
+  --zen-ink-muted: rgba(20, 18, 16, 0.62);
+  --zen-hair: rgba(20, 18, 16, 0.12);
+  --zen-hair-bold: rgba(20, 18, 16, 0.22);
+  --zen-accent: #b63a2c;
+  --zen-accent-soft: rgba(182, 58, 44, 0.1);
+  --zen-accent-line: rgba(182, 58, 44, 0.26);
+  --zen-success: #5f7a45;
+  --zen-warn: #b48432;
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    box-sizing: border-box;
   }
+
   html {
-    @apply font-sans;
-    color-scheme: dark;
-    background-color: #08131f;
+    color-scheme: light;
     background:
-      radial-gradient(circle at top right, rgba(71, 229, 210, 0.14), transparent 28%),
-      radial-gradient(circle at top left, rgba(96, 165, 250, 0.16), transparent 22%),
-      linear-gradient(180deg, #0d1c2d 0%, #08131f 58%, #050d17 100%);
+      radial-gradient(circle at top right, rgba(182, 58, 44, 0.08), transparent 26%),
+      radial-gradient(circle at top left, rgba(20, 18, 16, 0.05), transparent 22%),
+      linear-gradient(180deg, #f6f1e7 0%, #f4efe4 54%, #eee6d7 100%);
+    color: var(--zen-ink);
+    font-family:
+      "Noto Sans TC",
+      "Helvetica Neue",
+      Helvetica,
+      system-ui,
+      sans-serif;
     overscroll-behavior-y: none;
   }
+
   body {
-    @apply bg-background text-foreground;
-    background-color: #08131f;
-    background:
-      radial-gradient(circle at top right, rgba(71, 229, 210, 0.08), transparent 24%),
-      radial-gradient(circle at 18% 18%, rgba(96, 165, 250, 0.12), transparent 18%),
-      linear-gradient(180deg, rgba(12, 28, 44, 0.98) 0%, rgba(8, 19, 31, 0.99) 100%);
     min-height: 100vh;
+    background: transparent;
+    color: var(--zen-ink);
     overscroll-behavior-y: none;
   }
 
   ::selection {
-    background: rgba(182, 58, 44, 0.24);
-    color: #141210;
+    background: rgba(182, 58, 44, 0.18);
+    color: var(--zen-ink);
   }
 
   :focus-visible {
     outline: none;
-    box-shadow: 0 0 0 1px var(--focus-outline), 0 0 0 4px var(--focus-ring);
-  }
-}
-
-@layer components {
-  [data-slot="card"],
-  [data-slot="sheet-content"],
-  [data-slot="tooltip-content"] {
-    box-shadow: var(--panel-shadow);
-  }
-
-  [data-slot="card"] {
-    border-color: rgb(57 102 140 / 0.9);
+    box-shadow: 0 0 0 1px var(--zen-accent-line), 0 0 0 4px rgba(182, 58, 44, 0.12);
   }
 }
 
 @layer utilities {
+  .bg-base {
+    background-color: var(--zen-paper);
+  }
+
+  .bg-panel {
+    background-color: rgba(255, 255, 255, 0.78);
+  }
+
+  .bg-soft {
+    background-color: rgba(20, 18, 16, 0.05);
+  }
+
+  .bg-accent-soft {
+    background-color: var(--zen-accent-soft);
+  }
+
+  .bd-hair {
+    border-color: var(--zen-hair);
+  }
+
+  .text-dim {
+    color: var(--zen-ink-muted);
+  }
+
+  .rounded-zen {
+    border-radius: 2px;
+  }
+
   .graph-core-glow {
     animation: graph-pulse 6s ease-in-out infinite;
   }
@@ -212,80 +154,7 @@
   .graph-signal {
     stroke-dasharray: 14 120;
     stroke-dashoffset: 140;
-    filter: drop-shadow(0 0 6px rgba(54, 225, 202, 0.45));
     animation: graph-travel 3.6s linear infinite;
-  }
-
-  .text-blue-400 {
-    color: #74ddff !important;
-  }
-
-  .hover\:text-blue-300:hover {
-    color: #c1efff !important;
-  }
-
-  .bg-blue-900\/50 {
-    background-color: rgb(30 72 106 / 0.56) !important;
-  }
-
-  .bg-blue-900\/30 {
-    background-color: rgb(30 72 106 / 0.38) !important;
-  }
-
-  .border-blue-500\/30 {
-    border-color: rgb(96 165 250 / 0.42) !important;
-  }
-
-  .border-primary\/40 {
-    border-color: rgb(71 229 210 / 0.48) !important;
-  }
-
-  .text-muted-foreground {
-    color: var(--muted-foreground) !important;
-  }
-
-  .border-border\/30 {
-    border-color: rgb(42 80 112 / 0.3) !important;
-  }
-
-  .border-border\/40 {
-    border-color: rgb(42 80 112 / 0.42) !important;
-  }
-
-  .border-border\/50 {
-    border-color: rgb(42 80 112 / 0.58) !important;
-  }
-
-  .border-border\/60 {
-    border-color: rgb(42 80 112 / 0.68) !important;
-  }
-
-  .bg-card\/50 {
-    background-color: rgb(16 33 49 / 0.82) !important;
-  }
-
-  .bg-card\/60 {
-    background-color: rgb(16 33 49 / 0.86) !important;
-  }
-
-  .bg-card\/70 {
-    background-color: rgb(16 33 49 / 0.92) !important;
-  }
-
-  .bg-card\/80 {
-    background-color: rgb(16 33 49 / 0.96) !important;
-  }
-
-  .bg-secondary\/30 {
-    background-color: rgb(25 55 84 / 0.42) !important;
-  }
-
-  .bg-secondary\/60 {
-    background-color: rgb(25 55 84 / 0.72) !important;
-  }
-
-  .bg-secondary\/70 {
-    background-color: rgb(25 55 84 / 0.82) !important;
   }
 }
 

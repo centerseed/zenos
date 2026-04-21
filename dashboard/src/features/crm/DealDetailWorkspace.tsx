@@ -218,13 +218,13 @@ function ActivityItem({ activity, matchingDebrief }: ActivityItemProps) {
           <span
             className={`text-xs rounded px-1.5 py-0.5 ${
               activity.isSystem
-                ? "bg-secondary text-muted-foreground"
-                : "bg-primary/15 text-primary"
+                ? "bg-soft text-dim"
+                : "bg-accent-soft text-primary"
             }`}
           >
             {activity.activityType}
           </span>
-          <span className="text-xs text-muted-foreground" style={{ fontFamily: fontMono }}>{dateStr}</span>
+          <span className="text-xs text-dim" style={{ fontFamily: fontMono }}>{dateStr}</span>
         </div>
         <p className="text-sm text-foreground">{activity.summary}</p>
 
@@ -234,7 +234,7 @@ function ActivityItem({ activity, matchingDebrief }: ActivityItemProps) {
             <summary className="cursor-pointer text-xs select-none" style={{ color: c.vermillion }}>
               AI 分析 ▸
             </summary>
-            <div className="mt-1 pl-3 text-muted-foreground space-y-1" style={{ borderLeft: `2px solid ${c.vermLine}` }}>
+            <div className="mt-1 pl-3 text-dim space-y-1" style={{ borderLeft: `2px solid ${c.vermLine}` }}>
               {debriefMeta.key_decisions && debriefMeta.key_decisions.length > 0 && (
                 <div>
                   <span className="text-xs font-medium text-foreground">關鍵決策：</span>
@@ -313,16 +313,16 @@ function NewActivityForm({
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-secondary/20 border border-border rounded-xl p-4 space-y-3"
+      className="bg-soft border bd-hair rounded-zen p-4 space-y-3"
     >
       <h4 className="text-sm font-medium text-foreground">新增活動</h4>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <label className="block text-xs text-muted-foreground mb-1">類型</label>
+          <label className="block text-xs text-dim mb-1">類型</label>
           <select
             value={activityType}
             onChange={(e) => setActivityType(e.target.value as ActivityType)}
-            className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full bg-base border bd-hair rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           >
             {ACTIVITY_TYPES.map((t) => (
               <option key={t} value={t}>
@@ -332,19 +332,19 @@ function NewActivityForm({
           </select>
         </div>
         <div>
-          <label className="block text-xs text-muted-foreground mb-1">
+          <label className="block text-xs text-dim mb-1">
             日期時間
           </label>
           <input
             type="datetime-local"
             value={activityAt}
             onChange={(e) => setActivityAt(e.target.value)}
-            className="w-full bg-background border border-border rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            className="w-full bg-base border bd-hair rounded-lg px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
           />
         </div>
       </div>
       <div>
-        <label className="block text-xs text-muted-foreground mb-1">
+        <label className="block text-xs text-dim mb-1">
           摘要 <span className="text-red-400">*</span>
         </label>
         <textarea
@@ -353,7 +353,7 @@ function NewActivityForm({
           placeholder="本次互動的重點..."
           rows={3}
           required
-          className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+          className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-dim focus:outline-none focus:ring-1 focus:ring-primary resize-none"
         />
       </div>
       {error && <p className="text-xs text-red-400">{error}</p>}
@@ -361,7 +361,7 @@ function NewActivityForm({
         <button
           type="submit"
           disabled={saving || !summary.trim()}
-          className="px-4 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+          className="px-4 py-1.5 text-sm rounded-lg bg-accent-soft text-primary-foreground hover:bg-accent-soft transition-colors disabled:opacity-50"
         >
           {saving ? "建立中..." : "新增活動"}
         </button>
@@ -602,7 +602,7 @@ function DealDetailPage() {
     return (
       <div className="min-h-screen">
         <main className="max-w-3xl mx-auto px-4 py-6">
-          <p className={loadError ? "text-red-400" : "text-muted-foreground"}>
+          <p className={loadError ? "text-red-400" : "text-dim"}>
             {loadError ?? "找不到該商機"}
           </p>
         </main>
@@ -670,7 +670,7 @@ function DealDetailPage() {
         className="max-w-screen-xl mx-auto px-4 sm:px-6 py-6 space-y-6"
       >
         {/* Breadcrumb — full width */}
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <div className="flex items-center gap-2 text-sm text-dim">
           <Link
             href="/clients"
             className="hover:text-foreground transition-colors"
@@ -682,13 +682,13 @@ function DealDetailPage() {
         </div>
 
         {secondaryWarning && (
-          <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
+          <div className="rounded-zen border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-200">
             {secondaryWarning}
           </div>
         )}
 
         {/* Deal header — full width */}
-        <div className="bg-card border border-border rounded-xl p-5">
+        <div className="bg-panel border bd-hair rounded-zen p-5">
           <div className="flex items-start justify-between gap-3 mb-4">
             <h2 className="text-xl font-semibold text-foreground">
               {deal.title}
@@ -711,7 +711,7 @@ function DealDetailPage() {
                     setDebriefActivity(null);
                     setSelectedBriefing(null);
                   }}
-                  className="px-3 py-1 text-xs rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+                  className="px-3 py-1 text-xs rounded-lg bg-accent-soft text-primary-foreground hover:bg-accent-soft transition-colors"
                 >
                   準備下次會議
                 </button>
@@ -721,7 +721,7 @@ function DealDetailPage() {
 
           {/* Funnel stage selector */}
           <div className="mb-4">
-            <label className="block text-xs text-muted-foreground mb-1.5">
+            <label className="block text-xs text-dim mb-1.5">
               漏斗階段
             </label>
             <div className="flex gap-2 flex-wrap items-center">
@@ -761,7 +761,7 @@ function DealDetailPage() {
           {/* Deal fields */}
           <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
             <div>
-              <dt className="text-xs text-muted-foreground">案值</dt>
+              <dt className="text-xs text-dim">案值</dt>
               <dd className="text-foreground">
                 {deal.amountTwd != null && deal.amountTwd !== 0
                   ? `NT$ ${deal.amountTwd.toLocaleString()}`
@@ -769,32 +769,32 @@ function DealDetailPage() {
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">案子類型</dt>
+              <dt className="text-xs text-dim">案子類型</dt>
               <dd className="text-foreground">{deal.dealType ?? "—"}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">來源</dt>
+              <dt className="text-xs text-dim">來源</dt>
               <dd className="text-foreground">{deal.sourceType ?? "—"}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">介紹人</dt>
+              <dt className="text-xs text-dim">介紹人</dt>
               <dd className="text-foreground">{deal.referrer ?? "—"}</dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">預計成交日</dt>
+              <dt className="text-xs text-dim">預計成交日</dt>
               <dd className="text-foreground">
                 {formatDate(deal.expectedCloseDate)}
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-muted-foreground">合約簽署日</dt>
+              <dt className="text-xs text-dim">合約簽署日</dt>
               <dd className="text-foreground">{formatDate(deal.signedDate)}</dd>
             </div>
           </dl>
 
           {deal.scopeDescription && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <dt className="text-xs text-muted-foreground mb-1">工作範圍</dt>
+            <div className="mt-3 pt-3 border-t bd-hair">
+              <dt className="text-xs text-dim mb-1">工作範圍</dt>
               <dd className="text-sm text-foreground">
                 {deal.scopeDescription}
               </dd>
@@ -802,8 +802,8 @@ function DealDetailPage() {
           )}
 
           {deal.deliverables && deal.deliverables.length > 0 && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <p className="text-xs text-muted-foreground mb-1">交付物</p>
+            <div className="mt-3 pt-3 border-t bd-hair">
+              <p className="text-xs text-dim mb-1">交付物</p>
               <ul className="list-disc list-inside space-y-0.5">
                 {deal.deliverables.map((item, i) => (
                   <li key={i} className="text-sm text-foreground">
@@ -815,8 +815,8 @@ function DealDetailPage() {
           )}
 
           {deal.notes && (
-            <div className="mt-3 pt-3 border-t border-border">
-              <p className="text-xs text-muted-foreground mb-1">備忘</p>
+            <div className="mt-3 pt-3 border-t bd-hair">
+              <p className="text-xs text-dim mb-1">備忘</p>
               <p className="text-sm text-foreground">{deal.notes}</p>
             </div>
           )}
@@ -890,7 +890,7 @@ function DealDetailPage() {
                 活動紀錄 ({activities.length})
               </h3>
               {activities.length === 0 ? (
-                <p className="text-sm text-muted-foreground">尚無活動紀錄</p>
+                <p className="text-sm text-dim">尚無活動紀錄</p>
               ) : (
                 <div>
                   {activities.map((activity) => (

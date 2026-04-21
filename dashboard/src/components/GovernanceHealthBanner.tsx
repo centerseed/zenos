@@ -53,7 +53,7 @@ export function GovernanceHealthBanner({ level }: GovernanceHealthBannerProps) {
       <p className={`text-sm font-medium ${textClass}`}>
         {message}
       </p>
-      <p className="mt-1 text-xs text-muted-foreground">
+      <p className="mt-1 text-xs text-dim">
         {guidance}{" "}
         <button
           onClick={handleCopy}

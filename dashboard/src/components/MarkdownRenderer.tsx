@@ -13,7 +13,7 @@ const components: Components = {
   table: ({ children, ...props }) => (
     <div className="overflow-x-auto my-2">
       <table
-        className="min-w-full text-xs border-collapse border border-border/60 bg-background/70"
+        className="min-w-full text-xs border-collapse border bd-hair bg-base"
         {...props}
       >
         {children}
@@ -27,14 +27,14 @@ const components: Components = {
   ),
   th: ({ children, ...props }) => (
     <th
-      className="border border-border/60 px-3 py-1.5 text-left font-semibold text-foreground"
+      className="border bd-hair px-3 py-1.5 text-left font-semibold text-foreground"
       {...props}
     >
       {children}
     </th>
   ),
   td: ({ children, ...props }) => (
-    <td className="border border-border/60 px-3 py-1.5 text-foreground align-top" {...props}>
+    <td className="border bd-hair px-3 py-1.5 text-foreground align-top" {...props}>
       {children}
     </td>
   ),
@@ -53,7 +53,7 @@ const components: Components = {
     <img
       src={src}
       alt={alt ?? ""}
-      className="rounded-lg max-w-full max-h-64 object-contain my-2 border border-border"
+      className="rounded-lg max-w-full max-h-64 object-contain my-2 border bd-hair"
       loading="lazy"
       {...props}
     />
@@ -103,7 +103,7 @@ const components: Components = {
     const isBlock = className?.startsWith("language-");
     if (isBlock) {
       return (
-        <pre className="my-2 overflow-x-auto rounded-[2px] border border-border/60 bg-foreground/[0.04] p-3 text-xs text-foreground">
+        <pre className="my-2 overflow-x-auto rounded-[2px] border bd-hair bg-foreground/[0.04] p-3 text-xs text-foreground">
           <code className={className} {...props}>
             {children}
           </code>
@@ -112,7 +112,7 @@ const components: Components = {
     }
     return (
       <code
-        className="rounded-[2px] border border-border/50 bg-foreground/[0.05] px-1.5 py-0.5 text-[0.8em] font-mono text-foreground"
+        className="rounded-[2px] border bd-hair bg-foreground/[0.05] px-1.5 py-0.5 text-[0.8em] font-mono text-foreground"
         {...props}
       >
         {children}
@@ -121,13 +121,13 @@ const components: Components = {
   },
   blockquote: ({ children, ...props }) => (
     <blockquote
-      className="my-2 border-l-2 border-border/80 pl-3 text-muted-foreground italic"
+      className="my-2 border-l-2 bd-hair pl-3 text-dim italic"
       {...props}
     >
       {children}
     </blockquote>
   ),
-  hr: (props) => <hr className="border-border my-3" {...props} />,
+  hr: (props) => <hr className="bd-hair my-3" {...props} />,
   strong: ({ children, ...props }) => (
     <strong className="font-semibold text-foreground" {...props}>
       {children}

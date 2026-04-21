@@ -410,21 +410,21 @@ export function isConfirmedStatus(status: Post["status"]): boolean {
 export function statusConfig(status: Post["status"]) {
   switch (status) {
     case "topic_planned":
-      return { label: "主題已規劃", class: "border-primary/30 bg-primary/10 text-primary" };
+      return { label: "主題已規劃", class: "border-primary/30 bg-accent-soft text-primary" };
     case "intel_ready":
-      return { label: "情報已就緒", class: "border-primary/30 bg-primary/10 text-primary" };
+      return { label: "情報已就緒", class: "border-primary/30 bg-accent-soft text-primary" };
     case "draft_generated":
       return { label: "主文案待確認", class: "border-amber-400/30 bg-amber-400/10 text-amber-400" };
     case "draft_confirmed":
-      return { label: "主文案已確認", class: "border-primary/30 bg-primary/10 text-primary" };
+      return { label: "主文案已確認", class: "border-primary/30 bg-accent-soft text-primary" };
     case "platform_adapted":
       return { label: "平台版本待確認", class: "border-amber-400/30 bg-amber-400/10 text-amber-400" };
     case "platform_confirmed":
-      return { label: "平台版本已確認", class: "border-primary/30 bg-primary/10 text-primary" };
+      return { label: "平台版本已確認", class: "border-primary/30 bg-accent-soft text-primary" };
     case "scheduled":
       return { label: "已排程", class: "border-chart-2/30 bg-chart-2/10 text-chart-2" };
     case "published":
-      return { label: "已發佈", class: "border-border/40 bg-muted/20 text-muted-foreground" };
+      return { label: "已發佈", class: "bd-hair bg-muted/20 text-dim" };
     case "failed":
       return { label: "流程失敗", class: "border-destructive/30 bg-destructive/10 text-destructive" };
   }
@@ -433,11 +433,11 @@ export function statusConfig(status: Post["status"]) {
 export function campaignStatusConfig(status: MarketingProject["status"]) {
   switch (status) {
     case "active":
-      return { dot: "bg-primary", badge: "border-primary/30 bg-primary/10 text-primary", label: "進行中" };
+      return { dot: "bg-accent-soft", badge: "border-primary/30 bg-accent-soft text-primary", label: "進行中" };
     case "blocked":
       return { dot: "bg-destructive", badge: "border-destructive/30 bg-destructive/10 text-destructive", label: "暫停" };
     case "completed":
-      return { dot: "bg-muted-foreground", badge: "border-border/40 bg-muted/20 text-muted-foreground", label: "已結束" };
+      return { dot: "bg-muted-foreground", badge: "bd-hair bg-muted/20 text-dim", label: "已結束" };
   }
 }
 

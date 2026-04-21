@@ -107,7 +107,7 @@ function ProductTree({ product }: { product: RealEntity }) {
   };
 
   return (
-    <div className="rounded-xl border border-[#27272A] bg-[#111113] overflow-hidden">
+    <div className="rounded-zen border border-[#27272A] bg-[#111113] overflow-hidden">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center gap-4 px-5 py-4 hover:bg-[#18181B]/50 transition-colors cursor-pointer"
@@ -234,7 +234,7 @@ export default function MockupAReal() {
 
         {/* Orphan blindspots */}
         {orphans.length > 0 && (
-          <div className="rounded-xl border border-[#27272A] bg-[#111113] overflow-hidden">
+          <div className="rounded-zen border border-[#27272A] bg-[#111113] overflow-hidden">
             <div className="px-5 pt-4 pb-3 flex items-center gap-3">
               <div className="w-10 h-10 rounded-full border-2 border-[#FAFAFA]/10 bg-[#FAFAFA]/5 flex items-center justify-center shrink-0">
                 <span className="text-[#FAFAFA]/30">?</span>

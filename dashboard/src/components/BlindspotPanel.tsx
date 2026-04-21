@@ -20,7 +20,7 @@ export function BlindspotPanel({ blindspots, entities }: BlindspotPanelProps) {
   );
 
   return (
-    <div className="bg-card rounded-lg border border-border">
+    <div className="bg-panel rounded-lg border bd-hair">
       <button
         onClick={() => setExpanded(!expanded)}
         className="w-full flex items-center justify-between px-4 py-3 cursor-pointer"
@@ -29,7 +29,7 @@ export function BlindspotPanel({ blindspots, entities }: BlindspotPanelProps) {
           Blindspots ({blindspots.length})
         </span>
         <svg
-          className={`w-4 h-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+          className={`w-4 h-4 text-dim transition-transform ${expanded ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -42,7 +42,7 @@ export function BlindspotPanel({ blindspots, entities }: BlindspotPanelProps) {
       {expanded && (
         <div className="px-4 pb-4 space-y-3">
           {sorted.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No active blindspots</p>
+            <p className="text-sm text-dim">No active blindspots</p>
           ) : (
             sorted.map((bs) => {
               const isRed = bs.severity === "red";

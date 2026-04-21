@@ -93,17 +93,17 @@ export function CopilotRailShell({
           : c.inkMuted;
   const shellContent = (
     <div
-      className={`flex h-full flex-col overflow-hidden bg-background ${
+      className={`flex h-full flex-col overflow-hidden bg-base ${
         inlineOnly
-          ? "rounded-[2px] border border-border/60 bg-card shadow-[0_18px_40px_rgba(58,52,44,0.10)]"
+          ? "rounded-[2px] border bd-hair bg-panel shadow-[0_18px_40px_rgba(58,52,44,0.10)]"
           : desktopInline
-            ? "xl:rounded-[2px] xl:border xl:border-border/60 xl:bg-card xl:shadow-[0_20px_44px_rgba(58,52,44,0.12)]"
+            ? "xl:rounded-[2px] xl:border xl:bd-hair xl:bg-panel xl:shadow-[0_20px_44px_rgba(58,52,44,0.12)]"
             : ""
       }`}
       style={shellVars}
     >
       <div
-        className="border-b border-border/40 px-4 py-4"
+        className="border-b bd-hair px-4 py-4"
         style={{
           background: c.surface,
           borderBottomColor: c.inkHair,
@@ -122,7 +122,7 @@ export function CopilotRailShell({
               {entry?.title || "AI 助手"}
             </h2>
             <p
-              className="text-sm text-muted-foreground"
+              className="text-sm text-dim"
               style={{
                 marginTop: 2,
                 color: c.inkMuted,
@@ -178,7 +178,7 @@ export function CopilotRailShell({
         </div>
         {footer ? (
           <div
-            className="max-h-[min(42vh,420px)] shrink-0 overflow-y-auto border-t border-border/30 bg-background px-4 py-4"
+            className="max-h-[min(42vh,420px)] shrink-0 overflow-y-auto border-t bd-hair bg-base px-4 py-4"
             style={{
               background: c.surface,
               borderTopColor: c.inkHair,

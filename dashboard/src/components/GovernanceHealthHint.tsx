@@ -30,7 +30,7 @@ export function GovernanceHealthHint({ level }: { level: HealthLevel }) {
           ? "品質可能影響 agent 建議"
           : "有些內容可能需要整理"}
       </p>
-      <p className="mt-0.5 text-[10px] text-muted-foreground leading-tight">
+      <p className="mt-0.5 text-[10px] text-dim leading-tight">
         <button
           onClick={handleCopy}
           className="inline rounded bg-foreground/5 px-1 py-px font-mono text-[10px] text-foreground/60 hover:bg-foreground/10 transition-colors cursor-pointer"

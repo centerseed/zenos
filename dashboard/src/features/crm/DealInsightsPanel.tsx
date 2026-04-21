@@ -82,12 +82,12 @@ function SectionHeader({ title, open, onToggle, count }: SectionHeaderProps) {
       className="w-full flex items-center justify-between py-2 text-left group"
     >
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground select-none">
+        <span className="text-xs text-dim select-none">
           {open ? "▾" : "▸"}
         </span>
         <span className="text-sm font-medium text-foreground">{title}</span>
         {count !== undefined && count > 0 && (
-          <span className="text-xs bg-secondary text-muted-foreground rounded-full px-1.5">
+          <span className="text-xs bg-soft text-dim rounded-full px-1.5">
             {count}
           </span>
         )}
@@ -131,13 +131,13 @@ function CommitmentItem({ insight, token, onStatusChange }: CommitmentItemProps)
         checked={done}
         disabled={updating}
         onChange={handleToggle}
-        className="mt-0.5 h-3.5 w-3.5 rounded border-border accent-primary shrink-0 cursor-pointer"
+        className="mt-0.5 h-3.5 w-3.5 rounded bd-hair accent-primary shrink-0 cursor-pointer"
       />
       <div className="min-w-0 flex-1">
         <p
           className={`text-xs leading-snug ${
             done
-              ? "line-through text-muted-foreground"
+              ? "line-through text-dim"
               : overdue
               ? "text-red-400"
               : "text-foreground"
@@ -148,7 +148,7 @@ function CommitmentItem({ insight, token, onStatusChange }: CommitmentItemProps)
         {meta.deadline && (
           <p
             className={`text-[10px] mt-0.5 ${
-              overdue ? "text-red-400 font-medium" : "text-muted-foreground"
+              overdue ? "text-red-400 font-medium" : "text-dim"
             }`}
           >
             {overdue ? "逾期：" : "預期："}
@@ -303,11 +303,11 @@ export function DealInsightsPanel({
   // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
-    <div className="bg-card border border-border rounded-xl p-4 space-y-1">
+    <div className="bg-panel border bd-hair rounded-zen p-4 space-y-1">
       <h3 className="text-sm font-semibold text-foreground mb-2">AI 洞察</h3>
 
       {loading && (
-        <p className="text-xs text-muted-foreground py-4 text-center">
+        <p className="text-xs text-dim py-4 text-center">
           載入洞察中...
         </p>
       )}
@@ -317,7 +317,7 @@ export function DealInsightsPanel({
       )}
 
       {!loading && !error && !hasAnyData && (
-        <p className="text-xs text-muted-foreground py-4 leading-relaxed">
+        <p className="text-xs text-dim py-4 leading-relaxed">
           完成第一次商談並記錄活動後，AI 洞察將在這裡累積
         </p>
       )}
@@ -335,7 +335,7 @@ export function DealInsightsPanel({
             {openSections.briefings && (
               <div className="space-y-2 mt-1">
                 {briefingsSorted.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">尚無已存 briefing</p>
+                  <p className="text-xs text-dim">尚無已存 briefing</p>
                 ) : (
                   briefingsSorted.map((briefing) => {
                     const meta = briefing.metadata as BriefingMetadata;
@@ -349,21 +349,21 @@ export function DealInsightsPanel({
                     return (
                       <div
                         key={briefing.id}
-                        className="rounded-lg border border-border p-2 space-y-1"
+                        className="rounded-lg border bd-hair p-2 space-y-1"
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-xs font-medium text-foreground truncate">
                               {title}
                             </p>
-                            <p className="text-[10px] text-muted-foreground">
+                            <p className="text-[10px] text-dim">
                               {formatDate(briefing.createdAt)}
                             </p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
                             <button
                               onClick={() => onOpenBriefing(briefing)}
-                              className="px-2 py-1 text-[10px] rounded border border-border text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-colors"
+                              className="px-2 py-1 text-[10px] rounded border bd-hair text-dim hover:text-foreground hover:border-foreground/30 transition-colors"
                             >
                               開啟
                             </button>
@@ -376,7 +376,7 @@ export function DealInsightsPanel({
                             </button>
                           </div>
                         </div>
-                        <p className="text-xs text-muted-foreground line-clamp-3 whitespace-pre-wrap">
+                        <p className="text-xs text-dim line-clamp-3 whitespace-pre-wrap">
                           {lastAssistant?.trim() || "—"}
                         </p>
                       </div>
@@ -398,11 +398,11 @@ export function DealInsightsPanel({
             {openSections.decisions && (
               <div className="space-y-1.5 mt-1">
                 {allDecisions.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">尚無決策記錄</p>
+                  <p className="text-xs text-dim">尚無決策記錄</p>
                 ) : (
                   allDecisions.map((item, i) => (
                     <div key={i} className="flex items-start gap-2">
-                      <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">
+                      <span className="text-[10px] text-dim shrink-0 mt-0.5">
                         {item.date}
                       </span>
                       <p className="text-xs text-foreground">{item.text}</p>
@@ -424,12 +424,12 @@ export function DealInsightsPanel({
             {openSections.commitments && (
               <div className="mt-1 space-y-2">
                 {ourCommitments.length === 0 && customerCommitments.length === 0 && doneCommitments.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">尚無承諾追蹤</p>
+                  <p className="text-xs text-dim">尚無承諾追蹤</p>
                 ) : (
                   <>
                     {ourCommitments.length > 0 && (
                       <div>
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                        <p className="text-[10px] font-medium text-dim uppercase tracking-wide mb-1">
                           我方承諾
                         </p>
                         {ourCommitments.map((c) => (
@@ -444,7 +444,7 @@ export function DealInsightsPanel({
                     )}
                     {customerCommitments.length > 0 && (
                       <div>
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-1">
+                        <p className="text-[10px] font-medium text-dim uppercase tracking-wide mb-1">
                           客戶承諾
                         </p>
                         {customerCommitments.map((c) => (
@@ -459,7 +459,7 @@ export function DealInsightsPanel({
                     )}
                     {doneCommitments.length > 0 && (
                       <details className="mt-3">
-                        <summary className="text-sm text-muted-foreground cursor-pointer hover:text-foreground">
+                        <summary className="text-sm text-dim cursor-pointer hover:text-foreground">
                           已完成（{doneCommitments.length}）
                         </summary>
                         <div className="mt-2 space-y-2">
@@ -491,11 +491,11 @@ export function DealInsightsPanel({
             {openSections.concerns && (
               <div className="space-y-1.5 mt-1">
                 {allConcerns.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">尚無客戶顧慮記錄</p>
+                  <p className="text-xs text-dim">尚無客戶顧慮記錄</p>
                 ) : (
                   allConcerns.map((item, i) => (
                     <div key={i} className="flex items-start gap-2">
-                      <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5">
+                      <span className="text-[10px] text-dim shrink-0 mt-0.5">
                         {item.date}
                       </span>
                       <p className="text-xs text-foreground">{item.text}</p>
@@ -516,12 +516,12 @@ export function DealInsightsPanel({
             {openSections.summary && (
               <div className="space-y-2 mt-1">
                 {!latestMeta ? (
-                  <p className="text-xs text-muted-foreground">尚無摘要</p>
+                  <p className="text-xs text-dim">尚無摘要</p>
                 ) : (
                   <>
                     {latestMeta.stage_recommendation && (
                       <div>
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
+                        <p className="text-[10px] font-medium text-dim uppercase tracking-wide mb-0.5">
                           階段建議
                         </p>
                         <p className="text-xs text-foreground">
@@ -531,13 +531,13 @@ export function DealInsightsPanel({
                     )}
                     {latestMeta.next_steps && latestMeta.next_steps.length > 0 && (
                       <div>
-                        <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide mb-0.5">
+                        <p className="text-[10px] font-medium text-dim uppercase tracking-wide mb-0.5">
                           下一步
                         </p>
                         <ul className="space-y-0.5">
                           {latestMeta.next_steps.map((step, i) => (
                             <li key={i} className="text-xs text-foreground flex gap-1">
-                              <span className="text-muted-foreground shrink-0">·</span>
+                              <span className="text-dim shrink-0">·</span>
                               <span>{step}</span>
                             </li>
                           ))}
@@ -547,7 +547,7 @@ export function DealInsightsPanel({
                     {!latestMeta.stage_recommendation &&
                       (!latestMeta.next_steps ||
                         latestMeta.next_steps.length === 0) && (
-                        <p className="text-xs text-muted-foreground">
+                        <p className="text-xs text-dim">
                           最近 debrief 尚無摘要資料
                         </p>
                       )}

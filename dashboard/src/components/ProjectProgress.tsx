@@ -17,9 +17,9 @@ interface ProjectStat {
 export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
   if (entities.length === 0) {
     return (
-      <div className="bg-card rounded-lg border border-border p-6">
+      <div className="bg-panel rounded-lg border bd-hair p-6">
         <h3 className="text-sm font-semibold text-white mb-4">Products Progress</h3>
-        <p className="text-sm text-muted-foreground text-center py-4">No products yet</p>
+        <p className="text-sm text-dim text-center py-4">No products yet</p>
       </div>
     );
   }
@@ -37,7 +37,7 @@ export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
     .sort((a, b) => b.percent - a.percent);
 
   return (
-    <div className="bg-card rounded-lg border border-border p-6">
+    <div className="bg-panel rounded-lg border bd-hair p-6">
       <h3 className="text-sm font-semibold text-white mb-4">Products Progress</h3>
       <div className="space-y-4">
         {stats.map(({ entity, total, done, percent }) => {
@@ -51,18 +51,18 @@ export function ProjectProgress({ tasks, entities }: ProjectProgressProps) {
                 <span className="text-sm font-medium text-foreground">
                   {entity.name}
                 </span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-dim">
                   {done}/{total}
                 </span>
               </div>
               <div className="flex items-center gap-3">
-                <div className="flex-1 bg-secondary rounded-full h-2">
+                <div className="flex-1 bg-soft rounded-full h-2">
                   <div
                     className={`${barColor} rounded-full h-2 transition-all`}
                     style={{ width: `${percent}%` }}
                   />
                 </div>
-                <span className="text-xs font-medium text-muted-foreground w-10 text-right">
+                <span className="text-xs font-medium text-dim w-10 text-right">
                   {percent}%
                 </span>
               </div>

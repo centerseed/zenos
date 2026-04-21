@@ -80,9 +80,9 @@ function Step1Content({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">{content.description}</p>
+      <p className="text-sm text-dim">{content.description}</p>
       <p className="text-xs font-medium text-foreground">{content.instruction}</p>
-      <div className="rounded-lg border border-border bg-[#0f1418] p-3">
+      <div className="rounded-lg border bd-hair bg-[#0f1418] p-3">
         <div className="flex items-center justify-between gap-2">
           <code className="text-sm text-emerald-300">{content.command}</code>
           <button
@@ -93,7 +93,7 @@ function Step1Content({
           </button>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">{content.driveHint}</p>
+      <p className="text-xs text-dim">{content.driveHint}</p>
       <div className="flex gap-2 pt-1">
         <button
           onClick={onDone}
@@ -103,7 +103,7 @@ function Step1Content({
         </button>
         <button
           onClick={onSkip}
-          className="rounded-full border border-border px-4 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+          className="rounded-full border bd-hair px-4 py-1.5 text-xs text-dim hover:text-foreground"
         >
           稍後再說
         </button>
@@ -128,10 +128,10 @@ function Step2Content({ apiKey, useSSE }: { apiKey: string; useSSE: boolean }) {
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm text-dim">
         將 MCP 連結加入你的 AI 工具，然後安裝 ZenOS skills，讓 AI 獲得角色和治理能力。
       </p>
-      <div className="rounded-lg border border-border bg-[#0f1418] p-3">
+      <div className="rounded-lg border bd-hair bg-[#0f1418] p-3">
         <div className="flex items-center justify-between gap-2">
           <code className="text-xs text-slate-300 break-all">{maskedUrl}</code>
           <button
@@ -142,7 +142,7 @@ function Step2Content({ apiKey, useSSE }: { apiKey: string; useSSE: boolean }) {
           </button>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-dim">
         連上 MCP 後，在 AI 工具中輸入 <code className="text-emerald-300">/zenos-setup</code> 來安裝 Skills。
       </p>
       <Link href="/setup" className="inline-block text-xs text-blue-400 hover:underline">
@@ -177,8 +177,8 @@ function Step3Content({ platformType }: { platformType: "technical" | "non_techn
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">{content.instruction}</p>
-      <div className="rounded-lg border border-border bg-[#0f1418] p-3">
+      <p className="text-sm text-dim">{content.instruction}</p>
+      <div className="rounded-lg border bd-hair bg-[#0f1418] p-3">
         <div className="flex items-center justify-between gap-2">
           <code className="text-sm text-emerald-300">{content.command}</code>
           <button
@@ -189,7 +189,7 @@ function Step3Content({ platformType }: { platformType: "technical" | "non_techn
           </button>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">{content.hint}</p>
+      <p className="text-xs text-dim">{content.hint}</p>
     </div>
   );
 }
@@ -221,28 +221,28 @@ function Step4Content({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-sm text-dim">
         試試用 AI 角色來處理工作。這些角色會根據知識地圖中的資訊來理解你的公司。
       </p>
       <div className="space-y-2">
         {roles.map((role) => (
           <div
             key={role.name}
-            className="rounded-lg border border-border bg-background/70 p-3"
+            className="rounded-lg border bd-hair bg-base p-3"
           >
             <div className="flex items-center gap-2">
               <span className="font-mono text-sm font-semibold text-emerald-300">
                 {role.name}
               </span>
-              <span className="text-xs text-muted-foreground">{role.label}</span>
+              <span className="text-xs text-dim">{role.label}</span>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
+            <p className="mt-1 text-xs text-dim">
               試試看：「{role.example}」
             </p>
           </div>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-xs text-dim">
         如果沒有看到這些角色，請先在 AI 工具中執行 <code className="text-emerald-300">/zenos-setup</code> 安裝 ZenOS Agent。
       </p>
       <div className="flex gap-2 pt-1">
@@ -254,7 +254,7 @@ function Step4Content({
         </button>
         <button
           onClick={onSkip}
-          className="rounded-full border border-border px-4 py-1.5 text-xs text-muted-foreground hover:text-foreground"
+          className="rounded-full border bd-hair px-4 py-1.5 text-xs text-dim hover:text-foreground"
         >
           稍後再說
         </button>
@@ -281,7 +281,7 @@ function ChecklistStep({
   children: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-border last:border-b-0">
+    <div className="border-b bd-hair last:border-b-0">
       <button
         onClick={onToggle}
         className="flex w-full items-center gap-3 px-5 py-4 text-left hover:bg-foreground/5 transition-colors cursor-pointer"
@@ -296,11 +296,11 @@ function ChecklistStep({
             </div>
           ) : status === "skipped" ? (
             <div className="flex h-6 w-6 items-center justify-center rounded-full bg-foreground/10">
-              <span className="text-xs text-muted-foreground">--</span>
+              <span className="text-xs text-dim">--</span>
             </div>
           ) : (
-            <div className="flex h-6 w-6 items-center justify-center rounded-full border border-border">
-              <span className="text-xs text-muted-foreground">{index + 1}</span>
+            <div className="flex h-6 w-6 items-center justify-center rounded-full border bd-hair">
+              <span className="text-xs text-dim">{index + 1}</span>
             </div>
           )}
         </div>
@@ -310,12 +310,12 @@ function ChecklistStep({
           <p className={`text-sm font-medium ${status === "done" ? "text-emerald-300" : "text-foreground"}`}>
             {step.title}
           </p>
-          <p className="text-xs text-muted-foreground">{step.subtitle}</p>
+          <p className="text-xs text-dim">{step.subtitle}</p>
         </div>
 
         {/* Expand arrow */}
         <svg
-          className={`h-4 w-4 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+          className={`h-4 w-4 text-dim transition-transform ${expanded ? "rotate-180" : ""}`}
           fill="none"
           viewBox="0 0 24 24"
           stroke="currentColor"
@@ -385,13 +385,13 @@ export function OnboardingChecklist({
 
   return (
     <div className="w-full max-w-lg mx-auto">
-      <div className="rounded-[28px] border border-border bg-card overflow-hidden">
+      <div className="rounded-[28px] border bd-hair bg-panel overflow-hidden">
         {/* Header */}
         <div className="px-5 pt-5 pb-4">
           <h2 className="text-lg font-semibold text-foreground">
             開始使用 ZenOS
           </h2>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <p className="mt-1 text-sm text-dim">
             完成以下步驟，讓 AI 助手理解你的公司
           </p>
 
@@ -403,14 +403,14 @@ export function OnboardingChecklist({
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <span className="text-xs text-muted-foreground shrink-0">
+            <span className="text-xs text-dim shrink-0">
               {doneCount}/{totalSteps}
             </span>
           </div>
         </div>
 
         {/* Steps */}
-        <div className="border-t border-border">
+        <div className="border-t bd-hair">
           {STEPS.map((step, index) => (
             <ChecklistStep
               key={step.id}
@@ -437,10 +437,10 @@ export function OnboardingChecklist({
         </div>
 
         {/* Footer */}
-        <div className="border-t border-border px-5 py-3 flex justify-end">
+        <div className="border-t bd-hair px-5 py-3 flex justify-end">
           <button
             onClick={handleDismiss}
-            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            className="text-xs text-dim hover:text-foreground transition-colors"
           >
             不再顯示
           </button>
@@ -464,7 +464,7 @@ export function OnboardingStartButton({ onClick }: { onClick: () => void }) {
         <h2 className="text-lg font-semibold text-foreground">
           你的知識地圖還是空的
         </h2>
-        <p className="mt-1 text-sm text-muted-foreground max-w-xs">
+        <p className="mt-1 text-sm text-dim max-w-xs">
           讓我們一起把你的專案知識加入 ZenOS，讓 AI 助手真正理解你的公司
         </p>
       </div>

@@ -97,13 +97,13 @@ function SetupSkillsPage() {
     <div className="min-h-screen">
       <main id="main-content" className="max-w-5xl mx-auto px-6 py-8 space-y-8">
         <section className="space-y-3">
-          <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">
+          <p className="text-xs uppercase tracking-[0.24em] text-dim">
             Setup
           </p>
           <h1 className="text-3xl font-bold text-foreground">
             ZenOS skills / agents / flows
           </h1>
-          <p className="max-w-3xl text-muted-foreground">
+          <p className="max-w-3xl text-dim">
             這一頁只講安裝完成後會多出什麼治理能力，不再重複平台的 MCP 安裝步驟。
           </p>
         </section>
@@ -111,10 +111,10 @@ function SetupSkillsPage() {
         {SKILL_GROUPS.map((group) => (
           <section
             key={group.title}
-            className="rounded-2xl border border-border bg-card p-6"
+            className="rounded-zen border bd-hair bg-panel p-6"
           >
             <h2 className="text-xl font-semibold text-foreground">{group.title}</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
+            <p className="mt-2 text-sm text-dim">
               {group.description}
             </p>
 
@@ -122,13 +122,13 @@ function SetupSkillsPage() {
               {group.items.map((item) => (
                 <div
                   key={item.name}
-                  className="rounded-xl border border-border bg-background/70 p-4"
+                  className="rounded-zen border bd-hair bg-base p-4"
                 >
                   <h3 className="font-medium text-foreground">{item.name}</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">
+                  <p className="mt-2 text-sm text-dim">
                     {item.usage}
                   </p>
-                  <p className="mt-2 text-xs uppercase tracking-[0.22em] text-muted-foreground">
+                  <p className="mt-2 text-xs uppercase tracking-[0.22em] text-dim">
                     Attached
                   </p>
                   <p className="mt-1 text-sm text-foreground/85">
@@ -140,11 +140,11 @@ function SetupSkillsPage() {
           </section>
         ))}
 
-        <section className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-6">
+        <section className="rounded-zen border border-blue-500/30 bg-blue-500/10 p-6">
           <h2 className="text-xl font-semibold text-foreground">
             頁面上建議補的兩句提醒
           </h2>
-          <div className="mt-4 space-y-3 text-sm text-muted-foreground">
+          <div className="mt-4 space-y-3 text-sm text-dim">
             <p>
               Skills 不是 MCP 的替代品。沒有 MCP，skills 只能提供流程指引，不能真的讀寫 ZenOS ontology。
             </p>

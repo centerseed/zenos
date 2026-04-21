@@ -23,7 +23,7 @@ const statusColors: Record<string, string> = {
   active: "bg-green-900/50 text-green-400",
   paused: "bg-yellow-900/50 text-yellow-400",
   planned: "bg-blue-900/50 text-blue-400",
-  completed: "bg-secondary text-muted-foreground",
+  completed: "bg-soft text-dim",
 };
 
 const VISIBILITY_OPTIONS: EntityVisibility[] = ["public", "restricted", "confidential"];
@@ -84,18 +84,18 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
   };
 
   return (
-    <div className="border border-border rounded-lg bg-card">
+    <div className="border bd-hair rounded-lg bg-panel">
       <button
         onClick={handleToggle}
         aria-label={`${expanded ? "Collapse" : "Expand"} ${entity.name}`}
-        className="w-full text-left p-4 hover:bg-secondary transition-colors cursor-pointer"
+        className="w-full text-left p-4 hover:bg-soft transition-colors cursor-pointer"
       >
         <div className="flex items-start justify-between">
           <div className="flex items-start gap-2">
             <span>{typeIcons[entity.type] ?? "📄"}</span>
             <div>
               <h4 className="font-medium text-foreground">{entity.name}</h4>
-              <p className="text-sm text-muted-foreground mt-1">{entity.summary}</p>
+              <p className="text-sm text-dim mt-1">{entity.summary}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -104,7 +104,7 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
             >
               {entity.status}
             </span>
-            <span className="text-muted-foreground text-sm">
+            <span className="text-dim text-sm">
               {expanded ? "▲" : "▼"}
             </span>
           </div>
@@ -112,16 +112,16 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
       </button>
 
       {expanded && (
-        <div className="border-t border-border p-4 bg-background">
+        <div className="border-t bd-hair p-4 bg-base">
           {partner?.isAdmin && (
-            <div className="mb-4 rounded-md border border-border p-3">
-              <div className="text-xs text-muted-foreground mb-2">Visibility</div>
+            <div className="mb-4 rounded-md border bd-hair p-3">
+              <div className="text-xs text-dim mb-2">Visibility</div>
               <div className="grid gap-2">
                 <select
                   aria-label={`Visibility for ${entity.name}`}
                   value={visibility}
                   onChange={(e) => setVisibility(normalizeVisibility(e.target.value))}
-                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                  className="bg-panel border bd-hair rounded px-2 py-1 text-xs text-foreground"
                 >
                   {VISIBILITY_OPTIONS.map((option) => (
                     <option key={option} value={option}>
@@ -134,21 +134,21 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
                   value={visibleToRoles}
                   onChange={(e) => setVisibleToRoles(e.target.value)}
                   placeholder="workspace roles (comma-separated)"
-                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                  className="bg-panel border bd-hair rounded px-2 py-1 text-xs text-foreground"
                 />
                 <input
                   aria-label={`Workspace groups for ${entity.name}`}
                   value={visibleToDepartments}
                   onChange={(e) => setVisibleToDepartments(e.target.value)}
                   placeholder="workspace groups (comma-separated)"
-                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                  className="bg-panel border bd-hair rounded px-2 py-1 text-xs text-foreground"
                 />
                 <input
                   aria-label={`Authorized members for ${entity.name}`}
                   value={visibleToMembers}
                   onChange={(e) => setVisibleToMembers(e.target.value)}
                   placeholder="authorized members (partner ids, comma-separated)"
-                  className="bg-card border border-border rounded px-2 py-1 text-xs text-foreground"
+                  className="bg-panel border bd-hair rounded px-2 py-1 text-xs text-foreground"
                 />
                 <button
                   onClick={handleSaveVisibility}
@@ -163,15 +163,15 @@ function EntityCard({ entity, allEntities }: { entity: Entity; allEntities: Enti
           {loadingRels ? (
             <LoadingState label="Loading relationships..." />
           ) : relationships.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No relationships</p>
+            <p className="text-sm text-dim">No relationships</p>
           ) : (
             <ul className="space-y-2">
               {relationships.map((rel, idx) => (
                 <li key={rel.id} className="text-sm text-foreground flex items-center gap-2">
-                  <span className="text-muted-foreground">{rel.type.replace(/_/g, " ")}</span>
+                  <span className="text-dim">{rel.type.replace(/_/g, " ")}</span>
                   <span className="font-medium">{getEntityName(rel.targetId)}</span>
                   {rel.description && (
-                    <span className="text-muted-foreground">— {rel.description}</span>
+                    <span className="text-dim">— {rel.description}</span>
                   )}
                   <span className="sr-only">Relationship {idx + 1}</span>
                 </li>
@@ -204,7 +204,7 @@ export function EntityTree({ entities, allEntities }: EntityTreeProps) {
         if (!items || items.length === 0) return null;
         return (
           <div key={type}>
-            <h3 className="text-sm font-medium text-muted-foreground uppercase tracking-wide mb-3">
+            <h3 className="text-sm font-medium text-dim uppercase tracking-wide mb-3">
               {typeIcons[type]} {type}s ({items.length})
             </h3>
             <div className="space-y-2">

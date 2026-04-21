@@ -69,13 +69,13 @@ export default function LoginPage() {
 
   if (error === "FIREBASE_CONFIG_MISSING" || error === "FIREBASE_CONFIG_INVALID") {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex items-center justify-center bg-base">
         <div className="text-center max-w-md w-full p-8">
           <h1 className="text-3xl font-bold text-white mb-2">ZenOS</h1>
-          <p className="text-muted-foreground mb-6">Dashboard deployment is misconfigured.</p>
-          <div className="rounded-2xl border border-border bg-card p-5 text-left">
+          <p className="text-dim mb-6">Dashboard deployment is misconfigured.</p>
+          <div className="rounded-zen border bd-hair bg-panel p-5 text-left">
             <div className="text-sm font-medium text-foreground mb-2">Firebase public config 無法啟動</div>
-            <div className="text-sm text-muted-foreground">
+            <div className="text-sm text-dim">
               {error === "FIREBASE_CONFIG_MISSING"
                 ? "build 階段缺少 NEXT_PUBLIC_FIREBASE_* 環境變數。"
                 : "build 階段注入的 NEXT_PUBLIC_FIREBASE_API_KEY 無效。"}
@@ -87,22 +87,22 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
+    <div className="min-h-screen flex items-center justify-center bg-base">
       <div className="text-center max-w-sm w-full p-8">
         <h1 className="text-3xl font-bold text-white mb-2">ZenOS</h1>
-        <p className="text-muted-foreground mb-8">
+        <p className="text-dim mb-8">
           Shared-L1 workspace access for prosumer teams
         </p>
 
         {emailLinkLoading ? (
-          <div className="text-muted-foreground text-sm">正在完成登入...</div>
+          <div className="text-dim text-sm">正在完成登入...</div>
         ) : emailLinkError ? (
           <div className="space-y-4">
             <div className="text-red-400 text-sm">{emailLinkError}</div>
             <button
               onClick={signInWithGoogle}
               disabled={loading}
-              className="w-full flex items-center justify-center gap-3 rounded-lg border border-border bg-card px-6 py-3 text-sm font-medium text-foreground transition-colors hover:border-border hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+              className="w-full flex items-center justify-center gap-3 rounded-lg border bd-hair bg-panel px-6 py-3 text-sm font-medium text-foreground transition-colors hover:bd-hair hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
             >
               <GoogleIcon />
               Sign in with Google
@@ -112,7 +112,7 @@ export default function LoginPage() {
           <button
             onClick={signInWithGoogle}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-3 rounded-lg border border-border bg-card px-6 py-3 text-sm font-medium text-foreground transition-colors hover:border-border hover:bg-secondary disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
+            className="w-full flex items-center justify-center gap-3 rounded-lg border bd-hair bg-panel px-6 py-3 text-sm font-medium text-foreground transition-colors hover:bd-hair hover:bg-soft disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer"
           >
             <GoogleIcon />
             Sign in with Google

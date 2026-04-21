@@ -46,11 +46,11 @@ function NewCompanyModal({ onClose, onCreated, token }: NewCompanyModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-      <div className="bg-card border border-border rounded-xl p-6 w-full max-w-md shadow-xl">
+      <div className="bg-panel border bd-hair rounded-zen p-6 w-full max-w-md shadow-xl">
         <h3 className="text-base font-semibold text-foreground mb-4">新增公司</h3>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="block text-xs text-muted-foreground mb-1">
+            <label className="block text-xs text-dim mb-1">
               公司名稱 <span className="text-red-400">*</span>
             </label>
             <input
@@ -58,50 +58,50 @@ function NewCompanyModal({ onClose, onCreated, token }: NewCompanyModalProps) {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="台灣科技股份有限公司"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-dim focus:outline-none focus:ring-1 focus:ring-primary"
               required
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs text-muted-foreground mb-1">產業</label>
+              <label className="block text-xs text-dim mb-1">產業</label>
               <input
                 type="text"
                 value={industry}
                 onChange={(e) => setIndustry(e.target.value)}
                 placeholder="製造業"
-                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-dim focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
             <div>
-              <label className="block text-xs text-muted-foreground mb-1">規模</label>
+              <label className="block text-xs text-dim mb-1">規模</label>
               <input
                 type="text"
                 value={sizeRange}
                 onChange={(e) => setSizeRange(e.target.value)}
                 placeholder="50-200 人"
-                className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-dim focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
           </div>
           <div>
-            <label className="block text-xs text-muted-foreground mb-1">地區</label>
+            <label className="block text-xs text-dim mb-1">地區</label>
             <input
               type="text"
               value={region}
               onChange={(e) => setRegion(e.target.value)}
               placeholder="台北"
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-dim focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
           <div>
-            <label className="block text-xs text-muted-foreground mb-1">備忘</label>
+            <label className="block text-xs text-dim mb-1">備忘</label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="備注..."
               rows={2}
-              className="w-full bg-background border border-border rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+              className="w-full bg-base border bd-hair rounded-lg px-3 py-2 text-sm text-foreground placeholder:text-dim focus:outline-none focus:ring-1 focus:ring-primary resize-none"
             />
           </div>
           {error && (
@@ -111,14 +111,14 @@ function NewCompanyModal({ onClose, onCreated, token }: NewCompanyModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 text-sm rounded-lg bg-secondary text-foreground hover:bg-secondary/80 transition-colors"
+              className="px-4 py-2 text-sm rounded-lg bg-soft text-foreground hover:bg-soft transition-colors"
             >
               取消
             </button>
             <button
               type="submit"
               disabled={saving || !name.trim()}
-              className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="px-4 py-2 text-sm rounded-lg bg-accent-soft text-primary-foreground hover:bg-accent-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? "建立中..." : "建立"}
             </button>
@@ -168,7 +168,7 @@ function CompaniesPage() {
           <div className="flex items-center gap-3">
             <Link
               href="/clients"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+              className="text-sm text-dim hover:text-foreground transition-colors"
             >
               ← 客戶
             </Link>
@@ -176,7 +176,7 @@ function CompaniesPage() {
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="px-3 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+            className="px-3 py-1.5 text-sm rounded-lg bg-accent-soft text-primary-foreground hover:bg-accent-soft transition-colors"
           >
             + 新增公司
           </button>
@@ -185,30 +185,30 @@ function CompaniesPage() {
         {loading ? (
           <LoadingState label="載入公司列表..." />
         ) : companies.length === 0 ? (
-          <div className="text-center py-16 bg-card rounded-xl border border-border">
-            <p className="text-muted-foreground">尚無公司資料</p>
+          <div className="text-center py-16 bg-panel rounded-zen border bd-hair">
+            <p className="text-dim">尚無公司資料</p>
             <button
               onClick={() => setShowModal(true)}
-              className="mt-3 px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors"
+              className="mt-3 px-4 py-2 text-sm rounded-lg bg-accent-soft text-primary-foreground hover:bg-accent-soft transition-colors"
             >
               新增第一家公司
             </button>
           </div>
         ) : (
-          <div className="bg-card border border-border rounded-xl overflow-hidden">
+          <div className="bg-panel border bd-hair rounded-zen overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <tr className="border-b bd-hair">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-dim uppercase tracking-wide">
                     公司名稱
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-dim uppercase tracking-wide hidden sm:table-cell">
                     產業
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-dim uppercase tracking-wide hidden md:table-cell">
                     規模
                   </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-dim uppercase tracking-wide hidden md:table-cell">
                     地區
                   </th>
                 </tr>
@@ -217,7 +217,7 @@ function CompaniesPage() {
                 {companies.map((company) => (
                   <tr
                     key={company.id}
-                    className="border-b border-border last:border-0 hover:bg-secondary/30 transition-colors"
+                    className="border-b bd-hair last:border-0 hover:bg-soft transition-colors"
                   >
                     <td className="px-4 py-3">
                       <Link
@@ -227,13 +227,13 @@ function CompaniesPage() {
                         {company.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden sm:table-cell">
+                    <td className="px-4 py-3 text-dim hidden sm:table-cell">
                       {company.industry ?? "—"}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                    <td className="px-4 py-3 text-dim hidden md:table-cell">
                       {company.sizeRange ?? "—"}
                     </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
+                    <td className="px-4 py-3 text-dim hidden md:table-cell">
                       {company.region ?? "—"}
                     </td>
                   </tr>

@@ -58,9 +58,9 @@ export function ActivityTimeline({ tasks, partners, entities }: ActivityTimeline
 
   if (sorted.length === 0) {
     return (
-      <div className="bg-card rounded-lg border border-border p-6">
+      <div className="bg-panel rounded-lg border bd-hair p-6">
         <h3 className="text-sm font-semibold text-white mb-4">Activity Timeline</h3>
-        <p className="text-sm text-muted-foreground text-center py-4">No recent activity</p>
+        <p className="text-sm text-dim text-center py-4">No recent activity</p>
       </div>
     );
   }
@@ -81,15 +81,15 @@ export function ActivityTimeline({ tasks, partners, entities }: ActivityTimeline
   }
 
   return (
-    <div className="bg-card rounded-lg border border-border p-6">
+    <div className="bg-panel rounded-lg border bd-hair p-6">
       <h3 className="text-sm font-semibold text-white mb-4">Activity Timeline</h3>
       <div className="space-y-4">
         {groups.map((group) => (
           <div key={group.label}>
-            <div className="text-xs font-semibold text-muted-foreground uppercase mb-2">
+            <div className="text-xs font-semibold text-dim uppercase mb-2">
               {group.label}
             </div>
-            <div className="space-y-2 border-l-2 border-border ml-2 pl-4">
+            <div className="space-y-2 border-l-2 bd-hair ml-2 pl-4">
               {group.items.map((task) => {
                 const assigneeName = task.assignee
                   ? partnerMap.get(task.assignee) ?? task.assignee
@@ -101,20 +101,20 @@ export function ActivityTimeline({ tasks, partners, entities }: ActivityTimeline
 
                 return (
                   <div key={task.id} className="flex items-start gap-2 text-sm">
-                    <span className="text-xs text-muted-foreground whitespace-nowrap mt-0.5">
+                    <span className="text-xs text-dim whitespace-nowrap mt-0.5">
                       {relativeTime(task.updatedAt)}
                     </span>
                     <span className="font-medium text-foreground">
                       {assigneeName}
                     </span>
-                    <span className="text-muted-foreground">
+                    <span className="text-dim">
                       {getActionLabel(task)}
                     </span>
                     <span className="text-white font-medium truncate max-w-[200px]">
                       {task.title}
                     </span>
                     {entityName && (
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-dim">
                         → {entityName}
                       </span>
                     )}

@@ -41,16 +41,16 @@ function SharedDocumentPageInner() {
   }, [token]);
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-4xl bg-background px-4 py-8 text-foreground sm:px-6">
-      <header className="mb-6 border-b border-border pb-3">
+    <main className="mx-auto min-h-screen w-full max-w-4xl bg-base px-4 py-8 text-foreground sm:px-6">
+      <header className="mb-6 border-b bd-hair pb-3">
         <h1 className="text-xl font-semibold">{title}</h1>
       </header>
       {loading ? (
         <LoadingState label="Loading shared document..." />
       ) : error ? (
-        <div className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">{error}</div>
+        <div className="rounded-zen border bd-hair bg-panel p-5 text-sm text-dim">{error}</div>
       ) : (
-        <article className="rounded-xl border border-border bg-card p-5">
+        <article className="rounded-zen border bd-hair bg-panel p-5">
           <MarkdownRenderer content={content} />
         </article>
       )}

@@ -52,7 +52,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
     return (
       <span
         data-testid="workspace-entry-single"
-        className="hidden sm:inline-flex items-center rounded-md border border-border/70 bg-card/80 px-2.5 py-1 text-xs font-medium text-[#d9ebfa] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+        className="hidden sm:inline-flex items-center rounded-md border bd-hair bg-panel px-2.5 py-1 text-xs font-medium text-[#d9ebfa] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
       >
         我的工作區
       </span>
@@ -65,7 +65,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
     <div className="relative hidden sm:block" data-testid="workspace-entry-picker">
       <button
         onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-card/80 px-2.5 py-1 text-xs font-medium text-[#d9ebfa] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-primary/35 hover:bg-secondary/70 hover:text-foreground"
+        className="inline-flex items-center gap-1.5 rounded-md border bd-hair bg-panel px-2.5 py-1 text-xs font-medium text-[#d9ebfa] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] transition-colors hover:border-primary/35 hover:bg-soft hover:text-foreground"
         aria-expanded={open}
         aria-haspopup="listbox"
       >
@@ -78,7 +78,7 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
         <ul
           role="listbox"
           aria-label="切換工作區"
-          className="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-md border border-border/80 bg-card/95 shadow-[0_18px_40px_rgba(0,0,0,0.32)]"
+          className="absolute left-0 top-full z-50 mt-1 min-w-[180px] overflow-hidden rounded-md border bd-hair bg-panel shadow-[0_18px_40px_rgba(0,0,0,0.32)]"
         >
           {availableWorkspaces.map((ws) => {
             const isActive = ws.id === active.id;
@@ -89,13 +89,13 @@ function WorkspaceEntry({ availableWorkspaces, activeWorkspaceId, onSwitch }: Wo
                     onSwitch?.(ws.id);
                     setOpen(false);
                   }}
-                  className={`flex w-full items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-secondary/70 ${isActive ? "bg-primary/10 text-primary" : "text-[#e6f4ff]"}`}
+                  className={`flex w-full items-center justify-between px-3 py-2 text-xs transition-colors hover:bg-soft ${isActive ? "bg-accent-soft text-primary" : "text-[#e6f4ff]"}`}
                 >
                   <span>{ws.name}</span>
                   {ws.hasUpdate && !isActive && (
                     <span
                       data-testid={`workspace-badge-${ws.id}`}
-                      className="ml-2 h-1.5 w-1.5 rounded-full bg-primary"
+                      className="ml-2 h-1.5 w-1.5 rounded-full bg-accent-soft"
                       aria-label="有更新"
                     />
                   )}
@@ -144,7 +144,7 @@ export function AppNav() {
   if (!partner) return null;
 
   return (
-    <header className="sticky top-0 z-50 border-b border-border/90 bg-[rgba(8,19,31,0.9)] shadow-[0_10px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl">
+    <header className="sticky top-0 z-50 border-b bd-hair bg-[rgba(8,19,31,0.9)] shadow-[0_10px_30px_rgba(0,0,0,0.22)] backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
         <div className="flex items-center gap-3 sm:gap-6">
           <Link
@@ -183,8 +183,8 @@ export function AppNav() {
                   href={href}
                   className={`rounded-md border px-3 py-1.5 text-sm transition-all ${
                     isActive
-                      ? "border-primary/35 bg-primary/18 text-[#d5fff8] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_0_0_1px_rgba(71,229,210,0.12)]"
-                      : "border-transparent text-[#c3d8eb] hover:border-border/70 hover:bg-secondary/70 hover:text-foreground"
+                      ? "border-primary/35 bg-accent-soft text-[#d5fff8] shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_0_0_1px_rgba(71,229,210,0.12)]"
+                      : "border-transparent text-[#c3d8eb] hover:bd-hair hover:bg-soft hover:text-foreground"
                   }`}
                 >
                   {label}
@@ -205,7 +205,7 @@ export function AppNav() {
           </button>
           <button
             onClick={() => setMobileOpen((prev) => !prev)}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border/70 bg-card/80 text-[#d3e5f4] transition-all active:scale-95 hover:border-primary/35 hover:text-foreground hover:bg-secondary/70 md:hidden"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border bd-hair bg-panel text-[#d3e5f4] transition-all active:scale-95 hover:border-primary/35 hover:text-foreground hover:bg-soft md:hidden"
             aria-label={mobileOpen ? "關閉選單" : "開啟選單"}
             aria-expanded={mobileOpen}
           >
@@ -214,7 +214,7 @@ export function AppNav() {
         </div>
       </div>
       {mobileOpen && (
-        <div className="border-t border-border/80 bg-card/95 md:hidden">
+        <div className="border-t bd-hair bg-panel md:hidden">
           <nav className="flex flex-col px-4 py-2">
             {navItems.map(({ href, label }) => {
               const isActive = pathname.startsWith(href);
@@ -225,15 +225,15 @@ export function AppNav() {
                   onClick={() => setMobileOpen(false)}
                   className={`rounded-md border px-3 py-2 text-sm transition-all ${
                     isActive
-                      ? "border-primary/35 bg-primary/18 text-[#d5fff8] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
-                      : "border-transparent text-[#c3d8eb] hover:border-border/70 hover:bg-secondary/70 hover:text-foreground"
+                      ? "border-primary/35 bg-accent-soft text-[#d5fff8] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]"
+                      : "border-transparent text-[#c3d8eb] hover:bd-hair hover:bg-soft hover:text-foreground"
                   }`}
                 >
                   {label}
                 </Link>
               );
             })}
-            <div className="mt-2 flex items-center justify-between border-t border-border/80 pt-2">
+            <div className="mt-2 flex items-center justify-between border-t bd-hair pt-2">
               <span className="text-sm text-[#d3e5f4]">{partner.displayName}</span>
               <button
                 onClick={signOut}
