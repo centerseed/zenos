@@ -52,7 +52,7 @@ export function ZenShell({ children }: ZenShellProps) {
   const activeNav = pathToNavKey(pathname);
 
   const { isHomeWorkspace } = resolveActiveWorkspace(partner);
-  // Shared workspace → 只看到知識地圖 / 專案 / 任務
+  // Shared workspace → 只看到知識地圖 / 產品 / 任務
   const SHARED_NAV_KEYS = ["map", "projects", "tasks"] as const;
 
   const displayName = partner?.displayName?.trim() || partner?.email?.split("@")[0] || "—";
@@ -82,7 +82,7 @@ export function ZenShell({ children }: ZenShellProps) {
     { k: "map",       zh: "知識地圖",  en: "Knowledge",  icon: ICONS.map },
     { k: "home",      zh: "今日",      en: "Today",      icon: ICONS.zen },
     { k: "tasks",     zh: "任務",      en: "Tasks",      icon: ICONS.task },
-    { k: "projects",  zh: "專案",      en: "Projects",   icon: ICONS.folder },
+    { k: "projects",  zh: "產品",      en: "Products",   icon: ICONS.folder },
     { k: "clients",   zh: "客戶",      en: "Clients",    icon: ICONS.users },
     { k: "marketing", zh: "行銷",      en: "Growth",     icon: ICONS.trend },
     { k: "docs",      zh: "文件",      en: "Docs",       icon: ICONS.doc },

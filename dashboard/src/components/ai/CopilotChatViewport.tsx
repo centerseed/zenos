@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import { Bot } from "lucide-react";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import type { CopilotChatMessage } from "@/lib/copilot/useCopilotChat";
+import { useInk } from "@/lib/zen-ink/tokens";
 
 interface CopilotChatViewportProps {
   messages: CopilotChatMessage[];
@@ -20,6 +21,8 @@ export function CopilotChatViewport({
   emptyStateTitle = "AI 助手準備就緒",
   emptyStateDescription = "輸入你的需求開始對話",
 }: CopilotChatViewportProps) {
+  const t = useInk("light");
+  const { c } = t;
   const endRef = useRef<HTMLDivElement>(null);
 
   // Auto scroll to bottom on new messages / streaming update
@@ -37,7 +40,7 @@ export function CopilotChatViewport({
         // Empty state
         <div className="m-auto max-w-md text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-[2px] border border-border/30 bg-card">
-            <Bot className="h-5 w-5 text-primary" />
+            <Bot className="h-5 w-5" style={{ color: c.vermillion }} />
           </div>
           <div className="text-sm font-medium text-foreground">{emptyStateTitle}</div>
           <p className="mt-2 text-sm text-muted-foreground">{emptyStateDescription}</p>
@@ -50,7 +53,13 @@ export function CopilotChatViewport({
               className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
             >
               {msg.role === "user" ? (
-                <div className="max-w-[85%] rounded-[2px] border border-primary/20 bg-primary/10 px-4 py-3 text-sm text-foreground">
+                <div
+                  className="max-w-[85%] rounded-[2px] px-4 py-3 text-sm text-foreground"
+                  style={{
+                    border: `1px solid ${c.vermLine}`,
+                    background: c.vermSoft,
+                  }}
+                >
                   {msg.content}
                 </div>
               ) : msg.role === "assistant" ? (
@@ -71,7 +80,10 @@ export function CopilotChatViewport({
             <div className="flex justify-start">
               <div className="max-w-[85%] rounded-[2px] border border-border/30 bg-secondary/35 px-4 py-3 text-sm text-foreground">
                 <MarkdownRenderer content={streamingText} className="text-sm text-foreground space-y-1" />
-                <span className="ml-1 inline-block h-3 w-0.5 animate-pulse rounded-full bg-primary/60 align-middle" />
+                <span
+                  className="ml-1 inline-block h-3 w-0.5 animate-pulse rounded-full align-middle"
+                  style={{ background: c.vermillion }}
+                />
               </div>
             </div>
           )}

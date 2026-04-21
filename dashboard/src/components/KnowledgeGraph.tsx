@@ -162,7 +162,7 @@ export default function KnowledgeGraph({
   focusedNodeId,
   selectedPathIds = [],
   detailPanelOpen = false,
-  variant = "dark",
+  variant = "ink",
   showLegend = true,
   nodeColorsOverride,
   labelFontFamily,

@@ -3,8 +3,7 @@
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import { GraphContextBadge } from "@/components/ai/GraphContextBadge";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Badge, Button } from "@/components/zen/legacy";
 import type { CopilotEntryConfig } from "@/lib/copilot/types";
 import { REDACTION_RULES_VERSION } from "@/config/ai-redaction-rules";
 import {
@@ -14,7 +13,7 @@ import {
   SheetHeader,
   SheetTitle,
   SheetTrigger,
-} from "@/components/ui/sheet";
+} from "@/components/zen/legacy";
 import { useAuth } from "@/lib/auth";
 import { resolveCopilotWorkspaceId } from "@/lib/copilot/scope";
 import {

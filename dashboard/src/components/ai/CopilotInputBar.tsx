@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { RefreshCw, Square, Send } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import type { CopilotChatStatus } from "@/lib/copilot/types";
 import type { ReactNode } from "react";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Btn } from "@/components/zen/Btn";
+import { Textarea } from "@/components/zen/Textarea";
 
 interface CopilotInputBarProps {
   status: CopilotChatStatus;
@@ -15,8 +16,12 @@ interface CopilotInputBarProps {
   onSummarize?: () => void;
   hasStructuredResult: boolean;
   placeholder?: string;
+  value?: string;
+  onValueChange?: (value: string) => void;
   /** Label for the send button */
   sendLabel?: string;
+  /** When false, Enter requires Ctrl/Cmd to send */
+  sendOnPlainEnter?: boolean;
   /** Allow sending with empty input (entry will build prompt from context) */
   canSendEmpty?: boolean;
   /** Extra slot for domain-specific buttons */
@@ -32,11 +37,17 @@ export function CopilotInputBar({
   onSummarize,
   hasStructuredResult,
   placeholder = "輸入訊息...",
+  value,
+  onValueChange,
   sendLabel,
+  sendOnPlainEnter = true,
   canSendEmpty = false,
   extraActions,
 }: CopilotInputBarProps) {
-  const [input, setInput] = useState("");
+  const t = useInk("light");
+  const [internalInput, setInternalInput] = useState("");
+  const input = value ?? internalInput;
+  const setInput = onValueChange ?? setInternalInput;
   const isRunning = status === "loading" || status === "streaming" || status === "applying";
   const isApplyReady = status === "apply-ready";
 
@@ -50,15 +61,20 @@ export function CopilotInputBar({
 
   return (
     <div className="space-y-3">
-      <textarea
+      <Textarea
+        t={t}
         value={input}
-        onChange={(e) => setInput(e.target.value)}
+        onChange={setInput}
         onKeyDown={(e) => {
           const nativeEvent = e.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
           if (nativeEvent.isComposing || nativeEvent.keyCode === 229) {
             return;
           }
-          if (e.key === "Enter" && !e.shiftKey) {
+          if (e.key !== "Enter" || e.shiftKey) {
+            return;
+          }
+          const wantsModifier = e.metaKey || e.ctrlKey;
+          if (sendOnPlainEnter || wantsModifier) {
             e.preventDefault();
             handleSend();
           }
@@ -66,46 +82,44 @@ export function CopilotInputBar({
         placeholder={placeholder}
         disabled={isRunning}
         rows={3}
-        className="w-full rounded-[2px] border border-border bg-card px-4 py-3 text-sm text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-primary/50 disabled:opacity-50"
+        resize="vertical"
       />
       <div className="flex flex-wrap items-center justify-end gap-2">
         {extraActions}
 
         {onSummarize && status === "idle" && (
-          <Button size="sm" variant="outline" className="h-8 rounded-[2px] text-xs" onClick={onSummarize}>
+          <Btn t={t} size="sm" variant="outline" onClick={onSummarize}>
             整理結果
-          </Button>
+          </Btn>
         )}
 
         {status === "error" && (
-          <Button size="sm" variant="outline" className="h-8 rounded-[2px] text-xs" onClick={onRetry}>
-            <RefreshCw className="mr-1.5 h-3 w-3" />
+          <Btn t={t} size="sm" variant="outline" onClick={onRetry}>
             重試
-          </Button>
+          </Btn>
         )}
 
         {isApplyReady && onApply && (
-          <Button size="sm" className="h-8 rounded-[2px] text-xs" onClick={onApply}>
+          <Btn t={t} size="sm" variant="ink" onClick={onApply}>
             套用到欄位
-          </Button>
+          </Btn>
         )}
 
         {isRunning && (
-          <Button size="sm" variant="outline" className="h-8 rounded-[2px] text-xs" onClick={onCancel}>
-            <Square className="mr-1.5 h-3 w-3" />
+          <Btn t={t} size="sm" variant="outline" onClick={onCancel}>
             停止
-          </Button>
+          </Btn>
         )}
 
-        <Button
+        <Btn
+          t={t}
           size="sm"
-          className="h-8 rounded-[2px] text-xs"
+          variant="ink"
           disabled={isRunning || (!input.trim() && !canSendEmpty)}
           onClick={handleSend}
         >
-          <Send className="mr-1.5 h-3 w-3" />
           {sendLabel ?? "送出"}
-        </Button>
+        </Btn>
       </div>
     </div>
   );

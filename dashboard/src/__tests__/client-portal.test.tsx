@@ -148,7 +148,7 @@ describe("AppNav — two-stage nav (isHomeWorkspace → workspaceRole)", () => {
     render(<AppNav />);
 
     expect(screen.getByRole("link", { name: "知識地圖" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "產品" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "客戶" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /成員/i })).not.toBeInTheDocument();
@@ -168,7 +168,7 @@ describe("AppNav — two-stage nav (isHomeWorkspace → workspaceRole)", () => {
     render(<AppNav />);
 
     expect(screen.getByRole("link", { name: "知識地圖" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Products" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "產品" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "客戶" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /成員/i })).not.toBeInTheDocument();

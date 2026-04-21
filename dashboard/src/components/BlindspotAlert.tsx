@@ -1,13 +1,15 @@
 "use client";
 
 import type { Blindspot } from "@/types";
-import { Card, CardContent } from "@/components/ui/card";
+import { useInk } from "@/lib/zen-ink/tokens";
+import { Panel } from "@/components/zen/Panel";
 
 interface BlindspotAlertProps {
   blindspots: Blindspot[];
 }
 
 export function BlindspotAlert({ blindspots }: BlindspotAlertProps) {
+  const t = useInk("light");
   const critical = blindspots.filter((b) => b.severity === "red");
   const warnings = blindspots.filter((b) => b.severity === "yellow");
 
@@ -16,11 +18,12 @@ export function BlindspotAlert({ blindspots }: BlindspotAlertProps) {
   return (
     <div className="space-y-3">
       {critical.map((b) => (
-        <Card
+        <Panel
+          t={t}
           key={b.id}
-          className="bg-red-900/30 border border-red-800"
+          style={{ background: "rgba(182, 58, 44, 0.08)", borderColor: t.c.vermLine }}
         >
-          <CardContent className="pt-4">
+          <div className="pt-4">
             <div className="flex items-start gap-2">
               <span className="text-red-500 mt-0.5" aria-hidden>
                 ●
@@ -33,15 +36,16 @@ export function BlindspotAlert({ blindspots }: BlindspotAlertProps) {
                 <p className="text-xs text-red-500 mt-1">{b.suggestedAction}</p>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ))}
       {warnings.map((b) => (
-        <Card
+        <Panel
+          t={t}
           key={b.id}
-          className="bg-yellow-900/30 border border-yellow-800"
+          style={{ background: "rgba(180, 132, 50, 0.08)", borderColor: t.c.ocher }}
         >
-          <CardContent className="pt-4">
+          <div className="pt-4">
             <div className="flex items-start gap-2">
               <span className="text-yellow-500 mt-0.5" aria-hidden>
                 ●
@@ -56,8 +60,8 @@ export function BlindspotAlert({ blindspots }: BlindspotAlertProps) {
                 </p>
               </div>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </Panel>
       ))}
     </div>
   );

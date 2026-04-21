@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useInk } from "@/lib/zen-ink/tokens";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/zen/Toast";
 import { Section } from "@/components/zen/Section";
 import { Btn } from "@/components/zen/Btn";
 import { Icon, ICONS } from "@/components/zen/Icons";

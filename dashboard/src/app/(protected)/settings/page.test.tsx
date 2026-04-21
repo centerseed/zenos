@@ -33,7 +33,7 @@ vi.mock("@/lib/auth", () => ({
   }),
 }));
 
-vi.mock("@/components/ui/toast", () => ({
+vi.mock("@/components/zen/Toast", () => ({
   useToast: () => ({
     pushToast: pushToastMock,
   }),

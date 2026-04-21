@@ -17,7 +17,7 @@ import {
   updatePartnerScope,
   updatePartnerStatus,
 } from "@/lib/api";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/zen/Toast";
 import type { Entity, Partner, PartnerAccessMode } from "@/types";
 import { getPartnerAccessMode, getPartnerWorkspaceRole, resolveActiveWorkspace } from "@/lib/partner";
 

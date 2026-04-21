@@ -38,7 +38,7 @@ export function GraphContextBadge({
       <div
         className={className}
         style={{
-          borderRadius: 14,
+          borderRadius: 2,
           border: `1px solid ${c.vermLine}`,
           background: c.vermSoft,
           color: c.ink,
@@ -61,7 +61,7 @@ export function GraphContextBadge({
     <details
       className={className}
       style={{
-        borderRadius: 16,
+        borderRadius: 2,
         border: `1px solid ${c.inkHair}`,
         background: c.surface,
         padding: "10px 12px",
@@ -83,7 +83,7 @@ export function GraphContextBadge({
       <div style={{ marginTop: 12, display: "grid", gap: 12 }}>
         <div
           style={{
-            borderRadius: 12,
+            borderRadius: 2,
             border: `1px solid ${c.inkHair}`,
             background: c.paperWarm,
             padding: "10px 12px",
@@ -99,7 +99,7 @@ export function GraphContextBadge({
             <div
               key={neighbor.id}
               style={{
-                borderRadius: 12,
+                borderRadius: 2,
                 border: `1px solid ${c.inkHair}`,
                 background: c.surfaceHi,
                 padding: "10px 12px",
@@ -123,7 +123,7 @@ export function GraphContextBadge({
                 <div
                   style={{
                     flexShrink: 0,
-                    borderRadius: 999,
+                    borderRadius: "50%",
                     border: `1px solid ${c.inkHair}`,
                     background: c.paperWarm,
                     padding: "2px 8px",
@@ -152,12 +152,12 @@ export function GraphContextBadge({
                     <div
                       key={doc.id}
                       style={{
-                        borderRadius: 999,
                         border: `1px solid ${c.inkHair}`,
                         background: c.paperWarm,
                         padding: "2px 8px",
                         fontSize: 10,
                         color: c.inkMuted,
+                        borderRadius: "50%",
                       }}
                     >
                       {compactText(doc.title, 28)}
@@ -166,12 +166,12 @@ export function GraphContextBadge({
                   {neighbor.documents.length > 2 && (
                     <div
                       style={{
-                        borderRadius: 999,
                         border: `1px solid ${c.inkHair}`,
                         background: c.paperWarm,
                         padding: "2px 8px",
                         fontSize: 10,
                         color: c.inkMuted,
+                        borderRadius: "50%",
                       }}
                     >
                       +{neighbor.documents.length - 2}
@@ -184,7 +184,7 @@ export function GraphContextBadge({
             <div
               key={neighbor.id}
               style={{
-                borderRadius: 12,
+                borderRadius: 2,
                 border: `1px solid ${c.inkHair}`,
                 background: c.surfaceHi,
                 padding: "10px 12px",
@@ -217,7 +217,7 @@ export function GraphContextBadge({
         {graphContext.truncated && hiddenCount > 0 && (
           <div
             style={{
-              borderRadius: 12,
+              borderRadius: 2,
               border: `1px solid ${c.inkHair}`,
               background: c.paperWarm,
               padding: "10px 12px",

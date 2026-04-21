@@ -306,10 +306,10 @@ function ScopeDialog({
               }}
             >
               <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>
-                選擇訪客可存取的專案空間：
+                選擇訪客可存取的產品空間：
               </div>
               {projectEntities.length === 0 ? (
-                <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>尚無專案空間</div>
+                <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>尚無產品空間</div>
               ) : (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {projectEntities.map((entity) => (
@@ -492,10 +492,10 @@ function TeamPage() {
                 }}
               >
                 <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>
-                  選擇訪客可存取的專案空間：
+                  選擇訪客可存取的產品空間：
                 </p>
                 {projectEntities.length === 0 ? (
-                  <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>尚無專案空間</p>
+                  <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>尚無產品空間</p>
                 ) : (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {projectEntities.map((entity) => (
@@ -717,7 +717,7 @@ function TeamPage() {
                                 </Chip>
                                 {isScopedPartner(p) && (
                                   <span style={{ fontSize: 11, color: c.inkMuted, fontFamily: fontBody }}>
-                                    授權 {p.authorizedEntityIds!.length} 個專案空間
+                                    授權 {p.authorizedEntityIds!.length} 個產品空間
                                   </span>
                                 )}
                               </div>

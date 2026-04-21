@@ -4,11 +4,10 @@ import { useAuth } from "@/lib/auth";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { activatePartner } from "@/lib/api";
-import { useInk } from "@/lib/zen-ink/tokens";
+import { useInk, type ZenInkTokens } from "@/lib/zen-ink/tokens";
 import { InkMark } from "@/components/zen/InkMark";
 
-function ZenScreen({ children }: { children: React.ReactNode }) {
-  const t = useInk("light");
+function ZenScreen({ children, t }: { children: React.ReactNode; t: ZenInkTokens }) {
   return (
     <div
       style={{
@@ -27,8 +26,7 @@ function ZenScreen({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ZenSpinner() {
-  const t = useInk("light");
+function ZenSpinner({ t }: { t: ZenInkTokens }) {
   return (
     <div
       aria-hidden
@@ -44,8 +42,7 @@ function ZenSpinner() {
   );
 }
 
-function ZenCard({ children }: { children: React.ReactNode }) {
-  const t = useInk("light");
+function ZenCard({ children, t }: { children: React.ReactNode; t: ZenInkTokens }) {
   return (
     <div
       style={{
@@ -64,6 +61,7 @@ function ZenCard({ children }: { children: React.ReactNode }) {
 }
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
+  const t = useInk("light");
   const { user, partner, loading, error, signOut, refetchPartner } = useAuth();
   const router = useRouter();
   const [activating, setActivating] = useState(false);
@@ -102,9 +100,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [user, partner, activating, refetchPartner]);
 
   if (loading) {
-    const t = useInk("light");
     return (
-      <ZenScreen>
+      <ZenScreen t={t}>
         <style>{`@keyframes zen-spin { to { transform: rotate(360deg); } }`}</style>
         <div style={{ textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
           <InkMark size={56} ink={t.c.ink} seal={t.c.seal} sealInk={t.c.sealInk} />
@@ -112,7 +109,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
             ZenOS
           </div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 10, color: t.c.inkMuted, fontSize: 14 }}>
-            <ZenSpinner />
+            <ZenSpinner t={t} />
             <span>正在載入帳號…</span>
           </div>
           <div style={{ fontSize: 11, color: t.c.inkFaint, letterSpacing: "0.05em" }}>
@@ -125,10 +122,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   if (error === "FIREBASE_CONFIG_MISSING" || error === "FIREBASE_CONFIG_INVALID") {
     const isMissing = error === "FIREBASE_CONFIG_MISSING";
-    const t = useInk("light");
     return (
-      <ZenScreen>
-        <ZenCard>
+      <ZenScreen t={t}>
+        <ZenCard t={t}>
           <div style={{ fontFamily: t.fontHead, fontSize: 22, color: t.c.vermillion, marginBottom: 12 }}>部署設定錯誤</div>
           <p style={{ color: t.c.inkSoft, marginBottom: 10, fontSize: 14 }}>
             Firebase 公開設定在 build 階段沒有正確注入，登入模組無法啟動。
@@ -145,11 +141,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // Show activating state for invited partners
   if (partner?.status === "invited" || activating) {
-    const t = useInk("light");
     return (
-      <ZenScreen>
+      <ZenScreen t={t}>
         <style>{`@keyframes zen-spin { to { transform: rotate(360deg); } }`}</style>
-        <ZenCard>
+        <ZenCard t={t}>
           {activationError ? (
             <>
               <div style={{ fontFamily: t.fontHead, fontSize: 22, color: t.c.vermillion, marginBottom: 12 }}>啟用失敗</div>
@@ -175,7 +170,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
               <InkMark size={48} ink={t.c.ink} seal={t.c.seal} sealInk={t.c.sealInk} />
               <div style={{ display: "inline-flex", alignItems: "center", gap: 10, color: t.c.inkMuted, fontSize: 14 }}>
-                <ZenSpinner />
+                <ZenSpinner t={t} />
                 <span>正在啟用帳號…</span>
               </div>
             </div>
@@ -187,10 +182,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
   // Suspended partner
   if (partner?.status === "suspended") {
-    const t = useInk("light");
     return (
-      <ZenScreen>
-        <ZenCard>
+      <ZenScreen t={t}>
+        <ZenCard t={t}>
           <div style={{ fontFamily: t.fontHead, fontSize: 24, color: t.c.ink, marginBottom: 12 }}>帳號已停用</div>
           <p style={{ color: t.c.inkSoft, marginBottom: 18, fontSize: 14 }}>
             你的帳號已被管理員停用。如需恢復存取，請聯繫管理員。
@@ -218,10 +212,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (error === "NO_PARTNER" || (!partner && !loading)) {
-    const t = useInk("light");
     return (
-      <ZenScreen>
-        <ZenCard>
+      <ZenScreen t={t}>
+        <ZenCard t={t}>
           <div style={{ fontFamily: t.fontHead, fontSize: 24, color: t.c.ink, marginBottom: 12 }}>尚未開通權限</div>
           <p style={{ color: t.c.inkSoft, marginBottom: 18, fontSize: 14 }}>
             你的帳號尚未被授權使用 ZenOS Dashboard。請聯繫管理員開通權限。
@@ -249,10 +242,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (error === "FETCH_FAILED") {
-    const t = useInk("light");
     return (
-      <ZenScreen>
-        <ZenCard>
+      <ZenScreen t={t}>
+        <ZenCard t={t}>
           <div style={{ fontFamily: t.fontHead, fontSize: 22, color: t.c.vermillion, marginBottom: 12 }}>載入失敗</div>
           <p style={{ color: t.c.inkSoft, fontSize: 14 }}>無法連線到 ZenOS，請稍後再試。</p>
         </ZenCard>

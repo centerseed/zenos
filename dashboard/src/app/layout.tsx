@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import { AuthProvider } from "@/lib/auth";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/zen/Tooltip";
 import "./globals.css";
 import { Geist } from "next/font/google";
 import { cn } from "@/lib/utils";
-import { ToastProvider } from "@/components/ui/toast";
+import { ToastProvider } from "@/components/zen/Toast";
 import { APP_COPY } from "@/lib/i18n";
 
 const geist = Geist({ subsets: ["latin"], variable: "--font-sans" });

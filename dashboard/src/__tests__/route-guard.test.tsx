@@ -34,7 +34,7 @@ vi.mock("@/components/LoadingState", () => ({
   LoadingState: ({ label }: { label: string }) => <div>{label}</div>,
 }));
 
-vi.mock("@/components/ui/toast", () => ({
+vi.mock("@/components/zen/Toast", () => ({
   useToast: () => ({ pushToast: vi.fn() }),
 }));
 

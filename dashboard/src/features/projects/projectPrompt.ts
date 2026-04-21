@@ -72,7 +72,7 @@ export function buildProjectContinuationPrompt(
 ): string {
   const activePlans = progress.active_plans.length
     ? progress.active_plans.map((plan) =>
-        `- ${plan.goal} (${plan.status}) — open ${plan.open_count}, blocked ${plan.blocked_count}, review ${plan.review_count}`
+        `- ${plan.goal} (${plan.status})${plan.milestones.length ? ` · milestone: ${plan.milestones.map((milestone) => milestone.name).join(", ")}` : ""} — open ${plan.open_count}, blocked ${plan.blocked_count}, review ${plan.review_count}`
       ).join("\n")
     : "- No active plans";
 
@@ -108,4 +108,3 @@ export function buildProjectContinuationPrompt(
     options.nextStep,
   ].join("\n");
 }
-

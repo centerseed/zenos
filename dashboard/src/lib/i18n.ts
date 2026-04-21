@@ -8,7 +8,7 @@ export const APP_COPY = {
 } as const;
 
 export const NODE_TYPE_COPY: Record<string, string> = {
-  product: "專案",
+  product: "產品",
   module: "模組",
   goal: "目標",
   role: "角色",

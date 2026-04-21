@@ -1,13 +1,22 @@
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 
+const PRODUCTION_FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDjAsF7t4nR34RuouBDcMOnYi6kIjVDxRA", // pragma: allowlist secret
+  authDomain: "zenos-naruvia.firebaseapp.com",
+  projectId: "zenos-naruvia",
+  storageBucket: "zenos-naruvia.firebasestorage.app",
+  messagingSenderId: "165893875709",
+  appId: "1:165893875709:web:e7f2c1836462d49a601b94",
+} as const;
+
 const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || PRODUCTION_FIREBASE_CONFIG.apiKey,
+  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || PRODUCTION_FIREBASE_CONFIG.authDomain,
+  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || PRODUCTION_FIREBASE_CONFIG.projectId,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || PRODUCTION_FIREBASE_CONFIG.storageBucket,
+  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || PRODUCTION_FIREBASE_CONFIG.messagingSenderId,
+  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || PRODUCTION_FIREBASE_CONFIG.appId,
 };
 
 let _app: FirebaseApp | undefined;

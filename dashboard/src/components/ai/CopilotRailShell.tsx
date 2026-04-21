@@ -1,12 +1,9 @@
 "use client";
 
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
-import {
-  Sheet,
-  SheetContent,
-} from "@/components/ui/sheet";
 import type { CopilotChatStatus, CopilotEntryConfig } from "@/lib/copilot/types";
 import { useInk } from "@/lib/zen-ink/tokens";
+import { Drawer } from "@/components/zen/Drawer";
 
 type ConnectorStatus = "checking" | "connected" | "disconnected";
 
@@ -82,31 +79,6 @@ export function CopilotRailShell({
       ? "xl:h-[calc(100vh-7.5rem)] xl:max-h-[calc(100vh-7.5rem)]"
       : "";
   const shellVars = {
-    "--background": c.paperWarm,
-    "--foreground": c.ink,
-    "--card": c.surface,
-    "--card-foreground": c.ink,
-    "--popover": c.surface,
-    "--popover-foreground": c.ink,
-    "--primary": c.vermillion,
-    "--primary-foreground": c.surfaceHi,
-    "--secondary": c.surfaceHi,
-    "--secondary-foreground": c.ink,
-    "--muted": c.paperWarm,
-    "--muted-foreground": c.inkMuted,
-    "--accent": c.surfaceHi,
-    "--accent-foreground": c.ink,
-    "--destructive": c.vermillion,
-    "--border": c.inkHairBold,
-    "--input": c.surfaceHi,
-    "--ring": c.vermLine,
-    "--field-bg": c.surfaceHi,
-    "--field-bg-hover": c.surface,
-    "--field-border": c.inkHairBold,
-    "--field-border-strong": c.vermLine,
-    "--focus-ring": "rgba(182, 58, 44, 0.12)",
-    "--focus-outline": "rgba(182, 58, 44, 0.42)",
-    "--panel-shadow": "0 24px 60px rgba(58, 52, 44, 0.10)",
     colorScheme: "light",
     fontFamily: fontBody,
     color: c.ink,
@@ -223,18 +195,15 @@ export function CopilotRailShell({
     <>
       {renderInlineShell ? <div className={inlineShellClass}>{shellContent}</div> : null}
       {renderSheetShell ? (
-        <Sheet open={open} onOpenChange={onOpenChange}>
-          <SheetContent
-            side="right"
-            className="w-full overflow-hidden p-0 sm:max-w-3xl"
-            style={{
-              background: c.paper,
-              borderLeft: `1px solid ${c.inkHair}`,
-            }}
-          >
-            {shellContent}
-          </SheetContent>
-        </Sheet>
+        <Drawer
+          t={t}
+          open={open}
+          onOpenChange={onOpenChange}
+          side="right"
+          width="min(100vw, 48rem)"
+        >
+          {shellContent}
+        </Drawer>
       ) : null}
     </>
   );

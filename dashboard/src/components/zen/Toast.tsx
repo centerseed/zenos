@@ -13,7 +13,7 @@ import React, {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { ZenInkTokens } from "@/lib/zen-ink/tokens";
+import { ZenInkTokens, useInk } from "@/lib/zen-ink/tokens";
 import { Z } from "./useOverlay";
 
 // ---------- Types ----------
@@ -41,6 +41,7 @@ interface ToastItem {
 
 export interface ToastContextValue {
   showToast: (input: ToastInput) => string;
+  pushToast: (input: Omit<ToastInput, "id">) => string;
   dismiss: (id: string) => void;
   dismissAll: () => void;
 }
@@ -52,7 +53,12 @@ const ToastContext = createContext<ToastContextValue | null>(null);
 export function useToast(): ToastContextValue {
   const ctx = useContext(ToastContext);
   if (!ctx) {
-    throw new Error("useToast must be used within a <ToastProvider>");
+    return {
+      showToast: () => "",
+      pushToast: () => "",
+      dismiss: () => {},
+      dismissAll: () => {},
+    };
   }
   return ctx;
 }
@@ -94,11 +100,12 @@ function generateId(): string {
 // ---------- Provider ----------
 
 export interface ToastProviderProps {
-  t: ZenInkTokens;
+  t?: ZenInkTokens;
   children: React.ReactNode;
 }
 
 export function ToastProvider({ t, children }: ToastProviderProps) {
+  const resolvedTokens = t ?? useInk("light");
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [mounted, setMounted] = useState(false);
   const toastsRef = useRef<ToastItem[]>([]);
@@ -151,9 +158,11 @@ export function ToastProvider({ t, children }: ToastProviderProps) {
     return () => document.removeEventListener("keydown", handler, true);
   }, [toasts.length, dismiss]);
 
+  const pushToast = useCallback((input: Omit<ToastInput, "id">) => showToast(input), [showToast]);
+
   const value = useMemo<ToastContextValue>(
-    () => ({ showToast, dismiss, dismissAll }),
-    [showToast, dismiss, dismissAll]
+    () => ({ showToast, pushToast, dismiss, dismissAll }),
+    [showToast, pushToast, dismiss, dismissAll]
   );
 
   return (
@@ -161,7 +170,7 @@ export function ToastProvider({ t, children }: ToastProviderProps) {
       {children}
       {mounted &&
         createPortal(
-          <ToastViewport t={t} toasts={toasts} onDismiss={dismiss} />,
+          <ToastViewport t={resolvedTokens} toasts={toasts} onDismiss={dismiss} />,
           document.body
         )}
     </ToastContext.Provider>

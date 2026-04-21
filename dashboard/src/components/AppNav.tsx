@@ -11,14 +11,14 @@ import { setActiveWorkspaceId } from "@/lib/api";
 /** Shared workspace surface: shown when isHomeWorkspace=false and workspaceRole is member or guest */
 const SHARED_WORKSPACE_NAV_ITEMS = [
   { href: "/knowledge-map", label: "知識地圖" },
-  { href: "/projects", label: "Products" },
+  { href: "/projects", label: "產品" },
   { href: "/tasks", label: "Tasks" },
 ];
 
 /** Full home workspace nav for members */
 const MEMBER_NAV_ITEMS = [
   { href: "/knowledge-map", label: "知識地圖" },
-  { href: "/projects", label: "專案" },
+  { href: "/projects", label: "產品" },
   { href: "/tasks", label: "任務" },
   { href: "/marketing", label: "行銷" },
   { href: "/clients", label: "客戶" },

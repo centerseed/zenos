@@ -194,8 +194,8 @@ describe("Toast", () => {
   it("returns a no-op toast api when used outside provider", () => {
     function Orphan() {
       const toast = useToast();
-      toast.showToast({ title: "noop" });
-      toast.pushToast({ title: "noop-2" });
+      toast.showToast({ title: "noop", tone: "info" });
+      toast.pushToast({ title: "noop-2", tone: "info" });
       toast.dismiss("toast-1");
       toast.dismissAll();
       return null;

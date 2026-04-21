@@ -11,7 +11,7 @@ import { Btn } from "@/components/zen/Btn";
 import { Icon, ICONS } from "@/components/zen/Icons";
 import { useAuth } from "@/lib/auth";
 import { getAllBlindspots, getAllEntities, getAllRelationships } from "@/lib/api";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/zen/Toast";
 import type { Blindspot, Entity, Relationship } from "@/types";
 
 const KnowledgeGraph = dynamic(() => import("@/components/KnowledgeGraph"), {

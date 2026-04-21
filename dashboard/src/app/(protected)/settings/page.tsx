@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Section } from "@/components/zen/Section";
 import { Icon, ICONS } from "@/components/zen/Icons";
-import { useToast } from "@/components/ui/toast";
+import { useToast } from "@/components/zen/Toast";
 import { useAuth } from "@/lib/auth";
 import {
   checkGoogleWorkspaceConnectorHealth,

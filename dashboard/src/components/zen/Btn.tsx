@@ -19,6 +19,7 @@ interface BtnProps {
   onClick?: () => void;
   size?: BtnSize;
   style?: React.CSSProperties;
+  disabled?: boolean;
 }
 
 const sizeMap: Record<BtnSize, { p: string; fs: number; ic: number }> = {
@@ -35,6 +36,7 @@ export function Btn({
   onClick,
   size = "md",
   style,
+  disabled = false,
 }: BtnProps) {
   const { c, fontBody, radius } = t;
   const [hv, setHv] = useState(false);
@@ -65,6 +67,7 @@ export function Btn({
       onClick={onClick}
       onMouseEnter={() => setHv(true)}
       onMouseLeave={() => setHv(false)}
+      disabled={disabled}
       style={{
         display: "inline-flex",
         alignItems: "center",
@@ -78,7 +81,8 @@ export function Btn({
         color: V.fg,
         border: `1px solid ${V.bd}`,
         borderRadius: radius,
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
         transition: "all .15s",
         ...style,
       }}

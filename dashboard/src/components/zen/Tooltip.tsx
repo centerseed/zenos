@@ -25,6 +25,10 @@ export interface TooltipProps {
   delay?: number;
 }
 
+export function TooltipProvider({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
+}
+
 type Side = "top" | "bottom" | "left" | "right";
 
 function computePosition(
