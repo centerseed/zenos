@@ -69,6 +69,15 @@ interface TaskProgress {
   pct: number;
 }
 
+function isPlaceholderCompletedProject(entity: Entity): boolean {
+  return (
+    entity.type === "product" &&
+    entity.status === "completed" &&
+    entity.confirmedByUser === false &&
+    entity.sources.length === 0
+  );
+}
+
 type CreateTaskInput = {
   title: string;
   description?: string;
@@ -1343,17 +1352,18 @@ export default function ProjectsPage() {
     try {
       const token = await user.getIdToken();
       const fetched = await getProjectEntities(token);
-      setEntities(fetched);
+      const visibleProjects = fetched.filter((entity) => !isPlaceholderCompletedProject(entity));
+      setEntities(visibleProjects);
 
       // Initialize all progress slots as null (loading)
       const initMap = new Map<string, TaskProgress | null>();
-      for (const e of fetched) {
+      for (const e of visibleProjects) {
         initMap.set(e.id, null);
       }
       setProgressMap(new Map(initMap));
 
       // Fetch tasks for each project in parallel; update progress as they resolve
-      const taskFetches = fetched.map(async (e) => {
+      const taskFetches = visibleProjects.map(async (e) => {
         try {
           const tasks = await getTasksByEntity(token, e.id);
           const prog = computeProgress(tasks);

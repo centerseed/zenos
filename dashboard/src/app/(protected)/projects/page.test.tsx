@@ -1,6 +1,7 @@
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import ProjectsPage from "@/app/(protected)/projects/page";
 
 const getProjectEntitiesMock = vi.hoisted(() => vi.fn());
 const getProjectProgressMock = vi.hoisted(() => vi.fn());
@@ -232,6 +233,51 @@ describe("ProjectsPage", () => {
         }),
       );
     });
+  });
+
+  it("hides completed placeholder products from the projects list", async () => {
+    getProjectEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-real",
+        name: "個人",
+        type: "product",
+        summary: "real project",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Barry",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      {
+        id: "entity-fake",
+        name: "GRACE ONE",
+        type: "product",
+        summary: "placeholder",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "completed",
+        parentId: "company-1",
+        details: null,
+        confirmedByUser: false,
+        owner: null,
+        sources: [],
+        visibility: "confidential",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-03-31T00:00:00Z"),
+        updatedAt: new Date("2026-04-21T00:00:00Z"),
+      },
+    ]);
+    getTasksByEntityMock.mockResolvedValue([]);
+
+    render(<ProjectsPage />);
+
+    expect(await screen.findByText("個人")).toBeInTheDocument();
+    expect(screen.queryByText("GRACE ONE")).not.toBeInTheDocument();
   });
 
   it("keeps project console as default detail view and allows task drill-down", async () => {
