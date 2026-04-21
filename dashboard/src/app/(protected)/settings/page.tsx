@@ -8,6 +8,11 @@ import { Icon, ICONS } from "@/components/zen/Icons";
 import { useToast } from "@/components/ui/toast";
 import { useAuth } from "@/lib/auth";
 import {
+  checkGoogleWorkspaceConnectorHealth,
+  getPreferences,
+  updatePreferences,
+} from "@/lib/api";
+import {
   checkCoworkHelperHealth,
   getDefaultHelperBaseUrl,
   getDefaultHelperCwd,
@@ -60,6 +65,22 @@ ALLOWED_ORIGINS="https://zenos-naruvia.web.app" \\
 LOCAL_HELPER_TOKEN="${params.helperToken.trim()}" \\
 ALLOWED_CWDS="${cwd}" \\
 node server.mjs`;
+}
+
+function formatContainersInput(containers?: string[]): string {
+  if (!Array.isArray(containers)) return "";
+  return containers.join("\n");
+}
+
+function parseContainersInput(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(/[\n,]+/)
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
 }
 
 function statusMeta(
@@ -323,7 +344,7 @@ function DetailRow({
 }
 
 export default function SettingsPage() {
-  const { partner } = useAuth();
+  const { partner, user } = useAuth();
   const { pushToast } = useToast();
   const t = useInk("light");
   const { c, fontBody, fontMono } = t;
@@ -338,6 +359,12 @@ export default function SettingsPage() {
   const [helperToken, setHelperTokenState] = useState("");
   const [helperCwd, setHelperCwdState] = useState(DEFAULT_WORKSPACE);
   const [helperModel, setHelperModelState] = useState("sonnet");
+  const [preferencesLoading, setPreferencesLoading] = useState(true);
+  const [googleHealth, setGoogleHealth] = useState<HealthStatus>("idle");
+  const [googleHint, setGoogleHint] = useState<string>("尚未檢查");
+  const [googleBaseUrl, setGoogleBaseUrl] = useState("");
+  const [googleToken, setGoogleToken] = useState("");
+  const [googleContainers, setGoogleContainers] = useState("");
 
   useEffect(() => {
     setHelperBaseUrlState(getDefaultHelperBaseUrl());
@@ -346,10 +373,42 @@ export default function SettingsPage() {
     setHelperModelState(getDefaultHelperModel());
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPreferences() {
+      if (!user) {
+        if (!cancelled) setPreferencesLoading(false);
+        return;
+      }
+      try {
+        const token = await user.getIdToken();
+        const prefs = await getPreferences(token);
+        if (cancelled) return;
+        const gw = prefs.googleWorkspace ?? {};
+        setGoogleBaseUrl(gw.sidecar_base_url ?? "");
+        setGoogleToken(gw.sidecar_token ?? "");
+        setGoogleContainers(formatContainersInput(prefs.connectorScopes?.gdrive?.containers));
+      } catch {
+        if (!cancelled) {
+          setGoogleHint("無法載入 Google Workspace connector 設定");
+        }
+      } finally {
+        if (!cancelled) setPreferencesLoading(false);
+      }
+    }
+
+    void loadPreferences();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
   const apiKey = partner?.apiKey ?? "";
   const maskedApiKey = apiKey ? `${apiKey.slice(0, 8)}••••••••` : "尚未取得";
   const displayApiKey = showApiKey ? apiKey : maskedApiKey;
   const workspace = resolveActiveWorkspace(partner);
+  const canManageGoogleWorkspace = workspace.isHomeWorkspace && workspace.workspaceRole === "owner";
 
   const helperCommand = useMemo(
     () =>
@@ -360,6 +419,8 @@ export default function SettingsPage() {
       }),
     [apiKey, helperToken, helperCwd],
   );
+
+  const googleBadge = statusMeta(googleHealth, c, googleHint);
 
   async function runMcpCheck() {
     if (!apiKey) return;
@@ -418,6 +479,63 @@ export default function SettingsPage() {
     setHelperHint(result.message || "helper unavailable");
   }
 
+  async function saveGoogleWorkspaceSettings() {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const containers = parseContainersInput(googleContainers);
+      const prefs = await updatePreferences(token, {
+        googleWorkspace: {
+          sidecar_base_url: googleBaseUrl.trim(),
+          sidecar_token: googleToken.trim(),
+          principal_mode: "partner_email",
+        },
+        connectorScopes: {
+          gdrive: {
+            containers,
+          },
+        },
+      });
+      setGoogleBaseUrl(prefs.googleWorkspace?.sidecar_base_url ?? "");
+      setGoogleToken(prefs.googleWorkspace?.sidecar_token ?? "");
+      setGoogleContainers(formatContainersInput(prefs.connectorScopes?.gdrive?.containers));
+      pushToast({
+        tone: "success",
+        title: "Google Workspace connector 設定已儲存",
+        description: "server 端 live retrieval 會讀這組 sidecar 與 gdrive allowlist。",
+      });
+    } catch {
+      pushToast({
+        tone: "error",
+        title: "儲存失敗",
+        description: "無法保存 Google Workspace connector 設定。",
+      });
+    }
+  }
+
+  async function checkGoogleWorkspaceHealth() {
+    if (!user) return;
+    setGoogleHealth("checking");
+    setGoogleHint("正在檢查 Google Workspace connector");
+    try {
+      const token = await user.getIdToken();
+      const result = await checkGoogleWorkspaceConnectorHealth(token, {
+        sidecar_base_url: googleBaseUrl.trim(),
+        sidecar_token: googleToken.trim(),
+      });
+      if (result.ok) {
+        setGoogleHealth("connected");
+        setGoogleHint(result.message || "connector 已連線");
+        return;
+      }
+      setGoogleHealth("error");
+      setGoogleHint(result.message || "connector unavailable");
+    } catch {
+      setGoogleHealth("error");
+      setGoogleHint("connector unavailable");
+    }
+  }
+
   const mcpBadge = statusMeta(
     mcpHealth,
     c,
@@ -432,7 +550,7 @@ export default function SettingsPage() {
         eyebrow="Workspace · Preferences"
         title="Settings"
         en="Control Room"
-        subtitle="這一頁處理日常設定：MCP 連線、Dashboard Helper、本機路徑與診斷。進階 manifest / skill 細節仍看 Agent 頁。"
+        subtitle="這一頁處理日常設定：MCP、Dashboard Helper、Google Workspace connector、本機路徑與診斷。進階 manifest / skill 細節仍看 Agent 頁。"
         right={
           <Link
             href="/agent"
@@ -484,6 +602,12 @@ export default function SettingsPage() {
           label="Helper"
           value={helperHealth === "connected" ? "local" : "off"}
           sub={helperHealth === "connected" ? helperHint : "dashboard AI relay"}
+          t={t}
+        />
+        <MetricCard
+          label="GWorkspace"
+          value={googleHealth === "connected" ? "live" : preferencesLoading ? "…" : "off"}
+          sub={googleHealth === "connected" ? googleHint : "per-user sidecar"}
           t={t}
         />
       </div>
@@ -885,6 +1009,191 @@ export default function SettingsPage() {
               >
                 {helperCommand}
               </pre>
+            </div>
+          </Panel>
+
+          <Panel
+            eyebrow="Google Workspace"
+            title="Per-user live retrieval"
+            subtitle="這條線給企業文件治理用。ZenOS 只存 metadata / summary；真的讀全文時，server 會改走客戶環境內的 Google Workspace sidecar，並帶當前使用者身份去 live fetch。"
+            t={t}
+            status={
+              <div
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 8,
+                  color: googleBadge.tone,
+                }}
+              >
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: "50%",
+                    background: googleBadge.dot,
+                  }}
+                />
+                <span
+                  style={{
+                    fontFamily: fontMono,
+                    fontSize: 10,
+                    letterSpacing: "0.14em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {googleBadge.label}
+                </span>
+              </div>
+            }
+            right={<ActionButton label="檢查 Connector" ariaLabel="檢查 Google Workspace Connector" onClick={() => void checkGoogleWorkspaceHealth()} t={t} />}
+          >
+            <label style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+              <span
+                style={{
+                  fontFamily: fontMono,
+                  fontSize: 10,
+                  color: c.inkFaint,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Sidecar base URL
+              </span>
+              <input
+                aria-label="Google Workspace Sidecar Base URL"
+                value={googleBaseUrl}
+                onChange={(event) => setGoogleBaseUrl(event.target.value)}
+                placeholder="http://google-workspace-sidecar.internal:8787"
+                style={{
+                  border: `1px solid ${c.inkHair}`,
+                  background: c.surfaceHi,
+                  color: c.ink,
+                  padding: "11px 12px",
+                  fontFamily: fontMono,
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              />
+            </label>
+
+            <label style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+              <span
+                style={{
+                  fontFamily: fontMono,
+                  fontSize: 10,
+                  color: c.inkFaint,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Sidecar token
+              </span>
+              <input
+                aria-label="Google Workspace Sidecar Token"
+                value={googleToken}
+                onChange={(event) => setGoogleToken(event.target.value)}
+                placeholder="gwsc-..."
+                style={{
+                  border: `1px solid ${c.inkHair}`,
+                  background: c.surfaceHi,
+                  color: c.ink,
+                  padding: "11px 12px",
+                  fontFamily: fontMono,
+                  fontSize: 12,
+                  outline: "none",
+                }}
+              />
+            </label>
+
+            <label style={{ display: "grid", gap: 8, marginBottom: 16 }}>
+              <span
+                style={{
+                  fontFamily: fontMono,
+                  fontSize: 10,
+                  color: c.inkFaint,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                }}
+              >
+                Allowed containers
+              </span>
+              <textarea
+                aria-label="Google Workspace Allowed Containers"
+                value={googleContainers}
+                onChange={(event) => setGoogleContainers(event.target.value)}
+                placeholder={"drive:finance\nfolder:roadmap"}
+                rows={4}
+                style={{
+                  border: `1px solid ${c.inkHair}`,
+                  background: c.surfaceHi,
+                  color: c.ink,
+                  padding: "11px 12px",
+                  fontFamily: fontMono,
+                  fontSize: 12,
+                  outline: "none",
+                  resize: "vertical",
+                }}
+              />
+            </label>
+
+            <div style={{ display: "grid", gap: 10, marginBottom: 18 }}>
+              <DetailRow
+                label="Principal"
+                value="固定使用當前 caller 的 partner email。ZenOS 不會把 A 用自己權限抓到的全文變成 workspace 共享 cache。"
+                t={t}
+              />
+              <DetailRow
+                label="可編輯者"
+                value={canManageGoogleWorkspace ? "目前 workspace owner 可管理這組設定。" : "你目前不是 home workspace owner；建議由 owner 維護這組設定。"}
+                t={t}
+              />
+            </div>
+
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 18 }}>
+              <ActionButton
+                label={preferencesLoading ? "載入中..." : "儲存 Connector 設定"}
+                ariaLabel="儲存 Google Workspace Connector 設定"
+                tone="accent"
+                onClick={() => void saveGoogleWorkspaceSettings()}
+                t={t}
+              />
+            </div>
+
+            <div
+              style={{
+                border: `1px solid ${c.inkHair}`,
+                background: c.paperWarm,
+                padding: "14px 16px",
+              }}
+            >
+              <div
+                style={{
+                  fontFamily: fontMono,
+                  fontSize: 10,
+                  color: c.inkFaint,
+                  letterSpacing: "0.18em",
+                  textTransform: "uppercase",
+                  marginBottom: 10,
+                }}
+              >
+                設定步驟
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  fontFamily: fontBody,
+                  fontSize: 13,
+                  color: c.inkMuted,
+                  lineHeight: 1.7,
+                }}
+              >
+                <div>1. 在客戶環境內部署 Google Workspace sidecar，確保 ZenOS server 可以連到它。</div>
+                <div>2. 讓每位公司成員先在 sidecar / CLI 內用自己的公司 Google 帳號完成綁定。</div>
+                <div>3. 在這裡填入 sidecar URL、token，並限制允許的 Shared Drive / folder container。</div>
+                <div>4. 點「檢查 Connector」確認 health 正常後，`read_source(full)` 才會走 per-user live retrieval。</div>
+              </div>
             </div>
           </Panel>
 

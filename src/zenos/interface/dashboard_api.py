@@ -1201,6 +1201,49 @@ async def update_partner_preferences(request: Request) -> Response:
     return _json_response({"preferences": updated}, request=request)
 
 
+async def google_workspace_connector_health(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    email = decoded.get("email")
+    if not email:
+        return _error_response("INVALID_INPUT", "Email not found in token", 400, request=request)
+
+    raw_partner = await _get_partner_by_email_sql(email)
+    if not raw_partner:
+        return _error_response("NOT_FOUND", f"No partner found for email {email}", 404, request=request)
+
+    import json as _json
+
+    body = await request.body()
+    override: dict = {}
+    if body:
+        try:
+            parsed = _json.loads(body)
+        except (ValueError, TypeError):
+            return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+        if not isinstance(parsed, dict):
+            return _error_response("INVALID_INPUT", "Body must be a JSON object", 400, request=request)
+        override = parsed
+
+    active_workspace_id = resolve_active_workspace_id(
+        raw_partner,
+        _requested_active_workspace_id(request),
+    )
+    partner, _ = active_partner_view(raw_partner, active_workspace_id)
+    partner["activeWorkspaceId"] = active_workspace_id
+    partner["homeWorkspaceId"] = raw_partner["id"]
+    partner["isHomeWorkspace"] = active_workspace_id == str(raw_partner["id"])
+
+    source_service = SourceService(entity_repo=_entity_repo, source_adapter=None)
+    result = await source_service.check_google_workspace_connector_health(partner, override_config=override)
+    return _json_response(result, request=request)
+
+
 # ──────────────────────────────────────────────
 # Endpoint: GET /api/data/entities
 # ──────────────────────────────────────────────
@@ -3366,6 +3409,7 @@ dashboard_routes = [
     Route("/api/partner/me", get_partner_me, methods=["GET", "OPTIONS"]),
     Route("/api/partner/preferences", get_partner_preferences, methods=["GET", "OPTIONS"]),
     Route("/api/partner/preferences", update_partner_preferences, methods=["PATCH", "OPTIONS"]),
+    Route("/api/connectors/google-workspace/health", google_workspace_connector_health, methods=["POST", "OPTIONS"]),
     Route("/api/cowork/graph-context", get_cowork_graph_context, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities", list_entities, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities/{id}/children", get_entity_children, methods=["GET", "OPTIONS"]),

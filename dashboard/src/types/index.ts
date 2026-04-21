@@ -39,8 +39,25 @@ export interface OnboardingPreferences {
   platform_id?: string;
 }
 
+export interface ConnectorScopeSettings {
+  containers?: string[];
+}
+
+export interface GoogleWorkspacePreferences {
+  sidecar_base_url?: string;
+  sidecar_token?: string;
+  principal_mode?: "partner_email";
+}
+
 export interface PartnerPreferences {
   onboarding?: OnboardingPreferences;
+  connectorScopes?: {
+    gdrive?: ConnectorScopeSettings;
+    notion?: ConnectorScopeSettings;
+    github?: ConnectorScopeSettings;
+    wiki?: ConnectorScopeSettings;
+  };
+  googleWorkspace?: GoogleWorkspacePreferences;
 }
 
 export interface Tags {

@@ -616,6 +616,25 @@ export async function updatePreferences(
   return data.preferences ?? {};
 }
 
+export async function checkGoogleWorkspaceConnectorHealth(
+  token: string,
+  config?: {
+    sidecar_base_url?: string;
+    sidecar_token?: string;
+  },
+): Promise<{
+  ok: boolean;
+  status: string;
+  message?: string;
+  capability?: Record<string, unknown> | null;
+}> {
+  return apiRequest("/api/connectors/google-workspace/health", {
+    json: config ?? {},
+    method: "POST",
+    token,
+  });
+}
+
 export async function getPartners(token: string): Promise<Partner[]> {
   const res = await apiFetch<{ partners: Partner[] }>("/api/partners", token);
   return (res.partners ?? []).map((partner) => normalizePartner(partner as unknown as Record<string, unknown>));

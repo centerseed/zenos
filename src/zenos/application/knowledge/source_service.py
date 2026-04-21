@@ -17,6 +17,8 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
+
 from zenos.domain.knowledge import SourceType
 from zenos.domain.knowledge import EntityRepository, SourceAdapter
 from zenos.domain.doc_types import generate_source_id
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # Number of days after which a source is considered stale
 STALENESS_DAYS = 14
+DEFAULT_SIDECAR_TIMEOUT_SECONDS = 10.0
 
 
 def _source_status(source: dict) -> str:
@@ -101,6 +104,41 @@ def _parse_iso(ts: Any) -> datetime:
     # Try stdlib fromisoformat (Python 3.11+ handles 'Z'; earlier needs manual fix)
     s_fixed = s.replace("Z", "+00:00")
     return datetime.fromisoformat(s_fixed)
+
+
+def _partner_preferences(partner: dict | None) -> dict:
+    if not partner:
+        return {}
+    prefs = partner.get("preferences")
+    return prefs if isinstance(prefs, dict) else {}
+
+
+def _google_workspace_settings(
+    partner: dict | None,
+    override_config: dict | None = None,
+) -> dict:
+    base = {}
+    prefs = _partner_preferences(partner)
+    raw = prefs.get("googleWorkspace")
+    if isinstance(raw, dict):
+        base.update(raw)
+    if isinstance(override_config, dict):
+        for key in ("sidecar_base_url", "sidecar_token", "principal_mode"):
+            if key in override_config:
+                base[key] = override_config[key]
+    return base
+
+
+def _normalize_sidecar_base_url(value: Any) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def _sidecar_headers(config: dict) -> dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    token = str(config.get("sidecar_token") or "").strip()
+    if token:
+        headers["X-Zenos-Connector-Token"] = token
+    return headers
 
 
 class SourceService:
@@ -447,6 +485,127 @@ class SourceService:
                 "source_id": sid,
                 "setup_hint": "zenos_native source 尚未有 revision。請先在 Dashboard 儲存文件。",
             }
+
+    async def check_google_workspace_connector_health(
+        self,
+        partner: dict | None,
+        *,
+        override_config: dict | None = None,
+    ) -> dict:
+        """Probe the internal-first Google Workspace sidecar health endpoint."""
+        config = _google_workspace_settings(partner, override_config)
+        base_url = _normalize_sidecar_base_url(config.get("sidecar_base_url"))
+        if not base_url:
+            return {
+                "ok": False,
+                "status": "missing_config",
+                "message": "Google Workspace connector 尚未設定 sidecar URL。",
+                "capability": None,
+            }
+
+        headers = _sidecar_headers(config)
+        try:
+            async with httpx.AsyncClient(timeout=DEFAULT_SIDECAR_TIMEOUT_SECONDS) as client:
+                response = await client.get(f"{base_url}/health", headers=headers)
+        except Exception as exc:  # pragma: no cover - transport-specific
+            return {
+                "ok": False,
+                "status": "offline",
+                "message": str(exc),
+                "capability": None,
+            }
+
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {}
+
+        ok = bool(response.is_success and str(payload.get("status") or "ok").lower() == "ok")
+        return {
+            "ok": ok,
+            "status": str(payload.get("status") or ("ok" if response.is_success else "error")),
+            "message": str(payload.get("message") or ""),
+            "capability": payload.get("capability") if isinstance(payload, dict) else None,
+        }
+
+    async def read_source_live(
+        self,
+        doc_id: str,
+        *,
+        source_uri: str | None = None,
+        source: dict | None = None,
+        partner: dict | None = None,
+    ) -> dict:
+        """Read external content through a per-user Google Workspace sidecar."""
+        target_source = source if isinstance(source, dict) else {}
+        source_type = str(target_source.get("type") or "").strip().lower()
+        if source_type != SourceType.GDRIVE:
+            return {
+                "error": "LIVE_RETRIEVAL_FAILED",
+                "message": f"per-user live retrieval is not supported for source type '{source_type or 'unknown'}'",
+            }
+
+        config = _google_workspace_settings(partner)
+        base_url = _normalize_sidecar_base_url(config.get("sidecar_base_url"))
+        if not base_url:
+            return {
+                "error": "LIVE_RETRIEVAL_REQUIRED",
+                "message": "Google Workspace connector 尚未設定 sidecar URL。",
+            }
+
+        email = str((partner or {}).get("email") or "").strip()
+        if not email:
+            return {
+                "error": "LIVE_RETRIEVAL_REQUIRED",
+                "message": "當前 caller 缺少 email principal，無法走 Google Workspace live retrieval。",
+            }
+
+        payload = {
+            "connector": "gdrive",
+            "doc_id": doc_id,
+            "source_id": target_source.get("source_id"),
+            "source_uri": source_uri or target_source.get("uri"),
+            "requested_access": "full",
+            "principal": {
+                "partner_id": str((partner or {}).get("id") or "").strip() or None,
+                "email": email,
+                "display_name": str((partner or {}).get("displayName") or "").strip() or None,
+            },
+        }
+
+        headers = _sidecar_headers(config)
+        try:
+            async with httpx.AsyncClient(timeout=DEFAULT_SIDECAR_TIMEOUT_SECONDS) as client:
+                response = await client.post(f"{base_url}/read-source", headers=headers, json=payload)
+        except Exception as exc:  # pragma: no cover - transport-specific
+            return {
+                "error": "LIVE_RETRIEVAL_FAILED",
+                "message": str(exc),
+            }
+
+        try:
+            body = response.json()
+        except ValueError:
+            body = {}
+
+        if not response.is_success:
+            return {
+                "error": str(body.get("error") or "LIVE_RETRIEVAL_FAILED"),
+                "message": str(body.get("message") or f"Google Workspace sidecar responded {response.status_code}"),
+            }
+
+        content = body.get("content")
+        if not isinstance(content, str) or not content:
+            return {
+                "error": "LIVE_RETRIEVAL_FAILED",
+                "message": "Google Workspace sidecar did not return content.",
+            }
+
+        result = {"content": content}
+        content_type = body.get("content_type")
+        if isinstance(content_type, str) and content_type.strip():
+            result["content_type"] = content_type.strip()
+        return result
 
     async def _should_archive_entity(self, entity) -> bool:
         """Return True only if all sources are unresolvable (or entity is single-doc)."""

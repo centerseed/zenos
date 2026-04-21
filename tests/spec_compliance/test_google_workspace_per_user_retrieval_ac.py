@@ -313,3 +313,60 @@ async def test_ac_gwpr_08_write_preserves_source_access_fields():
     assert new_source["container_id"] == "drive:finance"
     assert new_source["retrieval_mode"] == "per_user_live"
     assert new_source["content_access"] == "full"
+
+
+@pytest.mark.asyncio
+async def test_ac_gwpr_11_live_reader_payload_uses_partner_principal():
+    """AC-GWPR-11: Given gdrive source 設為 retrieval_mode=per_user_live 且 sidecar 已配置，When read_source 走 live path，Then ZenOS 對 sidecar 的 request payload 會帶當前 caller 的 email/principal，並只回 sidecar 的 live content"""
+    from zenos.application.knowledge.source_service import SourceService
+
+    class _Response:
+        def __init__(self, status_code: int, payload: dict):
+            self.status_code = status_code
+            self._payload = payload
+
+        @property
+        def is_success(self) -> bool:
+            return 200 <= self.status_code < 300
+
+        def json(self) -> dict:
+            return self._payload
+
+    class _AsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            self.payload = None
+            self.headers = None
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url: str, *, headers: dict | None = None, json: dict | None = None):
+            assert url == "http://gw-sidecar.internal:8787/read-source"
+            self.headers = headers
+            self.payload = json
+            return _Response(200, {"content": "live content", "content_type": "text/plain"})
+
+    partner = _partner(connector_scopes={"gdrive": {"containers": ["drive:finance"]}})
+    partner["preferences"]["googleWorkspace"] = {
+        "sidecar_base_url": "http://gw-sidecar.internal:8787",
+        "sidecar_token": "gwsc-token",
+        "principal_mode": "partner_email",
+    }
+    client = _AsyncClient()
+
+    with patch("zenos.application.knowledge.source_service.httpx.AsyncClient", return_value=client):
+        svc = SourceService(entity_repo=None, source_adapter=None)
+        result = await svc.read_source_live(
+            "doc-1",
+            source_uri="https://drive.google.com/file/d/1abcXYZ/view",
+            source={"type": "gdrive", "source_id": "src-1"},
+            partner=partner,
+        )
+
+    assert result["content"] == "live content"
+    assert client.headers["X-Zenos-Connector-Token"] == "gwsc-token"
+    assert client.payload["principal"]["email"] == "dev@test.com"
+    assert client.payload["principal"]["partner_id"] == "partner-1"

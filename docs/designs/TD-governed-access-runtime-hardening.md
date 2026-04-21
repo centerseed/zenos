@@ -23,21 +23,26 @@ updated: 2026-04-21
 - `src/zenos/interface/mcp/_auth.py` — JWT `workspace_ids` 與 scope enforcement 已可直接重用。
 - `src/zenos/interface/dashboard_api.py` — Dashboard docs list / get 目前直接回 `sources`，沒有 source-level concealment。
 - `src/zenos/application/knowledge/ontology_service.py` — write source mutation 尚未保留 `container_id / retrieval_mode / content_access`。
+- `src/zenos/application/knowledge/source_service.py` — 目前沒有真的 sidecar-based `read_source_live`，也沒有 connector health check。
+- `dashboard/src/app/(protected)/settings/page.tsx` — 已有 MCP / helper 設定入口，但沒有 Google Workspace connector 區塊。
+- `dashboard/src/lib/api.ts` / `dashboard/src/types/index.ts` — preferences 型別還沒表達 `googleWorkspace.sidecar_base_url / sidecar_token`。
 
 ### 搜尋但未找到
 - `per-user live retrieval` 的既有 SPEC/TD
 - `connectorScopes` runtime model
 - 真正的 Google Workspace live reader 實作
+- Settings 頁的 Google Workspace connector UX
 
 ### 我不確定的事
-- [未確認] 本輪不實作 Google OAuth / token refresh；只實作 server runtime contract 與 live-reader hook。
+- [未確認] sidecar 服務本體不在 repo；本輪只交付 ZenOS 這端的 client / contract / settings。
 
 ### 結論
 可直接落最小版本：
 - `partner.preferences.connectorScopes` 當 workspace connector allowlist
 - `source.container_id + retrieval_mode + content_access` 當 source contract
-- `read_source` 對 `per_user_live` 只走 live reader，不回退到 shared full-content
+- `read_source` 對 `per_user_live` 只走 sidecar live reader，不回退到 shared full-content
 - MCP + Dashboard 對 blocked source 做一致 concealment
+- Settings 頁保存 sidecar URL/token/container allowlist，並可做 health check
 
 ## AC Compliance Matrix
 
@@ -51,6 +56,9 @@ updated: 2026-04-21
 | AC-GWPR-06 | per_user_live + summary only returns snapshot summary | `source.py` | `test_ac_gwpr_06_per_user_live_summary_mode_returns_snapshot` | PASS |
 | AC-GWPR-07 | blocked docs behave as not found on MCP get/dashboard metadata | `_visibility.py`, `ontology_service.py`, `dashboard_api.py`, `get.py` | `test_ac_gwpr_07_blocked_document_behaves_as_not_found` | PASS |
 | AC-GWPR-08 | write path preserves new source access fields | `ontology_service.py` | `test_ac_gwpr_08_write_preserves_source_access_fields` | PASS |
+| AC-GWPR-09 | settings save sidecar config + connector scopes | `settings/page.tsx`, `api.ts`, `types/index.ts` | `AC-GWPR-09: settings page saves google workspace connector settings` | PASS |
+| AC-GWPR-10 | settings health check surfaces connector status | `settings/page.tsx`, `dashboard_api.py`, `source_service.py` | `AC-GWPR-10: settings page checks google workspace connector health` | PASS |
+| AC-GWPR-11 | live retrieval payload carries current caller principal | `source_service.py` | `test_ac_gwpr_11_live_reader_payload_uses_partner_principal` | PASS |
 
 ## Component 架構
 
@@ -61,6 +69,19 @@ application/identity/source_access_policy.py
         ├─ is_source_in_connector_scope()
         ├─ filter_sources_for_partner()
         └─ normalized_retrieval_mode()
+        ↓
+application/knowledge/source_service.py
+        ├─ check_google_workspace_connector_health()
+        └─ read_source_live()
+        ↓
+Google Workspace sidecar
+
+partner.preferences.googleWorkspace
+        ↓
+Dashboard Settings
+        ├─ save sidecar_base_url / sidecar_token
+        ├─ save connectorScopes.gdrive.containers
+        └─ call connector health proxy
         ↓
 MCP surface
   - _visibility.py
@@ -83,13 +104,19 @@ Write path
 | `source.container_ids` | `container_ids` | `string[]` | 否 | 多 container 版本；任一命中 allowlist 即可 |
 | `source.retrieval_mode` | `retrieval_mode` | `direct \| snapshot \| per_user_live` | 否 | `per_user_live` 代表全文只能由 live reader 取得 |
 | `source.content_access` | `content_access` | `summary \| full \| none` | 否 | 既有暴露層級；搭配 `retrieval_mode` 使用 |
-| `source_service.read_source_live()` | `doc_id, source_uri, source, partner` | callable hook | 否 | 若存在，`per_user_live + full` 時由 `source.py` 呼叫 |
+| `partner.preferences.googleWorkspace.sidecar_base_url` | `sidecar_base_url` | `string` | 否 | ZenOS server 呼叫 sidecar 的 base URL |
+| `partner.preferences.googleWorkspace.sidecar_token` | `sidecar_token` | `string` | 否 | ZenOS → sidecar shared secret |
+| `partner.preferences.googleWorkspace.principal_mode` | `principal_mode` | `"partner_email"` | 否 | P0 固定使用 caller email 當 principal |
+| `POST /api/connectors/google-workspace/health` | `sidecar_base_url?, sidecar_token?` | JSON | 否 | Dashboard Settings 檢查 sidecar 健康；可用當前表單 override |
+| `SourceService.read_source_live()` | `doc_id, source_uri, source, partner` | async callable | 否 | `per_user_live + full` 時呼叫 sidecar `/read-source` |
 
 ## DB Schema 變更
 
 無。
 
-本輪只使用既有 `partners.preferences` JSONB 與 `entities.sources_json` JSONB。`container_id / retrieval_mode / content_access` 都落在 `sources_json` 內。
+本輪只使用既有 `partners.preferences` JSONB 與 `entities.sources_json` JSONB。
+- `container_id / retrieval_mode / content_access` 落在 `sources_json`
+- `sidecar_base_url / sidecar_token / principal_mode / connectorScopes` 落在 `partners.preferences`
 
 ## 任務拆分
 
@@ -97,14 +124,15 @@ Write path
 |---|------|------|--------------|
 | 1 | 補 spec amendment + 新 spec | Architect | `SPEC-identity-and-access` / `SPEC-zenos-external-integration` / `SPEC-google-workspace-per-user-retrieval` 一致 |
 | 2 | 抽 source access policy 共用模組 | Developer | MCP + Dashboard 共用同一套 connector scope / retrieval_mode logic |
-| 3 | 補 read path concealment 與 live retrieval gate | Developer | `read_source` / `get` / dashboard docs metadata 符合 AC-GWPR-01~07 |
-| 4 | 補 write path source schema 保留 | Developer | `container_id / retrieval_mode / content_access` 被保留在 `sources_json` |
-| 5 | 補 spec compliance tests + regression | QA | AC-GWPR-01~08 全 PASS，無既有權限回歸 |
+| 3 | 補 read path concealment 與 live retrieval gate | Developer | `read_source` / `get` / dashboard docs metadata 符合 AC-GWPR-01~08 |
+| 4 | 補 source sidecar client 與 settings health proxy | Developer | AC-GWPR-10/11 PASS |
+| 5 | 補 Settings UI 與 preferences 型別 | Developer | AC-GWPR-09/10 PASS |
+| 6 | 補 spec compliance tests + regression | QA | AC-GWPR-01~11 全 PASS，無既有權限回歸 |
 
 ## Risk Assessment
 
 ### 1. 不確定的技術點
-- 真正的 Google live reader 尚未存在；本輪只定 hook 與 fail-closed 行為。
+- sidecar 服務本體不在 repo 內；本輪只能驗證 ZenOS 對 sidecar 的 request/response contract，不能驗證 Google OAuth 本身。
 
 ### 2. 替代方案與選擇理由
 - 替代方案：直接做 workspace-shared full ingest。
@@ -125,11 +153,13 @@ Write path
 
 ## Done Criteria
 
-1. `SPEC-google-workspace-per-user-retrieval` 已建立並帶 AC-GWPR-01~08
+1. `SPEC-google-workspace-per-user-retrieval` 已更新並帶 AC-GWPR-01~11
 2. `TD-governed-access-runtime-hardening` 已補齊 compliance matrix / interface contract / risk / done criteria
 3. source access policy 已抽成共用模組，MCP 與 Dashboard 共用
-4. `read_source` 對 `per_user_live` 不再回退到 shared full-content
+4. `read_source` 對 `per_user_live` 不再回退到 shared full-content，而是走 sidecar `/read-source`
 5. MCP `get(document)` 與 Dashboard docs metadata 會過濾 blocked source
 6. document visibility 對 all-blocked external docs fail closed
 7. write path 保留 `container_id / retrieval_mode / content_access`
-8. `tests/spec_compliance/test_google_workspace_per_user_retrieval_ac.py` 全 PASS
+8. Settings 頁可保存 Google Workspace sidecar 設定與 gdrive allowlist
+9. Settings 頁可透過 server-side proxy 檢查 Google Workspace connector health
+10. `tests/spec_compliance/test_google_workspace_per_user_retrieval_ac.py` 與 settings / source service regression 全 PASS

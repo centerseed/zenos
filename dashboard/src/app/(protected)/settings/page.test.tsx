@@ -8,9 +8,15 @@ const setDefaultHelperBaseUrlMock = vi.fn();
 const setDefaultHelperTokenMock = vi.fn();
 const setDefaultHelperCwdMock = vi.fn();
 const setDefaultHelperModelMock = vi.fn();
+const getPreferencesMock = vi.fn();
+const updatePreferencesMock = vi.fn();
+const checkGoogleWorkspaceConnectorHealthMock = vi.fn();
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
+    user: {
+      getIdToken: vi.fn().mockResolvedValue("firebase-token"),
+    },
     partner: {
       id: "partner-1",
       email: "barry@example.com",
@@ -31,6 +37,12 @@ vi.mock("@/components/ui/toast", () => ({
   }),
 }));
 
+vi.mock("@/lib/api", () => ({
+  getPreferences: (...args: unknown[]) => getPreferencesMock(...args),
+  updatePreferences: (...args: unknown[]) => updatePreferencesMock(...args),
+  checkGoogleWorkspaceConnectorHealth: (...args: unknown[]) => checkGoogleWorkspaceConnectorHealthMock(...args),
+}));
+
 vi.mock("@/lib/cowork-helper", () => ({
   checkCoworkHelperHealth: (...args: unknown[]) => checkCoworkHelperHealthMock(...args),
   getDefaultHelperBaseUrl: () => "http://127.0.0.1:4317",
@@ -46,6 +58,25 @@ vi.mock("@/lib/cowork-helper", () => ({
 describe("SettingsPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getPreferencesMock.mockResolvedValue({
+      googleWorkspace: {
+        sidecar_base_url: "http://gw-sidecar.internal:8787",
+        sidecar_token: "gwsc-old-token",
+        principal_mode: "partner_email",
+      },
+      connectorScopes: {
+        gdrive: {
+          containers: ["drive:finance", "folder:roadmap"],
+        },
+      },
+    });
+    updatePreferencesMock.mockImplementation(async (_token, patch) => patch);
+    checkGoogleWorkspaceConnectorHealthMock.mockResolvedValue({
+      ok: true,
+      status: "ok",
+      message: "connector 已連線",
+      capability: { connector: "gdrive" },
+    });
     checkCoworkHelperHealthMock.mockResolvedValue({
       ok: true,
       status: "ok",
@@ -71,6 +102,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Settings")).toBeInTheDocument();
     expect(screen.getByText("MCP server")).toBeInTheDocument();
     expect(screen.getByText("Local helper")).toBeInTheDocument();
+    expect(screen.getByText("Per-user live retrieval")).toBeInTheDocument();
     expect(screen.getByText("MCP / Helper 怎麼分工")).toBeInTheDocument();
     expect(screen.getByText(/Marketing \/ Clients 裡的 AI rail 打不開/)).toBeInTheDocument();
   });
@@ -113,5 +145,67 @@ describe("SettingsPage", () => {
         "mk-legacy-token",
       );
     });
+  });
+
+  it("AC-GWPR-09: settings page saves google workspace connector settings", async () => {
+    const { default: SettingsPage } = await import("./page");
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Google Workspace Sidecar Base URL")).toHaveValue("http://gw-sidecar.internal:8787");
+    });
+
+    fireEvent.change(screen.getByLabelText("Google Workspace Sidecar Base URL"), {
+      target: { value: "http://gw-sidecar.internal:9797" },
+    });
+    fireEvent.change(screen.getByLabelText("Google Workspace Sidecar Token"), {
+      target: { value: "gwsc-new-token" },
+    });
+    fireEvent.change(screen.getByLabelText("Google Workspace Allowed Containers"), {
+      target: { value: "drive:legal\nfolder:contracts" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "儲存 Google Workspace Connector 設定" }));
+
+    await waitFor(() => {
+      expect(updatePreferencesMock).toHaveBeenCalledWith(
+        expect.any(String),
+        {
+          googleWorkspace: {
+            sidecar_base_url: "http://gw-sidecar.internal:9797",
+            sidecar_token: "gwsc-new-token",
+            principal_mode: "partner_email",
+          },
+          connectorScopes: {
+            gdrive: {
+              containers: ["drive:legal", "folder:contracts"],
+            },
+          },
+        },
+      );
+    });
+  });
+
+  it("AC-GWPR-10: settings page checks google workspace connector health", async () => {
+    const { default: SettingsPage } = await import("./page");
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Google Workspace Sidecar Token")).toHaveValue("gwsc-old-token");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "檢查 Google Workspace Connector" }));
+
+    await waitFor(() => {
+      expect(checkGoogleWorkspaceConnectorHealthMock).toHaveBeenCalledWith(
+        expect.any(String),
+        {
+          sidecar_base_url: "http://gw-sidecar.internal:8787",
+          sidecar_token: "gwsc-old-token",
+        },
+      );
+    });
+
+    expect(screen.getAllByText("connector 已連線").length).toBeGreaterThan(0);
   });
 });

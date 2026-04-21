@@ -26,6 +26,7 @@ ZenOS 現有外部文件路線只有兩種：
 - Google Workspace 先走 `per-user live retrieval`
 - ZenOS 只共享 metadata / summary
 - 全文必須走 live reader，不得偷落成共享 cache
+- live reader 先走 **internal-first sidecar**：ZenOS server 呼叫客戶環境內的 Google Workspace connector sidecar；每位使用者仍以自己的公司帳號在 sidecar 內完成綁定
 
 ## 2. 目標
 
@@ -33,13 +34,15 @@ ZenOS 現有外部文件路線只有兩種：
 2. 讓 workspace owner 能限制 connector 只允許某些 Shared Drive / Folder / container
 3. 讓 `read_source`、Dashboard docs metadata、MCP `get(document)` 對 out-of-scope source fail closed
 4. 讓 delegated credential / current principal 成為 live retrieval 的正式身份來源
+5. 讓 Settings 頁能配置 Google Workspace sidecar 與 container allowlist，並提供健康檢查與操作步驟
 
 ## 3. 非目標
 
-- 不在本 spec 內實作 Google OAuth UI
+- 不在 ZenOS 內實作 Google OAuth consent screen
 - 不做 webhook / 自動 sync
 - 不做 workspace-shared full ingest
 - 不做 source-level ACL editor；P0 只做 workspace connector scope + per-user live retrieval
+- 不在本 repo 內交付真正的 Google sidecar 服務本體；本 spec 只定 ZenOS 與 sidecar 的 contract
 
 ## 4. 核心模型
 
@@ -88,6 +91,59 @@ workspace 的 connector allowlist 先存於 `partner.preferences.connectorScopes
 - `read_source` 必須使用「當前 caller 的 delegated credential / principal」觸發 live reader
 - 若 live reader 或 user-scoped credential 不存在，回 `LIVE_RETRIEVAL_REQUIRED`
 
+### 4.4 Google Workspace Sidecar 設定
+
+ZenOS 以 `partner.preferences.googleWorkspace` 保存 sidecar 連線資訊：
+
+```json
+{
+  "googleWorkspace": {
+    "sidecar_base_url": "http://google-workspace-sidecar.internal:8787",
+    "sidecar_token": "gwsc-...",
+    "principal_mode": "partner_email"
+  }
+}
+```
+
+規則：
+
+- `sidecar_base_url`：ZenOS server 可連到的 sidecar URL
+- `sidecar_token`：ZenOS 呼叫 sidecar 的 shared secret；若為空代表不啟用
+- `principal_mode`：P0 固定為 `partner_email`
+- Settings 頁必須允許 owner 保存上述設定，並同頁保存 `connectorScopes.gdrive.containers`
+
+### 4.5 Sidecar Contract
+
+P0 sidecar contract：
+
+- `GET {sidecar_base_url}/health`
+  - request header: `X-Zenos-Connector-Token: {sidecar_token}`
+  - response: `{status, message?, capability?}`
+- `POST {sidecar_base_url}/read-source`
+  - request header: `X-Zenos-Connector-Token: {sidecar_token}`
+  - request body:
+
+```json
+{
+  "connector": "gdrive",
+  "doc_id": "doc-1",
+  "source_id": "src-1",
+  "source_uri": "https://drive.google.com/file/d/1abcXYZ/view",
+  "requested_access": "full",
+  "principal": {
+    "partner_id": "partner-1",
+    "email": "user@company.com",
+    "display_name": "Alice"
+  }
+}
+```
+
+規則：
+
+- ZenOS 必須把當前 caller 的 email 帶給 sidecar，作為 per-user identity binding
+- sidecar 失敗時 ZenOS 不得回退到共享全文副本
+- Settings 頁必須明確告知：每位公司成員要先在 sidecar / CLI 內完成自己的 Google Workspace 綁定
+
 ## 5. P0 需求
 
 ### P0-1: Connector Scope Runtime
@@ -111,6 +167,16 @@ workspace 的 connector allowlist 先存於 `partner.preferences.connectorScopes
 
 以上四條路徑對同一 source 的 connector scope 結果必須一致。
 
+### P0-4: Settings / Onboarding
+
+- Settings 頁必須提供 Google Workspace connector 區塊
+- 使用者必須能保存：
+  - sidecar base URL
+  - sidecar token
+  - gdrive allowed containers
+- Settings 頁必須提供 health check
+- Settings 頁必須用白話列出 setup steps：部署 sidecar、每位使用者綁定自己的 Google Workspace 帳號、填入 allowlist
+
 ## 6. Acceptance Criteria
 
 - `AC-GWPR-01` Given workspace 對 `gdrive` 已定義 connector scope 且 `containers=[]`，When caller 讀取只含 gdrive source 的文件，Then MCP 與 Dashboard 都不得暴露該文件或其 source metadata
@@ -121,6 +187,9 @@ workspace 的 connector allowlist 先存於 `partner.preferences.connectorScopes
 - `AC-GWPR-06` Given gdrive source 設為 `retrieval_mode=per_user_live` 且 `content_access=summary`，When `read_source` 執行，Then server 只回 `snapshot_summary` 或 `SNAPSHOT_UNAVAILABLE`，不可回全文
 - `AC-GWPR-07` Given document 的所有 source 都被 connector scope 擋下，When caller 查 `get(collection="documents")` 或 Dashboard docs metadata，Then 文件視同不存在，不得外洩 blocked source metadata
 - `AC-GWPR-08` Given source 帶 `container_id`、`retrieval_mode`、`content_access`，When helper 或 write mutation 更新 source，Then 新欄位被保留在 `sources_json`，供後續 runtime 使用
+- `AC-GWPR-09` Given 使用者在 Settings 頁填入 Google Workspace sidecar URL、token 與 gdrive containers，When 儲存設定，Then `/api/partner/preferences` 會保存 `preferences.googleWorkspace.*` 與 `preferences.connectorScopes.gdrive.containers`
+- `AC-GWPR-10` Given Settings 頁對當前 sidecar 設定執行 health check，When sidecar 回 `status=ok`，Then UI 顯示 connector 已連線且不要求使用者直接看 raw JSON
+- `AC-GWPR-11` Given gdrive source 設為 `retrieval_mode=per_user_live` 且 sidecar 已配置，When `read_source` 走 live path，Then ZenOS 對 sidecar 的 request payload 會帶當前 caller 的 email/principal，並只回 sidecar 的 live content
 
 ## 7. 與既有 Spec 關係
 
@@ -131,7 +200,6 @@ workspace 的 connector allowlist 先存於 `partner.preferences.connectorScopes
 
 ## 8. 明確不包含
 
-- Google Workspace admin onboarding UI
-- 真正的 OAuth token storage / refresh flow
+- 真正的 OAuth token storage / refresh flow（由 sidecar 自己管理）
 - Shared Drive crawler / sync worker
 - webhook / push notification
