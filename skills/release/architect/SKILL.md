@@ -359,7 +359,21 @@ updated: YYYY-MM-DD
 
 ## 2026-04-19 Action-Layer Handoff（SPEC-task-governance §Action-Layer 升級）
 
-Architect 是 handoff chain 的中繼。收 PM spec handoff、必要時拆 subtask、派給 Developer。**派工走 handoff，不再隱性 subagent spawn**。
+Architect 是 handoff chain 的中繼。收 PM spec handoff、必要時拆 subtask、派給 Developer。
+
+**重要：`task(action="handoff")` 只是在 ZenOS 任務層留下治理與派工履歷，不等於真的有 Developer runtime 開始做事。**
+
+要讓票正確進入執行態，Architect 必須完成兩件事，缺一不可：
+
+1. `handoff` 到 `agent:developer`，讓 task metadata 與 `handoff_events` 正確落地
+2. **真的啟動 / 喚醒 Developer agent**，把 task context 交給它執行
+
+若只做第 1 步，server 只會更新 `dispatcher`，**不會**自動：
+- 把 `todo` 升成 `in_progress`
+- 填 `assignee`
+- 幫你認領這張票
+
+`in_progress` 是 Developer agent 啟動後，依 Developer skill 主動做的第一步，不是 server-side automation。
 
 ### 接手 PM handoff 後
 `get(collection="tasks", id=<task_id>)` 讀完整脈絡 + `handoff_events`（看 PM 交棒原因與 output_ref）。規模大需拆 → 建 subtask（必帶 `parent_task_id` + 繼承 `parent.plan_id`）。
@@ -407,10 +421,19 @@ mcp__zenos__task(
 )
 ```
 
+然後立刻做真的調度，不要停在 metadata handoff：
+
+1. 啟動 / 喚醒 Developer agent
+2. 傳入完整 task id、SPEC/TD、AC test stub 路徑、Done Criteria、架構約束
+3. 明確要求它啟動第一步先執行 `task(action="update", id="{task_id}", status="in_progress")`
+
+沒有真的叫起 Developer agent，就不得宣稱「已派工」。
+
 ### 硬約束自查
 - dispatcher 必合正則 `^(human(:<id>)?|agent:[a-z_]+)$`，違反即 `INVALID_DISPATCHER` reject
 - subtask 禁止跨 plan，違反即 `CROSS_PLAN_SUBTASK` reject
 - 不要直接 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
+- `handoff -> agent:developer` 後，必須有對應的 Developer runtime claim；否則 task 仍可能停在 `todo`
 
 ---
 

@@ -890,18 +890,27 @@ Task 完成後的知識應流回 ontology：
 - linked_entities 中的 entity ID 必須實際存在；任何不存在的 ID 會被 Server reject 並回傳錯誤列表（不再靜默忽略）
 - confirm task 回傳會包含 `suggested_actions` 欄位，列出後續建議操作（如知識回寫、關聯 task）
 
+## Agent Claim / Handoff 摘要規則（2026-04-21）
+
+- `handoff` 是治理履歷，不是 runtime claim
+- agent 接到 task 後，第一步先確認 `status` / `dispatcher` / `assignee`
+- 只有 `dispatcher` 已派到自己，才可 claim；真正開工前顯式 `update(status="in_progress")`
+- `handoff` 不會自動填 `assignee`；需要責任落點時必須顯式確認或更新
+- 所有 `task(action="handoff")` 都必須帶摘要：`reason` 說明交棒原因，`notes` 至少含 `summary` / `verify` / `risk`，有產出時帶 `output_ref`
+- QA FAIL 的新流程建議用 `task(action="handoff", to_dispatcher="<上一 dispatcher>", reason="rejected: ...")`；`confirm(accepted=false)` 保留給 legacy caller，相容但不是新 workflow 首選
+
 ## 各角色操作時機速查
 
 | 角色 | 時機 | 操作 |
 |------|------|------|
 | PM | 開 Feature Spec 完 | `task(action="create", dispatcher="agent:pm", linked_entities=[...])` |
-| PM | Spec ready | `task(action="handoff", to_dispatcher="agent:architect", reason="spec ready", output_ref="<spec path>")` |
+| PM | Spec ready | `task(action="handoff", to_dispatcher="agent:architect", reason="spec ready", output_ref="<spec path>", notes="summary: ...; verify: ...; risk: ...")` |
 | Architect | 接手開 TD / subtask | `task(action="create", parent_task_id=<parent>, dispatcher="agent:architect")`（subtask 必須繼承 parent.plan_id） |
-| Architect | TD ready | `task(action="handoff", to_dispatcher="agent:developer", output_ref="<TD path>")` |
-| Developer | 拿到任務 | `task(action="update", status="in_progress")` |
-| Developer | 完成實作 | `task(action="handoff", to_dispatcher="agent:qa", output_ref="<commit SHA>")`（status 自動升 review） |
-| QA | PASS | `confirm(collection="tasks", accept=True, ...)`（自動 append 結束 handoff event + status=done） |
-| QA | FAIL | `task(action="handoff", to_dispatcher="<上一 dispatcher>", reason="rejected: ...")` |
+| Architect | TD ready | `task(action="handoff", to_dispatcher="agent:developer", output_ref="<TD path>", notes="summary: ...; verify: ...; risk: ...")` |
+| Developer | 拿到任務 | 先確認 `status/dispatcher/assignee`，再 `task(action="update", status="in_progress")` |
+| Developer | 完成實作 | `task(action="handoff", to_dispatcher="agent:qa", output_ref="<commit SHA>", notes="summary: ...; verify: ...; risk: ...")`（status 自動升 review） |
+| QA | PASS | `confirm(collection="tasks", accepted=True, ...)`（自動 append 結束 handoff event + status=done） |
+| QA | FAIL | `task(action="handoff", to_dispatcher="<上一 dispatcher>", reason="rejected: ...", notes="summary: ...; verify: ...; risk: ...")` |
 
 ## 2026-04-19 Action-Layer 升級硬約束
 
@@ -932,7 +941,7 @@ Task 完成後的知識應流回 ontology：
 副作用：
 - `to_dispatcher="agent:qa"` 且當前 status=in_progress → 自動升 status=review
 - `confirm(accepted=true)` → 自動 append 結束事件 `{to="human", reason="accepted", output_ref=entity_ids}`
-- `confirm(accepted=false)` → 自動 append `{to=<前一 dispatcher>, reason="rejected: ..."}` + status 回 in_progress""",
+- `confirm(accepted=false)` → legacy 相容：自動 append `{to=<前一 dispatcher>, reason="rejected: ..."}` + status 回 in_progress""",
 
         3: """# Task 治理規則 v2.0（含完整範例）
 
@@ -1033,18 +1042,27 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 
 **Server 端驗證：** Server 驗證 title 長度（≥4 字元）並拒絕停用詞開頭。`linked_entities` 不存在的 ID 直接 reject（不再靜默忽略）。`confirm(tasks)` 回傳 `governance_hints.suggested_entity_updates`。`confirm` 成功後回傳包含 `suggested_actions` 欄位，列出後續建議動作。
 
+## Agent Claim / Handoff 摘要規則（2026-04-21）
+
+- `handoff` 是治理履歷，不是 runtime claim
+- agent 接到 task 後，第一步先確認 `status` / `dispatcher` / `assignee`
+- 只有 `dispatcher` 已派到自己，才可 claim；真正開工前顯式 `update(status="in_progress")`
+- `handoff` 不會自動填 `assignee`；需要責任落點時必須顯式確認或更新
+- 所有 `task(action="handoff")` 都必須帶摘要：`reason` 說明交棒原因，`notes` 至少含 `summary` / `verify` / `risk`，有產出時帶 `output_ref`
+- QA FAIL 的新流程建議用 `task(action="handoff", to_dispatcher="<上一 dispatcher>", reason="rejected: ...")`；`confirm(accepted=false)` 保留給 legacy caller，相容但不是新 workflow 首選
+
 ## 各角色操作時機速查
 
 | 角色 | 時機 | 操作 |
 |------|------|------|
 | PM | 開 Feature Spec 完 | `task(action="create", dispatcher="agent:pm", linked_entities=[...])` |
-| PM | Spec ready | `task(action="handoff", to_dispatcher="agent:architect", reason="spec ready", output_ref="<spec path>")` |
+| PM | Spec ready | `task(action="handoff", to_dispatcher="agent:architect", reason="spec ready", output_ref="<spec path>", notes="summary: ...; verify: ...; risk: ...")` |
 | Architect | 接手開 TD / subtask | `task(action="create", parent_task_id=<parent>, dispatcher="agent:architect")`（subtask 必須繼承 parent.plan_id） |
-| Architect | TD ready | `task(action="handoff", to_dispatcher="agent:developer", output_ref="<TD path>")` |
-| Developer | 拿到任務 | `task(action="update", status="in_progress")` |
-| Developer | 完成實作 | `task(action="handoff", to_dispatcher="agent:qa", output_ref="<commit SHA>")`（status 自動升 review） |
-| QA | PASS | `confirm(collection="tasks", accept=True, ...)`（自動 append 結束 handoff event + status=done） |
-| QA | FAIL | `task(action="handoff", to_dispatcher="<上一 dispatcher>", reason="rejected: ...")` |
+| Architect | TD ready | `task(action="handoff", to_dispatcher="agent:developer", output_ref="<TD path>", notes="summary: ...; verify: ...; risk: ...")` |
+| Developer | 拿到任務 | 先確認 `status/dispatcher/assignee`，再 `task(action="update", status="in_progress")` |
+| Developer | 完成實作 | `task(action="handoff", to_dispatcher="agent:qa", output_ref="<commit SHA>", notes="summary: ...; verify: ...; risk: ...")`（status 自動升 review） |
+| QA | PASS | `confirm(collection="tasks", accepted=True, ...)`（自動 append 結束 handoff event + status=done） |
+| QA | FAIL | `task(action="handoff", to_dispatcher="<上一 dispatcher>", reason="rejected: ...", notes="summary: ...; verify: ...; risk: ...")` |
 
 ## 2026-04-19 Action-Layer 升級硬約束
 
@@ -1075,7 +1093,7 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 副作用：
 - `to_dispatcher="agent:qa"` 且當前 status=in_progress → 自動升 status=review
 - `confirm(accepted=true)` → 自動 append 結束事件 `{to="human", reason="accepted", output_ref=entity_ids}`
-- `confirm(accepted=false)` → 自動 append `{to=<前一 dispatcher>, reason="rejected: ..."}` + status 回 in_progress""",
+- `confirm(accepted=false)` → legacy 相容：自動 append `{to=<前一 dispatcher>, reason="rejected: ..."}` + status 回 in_progress""",
     },
 
     "bundle": {

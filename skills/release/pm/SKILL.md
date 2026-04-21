@@ -215,6 +215,10 @@ Spec 相容性：已比對 {n} 份既有 spec，{結論}
 
 PM 是 handoff chain 的起點。Spec 確認後不是「寫完就走」——建 Plan entity → 建 task → 把 spec 交棒給 Architect，留下完整履歷。
 
+接單 / 交接共通規則同樣適用 PM：
+- 若 PM 接回 task，先確認 `status` / `dispatcher` / `assignee`
+- 若 PM 要再交棒，`notes` 必須寫 handoff 摘要，不能只留一句空話
+
 ### 建票前：先建 Plan entity（SSOT）
 
 `plan_id` 必須是真實 Plan 的 32-char UUID，不能塞 feature slug 字串。否則 Plan 只存在於 task.plan_id 欄位，違反 SSOT 且無法收口。
@@ -254,6 +258,11 @@ mcp__zenos__task(
     notes="P0 有 {n} 條 AC；開放問題見 spec 最後一節"
 )
 ```
+
+`notes` 是 handoff 摘要，不是可有可無的附註。至少要讓接手的 Architect 立刻知道：
+- Spec 已完成到哪裡
+- 哪些 AC 最重要
+- 哪些未解問題仍存在
 
 **不要**直接改 dispatcher 或 handoff_events 欄位——會被 HANDOFF_EVENTS_READONLY reject。只能走 `action="handoff"`。
 

@@ -4,7 +4,7 @@ id: SPEC-task-governance
 status: Approved
 ontology_entity: action-layer
 created: 2026-03-26
-updated: 2026-04-19
+updated: 2026-04-21
 ---
 
 # Feature Spec: ZenOS Task Governance
@@ -84,6 +84,47 @@ task(action="handoff", id="...", data={
 
 **Append-only 保證**：`write(collection="tasks", data={handoff_events: [...]})` 忽略 handoff_events 欄位並回傳 warning。唯一入口是 `task(action="handoff")`。
 
+### Agent Claim / Handoff 摘要規則（2026-04-21 新增）
+
+`handoff` 是治理與派工履歷，不是 runtime claim。任何 agent 接到 task 後，必須先完成 claim，再開始做事。
+
+#### Claim 規則
+
+1. 接單第一步必須讀 task 脈絡，至少確認 `status`、`dispatcher`、`assignee`
+2. 只有當 `dispatcher` 已指向自己時，agent 才能 claim 該 task；若 `dispatcher` 不符，應回報，不得默默開工
+3. 真正開始執行前，agent 必須顯式把 task 更新為 `in_progress`
+4. `handoff` 不會自動填 `assignee`；若流程要求責任落點，agent / orchestrator 必須顯式確認或更新
+
+一句話：`handoff` 只代表「現在輪到誰」，`claim` 才代表「有人真的開始做」。
+
+#### Handoff 摘要規則
+
+所有 `task(action="handoff")` 都必須帶可驗收摘要，不得只寫空泛的 `"ready"` / `"done"`。
+
+- `reason`：為什麼現在要交棒
+- `output_ref`：本階段主要產出（spec path / TD path / commit SHA / report path / artifact）
+- `notes`：handoff 摘要，至少包含：
+  - `summary`: 做了什麼
+  - `verify`: 怎麼驗證
+  - `risk`: 已知風險、限制或未完成項
+
+建議格式：
+
+```python
+task(action="handoff", id="...", data={
+    to_dispatcher: "agent:qa",
+    reason: "implementation complete, ready for verification",
+    output_ref: "<commit SHA>",
+    notes: "summary: 改了 A/B/C；verify: pytest tests/x.py -q；risk: 已知限制或無"
+})
+```
+
+#### 相容性說明
+
+- 新流程：QA 驗收失敗時，建議用 `task(action="handoff", to_dispatcher="<上一 dispatcher>", reason="rejected: ...", notes="summary: ...; verify: ...; risk: ...")`
+- legacy 相容：`confirm(collection="tasks", accepted=false, rejection_reason="...")` 仍可用於舊 caller；server 會把 task 回到 `in_progress` 並補 rejection handoff event
+- Agent / workflow skill 一律以新流程為準，不再把 `confirm(accepted=false)` 當主要交接手段
+
 ### Subtask 規則
 
 | 規則 | 強制等級 |
@@ -154,6 +195,8 @@ get(tasks, id=Z).handoff_events
 - **AC-TASK-UPG-07**：既有 `search(tasks, product_id=X)` 過濾（DF-20260419-7 F12）與 AC-TASK-UPG-06 三個新 filter 可同時套用，彼此 AND。
 - **AC-TASK-UPG-08**：`confirm(collection="tasks", id, accepted=true)` 呼叫後，`handoff_events` 自動 append 一條 `to_dispatcher="human"` + `reason="accepted"` 的結束事件，status 升 `done`。
 - **AC-TASK-UPG-09**：SPEC-task-communication-sync / SPEC-task-view-clarity / SPEC-task-kanban-operations 經審查無衝突描述，或已補更。
+- **AC-TASK-UPG-10**：任何 agent-based workflow 在接單時都必須先確認 `status` / `dispatcher` / `assignee`，且在真正開始執行前顯式 `update(status="in_progress")`；不得把 handoff 視為自動 claim。
+- **AC-TASK-UPG-11**：所有 `task(action="handoff")` 範例與 workflow 都必須包含 handoff 摘要；`notes` 至少含 `summary` / `verify` / `risk`，`output_ref` 在存在產出時必填。
 
 ### 下游 SSOT 同步清單（Implementation 必做）
 
@@ -172,6 +215,7 @@ Action-Layer 升級不是只改 schema 就完——MCP tool docstring、governan
 | # | 檔案 | 具體改動 |
 |---|------|---------|
 | 4 | `src/zenos/interface/governance_rules.py["task"]` | 加三條硬約束規則（level 2 內容）：`DISPATCHER_NAMESPACE`（正則驗證）、`CROSS_PLAN_SUBTASK`（subtask 必須繼承 plan_id）、`HANDOFF_EVENTS_READONLY`（write 不可直接改 handoff_events） |
+| 4a | `src/zenos/interface/governance_rules.py["task"]` | 補 claim / handoff 摘要治理規則：`handoff` 不是 runtime claim；agent 接單先確認 `status/dispatcher/assignee` 再 `in_progress`；handoff 摘要至少含 `summary/verify/risk` |
 
 #### Agent Role Skills（4 項）
 

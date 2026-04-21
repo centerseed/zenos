@@ -112,13 +112,20 @@ mcp__zenos__write(
 ### 調度 Developer
 
 1. `Read skills/release/developer/SKILL.md` 完整內容
-2. 用 Agent tool 開 subagent，prompt 包含：
+2. 先做 ZenOS task handoff，把 `dispatcher` 正式交給 `agent:developer`
+3. 再用 Agent tool 開 / 喚醒 Developer subagent，prompt 包含：
    - Developer SKILL.md **全文**
+   - 明確的 `task_id`（完整 32-char UUID）
    - Spec 內容（或路徑 + 關鍵段落）
    - 技術設計（或 ADR 路徑 + 關鍵段落）
    - Done Criteria（具體、可驗證，含每個介面參數）
    - 架構約束與安全要求
-   - 結尾：「按 Developer skill 流程：實作 → 最小 scope 測試 → simplify → 全套測試 → Completion Report」
+   - 結尾：「按 Developer skill 流程，第一步先 `task(action="update", id=<task_id>, status="in_progress")`，再實作 → 最小 scope 測試 → simplify → 全套測試 → Completion Report」
+
+補充：
+- `handoff` 只會更新 task metadata / `handoff_events`，不會自動替你 claim task
+- 若沒有真的啟動 Developer agent，task 很可能停在 `todo`
+- `assignee` 也不是 handoff 的自動副作用；若流程需要，必須由執行端顯式更新
 
 ### 調度 QA
 

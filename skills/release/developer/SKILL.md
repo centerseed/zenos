@@ -31,6 +31,11 @@ mcp__zenos__search(collection="tasks", status="todo,in_progress")
 mcp__zenos__task(action="update", id="task-id", status="in_progress")
 ```
 
+接單時不要只改狀態。先確認：
+- `dispatcher` 已經是 `agent:developer`
+- `assignee` / owner 責任落點是否正確；需要顯式更新時就補，不要假設 handoff 會自動填
+- 若票其實沒派到你，先回報 Architect / QA，不要默默開工
+
 ---
 
 ## ALWAYS
@@ -198,6 +203,11 @@ mcp__zenos__task(
     notes="交付：{檔案清單摘要}；驗證指令：{command}；已知風險：{或無}"
 )
 ```
+
+`notes` 是必填心智模型：它就是 handoff 摘要。QA 不應再回頭猜：
+- 你改了什麼
+- 怎麼驗證
+- 還剩什麼風險
 
 副作用：
 - `to_dispatcher="agent:qa"` 且當前 status=in_progress → server 自動升 status=review

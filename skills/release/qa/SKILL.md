@@ -235,14 +235,19 @@ QA 不自己修 bug，而是在退回時**同時告訴 Developer 兩個層次該
 
 ## 2026-04-19 Action-Layer Handoff（SPEC-task-governance §Action-Layer 升級）
 
-QA 是 handoff chain 的驗收節點。**不再用 `confirm(accept=False)` + `status=in_progress` 的舊流程**——改用 handoff 把球打回給 Developer（或前一 dispatcher），audit trail 完整。
+QA 是 handoff chain 的驗收節點。**不再用 `confirm(accepted=False)` + `status=in_progress` 的舊流程**——改用 handoff 把球打回給 Developer（或前一 dispatcher），audit trail 完整。
+
+QA 接到 task 時也先做 claim 檢查：
+- 確認 `dispatcher` 現在是 `agent:qa`
+- 確認 `status`、`assignee` / owner 責任落點是否合理
+- 若 task 還沒進 `review` 就到 QA，先指出流程錯誤，不要硬驗
 
 ### PASS：驗收通過
 ```python
 mcp__zenos__confirm(
     collection="tasks",
     id="{task_id}",
-    accept=True,
+    accepted=True,
     entity_entries=[{"entity_id": "...", "type": "decision|insight|limitation|change|context", "content": "..."}]
 )
 ```
@@ -271,6 +276,7 @@ Server 自動：
 **約束**：
 - `to_dispatcher` 必合正則，違反即 `INVALID_DISPATCHER` reject
 - reason 必填；用結構化格式 `"rejected: <instance>; class_fix: <class>"` 讓 Developer 一眼看懂要修什麼
+- `notes` 要寫 handoff 摘要，至少包含失敗證據、重現方式、驗證門檻
 - 不要直接 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
 - 退回後可讀 `get(task).handoff_events` 比對前後派工履歷
 

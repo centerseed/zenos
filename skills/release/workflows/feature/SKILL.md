@@ -106,7 +106,7 @@ PM 將完整 Spec 呈給用戶逐章確認。
 ## Phase 4：PM → Architect Handoff + 建實作 PLAN
 
 > 建票前必讀 `skills/governance/shared-rules.md` 的去重與 linked_entities 規則。
-> 2026-04-19 Action-Layer 升級：派工用顯性 handoff chain，不再隱性 subagent spawn。
+> 2026-04-19 Action-Layer 升級：派工必須同時包含顯性 handoff chain 與真實 agent 調度。`handoff` 是治理記錄，不是 runtime claim。
 
 ### 4.0 PM 先建 Plan entity（SSOT）
 
@@ -153,11 +153,17 @@ mcp__zenos__task(action="handoff", id=X,
     reason="TD ready, implementation dispatched",
     output_ref="docs/designs/TD-{slug}.md")
 ```
-叫起 Developer subagent，傳入 task description + AC + TD 引用。
+接著立刻叫起 Developer subagent，傳入 task description + AC + TD 引用。
+
+注意：
+- 只做這個 handoff，task 只會更新 `dispatcher`
+- server 不會自動改成 `in_progress`
+- server 不會自動填 `assignee`
+- 必須真的有 Developer agent 起來認領，後續 `in_progress` 才會成立
 
 ### 5.2 Developer 接手 + 實作
 - 讀 task + handoff_events 取完整脈絡（PM 原意 + Architect 設計）
-- 更新：`task(action="update", id=X, status="in_progress")`
+- 啟動第一步就更新：`task(action="update", id=X, status="in_progress")`
 - 實作完成後 handoff to QA：
 ```python
 mcp__zenos__task(action="handoff", id=X,

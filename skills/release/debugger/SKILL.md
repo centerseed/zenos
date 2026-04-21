@@ -48,17 +48,22 @@ mcp__zenos__task(
 # 開始調查時
 mcp__zenos__task(action="update", id="task-id", status="in_progress")
 
-# 修復完成，提交 Debug Report 時
+# 接單時先確認 dispatcher / assignee / status 是否正確，再開始調查
+
+# Debug 完成，交棒給下一個角色時
 mcp__zenos__task(
-    action="update",
+    action="handoff",
     id="task-id",
-    status="review",
-    result="根因：... 修復：file:line 回歸測試：file:line",
+    to_dispatcher="agent:developer",
+    reason="root cause isolated, implementation needed",
+    output_ref="{debug report path}",
+    notes="summary: 根因是 ...; verify: 重現步驟 / 觀測證據 ...; risk: 尚未實作修復"
 )
 ```
 
 > 若 `skills/governance/` 不存在，跳過 task 治理流程。
 > 最終驗收由 Architect 或 QA 透過 `confirm(collection="tasks")` 執行。
+> 若 Debugger 自己就是修復執行者，也一樣先 claim task，再在交棒時留下 handoff 摘要。
 
 > Debug 完成後若需要 code fix，建立新 task（status: todo）交給 Developer，而不是自己直接修（除非 bug 是單行 hotfix）。
 > Production hotfix 流程：Debugger 確認根因 → Developer 修復 → QA 驗收 → Architect 部署。
