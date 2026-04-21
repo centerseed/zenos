@@ -529,7 +529,6 @@ describe("getProjectProgress", () => {
         {
           id: "plan-1",
           goal: "Ship S01",
-          goal: "Ship S01",
           status: "active",
           owner: "Barry",
           tasks_summary: { total: 1, by_status: { todo: 1 } },
