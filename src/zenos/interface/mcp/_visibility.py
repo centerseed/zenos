@@ -18,6 +18,7 @@ import logging
 from zenos.infrastructure.context import current_partner_department
 from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
 from zenos.application.knowledge.ontology_service import _collect_subtree_ids
+from zenos.application.identity.source_access_policy import entity_has_visible_source
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,10 @@ def _is_entity_visible(entity: object) -> bool:
     partner = _current_partner.get()
     if not partner:
         return True
+
+    if not entity_has_visible_source(entity, partner):
+        return False
+
     access = describe_partner_access(partner)
     if access["is_admin"]:
         return True
@@ -167,8 +172,8 @@ async def _is_task_visible(task: object) -> bool:
                 return False
         return True
     except Exception:
-        logger.warning("_is_task_visible check failed, defaulting to visible", exc_info=True)
-        return True
+        logger.warning("_is_task_visible check failed, denying access", exc_info=True)
+        return False
 
 
 async def _is_protocol_visible(protocol: object) -> bool:
@@ -192,8 +197,8 @@ async def _is_protocol_visible(protocol: object) -> bool:
             return True  # entity deleted = show protocol
         return _is_entity_visible(entity)
     except Exception:
-        logger.warning("_is_protocol_visible check failed, defaulting to visible", exc_info=True)
-        return True
+        logger.warning("_is_protocol_visible check failed, denying access", exc_info=True)
+        return False
 
 
 async def _is_blindspot_visible(blindspot: object) -> bool:
@@ -226,15 +231,15 @@ async def _is_blindspot_visible(blindspot: object) -> bool:
                 return True  # at least one visible
         return False
     except Exception:
-        logger.warning("_is_blindspot_visible check failed, defaulting to visible", exc_info=True)
-        return True
+        logger.warning("_is_blindspot_visible check failed, denying access", exc_info=True)
+        return False
 
 
 def _check_write_visibility(existing_entity: object, data: dict) -> dict | None:
     """Check if caller is authorized to write to an existing entity.
 
     Returns an error dict if unauthorized, None if OK.
-    Fail-open: exceptions default to allowing the write.
+    Fail-closed: exceptions default to rejecting the write.
     """
     from zenos.interface.mcp._auth import _current_partner
 
@@ -256,8 +261,11 @@ def _check_write_visibility(existing_entity: object, data: dict) -> dict | None:
                 }
         return None
     except Exception:
-        logger.warning("_check_write_visibility failed, allowing write", exc_info=True)
-        return None
+        logger.warning("_check_write_visibility failed, denying write", exc_info=True)
+        return {
+            "error": "FORBIDDEN",
+            "message": "Unable to verify write permission.",
+        }
 
 
 def _guest_write_rejection(collection: str) -> dict | None:

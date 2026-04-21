@@ -4,7 +4,7 @@ id: SPEC-identity-and-access
 status: Under Review
 ontology_entity: 身份與權限管理
 created: 2026-04-08
-updated: 2026-04-10
+updated: 2026-04-21
 supersedes:
   - SPEC-permission-model
   - SPEC-partner-access-scope
@@ -239,3 +239,93 @@ route guard 必須遵循以下順序：
 - 當 owner 將 guest 移出 workspace，或拔除其某個 L1 授權時，系統必須自動移除該 guest 在失效範圍內的 task assignee 關聯
 - guest 失去授權後，既有留言 / 歷史紀錄保留，但該 guest 不得再讀取失效範圍內容
 - 權限過濾必須由 server 端強制執行；前端與 agent 只可消費過濾後結果，不可自行推斷授權
+
+## 8. 最小治理骨架（P0）
+
+本章定義 ZenOS 在企業資料場景下不可再往下刪減的最小治理骨架。
+
+目的不是一次做完企業級細粒度權限，而是先建立不可破的硬邊界，避免在「無邊界功能」上驗證出假需求。
+
+### P0-1: Active Workspace 硬隔離
+
+- 一切 read / write / task / doc / `read_source` 行為，必須先落到單一 `active workspace context`
+- 未指定 `workspace_id` 時，一律回到 caller 的 `home workspace`
+- 不得因 legacy fallback、shared route 或前端 state 漂移而跨 workspace 讀寫
+
+**Acceptance Criteria**
+
+- `AC-IAM-01` Given 同一 principal 同時擁有 home workspace 與 shared workspace，When 未帶 `workspace_id` 呼叫 MCP/API，Then 一律以 home workspace 作為 active workspace 執行
+- `AC-IAM-02` Given caller 明確帶入 `workspace_id=A`，When 呼叫 `search/get/task/write/read_source`，Then 只可看見與寫入 A workspace 的資料，不可混入其他 workspace 的結果
+- `AC-IAM-03` Given delegated token 的 `workspace_ids` 不含目標 workspace，When caller 嘗試切換到該 workspace，Then server 回 `403`，不得 fallback 到其他 workspace 繼續執行
+
+### P0-2: Role + Visibility + 子樹裁切
+
+- `owner/member/guest` 與 `public/restricted/confidential` 是目前唯一正式 P0 權限語意
+- `guest` 只可見被授權 L1 子樹中的 `public`
+- `member` 可見 `public + restricted`
+- `confidential` 僅 `owner` 可見
+- 未授權範圍必須直接隱藏，不顯示灰階、占位提示或 existence leak
+
+**Acceptance Criteria**
+
+- `AC-IAM-04` Given guest 被授權某 L1 子樹，When 進入 shared workspace，Then 只可見該子樹中的 `public` entity / doc / task context
+- `AC-IAM-05` Given 同一子樹下同時存在 `public`、`restricted`、`confidential` 節點，When guest 查詢，Then `restricted/confidential` 完全不可見
+- `AC-IAM-06` Given member 進入 shared workspace，When 查詢資料，Then 可見 workspace 內 `public + restricted`，但不可見 `confidential`
+
+### P0-3: Connector Scope 邊界
+
+- 外部資料源接入必須先定義「這個 workspace 可索引哪些 container」
+- `container` 在不同 connector 可對應為 Shared Drive、Folder、Repo、Space 等
+- owner/admin 必須明確選定可索引範圍；ZenOS 不得在第一次接入時預設全域掃描整個外部系統
+- Connector scope 是資料進場邊界，不是後處理建議
+
+**Acceptance Criteria**
+
+- `AC-IAM-07` Given workspace 接上外部 connector 但尚未設定任何允許的 container，When sync job 或 agent 嘗試拉資料，Then server 不得索引任何外部文件
+- `AC-IAM-08` Given owner 只授權某兩個 Shared Drives / folders，When connector 執行同步，Then 僅可建立來自該範圍的 source/doc linkage
+- `AC-IAM-09` Given 外部文件存在於未授權 container，When agent 於該 workspace 查詢，Then ZenOS 不得暴露其 metadata、summary 或 existence hint
+
+> `connector scope` 的正式 executable contract 與 Google Workspace `per_user_live` 路徑，由 `SPEC-google-workspace-per-user-retrieval` 定義。
+
+### P0-4: Progressive Data Exposure
+
+- ZenOS 對 agent / external app 的資料暴露必須分三層：
+  - `discover`: metadata、關聯、治理狀態
+  - `summary`: 可讀摘要、snapshot summary、引用片段
+  - `full-content`: 原文 / 完整 markdown / 原始文件內容
+- 預設路徑必須停在 `discover + summary`
+- `full-content` 只可在明確 connector/content policy 允許時取得
+- 外部資料的原文真相仍留在原生系統；ZenOS 不因建立索引而自動獲得全文讀取權
+
+**Acceptance Criteria**
+
+- `AC-IAM-10` Given agent 擁有一般 `read` 權限，When 查詢知識上下文，Then 預設可取得 metadata 與 summary，不代表自動取得 full-content
+- `AC-IAM-11` Given 某 source 僅允許 summary access，When caller 呼叫 `read_source`，Then server 只可回傳摘要型結果或拒絕，不可回傳原文
+- `AC-IAM-12` Given 某 source 被明確標記允許 full-content，When caller 符合 workspace/role/content policy，Then `read_source` 才可回傳完整內容
+
+> `per_user_live` 是 P0 的合法 full-content 路徑之一：ZenOS 只在當前 caller 的外部身份可用時 live 取全文，不把全文先落成 workspace 共享副本。細節見 `SPEC-google-workspace-per-user-retrieval`。
+
+### P0-5: Server-side Final Authorization + Fail-Closed
+
+- 最終授權必須由 server 決定；前端、agent、external app 不得自行推斷可見範圍
+- 當 workspace projection、visibility 判定、connector policy 解析失敗時，系統必須 fail-closed
+- 不得因例外處理而 `default to visible`、`allow write anyway` 或 fallback 到較寬鬆行為
+
+**Acceptance Criteria**
+
+- `AC-IAM-13` Given 前端或 external app 傳入超出授權的 entity/doc/task id，When server 執行查詢或 mutation，Then 以 server-side authorization 為準拒絕，不信任 client-side claim
+- `AC-IAM-14` Given 權限判定過程發生例外或 context 缺失，When server 無法安全確定 caller 權限，Then 必須拒絕本次操作，不得放行
+- `AC-IAM-15` Given agent/前端已拿到被過濾後的結果，When 後續渲染或推理，Then 不得再額外推斷或拼出未授權範圍
+
+### P0-6: Mutation Boundary + Audit/Log 最小揭露
+
+- guest 僅可建立 `task` 與掛在授權 L2 下的 `L3`
+- guest 不可建立 `L1/L2`
+- 新建資料必須寫回當前 `active workspace`
+- audit/log 預設只記 actor、resource、action、outcome、policy context；不記原始文件內容、原始 query、prompt、全文摘要以外的敏感 payload
+
+**Acceptance Criteria**
+
+- `AC-IAM-16` Given guest 在 shared workspace 建立新 L3，When 寫入成功，Then 該 L3 必須寫回當前 active workspace，且預設 `visibility=public`
+- `AC-IAM-17` Given guest 嘗試建立 L1 或 L2，When server 收到請求，Then 必須拒絕
+- `AC-IAM-18` Given 使用者執行 search/read/audit 路徑，When 系統記錄 audit log 或 tool event，Then 預設不得保存原始文件內容、原始 query 字串或 prompt 內容

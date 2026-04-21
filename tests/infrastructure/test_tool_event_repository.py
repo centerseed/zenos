@@ -217,7 +217,7 @@ class TestScheduleToolEvent:
                 partner_id=PARTNER_ID,
                 tool_name="search",
                 entity_id="ent_abc",
-                query="my query",
+                query="[redacted len=8 sha256_12=dd37703a71ff]",
                 result_count=3,
             )
         finally:

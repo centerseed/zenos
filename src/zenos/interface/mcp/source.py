@@ -7,6 +7,10 @@ import logging
 
 from zenos.domain.partner_access import is_guest
 from zenos.application.knowledge.source_service import _compute_staleness_hint
+from zenos.application.identity.source_access_policy import (
+    filter_sources_for_partner,
+    normalized_retrieval_mode,
+)
 
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
@@ -28,6 +32,26 @@ logger = logging.getLogger(__name__)
 # Source types that can supply content via snapshot_summary (helper-ingest path).
 # All other types (github, zenos_native) go through the external adapter.
 _HELPER_SOURCE_TYPES = frozenset({"notion", "gdrive", "local", "upload", "wiki", "url"})
+_VALID_CONTENT_ACCESS = frozenset({"summary", "full", "none"})
+
+
+def _normalized_content_access(source: dict) -> str:
+    """Resolve source content exposure policy with safe defaults.
+
+    - helper-ingest sources default to ``summary``
+    - adapter-backed sources default to ``full`` for backward compatibility
+    - explicit invalid values fail closed to ``none``
+    """
+    raw = str(source.get("content_access", "") or "").strip().lower()
+    if raw:
+        return raw if raw in _VALID_CONTENT_ACCESS else "none"
+
+    source_type = str(source.get("type", "") or "").strip().lower()
+    if source_type in _HELPER_SOURCE_TYPES:
+        return "summary"
+    if source_type in {"github", "zenos_native"}:
+        return "full"
+    return "summary"
 
 
 async def read_source(doc_id: str, source_id: str | None = None) -> dict:
@@ -94,13 +118,43 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             )
 
         # --- ADR-022: source_id-aware source selection ---
-        sources = doc_record.sources or []
+        raw_sources = getattr(doc_record, "sources", None)
+        all_sources = raw_sources if isinstance(raw_sources, list) else []
+        sources = filter_sources_for_partner(all_sources, partner)
+        if all_sources and not sources:
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=_format_not_found("Document", doc_id),
+            )
+        if not sources:
+            try:
+                legacy_result = await _mcp.source_service.read_source(doc_id)
+                return _unified_response(data={"doc_id": doc_id, "content": legacy_result})
+            except (ValueError, FileNotFoundError):
+                return _error_response(
+                    status="rejected",
+                    error_code="NOT_FOUND",
+                    message=_format_not_found("Document", doc_id),
+                )
+            except PermissionError:
+                return _error_response(
+                    error_code="ADAPTER_ERROR",
+                    message="Permission denied while reading source",
+                )
+            except RuntimeError as e:
+                return _error_response(
+                    error_code="ADAPTER_ERROR",
+                    message=str(e),
+                )
+
         all_source_info = [
             {
                 "source_id": s.get("source_id", ""),
                 "label": s.get("label", ""),
                 "status": _source_status(s),
                 "source_status": _source_status(s),
+                "content_access": _normalized_content_access(s),
             }
             for s in sources
         ]
@@ -141,6 +195,8 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
         uri = target_source.get("uri", "")
         source_type = target_source.get("type", "")
         source_status = _source_status(target_source)
+        content_access = _normalized_content_access(target_source)
+        retrieval_mode = normalized_retrieval_mode(target_source)
 
         # Build alternative_sources (other sources in the same bundle)
         current_sid = target_source.get("source_id", "")
@@ -149,11 +205,25 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
             if s.get("source_id") != current_sid and s.get("status") == "valid"
         ]
 
+        if content_access == "none":
+            return _error_response(
+                error_code="FORBIDDEN",
+                message=f"Source '{current_sid or uri}' is not readable under current content policy",
+                extra_data={
+                    "doc_id": doc_id,
+                    "source_id": current_sid,
+                    "source_type": source_type,
+                    "uri": uri,
+                    "content_access": content_access,
+                    "alternative_sources": alternative_sources,
+                },
+            )
+
         # --- Helper Ingest: snapshot_summary path for non-adapter source types ---
         # For helper-supplied sources (notion, gdrive, local, etc.), we do NOT call
         # the external adapter.  Instead we return snapshot_summary if present,
         # or an unavailable response with setup_hint if absent.
-        if source_type in _HELPER_SOURCE_TYPES:
+        if source_type in _HELPER_SOURCE_TYPES and retrieval_mode != "per_user_live":
             snapshot = target_source.get("snapshot_summary")
             staleness = _compute_staleness_hint(target_source)
             if snapshot:
@@ -178,9 +248,115 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                     "source_id": current_sid,
                     "source_type": source_type,
                     "uri": uri,
+                    "content_access": content_access,
                     "setup_hint": (
                         "用 Notion MCP 同步這份文件，或在 Dashboard 點重新同步。"
                     ),
+                    "retrieval_mode": retrieval_mode,
+                    "alternative_sources": alternative_sources,
+                },
+            )
+
+        if source_type in _HELPER_SOURCE_TYPES and retrieval_mode == "per_user_live":
+            if content_access != "full":
+                snapshot = target_source.get("snapshot_summary")
+                if snapshot:
+                    return _unified_response(data={
+                        "doc_id": doc_id,
+                        "source_id": current_sid,
+                        "content": snapshot,
+                        "content_type": "snapshot_summary",
+                    })
+                return _error_response(
+                    error_code="SNAPSHOT_UNAVAILABLE",
+                    message=f"Source '{current_sid or uri}' has no snapshot_summary",
+                    extra_data={
+                        "doc_id": doc_id,
+                        "source_id": current_sid,
+                        "source_type": source_type,
+                        "uri": uri,
+                        "content_access": content_access,
+                        "retrieval_mode": retrieval_mode,
+                        "setup_hint": "先同步摘要，或用當前使用者身份 live 讀取原文。",
+                        "alternative_sources": alternative_sources,
+                    },
+                )
+
+            live_reader = getattr(_mcp.source_service, "read_source_live", None)
+            if live_reader is None:
+                return _error_response(
+                    error_code="LIVE_RETRIEVAL_REQUIRED",
+                    message=f"Source '{current_sid or uri}' requires per-user live retrieval",
+                    extra_data={
+                        "doc_id": doc_id,
+                        "source_id": current_sid,
+                        "source_type": source_type,
+                        "uri": uri,
+                        "retrieval_mode": retrieval_mode,
+                        "setup_hint": "需要以當前使用者自己的外部身份 live 讀取這份文件。",
+                        "alternative_sources": alternative_sources,
+                    },
+                )
+
+            maybe = live_reader(
+                doc_id,
+                source_uri=uri,
+                source=target_source,
+                partner=partner,
+            )
+            live_result = await maybe if inspect.isawaitable(maybe) else maybe
+
+            if isinstance(live_result, str):
+                return _unified_response(data={
+                    "doc_id": doc_id,
+                    "source_id": current_sid,
+                    "content": live_result,
+                })
+            if isinstance(live_result, dict) and "content" in live_result:
+                payload = {
+                    "doc_id": doc_id,
+                    "source_id": current_sid,
+                    "content": live_result["content"],
+                }
+                if "content_type" in live_result:
+                    payload["content_type"] = live_result["content_type"]
+                return _unified_response(data=payload)
+            if isinstance(live_result, dict):
+                return _error_response(
+                    error_code=str(live_result.get("error", "LIVE_RETRIEVAL_FAILED")),
+                    message=str(live_result.get("message", "Failed to read source via per-user live retrieval")),
+                    extra_data={
+                        "doc_id": doc_id,
+                        "source_id": current_sid,
+                        "source_type": source_type,
+                        "uri": uri,
+                        "retrieval_mode": retrieval_mode,
+                        "alternative_sources": alternative_sources,
+                    },
+                )
+            return _error_response(
+                error_code="LIVE_RETRIEVAL_FAILED",
+                message=f"Source '{current_sid or uri}' did not return content via per-user live retrieval",
+                extra_data={
+                    "doc_id": doc_id,
+                    "source_id": current_sid,
+                    "source_type": source_type,
+                    "uri": uri,
+                    "retrieval_mode": retrieval_mode,
+                    "alternative_sources": alternative_sources,
+                },
+            )
+
+        if content_access != "full":
+            return _error_response(
+                error_code="FORBIDDEN",
+                message=f"Source '{current_sid or uri}' does not allow full-content access",
+                extra_data={
+                    "doc_id": doc_id,
+                    "source_id": current_sid,
+                    "source_type": source_type,
+                    "uri": uri,
+                    "content_access": content_access,
                     "alternative_sources": alternative_sources,
                 },
             )

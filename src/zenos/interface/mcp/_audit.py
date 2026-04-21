@@ -11,6 +11,7 @@ Contains:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from datetime import datetime, timezone
@@ -19,6 +20,57 @@ logger = logging.getLogger(__name__)
 
 # Lazily initialized audit repo (populated on first use)
 _audit_repo = None
+
+_SENSITIVE_KEYS = frozenset({
+    "content",
+    "query",
+    "prompt",
+    "body",
+    "markdown",
+    "snapshot_summary",
+    "raw_content",
+    "raw_query",
+    "raw_prompt",
+})
+
+
+def _redacted_marker(value: object) -> dict:
+    """Return a stable redaction marker that preserves debug value without content."""
+    if isinstance(value, str):
+        digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+        return {
+            "redacted": True,
+            "type": "str",
+            "len": len(value),
+            "sha256_12": digest,
+        }
+    if isinstance(value, list):
+        return {"redacted": True, "type": "list", "len": len(value)}
+    if isinstance(value, dict):
+        return {"redacted": True, "type": "dict", "keys": sorted(value.keys())[:10]}
+    return {"redacted": True, "type": type(value).__name__}
+
+
+def _sanitize_payload(value: object, *, key: str | None = None) -> object:
+    """Recursively sanitize audit payloads before logging or SQL persistence."""
+    if key and key.lower() in _SENSITIVE_KEYS:
+        return _redacted_marker(value)
+    if isinstance(value, dict):
+        return {
+            str(k): _sanitize_payload(v, key=str(k))
+            for k, v in value.items()
+        }
+    if isinstance(value, list):
+        return [_sanitize_payload(item, key=key) for item in value]
+    return value
+
+
+def _redact_query(query: str | None) -> str | None:
+    """Store query fingerprint instead of raw text in tool-event telemetry."""
+    if not query:
+        return query
+    digest = hashlib.sha256(query.encode("utf-8")).hexdigest()[:12]
+    return f"[redacted len={len(query)} sha256_12={digest}]"
 
 
 def _audit_log(
@@ -31,6 +83,8 @@ def _audit_log(
     from zenos.interface.mcp._auth import _current_partner
 
     partner = _current_partner.get() or {}
+    sanitized_changes = _sanitize_payload(changes or {})
+    sanitized_governance = _sanitize_payload(governance or {})
     payload = {
         "event_type": event_type,
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -41,8 +95,8 @@ def _audit_log(
             "email": partner.get("email", ""),
         },
         "target": target,
-        "changes": changes or {},
-        "governance": governance or {},
+        "changes": sanitized_changes,
+        "governance": sanitized_governance,
     }
     logger.info("AUDIT_LOG %s", json.dumps(payload, ensure_ascii=False, default=str))
 
@@ -101,7 +155,7 @@ async def _log_tool_event(
             partner_id=partner_id,
             tool_name=tool_name,
             entity_id=entity_id,
-            query=query,
+            query=_redact_query(query),
             result_count=result_count,
         )
     except Exception:

@@ -4,7 +4,7 @@ id: SPEC-zenos-external-integration
 status: Draft
 ontology_entity: agent-integration
 created: 2026-04-10
-updated: 2026-04-10
+updated: 2026-04-21
 ---
 
 # Feature Spec: ZenOS External Integration Contract (v1)
@@ -104,6 +104,22 @@ updated: 2026-04-10
 
 > `write` 不等於 `task`；外部 app 需按最小權限申請 scope。
 
+### 5.2.1 Governed Access Contract
+
+- `read` 代表可進入 ZenOS 的只讀查詢面，不代表自動取得所有原文
+- 外部 app / agent 對資料的預設暴露層級，必須是 `metadata + summary`
+- `read_source` 可回傳三種結果：
+  - `summary` / `snapshot_summary`
+  - `full-content`
+  - `FORBIDDEN` / `SNAPSHOT_UNAVAILABLE`
+- Google Workspace 的 `full-content` 若走 `per_user_live`，server 必須以當前 caller 的 delegated credential / principal 做 live retrieval；不得回退到 workspace-shared 全文副本
+- 是否能拿到 `full-content`，除 `read` scope 外，還必須同時通過：
+  - active workspace
+  - workspace role / visibility
+  - connector scope
+  - content policy（該 source 是否允許原文存取）
+- 外部 app 不得把 delegated credential 視為「全資料通行證」
+
 ### 5.3 Task 狀態契約
 
 - 正式狀態：`todo`, `in_progress`, `review`, `done`, `cancelled`
@@ -121,6 +137,18 @@ updated: 2026-04-10
 3. Task 流程符合 `todo -> in_progress -> review -> confirm -> done`
 4. app 端無繞過 ZenOS 授權的直寫路徑
 5. 至少 1 條端到端流程證據（登入 -> exchange -> 建 task -> review -> confirm）
+
+### Acceptance Criteria
+
+- `AC-EIC-01` Given 外部 app 以 delegated credential 呼叫 `search/get/task/plan`，When token 的 `workspace_ids` 與 `scopes` 合法，Then 請求可成功執行，且結果仍受 active workspace / role / visibility 裁切
+- `AC-EIC-02` Given token 缺少 `write` scope，When 外部 app 呼叫 `write/confirm/journal_write/upload_attachment`，Then server 回 `FORBIDDEN`
+- `AC-EIC-03` Given token 缺少 `task` scope，When 外部 app 呼叫 `task/plan` mutation，Then server 回 `FORBIDDEN`
+- `AC-EIC-04` Given 外部 app 擁有 `read` scope 但目標 source 僅允許 summary access，When 呼叫 `read_source`，Then server 只可回傳摘要型結果或拒絕，不可回傳 full-content
+- `AC-EIC-05` Given 外部文件位於未被該 workspace 授權的 connector scope 外，When 外部 app 查詢 context 或讀取 source，Then ZenOS 不得暴露該文件的 metadata、summary 或 full-content
+- `AC-EIC-06` Given 外部 app 嘗試繞過 delegated credential 直寫 ZenOS Core 資料，When 請求未通過正式 auth/runtime path，Then server 必須拒絕
+- `AC-EIC-07` Given 外部 app 完成一條端到端流程（登入 -> exchange -> 建 task -> review -> confirm），When 事後查核 audit / tool event，Then 可看見 actor、resource、action 與 outcome，但預設不得看到原始文件內容或 prompt/query 原文
+
+> Google Workspace `per_user_live` 的 source contract 與 AC，另見 `SPEC-google-workspace-per-user-retrieval`。
 
 ---
 

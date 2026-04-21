@@ -55,6 +55,9 @@ from zenos.application.identity.workspace_context import (
     build_available_workspaces,
     resolve_active_workspace_id,
 )
+from zenos.application.identity.source_access_policy import (
+    filter_sources_for_partner,
+)
 from zenos.domain.partner_access import (
     describe_partner_access,
     is_guest,
@@ -820,8 +823,8 @@ async def _is_task_visible_for_partner(
                 return False
         return True
     except Exception:
-        logger.warning("_is_task_visible_for_partner failed, defaulting to visible", exc_info=True)
-        return True
+        logger.warning("_is_task_visible_for_partner failed, denying access", exc_info=True)
+        return False
 
 
 async def _is_blindspot_visible_for_partner(
@@ -850,8 +853,8 @@ async def _is_blindspot_visible_for_partner(
                 return True
         return False
     except Exception:
-        logger.warning("_is_blindspot_visible_for_partner failed, defaulting to visible", exc_info=True)
-        return True
+        logger.warning("_is_blindspot_visible_for_partner failed, denying access", exc_info=True)
+        return False
 
 
 # ──────────────────────────────────────────────
@@ -859,7 +862,8 @@ async def _is_blindspot_visible_for_partner(
 # ──────────────────────────────────────────────
 
 
-def _entity_to_dict(e: Entity) -> dict:
+def _entity_to_dict(e: Entity, partner: dict | None = None) -> dict:
+    visible_sources = filter_sources_for_partner(e.sources, partner)
     return {
         "id": e.id,
         "name": e.name,
@@ -872,7 +876,7 @@ def _entity_to_dict(e: Entity) -> dict:
         "details": e.details,
         "confirmedByUser": e.confirmed_by_user,
         "owner": e.owner,
-        "sources": e.sources,
+        "sources": visible_sources,
         "visibility": e.visibility,
         "visibleToRoles": e.visible_to_roles,
         "visibleToMembers": e.visible_to_members,
@@ -1109,7 +1113,7 @@ async def list_entities(request: Request) -> Response:
     else:
         entities = [e for e in entities if OntologyService.is_entity_visible_for_partner(e, partner)]
 
-    return _json_response({"entities": [_entity_to_dict(e) for e in entities]}, request=request)
+    return _json_response({"entities": [_entity_to_dict(e, partner) for e in entities]}, request=request)
 
 
 # ──────────────────────────────────────────────
@@ -1151,7 +1155,7 @@ async def get_entity(request: Request) -> Response:
 
     return _json_response(
         {
-            "entity": _entity_to_dict(entity),
+            "entity": _entity_to_dict(entity, partner),
             "impact_chain": impact_chain,
             "reverse_impact_chain": reverse_impact_chain,
         },
@@ -1284,7 +1288,7 @@ async def get_entity_children(request: Request) -> Response:
         children = [e for e in children if OntologyService.is_entity_visible_for_partner(e, partner)]
 
     return _json_response(
-        {"entities": [_entity_to_dict(e) for e in children], "count": len(children)},
+        {"entities": [_entity_to_dict(e, partner) for e in children], "count": len(children)},
         request=request,
     )
 
@@ -1780,7 +1784,26 @@ async def create_task(request: Request) -> Response:
         return _error_response("INVALID_INPUT", "title is required", 400, request=request)
 
     data: dict = {"title": title, "created_by": effective_id}
-    for _field in ("description", "priority", "assignee", "due_date", "project", "linked_entities"):
+    for _field in (
+        "description",
+        "priority",
+        "assignee",
+        "due_date",
+        "project",
+        "linked_entities",
+        "acceptance_criteria",
+        "assignee_role_id",
+        "linked_protocol",
+        "linked_blindspot",
+        "blocked_by",
+        "blocked_reason",
+        "plan_id",
+        "plan_order",
+        "depends_on_task_ids",
+        "parent_task_id",
+        "dispatcher",
+        "source_metadata",
+    ):
         _val = body.get(_field)
         if _val is not None:
             data[_field] = _val
@@ -1822,8 +1845,29 @@ async def update_task(request: Request) -> Response:
     except Exception:
         return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
 
-    allowed_fields = {"status", "title", "description", "priority", "assignee", "due_date", "result"}
-    updates: dict = {k: v for k, v in body.items() if k in allowed_fields and v is not None}
+    allowed_fields = {
+        "status",
+        "title",
+        "description",
+        "priority",
+        "assignee",
+        "due_date",
+        "result",
+        "acceptance_criteria",
+        "assignee_role_id",
+        "linked_entities",
+        "linked_protocol",
+        "linked_blindspot",
+        "blocked_by",
+        "blocked_reason",
+        "plan_id",
+        "plan_order",
+        "depends_on_task_ids",
+        "parent_task_id",
+        "dispatcher",
+        "source_metadata",
+    }
+    updates: dict = {k: body[k] for k in body.keys() if k in allowed_fields}
 
     await _ensure_repos()
     token = current_partner_id.set(effective_id)
@@ -2390,7 +2434,7 @@ async def create_doc(request: Request) -> Response:
         {
             "doc_id": doc_id,
             "base_revision_id": None,
-            "entity": _entity_to_dict(saved_entity),
+            "entity": _entity_to_dict(saved_entity, partner),
         },
         request=request,
     )
@@ -2617,7 +2661,7 @@ async def get_document_delivery(request: Request) -> Response:
                 "name": doc_entity.name,
                 "summary": doc_entity.summary,
                 "visibility": doc_entity.visibility,
-                "sources": doc_entity.sources or [],
+                "sources": filter_sources_for_partner(doc_entity.sources, partner),
                 "doc_role": doc_entity.doc_role or "single",
                 "bundle_highlights": doc_entity.bundle_highlights or [],
                 "highlights_updated_at": doc_entity.highlights_updated_at,

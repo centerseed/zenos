@@ -16,6 +16,7 @@ Design constraints (ADR-041 S05):
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -28,6 +29,12 @@ HYBRID_SEMANTIC_WEIGHT = 0.7
 HYBRID_KEYWORD_WEIGHT = 0.3
 
 VALID_MODES = {"keyword", "semantic", "hybrid"}
+
+
+def _query_fingerprint(query: str) -> str:
+    """Return a safe marker for logging search fallback events."""
+    digest = hashlib.sha256(query.encode("utf-8")).hexdigest()[:12]
+    return f"len={len(query)} sha256_12={digest}"
 
 
 def keyword_matches(query: str, entity: Any) -> int:
@@ -186,9 +193,9 @@ class SearchService:
         query_vec = await self._embedding_service.embed_query(query)
         if query_vec is None:
             logger.warning(
-                "search_entities: embed_query returned None for query=%r, "
+                "search_entities: embed_query returned None for query(%s), "
                 "falling back to keyword mode",
-                query,
+                _query_fingerprint(query),
             )
             return await self._keyword_search(query, limit=limit, filters=filters, semantic_null=False)
 
@@ -218,9 +225,9 @@ class SearchService:
         query_vec = await self._embedding_service.embed_query(query)
         if query_vec is None:
             logger.warning(
-                "search_entities: embed_query returned None for query=%r, "
+                "search_entities: embed_query returned None for query(%s), "
                 "falling back to keyword mode (hybrid → keyword fallback)",
-                query,
+                _query_fingerprint(query),
             )
             return await self._keyword_search(query, limit=limit, filters=filters, semantic_null=False)
 

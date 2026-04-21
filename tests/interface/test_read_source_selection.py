@@ -316,3 +316,107 @@ class TestSourceIdPassedToService:
             mock_ss.read_source_with_recovery.assert_called_once_with(
                 "doc-1", source_uri="second.md"
             )
+
+
+# ---------------------------------------------------------------------------
+# Governed access: source-level content exposure policy
+# ---------------------------------------------------------------------------
+
+
+class TestSourceContentAccessPolicy:
+    @pytest.mark.asyncio
+    async def test_helper_source_with_none_policy_is_forbidden_even_with_snapshot(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_doc_entity(sources=[
+            {
+                "source_id": "s1",
+                "uri": "https://www.notion.so/page-abc12345678912345678912345678912",
+                "label": "Notion",
+                "type": "notion",
+                "status": "valid",
+                "snapshot_summary": "secret summary",
+                "content_access": "none",
+                "is_primary": True,
+            },
+        ])
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.source_service") as mock_ss,
+            patch("zenos.interface.mcp._current_partner") as mock_partner,
+        ):
+            mock_partner.get.return_value = None
+            mock_os.get_document = AsyncMock(return_value=doc)
+
+            result = await read_source(doc_id="doc-1")
+            data = _non_ok_data(result, "error")
+
+            assert data["error"] == "FORBIDDEN"
+            assert data["content_access"] == "none"
+            mock_ss.read_source.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_adapter_source_with_summary_only_policy_blocks_full_content(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_doc_entity(sources=[
+            {
+                "source_id": "s1",
+                "uri": "github://repo/spec.md",
+                "label": "Spec",
+                "type": "github",
+                "status": "valid",
+                "content_access": "summary",
+                "is_primary": True,
+            },
+        ])
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.source_service") as mock_ss,
+            patch("zenos.interface.mcp._current_partner") as mock_partner,
+        ):
+            mock_partner.get.return_value = None
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_ss.read_source_with_recovery = AsyncMock(return_value={"content": "full text"})
+
+            result = await read_source(doc_id="doc-1")
+            data = _non_ok_data(result, "error")
+
+            assert data["error"] == "FORBIDDEN"
+            assert data["content_access"] == "summary"
+            mock_ss.read_source_with_recovery.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_adapter_source_with_full_policy_allows_content_read(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_doc_entity(sources=[
+            {
+                "source_id": "s1",
+                "uri": "github://repo/spec.md",
+                "label": "Spec",
+                "type": "github",
+                "status": "valid",
+                "content_access": "full",
+                "is_primary": True,
+            },
+        ])
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.source_service") as mock_ss,
+            patch("zenos.interface.mcp._current_partner") as mock_partner,
+        ):
+            mock_partner.get.return_value = None
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_ss.read_source_with_recovery = AsyncMock(return_value={"content": "full text"})
+
+            result = await read_source(doc_id="doc-1")
+            data = _ok_data(result)
+
+            assert data["content"] == "full text"
+            mock_ss.read_source_with_recovery.assert_called_once_with(
+                "doc-1", source_uri="github://repo/spec.md"
+            )

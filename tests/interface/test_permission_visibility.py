@@ -276,6 +276,24 @@ class TestWriteAuth:
                 )
         assert "error" not in result
 
+    async def test_write_visibility_check_exception_fails_closed(self):
+        """Permission verification exceptions must reject writes."""
+        from zenos.interface.mcp import write
+
+        existing = _make_entity(visibility="public")
+
+        with _PartnerContext("p-user", is_admin=False):
+            with patch("zenos.interface.mcp.entity_repo") as mock_repo, \
+                 patch("zenos.interface.mcp._visibility._is_entity_visible", side_effect=RuntimeError("boom")):
+                mock_repo.get_by_id = AsyncMock(return_value=existing)
+                result = await write(
+                    collection="entities",
+                    data={"id": "ent-1", "summary": "updated"},
+                )
+
+        data = _non_ok_data(result, "error")
+        assert data["error"] == "FORBIDDEN"
+
 
 # ===========================================================================
 # Task Visibility Filtering
@@ -348,6 +366,15 @@ class TestTaskVisibility:
             with patch("zenos.interface.mcp.entity_repo") as mock_repo:
                 mock_repo.get_by_id = AsyncMock(return_value=secret)
                 assert await _is_task_visible(task) is True
+
+    async def test_task_visibility_exception_fails_closed(self):
+        from zenos.interface.mcp import _is_task_visible
+
+        task = _make_task(linked_entities=["ent-1"])
+        with _PartnerContext("p-user", is_admin=False):
+            with patch("zenos.interface.mcp.entity_repo") as mock_repo:
+                mock_repo.get_by_id = AsyncMock(side_effect=RuntimeError("db down"))
+                assert await _is_task_visible(task) is False
 
     async def test_search_tasks_filters_by_visibility(self):
         """search(collection="tasks") should exclude tasks linked to invisible entities."""
@@ -426,6 +453,15 @@ class TestProtocolVisibility:
         with _PartnerContext("p-user", is_admin=False):
             assert await _is_protocol_visible(proto) is True
 
+    async def test_protocol_visibility_exception_fails_closed(self):
+        from zenos.interface.mcp import _is_protocol_visible
+
+        proto = _make_protocol(entity_id="ent-1")
+        with _PartnerContext("p-user", is_admin=False):
+            with patch("zenos.interface.mcp.entity_repo") as mock_repo:
+                mock_repo.get_by_id = AsyncMock(side_effect=RuntimeError("db down"))
+                assert await _is_protocol_visible(proto) is False
+
     async def test_get_protocol_hidden_returns_not_found(self):
         from zenos.interface.mcp import get
 
@@ -485,6 +521,15 @@ class TestBlindspotVisibility:
         bs = _make_blindspot(related_entity_ids=[])
         with _PartnerContext("p-user", is_admin=False):
             assert await _is_blindspot_visible(bs) is True
+
+    async def test_blindspot_visibility_exception_fails_closed(self):
+        from zenos.interface.mcp import _is_blindspot_visible
+
+        bs = _make_blindspot(related_entity_ids=["ent-1"])
+        with _PartnerContext("p-user", is_admin=False):
+            with patch("zenos.interface.mcp.entity_repo") as mock_repo:
+                mock_repo.get_by_id = AsyncMock(side_effect=RuntimeError("db down"))
+                assert await _is_blindspot_visible(bs) is False
 
     async def test_get_blindspot_hidden_returns_not_found(self):
         from zenos.interface.mcp import get

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 
 from zenos.domain.partner_access import is_guest
+from zenos.application.identity.source_access_policy import filter_sources_for_partner
 
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
@@ -33,6 +34,12 @@ from zenos.interface.mcp._visibility import (
 from zenos.interface.mcp._audit import _schedule_tool_event
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_entity_sources(payload: dict, partner: dict | None) -> dict:
+    if "sources" in payload and isinstance(payload.get("sources"), list):
+        payload["sources"] = filter_sources_for_partner(payload["sources"], partner)
+    return payload
 
 async def _resolve_id_prefix_for_get(
     prefix: str, collection: str, partner_id: str,
@@ -332,7 +339,7 @@ async def get(
                 caller_id = partner.get("id") if partner else None
                 log_deprecation_warning("get", "entities", str(caller_id) if caller_id else None)
 
-            response = _serialize(result)
+            response = _sanitize_entity_sources(_serialize(result), partner)
             if visible_rel_pairs:
                 response["outgoing_relationships"] = [
                     _enrich_rel_dict(r, peer) for r, peer in visible_rel_pairs
@@ -356,7 +363,7 @@ async def get(
             return _unified_response(data=_inject_workspace_context(response))
 
         # Selective include path: only fetch what is requested
-        entity_dict = _serialize(result.entity)
+        entity_dict = _sanitize_entity_sources(_serialize(result.entity), partner)
 
         # Fetch data only for requested sections
         rel_dicts: list[dict] | None = None
@@ -461,7 +468,7 @@ async def get(
                 error_code="NOT_FOUND",
                 message=_format_not_found("Document", doc_id),
             )
-        serialized = _serialize(result)
+        serialized = _sanitize_entity_sources(_serialize(result), partner)
         # ADR-022: enrich sources with canonical_type
         from zenos.domain.doc_types import canonical_type as compute_canonical_type
         for src in (serialized.get("sources") or []):

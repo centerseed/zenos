@@ -35,6 +35,7 @@ from zenos.domain.shared import SplitRecommendation, TagConfidence
 from zenos.domain.knowledge import BlindspotRepository, DocumentRepository, EntityRepository, ProtocolRepository, RelationshipRepository
 from zenos.domain.search import SearchResult, search_ontology
 from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
+from zenos.application.identity.source_access_policy import entity_has_visible_source
 
 
 # ──────────────────────────────────────────────
@@ -42,6 +43,7 @@ from zenos.domain.partner_access import describe_partner_access, is_guest, is_un
 # ──────────────────────────────────────────────
 
 SNAPSHOT_SUMMARY_MAX_BYTES = 10_240  # 10 KB — semantic discipline, not just tech limit
+_VALID_CONTENT_ACCESS = {"summary", "full", "none"}
 
 
 class SnapshotTooLargeError(ValueError):
@@ -61,6 +63,20 @@ def _assert_snapshot_size(snapshot: str | bytes) -> None:
             f"snapshot_summary 是摘要不是 mirror，請先在 helper 端 distill。"
             f"（大小 {size} bytes 超過上限 {SNAPSHOT_SUMMARY_MAX_BYTES} bytes）"
         )
+
+
+def _validate_source_access_fields(source_data: dict) -> None:
+    retrieval_mode = source_data.get("retrieval_mode")
+    if retrieval_mode is not None:
+        normalized = str(retrieval_mode).strip().lower()
+        if normalized not in {"direct", "snapshot", "per_user_live"}:
+            raise ValueError("retrieval_mode must be one of: direct, snapshot, per_user_live")
+
+    content_access = source_data.get("content_access")
+    if content_access is not None:
+        normalized = str(content_access).strip().lower()
+        if normalized not in _VALID_CONTENT_ACCESS:
+            raise ValueError("content_access must be one of: summary, full, none")
 
 
 # ──────────────────────────────────────────────
@@ -363,6 +379,9 @@ class OntologyService:
             True if the partner has access, False otherwise.
         """
         access = describe_partner_access(partner)
+
+        if not entity_has_visible_source(entity, partner):
+            return False
 
         if access["is_owner"]:
             return True
@@ -2491,6 +2510,7 @@ class OntologyService:
                     _sync_bundle_source_status(src, _bundle_source_status(src))
 
             if add_source_data:
+                _validate_source_access_fields(add_source_data)
                 # --- Helper Ingest Contract: external_id validation & size check ---
                 new_external_id = add_source_data.get("external_id")
                 if new_external_id is not None:
@@ -2517,7 +2537,10 @@ class OntologyService:
                         updated_src = dict(existing_src)
                         updated_src["last_synced_at"] = now_iso
                         updated_src["source_id"] = preserved_sid
-                        for key in ("uri", "label", "type", "doc_type", "doc_status", "note", "is_primary"):
+                        for key in (
+                            "uri", "label", "type", "doc_type", "doc_status", "note", "is_primary",
+                            "container_id", "container_ids", "retrieval_mode", "content_access",
+                        ):
                             if key in add_source_data and add_source_data[key] is not None:
                                 updated_src[key] = add_source_data[key]
                         if "external_updated_at" in add_source_data:
@@ -2562,6 +2585,10 @@ class OntologyService:
                             "source_status": "valid",
                             "note": add_source_data.get("note", ""),
                             "is_primary": add_source_data.get("is_primary", False),
+                            "container_id": add_source_data.get("container_id"),
+                            "container_ids": add_source_data.get("container_ids"),
+                            "retrieval_mode": add_source_data.get("retrieval_mode"),
+                            "content_access": add_source_data.get("content_access"),
                         }
                         if "external_updated_at" in add_source_data:
                             new_source["external_updated_at"] = add_source_data["external_updated_at"]
@@ -2604,6 +2631,10 @@ class OntologyService:
                         "source_status": "valid",
                         "note": add_source_data.get("note", ""),
                         "is_primary": add_source_data.get("is_primary", False),
+                        "container_id": add_source_data.get("container_id"),
+                        "container_ids": add_source_data.get("container_ids"),
+                        "retrieval_mode": add_source_data.get("retrieval_mode"),
+                        "content_access": add_source_data.get("content_access"),
                     }
                     # Warn on unknown doc_type
                     if new_source["doc_type"] and not is_known_doc_type(new_source["doc_type"]):
@@ -2617,6 +2648,7 @@ class OntologyService:
                     suggestions.append("change_summary 可能需要更新")
 
             elif update_source_data:
+                _validate_source_access_fields(update_source_data)
                 # --- Helper Ingest Contract: external_id in update_source ---
                 upd_external_id = update_source_data.get("external_id")
                 if upd_external_id is not None:
@@ -2649,7 +2681,11 @@ class OntologyService:
                 now_iso = datetime.now(timezone.utc).isoformat()
                 for src in sources:
                     if src.get("source_id") == target_sid:
-                        for key in ("uri", "label", "doc_type", "doc_status", "note", "is_primary", "status", "source_status"):
+                        for key in (
+                            "uri", "label", "doc_type", "doc_status", "note", "is_primary",
+                            "status", "source_status", "container_id", "container_ids",
+                            "retrieval_mode", "content_access",
+                        ):
                             if key in update_source_data and key != "source_id":
                                 src[key] = update_source_data[key]
                         if "status" in update_source_data or "source_status" in update_source_data:

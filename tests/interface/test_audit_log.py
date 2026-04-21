@@ -69,6 +69,32 @@ class TestAuditLogGracefulDegradation:
         finally:
             audit_mod._audit_repo = original_repo
 
+    def test_audit_log_redacts_sensitive_fields_before_scheduling(self):
+        """Raw content/query/prompt must not enter audit payloads."""
+        import zenos.interface.mcp._audit as audit_mod
+
+        captured = {}
+
+        def _capture(payload):
+            captured.update(payload)
+
+        with patch("zenos.interface.mcp._audit._schedule_audit_sql_write", side_effect=_capture):
+            audit_mod._audit_log(
+                event_type="task.create",
+                target={"collection": "tasks", "id": "task-1"},
+                changes={
+                    "content": "secret body",
+                    "query": "customer salary data",
+                    "nested": {"prompt": "rewrite this"},
+                    "safe": {"id": "task-1"},
+                },
+            )
+
+        assert captured["changes"]["content"]["redacted"] is True
+        assert captured["changes"]["query"]["redacted"] is True
+        assert captured["changes"]["nested"]["prompt"]["redacted"] is True
+        assert captured["changes"]["safe"]["id"] == "task-1"
+
     async def test_write_audit_event_logs_warning_on_repo_failure(self):
         """_write_audit_event() catches repo.create() errors and logs warning."""
         import zenos.interface.mcp._audit as audit_mod
