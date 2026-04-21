@@ -18,22 +18,34 @@ import type { ProjectProgressResponse } from "@/lib/api";
 export function ProjectProgressConsole({
   progress,
   onOpenTasks,
+  recapRailOpen,
+  onRecapRailOpenChange,
 }: {
   progress: ProjectProgressResponse;
   onOpenTasks: () => void;
+  recapRailOpen?: boolean;
+  onRecapRailOpenChange?: (next: boolean) => void;
 }) {
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
-  const [railOpen, setRailOpen] = useState(false);
+  const [internalRailOpen, setInternalRailOpen] = useState(false);
   const [preset, setPreset] = useState<ProjectAgentPreset>("claude_code");
   const [copiedState, setCopiedState] = useState<"idle" | "copied" | "error">("idle");
   const [latestRecap, setLatestRecap] = useState<string | null>(null);
   const nextStepOptions = useMemo(() => deriveProjectNextStepOptions(progress), [progress]);
   const [selectedNextStep, setSelectedNextStep] = useState(nextStepOptions[0]?.value || "");
+  const railOpen = recapRailOpen ?? internalRailOpen;
 
   useEffect(() => {
     setSelectedNextStep(nextStepOptions[0]?.value || "");
   }, [nextStepOptions]);
+
+  function handleRailOpenChange(next: boolean) {
+    onRecapRailOpenChange?.(next);
+    if (recapRailOpen === undefined) {
+      setInternalRailOpen(next);
+    }
+  }
 
   async function handleCopyPrompt() {
     const prompt = buildProjectContinuationPrompt(progress, {
@@ -60,7 +72,10 @@ export function ProjectProgressConsole({
         }}
       >
         <div style={{ display: "grid", gap: 16 }}>
-          <ProjectPlansOverview plans={progress.active_plans} />
+          <ProjectPlansOverview
+            plans={progress.active_plans}
+            milestones={progress.milestones}
+          />
           <ProjectOpenWorkPanel groups={progress.open_work_groups} onOpenTasks={onOpenTasks} />
         </div>
 
@@ -139,7 +154,7 @@ export function ProjectProgressConsole({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={() => setRailOpen(true)}
+                onClick={() => handleRailOpenChange(true)}
                 style={{
                   border: `1px solid ${c.inkHairBold}`,
                   background: c.surface,
@@ -198,7 +213,7 @@ export function ProjectProgressConsole({
 
       <ProjectRecapRail
         open={railOpen}
-        onOpenChange={setRailOpen}
+        onOpenChange={handleRailOpenChange}
         progress={progress}
         preset={preset}
         nextStep={selectedNextStep}

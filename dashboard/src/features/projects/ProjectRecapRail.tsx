@@ -48,6 +48,10 @@ export function ProjectRecapRail({
         ?.content ?? null,
     [messages]
   );
+  const visibleMessages = useMemo(
+    () => messages.filter((message) => message.role !== "system"),
+    [messages]
+  );
 
   useEffect(() => {
     onRecapChange(latestAssistant);
@@ -83,7 +87,7 @@ export function ProjectRecapRail({
       }
     >
       <CopilotChatViewport
-        messages={messages}
+        messages={visibleMessages}
         streamingText={streamingText}
         isStreaming={status === "loading" || status === "streaming"}
         emptyStateTitle="Product Progress Recap"

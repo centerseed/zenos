@@ -54,6 +54,10 @@ export function CopilotInputBar({
         value={input}
         onChange={(e) => setInput(e.target.value)}
         onKeyDown={(e) => {
+          const nativeEvent = e.nativeEvent as KeyboardEvent & { isComposing?: boolean; keyCode?: number };
+          if (nativeEvent.isComposing || nativeEvent.keyCode === 229) {
+            return;
+          }
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             handleSend();

@@ -1,6 +1,6 @@
 "use client";
 
-// ZenOS · Projects page — Zen Ink redesign with real data
+// ZenOS · Products page — Zen Ink redesign with real data
 // Wired to getProjectEntities + getTasksByEntity + getEntityContext + getChildEntities
 
 import { useEffect, useState, useCallback, useMemo } from "react";
@@ -11,10 +11,14 @@ import { Btn } from "@/components/zen/Btn";
 import { Chip } from "@/components/zen/Chip";
 import { TaskBoard } from "@/components/TaskBoard";
 import { TaskCreateDialog } from "@/components/TaskCreateDialog";
+import { PlanCreateDialog } from "@/components/PlanCreateDialog";
+import { MilestoneCreateDialog } from "@/components/MilestoneCreateDialog";
 import { ProjectProgressConsole } from "@/features/projects/ProjectProgressConsole";
 import { useAuth } from "@/lib/auth";
 import {
   confirmTask,
+  createMilestone,
+  createPlan,
   createTask,
   getAllBlindspots,
   getProjectEntities,
@@ -189,7 +193,7 @@ function InkErrorCard({
   );
 }
 
-// ─── Projects List ────────────────────────────────────────────────────────────
+// ─── Products List ────────────────────────────────────────────────────────────
 
 interface ProjectWithProgress {
   entity: Entity;
@@ -241,10 +245,10 @@ function InkProjectsList({
     <div style={{ padding: "40px 48px 60px", maxWidth: 1600 }}>
       <Section
         t={t}
-        eyebrow="WORK · 專案"
-        title="專案"
-        en="Projects"
-        subtitle="所有進行中的產品、營運、內容計畫。一個 project 對應一段真實的工作。"
+        eyebrow="WORK · 產品"
+        title="產品"
+        en="Products"
+        subtitle="所有進行中的產品主軸與其推進狀態。這一頁對應的是 L1 product，不是 L3 project。"
         right={
           <div style={{ display: "flex", gap: 10 }}>
             <Btn t={t} variant="ghost" icon={ICONS.filter}>
@@ -254,7 +258,7 @@ function InkProjectsList({
               Agent 盤點
             </Btn>
             <Btn t={t} variant="seal" icon={ICONS.plus}>
-              新專案
+              新產品
             </Btn>
           </div>
         }
@@ -319,7 +323,7 @@ function InkProjectsList({
             letterSpacing: "0.08em",
           }}
         >
-          目前沒有專案
+          目前沒有產品
         </div>
       )}
 
@@ -578,8 +582,9 @@ function InkProjectDetail({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailData | null>(null);
-  const [creating, setCreating] = useState(false);
+  const [createKind, setCreateKind] = useState<"task" | "plan" | "milestone" | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [projectRecapOpen, setProjectRecapOpen] = useState(false);
 
   const fetchDetail = useCallback(async () => {
     if (!user) return;
@@ -609,8 +614,9 @@ function InkProjectDetail({
 
   useEffect(() => {
     setTab("overview");
-    setCreating(false);
+    setCreateKind(null);
     setMutationError(null);
+    setProjectRecapOpen(false);
   }, [entityId]);
 
   const replaceTask = useCallback((nextTask: Task) => {
@@ -712,11 +718,58 @@ function InkProjectDetail({
       });
       replaceTask(created);
       setTab("tasks");
+      setCreateKind(null);
     } catch (err) {
       setMutationError(err instanceof Error ? err.message : "建立任務失敗");
       throw err;
     }
   }, [entity, replaceTask, user]);
+
+  const handleCreatePlan = useCallback(async (data: {
+    goal: string;
+    owner?: string | null;
+    entry_criteria?: string | null;
+    exit_criteria?: string | null;
+    status?: "draft" | "active";
+  }) => {
+    if (!user || !entity) return;
+    setMutationError(null);
+    try {
+      const token = await user.getIdToken();
+      await createPlan(token, {
+        ...data,
+        project: entity.name,
+        project_id: entity.id,
+      });
+      setCreateKind(null);
+      await fetchDetail();
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : "建立 plan 失敗");
+      throw err;
+    }
+  }, [entity, fetchDetail, user]);
+
+  const handleCreateMilestone = useCallback(async (data: {
+    name: string;
+    summary?: string;
+    status?: "planned" | "active";
+  }) => {
+    if (!user || !entity) return;
+    setMutationError(null);
+    try {
+      const token = await user.getIdToken();
+      await createMilestone(token, {
+        ...data,
+        project_id: entity.id,
+        owner: entity.owner ?? null,
+      });
+      setCreateKind(null);
+      await fetchDetail();
+    } catch (err) {
+      setMutationError(err instanceof Error ? err.message : "建立 milestone 失敗");
+      throw err;
+    }
+  }, [entity, fetchDetail, user]);
 
   const handleUpdateTask = useCallback(async (taskId: string, updates: Record<string, unknown>) => {
     if (!user) return;
@@ -768,7 +821,7 @@ function InkProjectDetail({
   );
 
   if (loading) {
-    return <InkSpinner message="載入專案資料…" />;
+    return <InkSpinner message="載入產品資料…" />;
   }
 
   if (error) {
@@ -799,7 +852,7 @@ function InkProjectDetail({
             marginBottom: 18,
           }}
         >
-          <Icon d="M19 12H5M12 19l-7-7 7-7" size={14} /> 返回專案
+          <Icon d="M19 12H5M12 19l-7-7 7-7" size={14} /> 返回產品
         </button>
 
         <div
@@ -862,10 +915,25 @@ function InkProjectDetail({
             <Btn t={t} variant="ghost" size="sm" icon={ICONS.doc} onClick={() => setTab("docs")}>
               Brief
             </Btn>
-            <Btn t={t} variant="outline" size="sm" icon={ICONS.spark} onClick={() => setTab("timeline")}>
+            <Btn
+              t={t}
+              variant="outline"
+              size="sm"
+              icon={ICONS.spark}
+              onClick={() => {
+                setTab("overview");
+                setProjectRecapOpen(true);
+              }}
+            >
               Agent 建議
             </Btn>
-            <Btn t={t} variant="ink" size="sm" icon={ICONS.plus} onClick={() => setCreating(true)}>
+            <Btn t={t} variant="ghost" size="sm" icon={ICONS.plus} onClick={() => setCreateKind("milestone")}>
+              新 Milestone
+            </Btn>
+            <Btn t={t} variant="outline" size="sm" icon={ICONS.plus} onClick={() => setCreateKind("plan")}>
+              新 Plan
+            </Btn>
+            <Btn t={t} variant="ink" size="sm" icon={ICONS.plus} onClick={() => setCreateKind("task")}>
               新任務
             </Btn>
           </div>
@@ -1047,6 +1115,8 @@ function InkProjectDetail({
             <ProjectProgressConsole
               progress={progressDetail}
               onOpenTasks={() => setTab("tasks")}
+              recapRailOpen={projectRecapOpen}
+              onRecapRailOpenChange={setProjectRecapOpen}
             />
           ) : null
         ) : null}
@@ -1066,7 +1136,7 @@ function InkProjectDetail({
                 letterSpacing: "0.08em",
               }}
             >
-              這個專案目前沒有任務
+              這個產品目前沒有任務
             </div>
           ) : (
             <TaskBoard
@@ -1226,11 +1296,22 @@ function InkProjectDetail({
       </div>
 
       <TaskCreateDialog
-        isOpen={creating}
-        onClose={() => setCreating(false)}
+        isOpen={createKind === "task"}
+        onClose={() => setCreateKind(null)}
         onCreateTask={handleCreateTask}
         entities={[entity, ...children].filter((value): value is Entity => Boolean(value))}
         blindspots={blindspots}
+      />
+      <PlanCreateDialog
+        isOpen={createKind === "plan"}
+        onClose={() => setCreateKind(null)}
+        onCreatePlan={handleCreatePlan}
+        defaultOwner={entity?.owner ?? null}
+      />
+      <MilestoneCreateDialog
+        isOpen={createKind === "milestone"}
+        onClose={() => setCreateKind(null)}
+        onCreateMilestone={handleCreateMilestone}
       />
     </>
   );
@@ -1301,7 +1382,7 @@ export default function ProjectsPage() {
   }, [fetchProjects]);
 
   if (loading) {
-    return <InkSpinner message="載入專案…" />;
+    return <InkSpinner message="載入產品…" />;
   }
 
   if (error) {
