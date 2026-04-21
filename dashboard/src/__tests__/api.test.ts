@@ -390,7 +390,7 @@ describe("getProjectProgress", () => {
 
     expect(fakeFetch).toHaveBeenCalledWith(
       `${API_BASE}/api/data/projects/proj-1/progress`,
-      expect.any(Object)
+      expect.objectContaining({ cache: "no-store" })
     );
   });
 
@@ -452,6 +452,70 @@ describe("getProjectProgress", () => {
     expect(result.active_plans[0]?.next_tasks[0]?.plan_order).toBe(2);
     expect(result.recent_progress[0]?.updated_at).toBeInstanceOf(Date);
     expect(result.project.updatedAt).toBeInstanceOf(Date);
+  });
+
+  it("filters empty active plans from stale aggregate payloads", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      project: {
+        id: "proj-1",
+        name: "Console",
+        type: "product",
+      },
+      active_plans: [
+        {
+          id: "plan-empty",
+          goal: "Already shipped",
+          status: "active",
+          owner: "Barry",
+          tasks_summary: { total: 1, by_status: { done: 1 } },
+          open_count: 0,
+          blocked_count: 0,
+          review_count: 0,
+          overdue_count: 0,
+          updated_at: "2026-04-21T01:00:00+00:00",
+          next_tasks: [],
+          milestones: [],
+        },
+      ],
+      open_work_groups: [
+        {
+          plan_id: "plan-empty",
+          plan_goal: "Already shipped",
+          plan_status: "active",
+          open_count: 0,
+          blocked_count: 0,
+          review_count: 0,
+          overdue_count: 0,
+          tasks: [],
+        },
+      ],
+      milestones: [
+        { id: "goal-1", name: "Alpha", open_count: 0 },
+      ],
+      recent_progress: [
+        {
+          id: "plan-empty",
+          kind: "plan",
+          title: "Already shipped",
+          subtitle: "plan · updated",
+          updated_at: "2026-04-21T02:00:00+00:00",
+        },
+        {
+          id: "task-1",
+          kind: "task",
+          title: "Shipped task",
+          subtitle: "task · done",
+          updated_at: "2026-04-21T03:00:00+00:00",
+        },
+      ],
+    }));
+
+    const result = await getProjectProgress(FAKE_TOKEN, "proj-1");
+
+    expect(result.active_plans).toEqual([]);
+    expect(result.open_work_groups).toEqual([]);
+    expect(result.milestones).toEqual([]);
+    expect(result.recent_progress.map((item) => item.id)).toEqual(["task-1"]);
   });
 });
 

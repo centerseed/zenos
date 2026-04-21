@@ -254,6 +254,26 @@ export interface ProjectProgressResponse {
   recent_progress: ProjectRecentProgressItem[];
 }
 
+function normalizeProjectProgress(
+  response: ProjectProgressResponse
+): ProjectProgressResponse {
+  const activePlans = (response.active_plans ?? []).filter((plan) => plan.open_count > 0);
+  const visiblePlanIds = new Set(activePlans.map((plan) => plan.id));
+  const openWorkGroups = (response.open_work_groups ?? []).filter((group) => group.open_count > 0);
+  const milestones = (response.milestones ?? []).filter((milestone) => milestone.open_count > 0);
+  const recentProgress = (response.recent_progress ?? []).filter((item) => {
+    if (item.kind !== "plan") return true;
+    return visiblePlanIds.has(item.id);
+  });
+  return {
+    ...response,
+    active_plans: activePlans,
+    open_work_groups: openWorkGroups,
+    milestones,
+    recent_progress: recentProgress,
+  };
+}
+
 export interface PlanSummary {
   id: string;
   goal: string;
@@ -630,7 +650,10 @@ export async function getProjectProgress(
   token: string,
   entityId: string
 ): Promise<ProjectProgressResponse> {
-  return apiFetch<ProjectProgressResponse>(`/api/data/projects/${entityId}/progress`, token);
+  const response = await apiFetch<ProjectProgressResponse>(`/api/data/projects/${entityId}/progress`, token, {
+    cache: "no-store",
+  });
+  return normalizeProjectProgress(response);
 }
 
 /** Fetch the current partner (auth) */
