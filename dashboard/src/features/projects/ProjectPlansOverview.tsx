@@ -138,17 +138,41 @@ function TaskSubtaskList({ subtasks }: { subtasks: ProjectProgressTaskSummary[] 
   const { c, fontMono } = t;
 
   return (
-    <div data-testid="plan-subtask-list" style={{ display: "grid", gap: 8, marginTop: 12 }}>
+    <div
+      data-testid="plan-subtask-list"
+      style={{
+        display: "grid",
+        gap: 10,
+        marginTop: 14,
+        marginLeft: 30,
+        padding: "14px 16px 14px 18px",
+        borderLeft: `3px solid ${c.inkHairBold}`,
+        background: c.paperWarm,
+      }}
+    >
+      <div
+        data-testid="plan-subtask-header"
+        style={{
+          fontFamily: fontMono,
+          fontSize: 10,
+          color: c.inkFaint,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
+        }}
+      >
+        Subtasks
+      </div>
       {subtasks.map((subtask, index) => (
         <div
           key={subtask.id}
           data-testid="plan-subtask-item"
           style={{
             display: "grid",
-            gridTemplateColumns: "48px minmax(0, 1fr)",
-            gap: 10,
-            borderTop: `1px solid ${c.inkHair}`,
-            paddingTop: 10,
+            gridTemplateColumns: "40px minmax(0, 1fr)",
+            gap: 12,
+            border: `1px solid ${c.inkHair}`,
+            background: c.surface,
+            padding: "12px 14px",
           }}
         >
           <div
@@ -158,6 +182,7 @@ function TaskSubtaskList({ subtasks }: { subtasks: ProjectProgressTaskSummary[] 
               color: c.inkFaint,
               letterSpacing: "0.14em",
               textTransform: "uppercase",
+              paddingTop: 2,
             }}
           >
             {formatOrder(subtask, index)}

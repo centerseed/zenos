@@ -353,6 +353,9 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(screen.getAllByTestId("open-work-task")).toHaveLength(1);
     expect(screen.getByText("Ship grouped open work")).toBeInTheDocument();
     expect(screen.getAllByTestId("open-work-subtask")).toHaveLength(1);
+    expect(screen.getByTestId("open-work-subtask-header")).toHaveTextContent("Subtasks");
+    expect(screen.getByTestId("open-work-task-order")).toHaveTextContent("02");
+    expect(screen.getByTestId("open-work-subtask-order")).toHaveTextContent("05");
     expect(screen.getByText("Render nested subtasks")).toBeInTheDocument();
   });
 
@@ -386,6 +389,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     fireEvent.click(within(row).getByTestId("plan-task-toggle"));
 
     expect(screen.getByTestId("plan-subtask-list")).toBeInTheDocument();
+    expect(screen.getByTestId("plan-subtask-header")).toHaveTextContent("Subtasks");
     expect(screen.getByText("Render nested subtasks")).toBeInTheDocument();
     expect(screen.getByText("05")).toBeInTheDocument();
   });
