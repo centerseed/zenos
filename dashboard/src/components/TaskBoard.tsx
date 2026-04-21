@@ -33,7 +33,7 @@ interface TaskBoardProps {
   onConfirmTask?: (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => Promise<void>;
   onHandoffTask?: (
     taskId: string,
-    data: { to_dispatcher: string; reason: string; notes?: string | null }
+    data: { to_dispatcher: string; reason: string; output_ref?: string | null; notes?: string | null }
   ) => Promise<void>;
 }
 

@@ -1,6 +1,6 @@
 export const API_BASE =
   process.env.NEXT_PUBLIC_MCP_API_URL ||
-  "https://zenos-mcp-165893875709.asia-east1.run.app";
+  "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 
 export const ACTIVE_WORKSPACE_STORAGE_KEY = "zenos.activeWorkspaceId";
 

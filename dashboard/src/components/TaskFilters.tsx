@@ -10,12 +10,14 @@ interface TaskFiltersProps {
   selectedPriority: TaskPriority | null;
   selectedProject: string | null;
   selectedDispatcher?: string | null;
-  availableProjects: string[];
+  selectedBlockedMode?: "all" | "blocked" | "unblocked";
+  availableProjects: Array<{ value: string; label: string }>;
   availableDispatchers?: string[];
   onStatusChange: (statuses: TaskStatus[]) => void;
   onPriorityChange: (priority: TaskPriority | null) => void;
   onProjectChange: (project: string | null) => void;
   onDispatcherChange?: (dispatcher: string | null) => void;
+  onBlockedModeChange?: (mode: "all" | "blocked" | "unblocked") => void;
 }
 
 const ALL_STATUSES: TaskStatus[] = [
@@ -44,17 +46,25 @@ const PRIORITY_OPTIONS = [
   })),
 ];
 
+const BLOCKED_OPTIONS = [
+  { value: "all", label: "All blockers" },
+  { value: "blocked", label: "Blocked only" },
+  { value: "unblocked", label: "Unblocked only" },
+];
+
 export function TaskFilters({
   selectedStatuses,
   selectedPriority,
   selectedProject,
   selectedDispatcher,
+  selectedBlockedMode = "all",
   availableProjects,
   availableDispatchers,
   onStatusChange,
   onPriorityChange,
   onProjectChange,
   onDispatcherChange,
+  onBlockedModeChange,
 }: TaskFiltersProps) {
   const t = useInk("light");
   const { c, fontBody, radius } = t;
@@ -66,7 +76,7 @@ export function TaskFilters({
 
   const projectOptions = [
     { value: "", label: "All Products" },
-    ...availableProjects.map((p) => ({ value: p, label: p.toUpperCase() })),
+    ...availableProjects,
   ];
 
   const dispatcherOptions = [
@@ -142,6 +152,17 @@ export function TaskFilters({
           onChange={(v) => onDispatcherChange(v === "" ? null : v)}
           options={dispatcherOptions}
           aria-label="Dispatcher filter"
+          style={{ width: "auto", minWidth: 150 }}
+        />
+      )}
+
+      {onBlockedModeChange && (
+        <Select
+          t={t}
+          value={selectedBlockedMode}
+          onChange={(v) => onBlockedModeChange((v as "all" | "blocked" | "unblocked") || "all")}
+          options={BLOCKED_OPTIONS}
+          aria-label="Blocked filter"
           style={{ width: "auto", minWidth: 150 }}
         />
       )}

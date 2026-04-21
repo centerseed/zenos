@@ -39,6 +39,16 @@ mcp__zenos__task(
     acceptance_criteria=["AC1", "AC2"], # list[str]，不是字串
     linked_entities=["entity-id-1"],    # list[str]，先 search 找到 ID 再填
     priority="critical|high|medium|low", # 選填，不填 AI 自動推薦
+    assignee_role_id="role-entity-id",   # 建議：跨 agent / 跨廠牌協作時優先填
+    dispatcher="agent:pm",               # 建議：顯性 handoff chain 起點
+    plan_id="32-char-plan-uuid",         # 有 plan/group 時建議帶
+    plan_order=1,                         # 同一 plan 的執行順序
+    depends_on_task_ids=["task-id"],     # 非線性流程依賴
+    blocked_by=["task-id"],              # 被哪些 task 卡住
+    blocked_reason="等待前置資料",         # blocked_by 有值時必填
+    linked_protocol="protocol-id",       # 有固定 SOP / intake protocol 時帶
+    linked_blindspot="blindspot-id",     # 由盲點觸發時帶
+    source_metadata={"created_via_agent": True, "agent_name": "pm"},  # 來源追溯
     # status 不要傳，default 是 todo
     # created_by 不要傳，server 依 API key 自動填
 )
@@ -78,6 +88,44 @@ todo → in_progress → review → (confirm) → done
 
 - 改狀態到 `review` 時，**result 欄位為必填**（SQL schema 強制）
 - **不能用 update 把 status 改成 done**，必須用 `confirm` 驗收
+
+## Richer Task 欄位何時該用
+
+不是每張 task 都要把所有欄位填滿，但以下情境不應再只用最小欄位集：
+
+- `assignee_role_id`
+  - 當任務責任落在「角色佇列」而不是特定個人時優先填。
+  - 例如：`doc_reviewer`、`qa`、`designer`。
+- `dispatcher`
+  - 需要顯性 handoff chain 時必填。
+  - PM 開始的 task 建議從 `agent:pm` 起。
+- `plan_id` / `plan_order`
+  - 同一交付目標下有多張 task，且順序重要時使用。
+- `parent_task_id`
+  - 需要 subtask，但仍要保留獨立驗收邊界時使用。
+- `depends_on_task_ids`
+  - 前置條件不是描述文字，而是真實 task 依賴時使用。
+- `blocked_by` / `blocked_reason`
+  - 不再用 `blocked` 狀態。被卡住就填 blocker IDs + 原因。
+- `linked_protocol`
+  - 任務有固定 intake / SOP / checklist 來源時使用。
+- `linked_blindspot`
+  - 任務是由治理盲點、風險或異常直接觸發時使用。
+- `source_metadata`
+  - 保留 agent / doc / chat provenance；不要拿這欄塞附件。
+- `attachments`
+  - 圖片 / 檔案 / link 一律走 `attachments`；不要混進 `source_metadata`。
+
+一句話：
+
+- 小型單點任務 → 最小欄位集可以
+- 跨角色、跨階段、可阻塞、可 handoff 的任務 → 要用 richer task 欄位
+
+## Dashboard / UI 對齊原則
+
+- Dashboard 若已有 read model（例如 entity、blindspot），應提供選擇器，不要逼使用者手打。
+- Dashboard 若暫時沒有 read model（例如 plan / protocol），也至少要保留穩定 ID 輸入口，**不得靜默忽略欄位**。
+- UI 上看不到的 richer 欄位，不代表 agent 不該填；agent 仍應依治理需要帶入。
 
 ---
 

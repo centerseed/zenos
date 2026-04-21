@@ -18,9 +18,10 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from starlette.datastructures import QueryParams
 
 from zenos.application.action.task_service import TaskResult
-from zenos.domain.action import Task
+from zenos.domain.action import Plan, Task
 from zenos.domain.knowledge import Blindspot, Entity, Relationship, Tags
 
 
@@ -99,6 +100,18 @@ def _make_task(tid: str = "t1") -> Task:
         assignee="Bob",
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
+    )
+
+
+def _make_plan(pid: str = "plan-1") -> Plan:
+    return Plan(
+        id=pid,
+        goal="Ship Console",
+        status="active",
+        created_by="Alice",
+        owner="Barry",
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 1, 4, tzinfo=timezone.utc),
     )
 
 
@@ -1242,3 +1255,139 @@ class TestGetGovernanceHealth:
             resp = await get_governance_health(request)
 
         assert resp.status_code == 401
+
+
+class TestGetProjectProgress:
+
+    async def test_returns_project_progress_aggregate_contract(self):
+        from zenos.interface.dashboard_api import get_project_progress
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"id": "proj-1"},
+        )
+        project = _make_entity("proj-1")
+        project.type = "product"
+        project.name = "Project Console"
+        milestone = _make_entity("goal-1")
+        milestone.type = "goal"
+        milestone.level = 3
+        milestone.name = "Milestone Alpha"
+        plan = _make_plan("plan-1")
+        plan.goal = "Ship S01 aggregate"
+
+        blocked_task = _make_task("task-1")
+        blocked_task.title = "Unblock backend aggregate"
+        blocked_task.status = "blocked"
+        blocked_task.plan_id = "plan-1"
+        blocked_task.linked_entities = ["proj-1", "goal-1"]
+        blocked_task.blocked_by = ["dep-1"]
+        blocked_task.blocked_reason = "Waiting on shared schema"
+        blocked_task.updated_at = datetime(2026, 4, 20, 8, 0, tzinfo=timezone.utc)
+
+        review_task = _make_task("task-2")
+        review_task.title = "Review API contract"
+        review_task.status = "review"
+        review_task.plan_id = "plan-1"
+        review_task.linked_entities = ["proj-1", "goal-1"]
+        review_task.updated_at = datetime(2026, 4, 19, 8, 0, tzinfo=timezone.utc)
+
+        parent_task = _make_task("task-3")
+        parent_task.title = "Finish client contract"
+        parent_task.status = "todo"
+        parent_task.plan_id = "plan-1"
+        parent_task.linked_entities = ["proj-1", "goal-1"]
+        parent_task.due_date = datetime(2026, 4, 1, 0, 0, tzinfo=timezone.utc)
+        parent_task.updated_at = datetime(2026, 4, 18, 8, 0, tzinfo=timezone.utc)
+
+        subtask = _make_task("task-4")
+        subtask.title = "Write TS types"
+        subtask.status = "in_progress"
+        subtask.plan_id = "plan-1"
+        subtask.parent_task_id = "task-3"
+        subtask.linked_entities = ["proj-1", "goal-1"]
+        subtask.updated_at = datetime(2026, 4, 21, 8, 0, tzinfo=timezone.utc)
+
+        async def list_all_side_effect(**kwargs):
+            if kwargs.get("linked_entity") == "proj-1":
+                return [blocked_task, review_task, parent_task, subtask]
+            if kwargs.get("plan_id") == "plan-1":
+                return [blocked_task, review_task, parent_task, subtask]
+            return []
+
+        async def get_entity_side_effect(_effective_id: str, entity_id: str):
+            if entity_id == "proj-1":
+                return project
+            if entity_id == "goal-1":
+                return milestone
+            return None
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._get_entity_by_id_with_context", new=AsyncMock(side_effect=get_entity_side_effect)), \
+             patch("zenos.interface.dashboard_api._is_task_visible_for_partner", new=AsyncMock(return_value=True)), \
+             patch("zenos.interface.dashboard_api._task_repo") as mock_task_repo, \
+             patch("zenos.interface.dashboard_api._plan_repo") as mock_plan_repo, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_task_repo.list_all = AsyncMock(side_effect=list_all_side_effect)
+            mock_plan_repo.get_by_id = AsyncMock(return_value=plan)
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await get_project_progress(request)
+
+        body = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["project"]["id"] == "proj-1"
+        assert body["active_plans"][0]["id"] == "plan-1"
+        assert body["active_plans"][0]["goal"] == "Ship S01 aggregate"
+        assert body["active_plans"][0]["open_count"] == 4
+        assert body["active_plans"][0]["blocked_count"] == 1
+        assert body["active_plans"][0]["review_count"] == 1
+        assert body["active_plans"][0]["overdue_count"] == 1
+        assert [task["id"] for task in body["active_plans"][0]["next_tasks"]] == ["task-1", "task-2", "task-3"]
+
+        assert body["open_work_groups"][0]["plan_id"] == "plan-1"
+        assert body["open_work_groups"][0]["plan_goal"] == "Ship S01 aggregate"
+        assert [task["id"] for task in body["open_work_groups"][0]["tasks"]] == ["task-1", "task-2", "task-3"]
+        assert body["open_work_groups"][0]["tasks"][2]["subtasks"][0]["id"] == "task-4"
+
+        assert body["milestones"] == [
+            {"id": "goal-1", "name": "Milestone Alpha", "open_count": 4}
+        ]
+        assert body["recent_progress"][0]["id"] == "task-4"
+        assert any(item["kind"] == "plan" and item["id"] == "plan-1" for item in body["recent_progress"])
+
+
+class TestListPlans:
+
+    async def test_returns_requested_plan_details_for_known_ids(self):
+        from zenos.interface.dashboard_api import list_plans
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            query_params=QueryParams("id=plan-1&id=plan-1&id=plan-2"),
+        )
+
+        async def get_plan_side_effect(plan_id: str):
+            if plan_id == "plan-1":
+                return {"id": "plan-1", "goal": "Ship aggregate", "status": "active"}
+            raise ValueError("not found")
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api.PlanService") as mock_plan_service_cls, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_plan_service = MagicMock()
+            mock_plan_service.get_plan = AsyncMock(side_effect=get_plan_side_effect)
+            mock_plan_service_cls.return_value = mock_plan_service
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await list_plans(request)
+
+        body = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["plans"] == [{"id": "plan-1", "goal": "Ship aggregate", "status": "active"}]
+        assert mock_plan_service.get_plan.await_args_list[0].args == ("plan-1",)
+        assert len(mock_plan_service.get_plan.await_args_list) == 2

@@ -6,7 +6,6 @@ import { useInk } from "@/lib/zen-ink/tokens";
 import { Section } from "@/components/zen/Section";
 import { Btn } from "@/components/zen/Btn";
 import { Chip } from "@/components/zen/Chip";
-import { HeroToday } from "@/components/zen/HeroToday";
 import { ICONS } from "@/components/zen/Icons";
 import { TaskBoard } from "@/components/TaskBoard";
 import { TaskFilters } from "@/components/TaskFilters";
@@ -14,12 +13,15 @@ import { TaskCreateDialog } from "@/components/TaskCreateDialog";
 import {
   confirmTask,
   createTask,
+  getAllBlindspots,
   getAllEntities,
+  getPlans,
   getTasks,
   handoffTask,
   updateTask,
 } from "@/lib/api";
-import type { Entity, Task, TaskPriority, TaskStatus } from "@/types";
+import type { PlanSummary } from "@/lib/api";
+import type { Blindspot, Entity, Task, TaskPriority, TaskStatus } from "@/types";
 
 type CreateTaskInput = {
   title: string;
@@ -28,7 +30,53 @@ type CreateTaskInput = {
   assignee?: string;
   due_date?: string;
   project?: string;
+  linked_entities?: string[];
+  acceptance_criteria?: string[];
+  assignee_role_id?: string | null;
+  linked_protocol?: string | null;
+  linked_blindspot?: string | null;
+  blocked_by?: string[];
+  blocked_reason?: string | null;
+  plan_id?: string | null;
+  plan_order?: number | null;
+  depends_on_task_ids?: string[];
+  parent_task_id?: string | null;
+  dispatcher?: string | null;
+  source_metadata?: Record<string, unknown>;
 };
+
+type ProjectFilterOption = {
+  value: string;
+  label: string;
+};
+
+export function normalizeProjectKey(value: string | null | undefined): string {
+  if (!value) return "";
+  return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+export function buildAvailableProjectOptions(tasks: Task[], entities: Entity[]): ProjectFilterOption[] {
+  const projects = new Map<string, string>();
+
+  for (const entity of entities) {
+    if (entity.type !== "product" && entity.type !== "project") continue;
+    const label = entity.name?.trim();
+    const key = normalizeProjectKey(label);
+    if (!key || projects.has(key)) continue;
+    projects.set(key, label);
+  }
+
+  for (const task of tasks) {
+    const label = task.project?.trim();
+    const key = normalizeProjectKey(label);
+    if (!key || projects.has(key)) continue;
+    projects.set(key, label);
+  }
+
+  return Array.from(projects.entries())
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
 
 function EmptyScopePrompt() {
   const t = useInk("light");
@@ -178,6 +226,8 @@ export function TasksPage() {
 
   const [tasks, setTasks] = useState<Task[]>([]);
   const [entities, setEntities] = useState<Entity[]>([]);
+  const [blindspots, setBlindspots] = useState<Blindspot[]>([]);
+  const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
@@ -185,6 +235,7 @@ export function TasksPage() {
   const [selectedPriority, setSelectedPriority] = useState<TaskPriority | null>(null);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedDispatcher, setSelectedDispatcher] = useState<string | null>(null);
+  const [selectedBlockedMode, setSelectedBlockedMode] = useState<"all" | "blocked" | "unblocked">("all");
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -192,12 +243,23 @@ export function TasksPage() {
     setError(null);
     try {
       const token = await user.getIdToken();
-      const [fetchedTasks, fetchedEntities] = await Promise.all([
+      const [fetchedTasks, fetchedEntities, fetchedBlindspots] = await Promise.all([
         getTasks(token),
         getAllEntities(token),
+        getAllBlindspots(token).catch(() => [] as Blindspot[]),
       ]);
+      const planIds = Array.from(
+        new Set(
+          fetchedTasks
+            .map((task) => task.planId)
+            .filter((planId): planId is string => Boolean(planId?.trim())),
+        ),
+      );
+      const fetchedPlans = planIds.length > 0 ? await getPlans(token, planIds) : [];
       setTasks(fetchedTasks);
       setEntities(fetchedEntities);
+      setBlindspots(fetchedBlindspots);
+      setPlans(fetchedPlans);
     } catch (err) {
       setError(err instanceof Error ? err.message : "任務載入失敗");
     } finally {
@@ -210,26 +272,21 @@ export function TasksPage() {
   }, [fetchData]);
 
   const entityNames = useMemo(
-    () => Object.fromEntries(entities.map((entity) => [entity.id, entity.name])),
-    [entities],
+    () => ({
+      ...Object.fromEntries(entities.map((entity) => [entity.id, entity.name])),
+      ...Object.fromEntries(plans.map((plan) => [plan.id, plan.goal])),
+    }),
+    [entities, plans],
   );
   const entitiesById = useMemo(
     () => Object.fromEntries(entities.map((entity) => [entity.id, entity])),
     [entities],
   );
 
-  const availableProjects = useMemo(() => {
-    const projects = new Set<string>();
-    for (const task of tasks) {
-      if (task.project?.trim()) projects.add(task.project.trim());
-    }
-    for (const entity of entities) {
-      if (entity.type === "product" || entity.type === "project") {
-        projects.add(entity.name);
-      }
-    }
-    return Array.from(projects).sort((a, b) => a.localeCompare(b));
-  }, [entities, tasks]);
+  const availableProjects = useMemo(
+    () => buildAvailableProjectOptions(tasks, entities),
+    [entities, tasks],
+  );
 
   const availableDispatchers = useMemo(() => {
     const set = new Set<string>();
@@ -247,15 +304,22 @@ export function TasksPage() {
       if (selectedPriority && task.priority !== selectedPriority) {
         return false;
       }
-      if (selectedProject && task.project !== selectedProject) {
+      if (selectedProject && normalizeProjectKey(task.project) !== selectedProject) {
         return false;
       }
       if (selectedDispatcher && task.dispatcher !== selectedDispatcher) {
         return false;
       }
+      const isBlocked = task.blockedBy.length > 0 || Boolean(task.blockedReason);
+      if (selectedBlockedMode === "blocked" && !isBlocked) {
+        return false;
+      }
+      if (selectedBlockedMode === "unblocked" && isBlocked) {
+        return false;
+      }
       return true;
     });
-  }, [selectedDispatcher, selectedPriority, selectedProject, selectedStatuses, tasks]);
+  }, [selectedBlockedMode, selectedDispatcher, selectedPriority, selectedProject, selectedStatuses, tasks]);
 
   const visibleStatuses = useMemo(
     () => selectedStatuses.filter((status) => status !== "cancelled"),
@@ -308,7 +372,7 @@ export function TasksPage() {
   );
 
   const handleHandoffTask = useCallback(
-    async (taskId: string, data: { to_dispatcher: string; reason: string; notes?: string | null }) => {
+    async (taskId: string, data: { to_dispatcher: string; reason: string; output_ref?: string | null; notes?: string | null }) => {
       if (!user) return;
       const token = await user.getIdToken();
       const updated = await handoffTask(token, taskId, data);
@@ -349,6 +413,7 @@ export function TasksPage() {
                   setSelectedPriority(null);
                   setSelectedProject(null);
                   setSelectedDispatcher(null);
+                  setSelectedBlockedMode("all");
                 }}
               >
                 清空篩選
@@ -364,10 +429,6 @@ export function TasksPage() {
             </div>
           }
         />
-
-        <div style={{ marginBottom: 24 }}>
-          <HeroToday />
-        </div>
 
         <div
           style={{
@@ -427,12 +488,14 @@ export function TasksPage() {
             selectedPriority={selectedPriority}
             selectedProject={selectedProject}
             selectedDispatcher={selectedDispatcher}
+            selectedBlockedMode={selectedBlockedMode}
             availableProjects={availableProjects}
             availableDispatchers={availableDispatchers}
             onStatusChange={setSelectedStatuses}
             onPriorityChange={setSelectedPriority}
             onProjectChange={setSelectedProject}
             onDispatcherChange={setSelectedDispatcher}
+            onBlockedModeChange={setSelectedBlockedMode}
           />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Chip t={t} tone="muted">{`全部 ${totalTasks}`}</Chip>
@@ -494,6 +557,8 @@ export function TasksPage() {
         isOpen={creating}
         onClose={() => setCreating(false)}
         onCreateTask={handleCreateTask}
+        entities={entities}
+        blindspots={blindspots}
       />
     </>
   );

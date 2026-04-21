@@ -17,7 +17,7 @@ import {
 import type { Deal, Company, Activity, AiInsight, DealAiEntries } from "@/lib/crm-api";
 
 const FAKE_TOKEN = "fake-crm-token";
-const API_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const API_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 
 function mockFetch(body: unknown, ok = true, status = 200) {
   return vi.fn().mockResolvedValue({

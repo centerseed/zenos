@@ -8,9 +8,11 @@ Endpoints:
   GET    /api/data/entities/{id}/relationships            — get entity relationships
   GET    /api/data/relationships                          — list all relationships
   GET    /api/data/blindspots                             — list blindspots
+  GET    /api/data/plans                                  — list plans / plan details
   GET    /api/data/tasks                                  — list tasks
   POST   /api/data/tasks                                  — create task
   GET    /api/data/tasks/by-entity/{entityId}             — tasks by entity
+  GET    /api/data/projects/{id}/progress                 — project progress aggregate
   PATCH  /api/data/tasks/{taskId}                         — update task fields
   POST   /api/data/tasks/{taskId}/confirm                 — approve or reject task
   POST   /api/data/tasks/{taskId}/attachments             — upload attachment (returns signed URL)
@@ -43,10 +45,11 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Route
 
+from zenos.application.action.plan_service import PlanService
+from zenos.application.action.task_service import TaskService
 from zenos.application.knowledge.governance_service import GovernanceService
 from zenos.application.knowledge.ontology_service import OntologyService, _collect_subtree_ids
 from zenos.application.knowledge.source_service import SourceService
-from zenos.application.action.task_service import TaskService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.action import Task
 from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship, SourceType, Tags
@@ -65,7 +68,7 @@ from zenos.domain.partner_access import (
 )
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.unit_of_work import UnitOfWork
-from zenos.infrastructure.action import PostgresTaskCommentRepository, SqlTaskRepository
+from zenos.infrastructure.action import PostgresTaskCommentRepository, SqlPlanRepository, SqlTaskRepository
 from zenos.infrastructure.agent import SqlToolEventRepository
 from zenos.infrastructure.identity import SqlPartnerRepository
 from zenos.infrastructure.github_adapter import GitHubAdapter
@@ -90,6 +93,7 @@ _GRAPH_CONTEXT_MAX_DOC_SUMMARY = 500
 _GRAPH_CONTEXT_REDUCED_DOC_SUMMARY = 180
 _GRAPH_CONTEXT_REDUCED_ENTITY_SUMMARY = 180
 _GRAPH_CONTEXT_MIN_ENTITY_SUMMARY = 48
+_PROJECT_PROGRESS_RECENT_LIMIT = 8
 
 
 class RevisionConflictError(RuntimeError):
@@ -117,13 +121,14 @@ _entity_repo: SqlEntityRepository | None = None
 _relationship_repo: SqlRelationshipRepository | None = None
 _blindspot_repo: SqlBlindspotRepository | None = None
 _task_repo: SqlTaskRepository | None = None
+_plan_repo: SqlPlanRepository | None = None
 _partner_repo: SqlPartnerRepository | None = None
 _tool_event_repo: SqlToolEventRepository | None = None
 _comment_repo: PostgresTaskCommentRepository | None = None
 
 
 async def _ensure_repos() -> None:
-    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo, _partner_repo, _tool_event_repo, _comment_repo
+    global _repos_ready, _entity_repo, _relationship_repo, _blindspot_repo, _task_repo, _plan_repo, _partner_repo, _tool_event_repo, _comment_repo
     if _repos_ready:
         return
     pool = await get_pool()
@@ -131,6 +136,7 @@ async def _ensure_repos() -> None:
     _relationship_repo = SqlRelationshipRepository(pool)
     _blindspot_repo = SqlBlindspotRepository(pool)
     _task_repo = SqlTaskRepository(pool)
+    _plan_repo = SqlPlanRepository(pool)
     _partner_repo = SqlPartnerRepository(pool)
     _tool_event_repo = SqlToolEventRepository(pool)
     _comment_repo = PostgresTaskCommentRepository(pool)
@@ -974,6 +980,119 @@ def _task_to_dict(t: Task) -> dict:
     }
 
 
+def _progress_task_status(status: str | None) -> str:
+    return {
+        "backlog": "todo",
+        "archived": "done",
+    }.get(status or "", status or "")
+
+
+def _progress_task_is_open(status: str | None) -> bool:
+    return _progress_task_status(status) in {"todo", "blocked", "in_progress", "review"}
+
+
+def _progress_task_is_blocked(task: Task) -> bool:
+    status = _progress_task_status(task.status)
+    return status == "blocked" or bool(task.blocked_by)
+
+
+def _progress_task_is_review(task: Task) -> bool:
+    return _progress_task_status(task.status) == "review"
+
+
+def _progress_task_is_overdue(task: Task, now: datetime) -> bool:
+    if not task.due_date or not _progress_task_is_open(task.status):
+        return False
+    due_date = task.due_date
+    if due_date.tzinfo is None:
+        due_date = due_date.replace(tzinfo=timezone.utc)
+    return due_date < now
+
+
+def _progress_task_sort_key(task: Task, now: datetime) -> tuple[int, float, float]:
+    rank = 4
+    if _progress_task_is_blocked(task):
+        rank = 0
+    elif _progress_task_is_review(task):
+        rank = 1
+    elif _progress_task_is_overdue(task, now):
+        rank = 2
+    elif _progress_task_status(task.status) == "in_progress":
+        rank = 3
+    updated_ts = task.updated_at.timestamp() if task.updated_at else 0.0
+    created_ts = task.created_at.timestamp() if task.created_at else 0.0
+    return (rank, -updated_ts, -created_ts)
+
+
+def _build_progress_task_summary(
+    task: Task,
+    now: datetime,
+    subtasks: list[dict] | None = None,
+) -> dict:
+    return {
+        "id": task.id,
+        "title": task.title,
+        "status": _progress_task_status(task.status),
+        "priority": task.priority,
+        "assignee_name": task.assignee_name,
+        "due_date": task.due_date,
+        "overdue": _progress_task_is_overdue(task, now),
+        "blocked": _progress_task_is_blocked(task),
+        "blocked_reason": task.blocked_reason,
+        "parent_task_id": task.parent_task_id,
+        "updated_at": task.updated_at,
+        "subtasks": subtasks or [],
+    }
+
+
+def _build_progress_task_tree(tasks: list[Task], now: datetime) -> list[dict]:
+    subtasks_by_parent: dict[str, list[Task]] = {}
+    top_level: list[Task] = []
+    task_ids = {task.id for task in tasks if task.id}
+    for task in tasks:
+        if task.parent_task_id and task.parent_task_id in task_ids:
+            subtasks_by_parent.setdefault(task.parent_task_id, []).append(task)
+        else:
+            top_level.append(task)
+
+    def render(task: Task) -> dict:
+        children = sorted(
+            subtasks_by_parent.get(task.id or "", []),
+            key=lambda item: _progress_task_sort_key(item, now),
+        )
+        return _build_progress_task_summary(
+            task,
+            now,
+            subtasks=[render(child) for child in children],
+        )
+
+    ordered_top_level = sorted(top_level, key=lambda item: _progress_task_sort_key(item, now))
+    return [render(task) for task in ordered_top_level]
+
+
+def _count_progress_tasks(tasks: list[Task], now: datetime) -> dict[str, int]:
+    return {
+        "open_count": sum(1 for task in tasks if _progress_task_is_open(task.status)),
+        "blocked_count": sum(1 for task in tasks if _progress_task_is_blocked(task)),
+        "review_count": sum(1 for task in tasks if _progress_task_is_review(task)),
+        "overdue_count": sum(1 for task in tasks if _progress_task_is_overdue(task, now)),
+    }
+
+
+def _recent_progress_item_sort_key(item: dict) -> float:
+    updated_at = item.get("updated_at")
+    if isinstance(updated_at, str):
+        try:
+            updated_at = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+        except ValueError:
+            updated_at = None
+    if isinstance(updated_at, datetime):
+        if updated_at.tzinfo is None:
+            updated_at = updated_at.replace(tzinfo=timezone.utc)
+        return updated_at.timestamp()
+    return float("-inf")
+
+
 def _attachments_with_proxy_url(attachments: list[dict]) -> list[dict]:
     """Add proxy_url to attachment items that have a gcs_path."""
     result = []
@@ -1529,6 +1648,245 @@ async def list_tasks_by_entity(request: Request) -> Response:
     ]
 
     return _json_response({"tasks": [_task_to_dict(t) for t in visible_tasks]}, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: GET /api/data/plans
+# ──────────────────────────────────────────────
+
+
+def _plan_payload_to_dict(plan: object) -> dict[str, object]:
+    created_at = getattr(plan, "created_at", None)
+    updated_at = getattr(plan, "updated_at", None)
+    return {
+        "id": getattr(plan, "id", None),
+        "goal": getattr(plan, "goal", None),
+        "status": getattr(plan, "status", None),
+        "owner": getattr(plan, "owner", None),
+        "entry_criteria": getattr(plan, "entry_criteria", None),
+        "exit_criteria": getattr(plan, "exit_criteria", None),
+        "project": getattr(plan, "project", None),
+        "project_id": getattr(plan, "project_id", None),
+        "created_by": getattr(plan, "created_by", None),
+        "updated_by": getattr(plan, "updated_by", None),
+        "result": getattr(plan, "result", None),
+        "created_at": created_at.isoformat() if created_at else None,
+        "updated_at": updated_at.isoformat() if updated_at else None,
+    }
+
+
+async def list_plans(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _json_response({"plans": []}, request=request)
+
+    ids = [plan_id.strip() for plan_id in request.query_params.getlist("id") if plan_id.strip()]
+    deduped_ids = list(dict.fromkeys(ids))
+
+    token = current_partner_id.set(effective_id)
+    try:
+        plan_service = PlanService(_plan_repo, _task_repo)
+        if deduped_ids:
+            plans: list[dict[str, object]] = []
+            for plan_id in deduped_ids:
+                try:
+                    plans.append(await plan_service.get_plan(plan_id))
+                except ValueError:
+                    continue
+        else:
+            listed = await plan_service.list_plans(limit=200)
+            plans = [_plan_payload_to_dict(plan) for plan in listed]
+    finally:
+        current_partner_id.reset(token)
+
+    return _json_response({"plans": plans}, request=request)
+
+
+# ──────────────────────────────────────────────
+# Endpoint: GET /api/data/projects/{id}/progress
+# ──────────────────────────────────────────────
+
+
+async def get_project_progress(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    project_id = request.path_params.get("id")
+    if not project_id:
+        return _error_response("INVALID_INPUT", "Project id is required", 400, request=request)
+
+    await _ensure_repos()
+    if is_unassigned_partner(partner):
+        return _error_response("NOT_FOUND", "Project not found", 404, request=request)
+
+    allowed_ids: set[str] | None = None
+    entity_cache: dict[str, Entity] = {}
+    if is_guest(partner):
+        all_entities = await _list_all_entities_with_context(effective_id)
+        entity_cache = {entity.id: entity for entity in all_entities if entity.id}
+        allowed_ids = _build_allowed_entity_ids(partner, entity_cache)
+        if project_id not in allowed_ids:
+            return _error_response("NOT_FOUND", "Project not found", 404, request=request)
+
+    project = entity_cache.get(project_id) or await _get_entity_by_id_with_context(effective_id, project_id)
+    if not project or not OntologyService.is_entity_visible_for_partner(project, partner):
+        return _error_response("NOT_FOUND", "Project not found", 404, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        linked_tasks = await _task_repo.list_all(linked_entity=project_id, limit=500)
+        plan_service = PlanService(_plan_repo, _task_repo)
+        plan_ids = sorted({task.plan_id for task in linked_tasks if task.plan_id})
+        plan_payloads: dict[str, dict] = {}
+        for plan_id in plan_ids:
+            try:
+                plan_payloads[plan_id] = await plan_service.get_plan(plan_id)
+            except ValueError:
+                continue
+    finally:
+        current_partner_id.reset(token)
+
+    visible_tasks = [
+        task
+        for task in linked_tasks
+        if await _is_task_visible_for_partner(task, partner, effective_id, allowed_ids=allowed_ids)
+    ]
+
+    now = datetime.now(timezone.utc)
+    tasks_by_plan: dict[str | None, list[Task]] = {}
+    visible_linked_entity_ids = {
+        entity_id
+        for task in visible_tasks
+        for entity_id in (task.linked_entities or [])
+        if entity_id and isinstance(entity_id, str)
+    }
+    for entity_id in visible_linked_entity_ids:
+        if entity_id in entity_cache:
+            continue
+        entity = await _get_entity_by_id_with_context(effective_id, entity_id)
+        if entity:
+            entity_cache[entity_id] = entity
+
+    for task in visible_tasks:
+        tasks_by_plan.setdefault(task.plan_id, []).append(task)
+
+    active_plans: list[dict] = []
+    open_work_groups: list[dict] = []
+    for plan_id, plan_tasks in tasks_by_plan.items():
+        plan_payload = plan_payloads.get(plan_id or "")
+        plan_goal = plan_payload["goal"] if plan_payload else None
+        plan_status = plan_payload["status"] if plan_payload else None
+        open_tasks = [task for task in plan_tasks if _progress_task_is_open(task.status)]
+        counts = _count_progress_tasks(open_tasks, now)
+        if counts["open_count"] > 0:
+            task_tree = _build_progress_task_tree(open_tasks, now)
+            open_work_groups.append({
+                "plan_id": plan_id,
+                "plan_goal": plan_goal,
+                "plan_status": plan_status,
+                **counts,
+                "tasks": task_tree,
+            })
+
+        if plan_payload and plan_status == "active":
+            top_level_tasks = [
+                task for task in open_tasks
+                if not task.parent_task_id or task.parent_task_id not in {candidate.id for candidate in open_tasks if candidate.id}
+            ]
+            next_tasks = [
+                _build_progress_task_summary(task, now)
+                for task in sorted(top_level_tasks, key=lambda item: _progress_task_sort_key(item, now))[:3]
+            ]
+            active_plans.append({
+                "id": plan_payload["id"],
+                "goal": plan_payload["goal"],
+                "status": plan_payload["status"],
+                "owner": plan_payload["owner"],
+                "tasks_summary": plan_payload.get("tasks_summary", {}),
+                **counts,
+                "updated_at": plan_payload["updated_at"],
+                "next_tasks": next_tasks,
+            })
+
+    active_plans.sort(
+        key=lambda item: (
+            0 if item["blocked_count"] > 0 else 1,
+            -_recent_progress_item_sort_key({"updated_at": item["updated_at"]}),
+            item["goal"] or "",
+        )
+    )
+    open_work_groups.sort(
+        key=lambda item: (
+            0 if item["blocked_count"] > 0 else 1,
+            -item["open_count"],
+            item["plan_goal"] or "",
+        )
+    )
+
+    milestone_counts: dict[str, dict] = {}
+    for task in visible_tasks:
+        if not _progress_task_is_open(task.status):
+            continue
+        for entity_id in task.linked_entities or []:
+            if not isinstance(entity_id, str) or entity_id == project_id:
+                continue
+            if is_guest(partner) and allowed_ids is not None and entity_id not in allowed_ids:
+                continue
+            entity = entity_cache.get(entity_id)
+            if not entity or entity.type != EntityType.GOAL.value:
+                continue
+            if not OntologyService.is_entity_visible_for_partner(entity, partner):
+                continue
+            current = milestone_counts.setdefault(entity_id, {
+                "id": entity.id,
+                "name": entity.name,
+                "open_count": 0,
+            })
+            current["open_count"] += 1
+
+    recent_progress: list[dict] = []
+    for task in sorted(visible_tasks, key=lambda item: _recent_progress_item_sort_key({"updated_at": item.updated_at}), reverse=True):
+        recent_progress.append({
+            "id": task.id,
+            "kind": "task",
+            "title": task.title,
+            "subtitle": f"Task · {_progress_task_status(task.status)}",
+            "updated_at": task.updated_at,
+        })
+    for plan_payload in plan_payloads.values():
+        recent_progress.append({
+            "id": plan_payload["id"],
+            "kind": "plan",
+            "title": plan_payload["goal"],
+            "subtitle": f"Plan · {plan_payload['status']}",
+            "updated_at": plan_payload["updated_at"],
+        })
+    recent_progress.sort(key=_recent_progress_item_sort_key, reverse=True)
+
+    return _json_response(
+        {
+            "project": _entity_to_dict(project, partner),
+            "active_plans": active_plans,
+            "open_work_groups": open_work_groups,
+            "milestones": sorted(
+                milestone_counts.values(),
+                key=lambda item: (-item["open_count"], item["name"]),
+            ),
+            "recent_progress": recent_progress[:_PROJECT_PROGRESS_RECENT_LIMIT],
+        },
+        request=request,
+    )
 
 
 # ──────────────────────────────────────────────
@@ -3017,6 +3375,8 @@ dashboard_routes = [
     Route("/api/data/blindspots", list_blindspots, methods=["GET", "OPTIONS"]),
     Route("/api/data/quality-signals", get_quality_signals, methods=["GET", "OPTIONS"]),
     Route("/api/data/governance-health", get_governance_health, methods=["GET", "OPTIONS"]),
+    Route("/api/data/plans", list_plans, methods=["GET", "OPTIONS"]),
+    Route("/api/data/projects/{id}/progress", get_project_progress, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/by-entity/{entityId}", list_tasks_by_entity, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/comments/{commentId}", delete_comment, methods=["DELETE", "OPTIONS"]),
     Route("/api/data/tasks/{taskId}/comments", create_comment, methods=["POST", "OPTIONS"]),

@@ -11,18 +11,22 @@ import { Btn } from "@/components/zen/Btn";
 import { Chip } from "@/components/zen/Chip";
 import { TaskBoard } from "@/components/TaskBoard";
 import { TaskCreateDialog } from "@/components/TaskCreateDialog";
+import { ProjectProgressConsole } from "@/features/projects/ProjectProgressConsole";
 import { useAuth } from "@/lib/auth";
 import {
   confirmTask,
   createTask,
+  getAllBlindspots,
   getProjectEntities,
+  getProjectProgress,
   getTasksByEntity,
   getEntityContext,
   getChildEntities,
+  handoffTask,
   updateTask,
 } from "@/lib/api";
-import type { EntityContextResponse } from "@/lib/api";
-import type { Entity, Task } from "@/types";
+import type { EntityContextResponse, ProjectProgressResponse } from "@/lib/api";
+import type { Blindspot, Entity, Task } from "@/types";
 
 // ─── Status → health mapping ──────────────────────────────────────────────────
 
@@ -68,6 +72,19 @@ type CreateTaskInput = {
   assignee?: string;
   due_date?: string;
   project?: string;
+  linked_entities?: string[];
+  acceptance_criteria?: string[];
+  assignee_role_id?: string | null;
+  linked_protocol?: string | null;
+  linked_blindspot?: string | null;
+  blocked_by?: string[];
+  blocked_reason?: string | null;
+  plan_id?: string | null;
+  plan_order?: number | null;
+  depends_on_task_ids?: string[];
+  parent_task_id?: string | null;
+  dispatcher?: string | null;
+  source_metadata?: Record<string, unknown>;
 };
 
 function computeProgress(tasks: Task[]): TaskProgress {
@@ -541,8 +558,10 @@ function InkProjectsList({
 
 interface DetailData {
   context: EntityContextResponse | null;
+  progress: ProjectProgressResponse;
   tasks: Task[];
   children: Entity[];
+  blindspots: Blindspot[];
 }
 
 function InkProjectDetail({
@@ -568,12 +587,14 @@ function InkProjectDetail({
     setError(null);
     try {
       const token = await user.getIdToken();
-      const [context, tasks, children] = await Promise.all([
+      const [context, progress, tasks, children, blindspots] = await Promise.all([
         getEntityContext(token, entityId),
+        getProjectProgress(token, entityId),
         getTasksByEntity(token, entityId),
         getChildEntities(token, entityId),
+        getAllBlindspots(token).catch(() => [] as Blindspot[]),
       ]);
-      setDetail({ context, tasks, children });
+      setDetail({ context, progress, tasks, children, blindspots });
     } catch (err) {
       console.error("[ProjectDetail] fetch failed:", err);
       setError(err instanceof Error ? err.message : "載入失敗");
@@ -606,8 +627,10 @@ function InkProjectDetail({
   }, []);
 
   const entity = detail?.context?.entity ?? null;
+  const progressDetail = detail?.progress ?? null;
   const tasks = detail?.tasks ?? [];
   const children = detail?.children ?? [];
+  const blindspots = detail?.blindspots ?? [];
   const progress = computeProgress(tasks);
   const h = entity ? entityStatusToHealth(entity.status) : { tone: "muted" as HealthTone, zh: "—" };
   const accent = c.vermillion;
@@ -685,7 +708,7 @@ function InkProjectDetail({
       const created = await createTask(token, {
         ...data,
         project: data.project ?? entity.name,
-        linked_entities: [entity.id],
+        linked_entities: Array.from(new Set([entity.id, ...(data.linked_entities ?? [])])),
       });
       replaceTask(created);
       setTab("tasks");
@@ -722,6 +745,22 @@ function InkProjectDetail({
         replaceTask(updated);
       } catch (err) {
         setMutationError(err instanceof Error ? err.message : "驗收任務失敗");
+        throw err;
+      }
+    },
+    [replaceTask, user],
+  );
+
+  const handleHandoffTask = useCallback(
+    async (taskId: string, data: { to_dispatcher: string; reason: string; output_ref?: string | null; notes?: string | null }) => {
+      if (!user) return;
+      setMutationError(null);
+      try {
+        const token = await user.getIdToken();
+        const updated = await handoffTask(token, taskId, data);
+        replaceTask(updated);
+      } catch (err) {
+        setMutationError(err instanceof Error ? err.message : "交棒任務失敗");
         throw err;
       }
     },
@@ -1004,250 +1043,12 @@ function InkProjectDetail({
         </div>
 
         {tab === "overview" ? (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 340px",
-              gap: 20,
-            }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div
-                style={{
-                  background: c.surface,
-                  border: `1px solid ${c.inkHair}`,
-                  borderRadius: 2,
-                  padding: 20,
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: fontMono,
-                    fontSize: 10,
-                    color: c.inkFaint,
-                    letterSpacing: "0.2em",
-                    textTransform: "uppercase",
-                    marginBottom: 14,
-                  }}
-                >
-                  Connected Nodes · 關聯節點
-                </div>
-                {relatedEntities.length === 0 ? (
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: c.inkFaint,
-                      fontFamily: fontMono,
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    無子節點資料
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {relatedEntities.slice(0, 5).map((child) => (
-                      <div
-                        key={child.id}
-                        style={{
-                          paddingBottom: 12,
-                          borderBottom: `1px solid ${c.inkHair}`,
-                        }}
-                      >
-                        <div style={{ fontSize: 13, color: c.ink, fontWeight: 500 }}>
-                          {child.name}
-                        </div>
-                        <div style={{ fontSize: 11, color: c.inkMuted, marginTop: 2 }}>
-                          {child.type} · {child.status}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div
-                style={{
-                  background: c.surface,
-                  border: `1px solid ${c.inkHair}`,
-                  borderRadius: 2,
-                  padding: 20,
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: fontMono,
-                    fontSize: 10,
-                    color: c.inkFaint,
-                    letterSpacing: "0.2em",
-                    textTransform: "uppercase",
-                    marginBottom: 14,
-                  }}
-                >
-                  Activity · 近期動態
-                </div>
-                {timeline.length === 0 ? (
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: c.inkFaint,
-                      fontFamily: fontMono,
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    尚無近期更新
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {timeline.slice(0, 5).map((item) => (
-                      <div key={item.id} style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                        <div>
-                          <div style={{ fontSize: 13, color: c.ink, fontWeight: 500 }}>{item.title}</div>
-                          <div style={{ fontSize: 11, color: c.inkMuted }}>{item.subtitle}</div>
-                        </div>
-                        <div
-                          style={{
-                            fontFamily: fontMono,
-                            fontSize: 10,
-                            color: c.inkFaint,
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {formatShortDate(item.date)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              <div
-                style={{
-                  background: c.paperWarm,
-                  border: `1px solid ${c.inkHair}`,
-                  borderRadius: 2,
-                  padding: 16,
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: fontHead,
-                    fontSize: 13,
-                    color: c.ink,
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                    marginBottom: 10,
-                  }}
-                >
-                  文件
-                </div>
-                {documents.length === 0 ? (
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: c.inkFaint,
-                      fontFamily: fontMono,
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    尚未掛上文件
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {documents.slice(0, 4).map((doc) => (
-                      <button
-                        key={doc.id}
-                        onClick={() => setTab("docs")}
-                        style={{
-                          padding: 0,
-                          border: "none",
-                          background: "transparent",
-                          textAlign: "left",
-                          cursor: "pointer",
-                        }}
-                      >
-                        <div style={{ fontSize: 12.5, color: c.ink, fontWeight: 500 }}>{doc.name}</div>
-                        <div style={{ fontSize: 10.5, color: c.inkMuted, marginTop: 2 }}>{doc.status}</div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div
-                style={{
-                  background: c.surface,
-                  border: `1px solid ${c.inkHair}`,
-                  borderRadius: 2,
-                  padding: 16,
-                }}
-              >
-                <div
-                  style={{
-                    fontFamily: fontHead,
-                    fontSize: 13,
-                    color: c.ink,
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                    marginBottom: 10,
-                  }}
-                >
-                  成員
-                </div>
-                {members.length === 0 ? (
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: c.inkFaint,
-                      fontFamily: fontMono,
-                      letterSpacing: "0.04em",
-                    }}
-                  >
-                    尚未辨識成員
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {members.map((member) => (
-                      <div
-                        key={member.name}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 10,
-                          paddingBottom: 10,
-                          borderBottom: `1px solid ${c.inkHair}`,
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: 26,
-                            height: 26,
-                            borderRadius: "50%",
-                            background: c.vermSoft,
-                            border: `1px solid ${c.vermLine}`,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontFamily: fontHead,
-                            fontSize: 11,
-                            color: c.vermillion,
-                            fontWeight: 500,
-                          }}
-                        >
-                          {member.name[0] ?? ownerLetter}
-                        </div>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12.5, color: c.ink, fontWeight: 500 }}>{member.name}</div>
-                          <div style={{ fontSize: 10.5, color: c.inkMuted }}>{member.role}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
+          progressDetail ? (
+            <ProjectProgressConsole
+              progress={progressDetail}
+              onOpenTasks={() => setTab("tasks")}
+            />
+          ) : null
         ) : null}
 
         {tab === "tasks" ? (
@@ -1275,6 +1076,7 @@ function InkProjectDetail({
               onStatusChange={handleStatusChange}
               onUpdateTask={handleUpdateTask}
               onConfirmTask={handleConfirmTask}
+              onHandoffTask={handleHandoffTask}
             />
           )
         ) : null}
@@ -1427,6 +1229,8 @@ function InkProjectDetail({
         isOpen={creating}
         onClose={() => setCreating(false)}
         onCreateTask={handleCreateTask}
+        entities={[entity, ...children].filter((value): value is Entity => Boolean(value))}
+        blindspots={blindspots}
       />
     </>
   );

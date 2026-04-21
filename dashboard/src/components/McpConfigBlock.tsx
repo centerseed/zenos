@@ -6,7 +6,7 @@ interface McpConfigBlockProps {
   apiKey: string;
 }
 
-const MCP_SERVER_URL = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const MCP_SERVER_URL = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 const STREAMABLE_HTTP_URL = `${MCP_SERVER_URL}/mcp`;
 const SSE_URL = `${MCP_SERVER_URL}/sse`;
 

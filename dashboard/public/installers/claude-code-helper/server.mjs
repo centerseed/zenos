@@ -25,7 +25,7 @@ const HELPER_TOOLS = process.env.HELPER_TOOLS ?? "";
 const ZENOS_API_KEY = String(process.env.ZENOS_API_KEY || "").trim();
 const ZENOS_PROJECT = String(process.env.ZENOS_PROJECT || "").trim();
 const ZENOS_MCP_URL = String(
-  process.env.ZENOS_MCP_URL || "https://zenos-mcp-165893875709.asia-east1.run.app/mcp"
+  process.env.ZENOS_MCP_URL || "https://zenos-mcp-s5oifosv3a-de.a.run.app/mcp"
 ).trim();
 const SESSION_STATE_FILE = path.join(homedir(), ".zenos-cowork-helper", "sessions.json");
 const PERMISSION_TIMEOUT_SECONDS = Math.max(

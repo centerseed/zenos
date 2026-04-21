@@ -171,9 +171,10 @@ AC-R8:
 ## 技術約束（給 Architect）
 
 - 本 spec 不新增 task 狀態值，僅使用既有狀態集合。
-- 本 spec 不改動 task schema，只能使用既有欄位（含 `project`, `status`, `priority`, `dueDate`）。
+- 本 spec 不改動 task schema，只能使用既有 Task Core 欄位；除 `project`, `status`, `priority`, `dueDate` 外，也必須能承接已存在的 richer 欄位，如 `assignee_role_id`, `plan_id`, `plan_order`, `depends_on_task_ids`, `blocked_by`, `blocked_reason`, `linked_protocol`, `linked_blindspot`, `dispatcher`, `parent_task_id`。
 - 畫面篩選條件必須可在 Pulse/Kanban 間共享，同一套條件不得各自維護獨立語義。
 - 若既有 API 無法一次回傳專案摘要所需資料，必須在 implementation task 中明確拆分增量交付，不得以「前端自行推測」替代正式口徑。
+- 對於目前尚無專屬 read model 的 richer 欄位（例如 `plan_id`, `linked_protocol`），UI 可暫以穩定 ID 呈現或編輯，但不得靜默忽略。
 
 ## 邊界與治理規則
 
@@ -216,11 +217,42 @@ AC-R10:
 3. Given task status = todo，assignee 存在，updated_at = 72h 前，When 在 Kanban 檢視，Then 卡片顯示灰色「未開始 72h」badge。
 4. Given task 狀態為 done/cancelled/archived，When 在 Kanban 檢視，Then 不顯示任何風險 badge，無論 due_date 為何。
 
+### P0-7（R11）Richer Task Context 可見性
+
+- `/tasks` 的卡片與詳情面板必須能承接新版 task 架構中的核心 orchestration/context 欄位，至少包含：`dispatcher`, `parent_task_id`, `plan_id`, `plan_order`, `assignee_role_id`, `blocked_by`, `blocked_reason`, `linked_protocol`, `linked_blindspot`。
+- 有現成名稱 read model 時應顯示名稱；沒有時至少顯示穩定 ID，不得讓欄位消失。
+- `blocked_by` / `blocked_reason` 屬於風險資訊，必須在不打開 raw JSON 的情況下被看見。
+
+AC-R11:
+1. Given task 帶有 `dispatcher`, `parent_task_id`, `plan_id`, `plan_order`
+   When 使用者查看 TaskCard 或 Detail Drawer
+   Then 至少一個主要 UI 區塊必須直接顯示這些欄位的語意化資訊，而非只存在 API payload。
+2. Given task 帶有 `assignee_role_id`, `linked_protocol`, `linked_blindspot`
+   When 使用者開啟 Detail Drawer
+   Then 必須看到對應欄位值；若 UI 無名稱 read model，至少顯示穩定 ID。
+3. Given task 帶有 `blocked_by` 或 `blocked_reason`
+   When 使用者查看 TaskCard 或 Detail Drawer
+   Then 必須可直接辨識該 task 為 blocked/有阻塞資訊，且可看到 blocker count 或阻塞原因。
+
+### P1-4（R12）Richer Task Filter / Grouping
+
+- `/tasks` 必須在既有 `status/priority/project/dispatcher` 之外，補足至少一種 richer task filter（例如 `assignee_role_id` 或 `blocked`），避免新版 task 只能看不能篩。
+- Kanban 內屬於同一 `plan_id` 的 task 應保留群組顯示；若沒有 plan 名稱 read model，可先用穩定 ID fallback。
+
+AC-R12:
+1. Given 多張 task 分屬不同 `assignee_role_id` 或 blocked 狀態
+   When 使用者套用 richer filter
+   Then 看板、摘要與列表必須同步只顯示符合條件的 task。
+2. Given 多張 task 共享同一 `plan_id`
+   When 查看 Kanban
+   Then 必須維持同 plan 群組顯示，而不是退回無群組平鋪。
+
 ## Open Questions
 
 ## Changelog
 
 - 2026-04-19: reviewed against SPEC-task-governance dispatcher / handoff / subtask semantics; added reference note only, no conflicting state-machine text in this view spec.
+- 2026-04-21: expanded view contract to cover richer task context visibility and richer filters; UI may use stable IDs as fallback for fields without dedicated read model.
 
 1. `review` 是否需要進一步拆分「待審核」與「被退回」顯示（目前以 `rejectionReason` 偵測）？此項列為 P2 後續討論，不阻塞本 spec。
 2. 晨報的「無人動 48h」門檻是否應可由用戶設定（例如 24h / 72h）？Phase 0 先固定 48h，後續討論。

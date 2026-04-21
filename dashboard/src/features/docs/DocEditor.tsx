@@ -34,7 +34,7 @@ async function saveContent(
 ): Promise<{ revision_id: string; canonical_path: string; current_revision_id?: string }> {
   const apiBase =
     process.env.NEXT_PUBLIC_MCP_API_URL ||
-    "https://zenos-mcp-165893875709.asia-east1.run.app";
+    "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 
   const workspaceId =
     typeof window !== "undefined"

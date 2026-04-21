@@ -112,7 +112,7 @@ function Step1Content({
   );
 }
 
-const MCP_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const MCP_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 
 function Step2Content({ apiKey, useSSE }: { apiKey: string; useSSE: boolean }) {
   const endpoint = useSSE ? "sse" : "mcp";

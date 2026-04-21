@@ -135,7 +135,7 @@ describe("TaskDetailDrawer — B4 Zen migration", () => {
 
   it("renders dispatcher chip", () => {
     render(<TaskDetailDrawer task={makeTask({ dispatcher: "agent:developer" })} onClose={vi.fn()} />);
-    expect(screen.getByText("Developer")).toBeDefined();
+    expect(screen.getAllByText("Developer").length).toBeGreaterThan(0);
   });
 
   it("closes via onClose when close button is clicked", () => {

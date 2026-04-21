@@ -15,7 +15,7 @@ import {
 
 const HELPER_DEFAULT_URL = "http://127.0.0.1:4317";
 
-const MCP_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const MCP_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 
 type PlatformId =
   | "claude-code"

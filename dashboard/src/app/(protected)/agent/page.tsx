@@ -12,7 +12,7 @@ import { Section } from "@/components/zen/Section";
 import { Btn } from "@/components/zen/Btn";
 import { Icon, ICONS } from "@/components/zen/Icons";
 
-const MCP_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const MCP_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 
 type PlatformId =
   | "claude-code"

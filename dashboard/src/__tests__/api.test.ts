@@ -11,6 +11,8 @@ import {
   getAllBlindspots,
   getTasks,
   getTasksByEntity,
+  getPlans,
+  getProjectProgress,
   getPartnerMe,
   updatePartnerScope,
   uploadTaskAttachment,
@@ -29,7 +31,7 @@ import {
 } from "@/lib/api";
 
 const FAKE_TOKEN = "fake-token-abc";
-const API_BASE = "https://zenos-mcp-165893875709.asia-east1.run.app";
+const API_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 
 // Helper to create a mock fetch response
 function mockFetch(body: unknown, ok = true, status = 200) {
@@ -262,6 +264,30 @@ describe("getAllBlindspots", () => {
   });
 });
 
+// ─── getPlans ───
+
+describe("getPlans", () => {
+  it("calls GET /api/data/plans with repeated id params", async () => {
+    const fakeFetch = mockFetch({ plans: [] });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await getPlans(FAKE_TOKEN, ["plan-1", "plan-2"]);
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/data/plans?id=plan-1&id=plan-2`,
+      expect.any(Object)
+    );
+  });
+
+  it("returns plan array unwrapped from { plans: [...] } response", async () => {
+    const plans = [{ id: "plan-1", goal: "Ship aggregate", status: "active" }];
+    vi.stubGlobal("fetch", mockFetch({ plans }));
+
+    const result = await getPlans(FAKE_TOKEN, ["plan-1"]);
+    expect(result).toEqual(plans);
+  });
+});
+
 // ─── getTasks ───
 
 describe("getTasks", () => {
@@ -344,6 +370,86 @@ describe("getTasksByEntity", () => {
 
     const result = await getTasksByEntity(FAKE_TOKEN, "entity-xyz");
     expect(result).toEqual(tasks);
+  });
+});
+
+// ─── getProjectProgress ───
+
+describe("getProjectProgress", () => {
+  it("calls GET /api/data/projects/{id}/progress", async () => {
+    const fakeFetch = mockFetch({
+      project: { id: "proj-1", name: "Console", type: "product" },
+      active_plans: [],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [],
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await getProjectProgress(FAKE_TOKEN, "proj-1");
+
+    expect(fakeFetch).toHaveBeenCalledWith(
+      `${API_BASE}/api/data/projects/proj-1/progress`,
+      expect.any(Object)
+    );
+  });
+
+  it("hydrates nested snake_case date fields in the aggregate payload", async () => {
+    vi.stubGlobal("fetch", mockFetch({
+      project: {
+        id: "proj-1",
+        name: "Console",
+        type: "product",
+        updatedAt: "2026-04-21T00:00:00+00:00",
+      },
+      active_plans: [
+        {
+          id: "plan-1",
+          goal: "Ship S01",
+          status: "active",
+          owner: "Barry",
+          tasks_summary: { total: 3, by_status: { todo: 1 } },
+          open_count: 3,
+          blocked_count: 1,
+          review_count: 1,
+          overdue_count: 1,
+          updated_at: "2026-04-21T01:00:00+00:00",
+          next_tasks: [
+            {
+              id: "task-1",
+              title: "Backend aggregate",
+              status: "blocked",
+              priority: "high",
+              assignee_name: "Dev",
+              due_date: "2026-04-20T00:00:00+00:00",
+              overdue: true,
+              blocked: true,
+              blocked_reason: "Waiting on schema",
+              parent_task_id: null,
+              updated_at: "2026-04-21T02:00:00+00:00",
+              subtasks: [],
+            },
+          ],
+        },
+      ],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [
+        {
+          id: "task-1",
+          kind: "task",
+          title: "Backend aggregate",
+          subtitle: "Task · blocked",
+          updated_at: "2026-04-21T02:00:00+00:00",
+        },
+      ],
+    }));
+
+    const result = await getProjectProgress(FAKE_TOKEN, "proj-1");
+    expect(result.active_plans[0]?.updated_at).toBeInstanceOf(Date);
+    expect(result.active_plans[0]?.next_tasks[0]?.due_date).toBeInstanceOf(Date);
+    expect(result.recent_progress[0]?.updated_at).toBeInstanceOf(Date);
+    expect(result.project.updatedAt).toBeInstanceOf(Date);
   });
 });
 

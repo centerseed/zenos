@@ -50,7 +50,7 @@ interface TaskDetailDrawerProps {
   onConfirmTask?: (taskId: string, data: { action: "approve" | "reject"; rejection_reason?: string }) => Promise<void>;
   onHandoffTask?: (
     taskId: string,
-    data: { to_dispatcher: string; reason: string; notes?: string | null }
+    data: { to_dispatcher: string; reason: string; output_ref?: string | null; notes?: string | null }
   ) => Promise<void>;
 }
 
@@ -128,6 +128,59 @@ function formatDate(date: Date | null): string {
     month: "long",
     day: "numeric",
   });
+}
+
+function taskIdsToText(taskIds: string[] | undefined): string {
+  return (taskIds ?? []).join(", ");
+}
+
+function criteriaToText(criteria: string[] | undefined): string {
+  return (criteria ?? []).join("\n");
+}
+
+function prettyJson(value: unknown): string {
+  if (!value || typeof value !== "object") return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return "";
+  }
+}
+
+function applyLocalTaskFieldUpdate(task: Task, field: string, value: unknown): Task {
+  switch (field) {
+    case "due_date":
+      return {
+        ...task,
+        dueDate: typeof value === "string" && value ? new Date(value) : null,
+      };
+    case "assignee_role_id":
+      return { ...task, assigneeRoleId: typeof value === "string" ? value : null };
+    case "plan_id":
+      return { ...task, planId: typeof value === "string" ? value : null };
+    case "plan_order":
+      return { ...task, planOrder: typeof value === "number" ? value : null };
+    case "depends_on_task_ids":
+      return { ...task, dependsOnTaskIds: Array.isArray(value) ? value as string[] : [] };
+    case "linked_protocol":
+      return { ...task, linkedProtocol: typeof value === "string" ? value : null };
+    case "linked_blindspot":
+      return { ...task, linkedBlindspot: typeof value === "string" ? value : null };
+    case "source_metadata":
+      return { ...task, sourceMetadata: (value as Task["sourceMetadata"]) ?? undefined };
+    case "blocked_by":
+      return { ...task, blockedBy: Array.isArray(value) ? value as string[] : [] };
+    case "blocked_reason":
+      return { ...task, blockedReason: typeof value === "string" ? value : null };
+    case "acceptance_criteria":
+      return { ...task, acceptanceCriteria: Array.isArray(value) ? value as string[] : [] };
+    case "parent_task_id":
+      return { ...task, parentTaskId: typeof value === "string" ? value : null };
+    case "dispatcher":
+      return { ...task, dispatcher: typeof value === "string" ? value : null };
+    default:
+      return { ...task, [field]: value };
+  }
 }
 
 function ContextCard({ entity }: { entity?: Entity; name: string }) {
@@ -324,8 +377,23 @@ export function TaskDetailDrawer({
   const [handoffCustom, setHandoffCustom] = useState("");
   const [handoffReason, setHandoffReason] = useState("");
   const [handoffNotes, setHandoffNotes] = useState("");
+  const [handoffOutputRef, setHandoffOutputRef] = useState("");
   const [handoffSubmitting, setHandoffSubmitting] = useState(false);
   const [handoffError, setHandoffError] = useState<string | null>(null);
+  const [advancedSubmitting, setAdvancedSubmitting] = useState(false);
+  const [advancedError, setAdvancedError] = useState<string | null>(null);
+  const [draftAcceptanceCriteria, setDraftAcceptanceCriteria] = useState("");
+  const [draftAssigneeRoleId, setDraftAssigneeRoleId] = useState("");
+  const [draftPlanId, setDraftPlanId] = useState("");
+  const [draftPlanOrder, setDraftPlanOrder] = useState("");
+  const [draftLinkedProtocol, setDraftLinkedProtocol] = useState("");
+  const [draftLinkedBlindspot, setDraftLinkedBlindspot] = useState("");
+  const [draftDependsOnTaskIds, setDraftDependsOnTaskIds] = useState("");
+  const [draftBlockedBy, setDraftBlockedBy] = useState("");
+  const [draftBlockedReason, setDraftBlockedReason] = useState("");
+  const [draftParentTaskId, setDraftParentTaskId] = useState("");
+  const [draftDispatcher, setDraftDispatcher] = useState("");
+  const [draftSourceMetadata, setDraftSourceMetadata] = useState("");
 
   useEffect(() => {
     setLocalTask(task);
@@ -341,9 +409,24 @@ export function TaskDetailDrawer({
     setShowHandoffForm(false);
     setHandoffReason("");
     setHandoffNotes("");
+    setHandoffOutputRef("");
     setHandoffError(null);
     setHandoffCustom("");
     setHandoffTarget("agent:developer");
+    setAdvancedSubmitting(false);
+    setAdvancedError(null);
+    setDraftAcceptanceCriteria(criteriaToText(task?.acceptanceCriteria));
+    setDraftAssigneeRoleId(task?.assigneeRoleId ?? "");
+    setDraftPlanId(task?.planId ?? "");
+    setDraftPlanOrder(task?.planOrder?.toString() ?? "");
+    setDraftLinkedProtocol(task?.linkedProtocol ?? "");
+    setDraftLinkedBlindspot(task?.linkedBlindspot ?? "");
+    setDraftDependsOnTaskIds(taskIdsToText(task?.dependsOnTaskIds));
+    setDraftBlockedBy(taskIdsToText(task?.blockedBy));
+    setDraftBlockedReason(task?.blockedReason ?? "");
+    setDraftParentTaskId(task?.parentTaskId ?? "");
+    setDraftDispatcher(task?.dispatcher ?? "");
+    setDraftSourceMetadata(prettyJson(task?.sourceMetadata));
   }, [task]);
 
   // Fetch comments when task and token are available
@@ -414,29 +497,98 @@ export function TaskDetailDrawer({
       await onHandoffTask(localTask.id, {
         to_dispatcher: to,
         reason: handoffReason.trim(),
+        output_ref: handoffOutputRef.trim() || null,
         notes: handoffNotes.trim() || null,
       });
       setShowHandoffForm(false);
       setHandoffReason("");
       setHandoffNotes("");
+      setHandoffOutputRef("");
       setHandoffCustom("");
     } catch (err) {
       setHandoffError(err instanceof Error ? err.message : "Handoff 失敗");
     } finally {
       setHandoffSubmitting(false);
     }
-  }, [localTask, onHandoffTask, handoffTarget, handoffCustom, handoffReason, handoffNotes]);
+  }, [localTask, onHandoffTask, handoffTarget, handoffCustom, handoffReason, handoffOutputRef, handoffNotes]);
 
   const handleFieldSave = useCallback(async (field: string, value: unknown) => {
     if (!localTask || !onUpdateTask) return;
     const prev = localTask;
-    setLocalTask({ ...localTask, [field]: value });
+    setLocalTask(applyLocalTaskFieldUpdate(localTask, field, value));
     try {
       await onUpdateTask(localTask.id, { [field]: value });
     } catch {
       setLocalTask(prev);
     }
   }, [localTask, onUpdateTask]);
+
+  const handleAdvancedSave = useCallback(async () => {
+    if (!localTask || !onUpdateTask) return;
+
+    const parseIds = (raw: string) =>
+      raw.split(",").map((item) => item.trim()).filter(Boolean);
+    const parseCriteria = (raw: string) =>
+      raw.split("\n").map((item) => item.trim()).filter(Boolean);
+
+    let parsedMetadata: Record<string, unknown> | null = null;
+    if (draftSourceMetadata.trim()) {
+      try {
+        parsedMetadata = JSON.parse(draftSourceMetadata);
+      } catch {
+        setAdvancedError("source metadata 必須是合法 JSON");
+        return;
+      }
+    }
+
+    const updates: Record<string, unknown> = {
+      acceptance_criteria: parseCriteria(draftAcceptanceCriteria),
+      assignee_role_id: draftAssigneeRoleId.trim() || null,
+      plan_id: draftPlanId.trim() || null,
+      plan_order: draftPlanOrder.trim() ? Number(draftPlanOrder) : null,
+      linked_protocol: draftLinkedProtocol.trim() || null,
+      linked_blindspot: draftLinkedBlindspot.trim() || null,
+      depends_on_task_ids: parseIds(draftDependsOnTaskIds),
+      blocked_by: parseIds(draftBlockedBy),
+      blocked_reason: draftBlockedReason.trim() || null,
+      parent_task_id: draftParentTaskId.trim() || null,
+      dispatcher: draftDispatcher.trim() || null,
+      source_metadata: parsedMetadata,
+    };
+
+    const prev = localTask;
+    let next = localTask;
+    for (const [field, value] of Object.entries(updates)) {
+      next = applyLocalTaskFieldUpdate(next, field, value);
+    }
+
+    setAdvancedSubmitting(true);
+    setAdvancedError(null);
+    setLocalTask(next);
+    try {
+      await onUpdateTask(localTask.id, updates);
+    } catch (err) {
+      setLocalTask(prev);
+      setAdvancedError(err instanceof Error ? err.message : "Rich task 欄位更新失敗");
+    } finally {
+      setAdvancedSubmitting(false);
+    }
+  }, [
+    draftAcceptanceCriteria,
+    draftAssigneeRoleId,
+    draftBlockedBy,
+    draftBlockedReason,
+    draftDependsOnTaskIds,
+    draftDispatcher,
+    draftLinkedBlindspot,
+    draftLinkedProtocol,
+    draftParentTaskId,
+    draftPlanId,
+    draftPlanOrder,
+    draftSourceMetadata,
+    localTask,
+    onUpdateTask,
+  ]);
 
   function requestStatusChange(newStatus: string) {
     if (!localTask) return;
@@ -687,6 +839,13 @@ export function TaskDetailDrawer({
                 placeholder="交棒原因（必填）"
                 rows={2}
                 resize="none"
+              />
+              <Input
+                t={t}
+                size="sm"
+                value={handoffOutputRef}
+                onChange={setHandoffOutputRef}
+                placeholder="output_ref（選填）"
               />
               <Textarea
                 t={t}
@@ -961,45 +1120,257 @@ export function TaskDetailDrawer({
       </div>
 
       {/* Acceptance Criteria */}
-      {displayTask.acceptanceCriteria && displayTask.acceptanceCriteria.length > 0 && (
+      {(onUpdateTask || (displayTask.acceptanceCriteria && displayTask.acceptanceCriteria.length > 0)) && (
         <div>
           {sectionLabel("Success Criteria")}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {displayTask.acceptanceCriteria.map((item, idx) => (
-              <div
-                key={idx}
-                style={{
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: 12,
-                  background: c.paperWarm,
-                  border: `1px solid ${c.inkHair}`,
-                  borderRadius: t.radius,
-                  padding: 12,
-                }}
-              >
+          {onUpdateTask ? (
+            <Textarea
+              t={t}
+              value={draftAcceptanceCriteria}
+              onChange={setDraftAcceptanceCriteria}
+              placeholder="每行一條 acceptance criteria"
+              rows={4}
+              resize="vertical"
+            />
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {displayTask.acceptanceCriteria.map((item, idx) => (
                 <div
+                  key={idx}
                   style={{
-                    flexShrink: 0,
-                    width: 18,
-                    height: 18,
-                    borderRadius: "50%",
-                    border: `1px solid ${c.inkHairBold}`,
                     display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontFamily: t.fontMono,
-                    fontSize: 10,
-                    fontWeight: 700,
-                    color: c.inkMuted,
-                    marginTop: 1,
+                    alignItems: "flex-start",
+                    gap: 12,
+                    background: c.paperWarm,
+                    border: `1px solid ${c.inkHair}`,
+                    borderRadius: t.radius,
+                    padding: 12,
                   }}
                 >
-                  {idx + 1}
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      width: 18,
+                      height: 18,
+                      borderRadius: "50%",
+                      border: `1px solid ${c.inkHairBold}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontFamily: t.fontMono,
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: c.inkMuted,
+                      marginTop: 1,
+                    }}
+                  >
+                    {idx + 1}
+                  </div>
+                  <p style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink, lineHeight: 1.6, margin: 0 }}>{item}</p>
                 </div>
-                <p style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink, lineHeight: 1.6, margin: 0 }}>{item}</p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {(onUpdateTask || displayTask.assigneeRoleId || displayTask.linkedProtocol || displayTask.linkedBlindspot || displayTask.dependsOnTaskIds?.length || displayTask.blockedBy.length || displayTask.blockedReason || displayTask.sourceMetadata || displayTask.parentTaskId || displayTask.dispatcher || displayTask.planId) && (
+        <div style={{ paddingTop: 16, borderTop: `1px solid ${c.inkHair}` }}>
+          {sectionLabel("Rich Task Context")}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Assignee Role
+              </span>
+              {onUpdateTask ? (
+                <Select
+                  t={t}
+                  size="sm"
+                  value={draftAssigneeRoleId}
+                  onChange={(value) => setDraftAssigneeRoleId(value ?? "")}
+                  options={[
+                    { value: "", label: "未指定" },
+                    ...Object.values(entitiesById)
+                      .filter((entity) => entity.type === "role")
+                      .map((entity) => ({ value: entity.id, label: entity.name })),
+                  ]}
+                />
+              ) : (
+                <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>
+                  {displayTask.assigneeRoleId ? entityNames[displayTask.assigneeRoleId] ?? displayTask.assigneeRoleId : "未指定"}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Dispatcher
+              </span>
+              {onUpdateTask ? (
+                <Select
+                  t={t}
+                  size="sm"
+                  value={draftDispatcher}
+                  onChange={(value) => setDraftDispatcher(value ?? "")}
+                  options={[
+                    { value: "", label: "未指定" },
+                    ...DISPATCHER_PRESETS.map((preset) => ({
+                      value: preset.value,
+                      label: `${preset.label} (${preset.value})`,
+                    })),
+                  ]}
+                />
+              ) : (
+                <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>
+                  {dispatcherLabel(displayTask.dispatcher)}
+                </span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Plan ID
+              </span>
+              {onUpdateTask ? (
+                <Input t={t} size="sm" value={draftPlanId} onChange={setDraftPlanId} placeholder="plan_id" />
+              ) : (
+                <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.inkMuted }}>{displayTask.planId || "未指定"}</span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Plan Order
+              </span>
+              {onUpdateTask ? (
+                <Input t={t} size="sm" type="number" value={draftPlanOrder} onChange={setDraftPlanOrder} placeholder="1" />
+              ) : (
+                <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.inkMuted }}>{displayTask.planOrder ?? "未指定"}</span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Parent Task
+              </span>
+              {onUpdateTask ? (
+                <Input t={t} size="sm" value={draftParentTaskId} onChange={setDraftParentTaskId} placeholder="parent_task_id" />
+              ) : (
+                <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.inkMuted }}>{displayTask.parentTaskId || "未指定"}</span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Linked Protocol
+              </span>
+              {onUpdateTask ? (
+                <Input t={t} size="sm" value={draftLinkedProtocol} onChange={setDraftLinkedProtocol} placeholder="protocol id" />
+              ) : (
+                <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.inkMuted }}>{displayTask.linkedProtocol || "未指定"}</span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Linked Blindspot
+              </span>
+              {onUpdateTask ? (
+                <Input t={t} size="sm" value={draftLinkedBlindspot} onChange={setDraftLinkedBlindspot} placeholder="blindspot id" />
+              ) : (
+                <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.inkMuted }}>{displayTask.linkedBlindspot || "未指定"}</span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Depends On
+              </span>
+              {onUpdateTask ? (
+                <Textarea t={t} value={draftDependsOnTaskIds} onChange={setDraftDependsOnTaskIds} rows={3} resize="vertical" placeholder="task-a, task-b" />
+              ) : (
+                <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.inkMuted, whiteSpace: "pre-wrap" }}>{taskIdsToText(displayTask.dependsOnTaskIds) || "未指定"}</span>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Blocked By
+              </span>
+              {onUpdateTask ? (
+                <Textarea t={t} value={draftBlockedBy} onChange={setDraftBlockedBy} rows={3} resize="vertical" placeholder="task-a, task-b" />
+              ) : (
+                <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.inkMuted, whiteSpace: "pre-wrap" }}>{taskIdsToText(displayTask.blockedBy) || "未指定"}</span>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Blocked Reason
+              </span>
+              {onUpdateTask ? (
+                <Textarea t={t} value={draftBlockedReason} onChange={setDraftBlockedReason} rows={2} resize="vertical" placeholder="blocked_reason" />
+              ) : (
+                <div style={{ fontFamily: t.fontBody, fontSize: 13, color: c.inkMuted, lineHeight: 1.6 }}>{displayTask.blockedReason || "未指定"}</div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <span style={{ fontFamily: t.fontMono, fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", color: c.inkFaint }}>
+                Source Metadata
+              </span>
+              {onUpdateTask ? (
+                <Textarea
+                  t={t}
+                  value={draftSourceMetadata}
+                  onChange={setDraftSourceMetadata}
+                  rows={8}
+                  resize="vertical"
+                  placeholder='{"provenance":[{"type":"chat","label":"..."}]}'
+                />
+              ) : (
+                <pre
+                  style={{
+                    margin: 0,
+                    padding: 16,
+                    background: c.paperWarm,
+                    border: `1px solid ${c.inkHair}`,
+                    borderRadius: t.radius,
+                    fontFamily: t.fontMono,
+                    fontSize: 11,
+                    lineHeight: 1.6,
+                    color: c.inkMuted,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  {prettyJson(displayTask.sourceMetadata) || "未指定"}
+                </pre>
+              )}
+            </div>
+
+            {onUpdateTask && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "space-between" }}>
+                {advancedError ? (
+                  <span style={{ fontFamily: t.fontBody, fontSize: 12, color: c.vermillion }}>{advancedError}</span>
+                ) : (
+                  <span style={{ fontFamily: t.fontBody, fontSize: 12, color: c.inkFaint }}>
+                    這一區會一次更新 richer task 欄位。
+                  </span>
+                )}
+                <Btn
+                  t={t}
+                  variant="ink"
+                  size="sm"
+                  onClick={handleAdvancedSave}
+                  style={{ opacity: advancedSubmitting ? 0.5 : 1 }}
+                >
+                  {advancedSubmitting ? "儲存中…" : "儲存 Rich Fields"}
+                </Btn>
               </div>
-            ))}
+            )}
           </div>
         </div>
       )}

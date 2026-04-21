@@ -16,7 +16,7 @@ export { API_BASE, setActiveWorkspaceId };
 const DATE_FIELDS = new Set([
   "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
   "summaryUpdatedAt", "highlightsUpdatedAt",
-  "summary_updated_at", "highlights_updated_at", "last_published_at",
+  "summary_updated_at", "highlights_updated_at", "last_published_at", "due_date",
   "updated_at", "cached_at",
 ]);
 
@@ -182,6 +182,91 @@ export interface GraphContextResponse {
   };
   estimated_tokens: number;
   cached_at: Date;
+}
+
+export interface ProjectProgressTaskSummary {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  assignee_name: string | null;
+  due_date: Date | null;
+  overdue: boolean;
+  blocked: boolean;
+  blocked_reason: string | null;
+  parent_task_id: string | null;
+  updated_at: Date | null;
+  subtasks: ProjectProgressTaskSummary[];
+}
+
+export interface ProjectProgressPlanSummary {
+  id: string;
+  goal: string;
+  status: string;
+  owner: string | null;
+  tasks_summary: {
+    total?: number;
+    by_status?: Record<string, number>;
+  };
+  open_count: number;
+  blocked_count: number;
+  review_count: number;
+  overdue_count: number;
+  updated_at: Date | null;
+  next_tasks: ProjectProgressTaskSummary[];
+}
+
+export interface ProjectProgressOpenWorkGroup {
+  plan_id: string | null;
+  plan_goal: string | null;
+  plan_status: string | null;
+  open_count: number;
+  blocked_count: number;
+  review_count: number;
+  overdue_count: number;
+  tasks: ProjectProgressTaskSummary[];
+}
+
+export interface ProjectProgressMilestone {
+  id: string;
+  name: string;
+  open_count: number;
+}
+
+export interface ProjectRecentProgressItem {
+  id: string;
+  kind: "task" | "plan" | "entity";
+  title: string;
+  subtitle: string;
+  updated_at: Date | null;
+}
+
+export interface ProjectProgressResponse {
+  project: Entity;
+  active_plans: ProjectProgressPlanSummary[];
+  open_work_groups: ProjectProgressOpenWorkGroup[];
+  milestones: ProjectProgressMilestone[];
+  recent_progress: ProjectRecentProgressItem[];
+}
+
+export interface PlanSummary {
+  id: string;
+  goal: string;
+  status: string;
+  owner: string | null;
+  entry_criteria?: string | null;
+  exit_criteria?: string | null;
+  project?: string | null;
+  project_id?: string | null;
+  created_by?: string | null;
+  updated_by?: string | null;
+  result?: string | null;
+  created_at?: Date | null;
+  updated_at?: Date | null;
+  tasks_summary?: {
+    total?: number;
+    by_status?: Record<string, number>;
+  };
 }
 
 /** Fetch a single entity together with impact chain context */
@@ -484,6 +569,27 @@ export async function getTasksByEntity(
   return res.tasks;
 }
 
+export async function getPlans(
+  token: string,
+  planIds?: string[],
+): Promise<PlanSummary[]> {
+  const params = new URLSearchParams();
+  for (const planId of planIds ?? []) {
+    if (planId?.trim()) params.append("id", planId.trim());
+  }
+  const qs = params.toString();
+  const res = await apiFetch<{ plans: PlanSummary[] }>(`/api/data/plans${qs ? `?${qs}` : ""}`, token);
+  return res.plans;
+}
+
+/** Fetch project progress aggregate payload for the project console. */
+export async function getProjectProgress(
+  token: string,
+  entityId: string
+): Promise<ProjectProgressResponse> {
+  return apiFetch<ProjectProgressResponse>(`/api/data/projects/${entityId}/progress`, token);
+}
+
 /** Fetch the current partner (auth) */
 export async function getPartnerMe(token: string): Promise<Partner> {
   const res = await apiFetch<{ partner: Partner }>("/api/partner/me", token, { cache: "no-store" });
@@ -709,6 +815,18 @@ export async function createTask(
     due_date?: string;
     project?: string;
     linked_entities?: string[];
+    acceptance_criteria?: string[];
+    assignee_role_id?: string | null;
+    linked_protocol?: string | null;
+    linked_blindspot?: string | null;
+    blocked_by?: string[];
+    blocked_reason?: string | null;
+    plan_id?: string | null;
+    plan_order?: number | null;
+    depends_on_task_ids?: string[];
+    parent_task_id?: string | null;
+    dispatcher?: string | null;
+    source_metadata?: Record<string, unknown>;
   }
 ): Promise<Task> {
   const body = await apiRequest<{ task?: Task } | Task>("/api/data/tasks", {
@@ -728,9 +846,22 @@ export async function updateTask(
     title?: string;
     description?: string;
     priority?: string;
-    assignee?: string;
+    assignee?: string | null;
     due_date?: string | null;
     result?: string;
+    acceptance_criteria?: string[];
+    assignee_role_id?: string | null;
+    linked_entities?: string[];
+    linked_protocol?: string | null;
+    linked_blindspot?: string | null;
+    blocked_by?: string[];
+    blocked_reason?: string | null;
+    plan_id?: string | null;
+    plan_order?: number | null;
+    depends_on_task_ids?: string[];
+    parent_task_id?: string | null;
+    dispatcher?: string | null;
+    source_metadata?: Record<string, unknown>;
   }
 ): Promise<Task> {
   const body = await apiRequest<{ task?: Task } | Task>(`/api/data/tasks/${taskId}`, {
