@@ -277,6 +277,7 @@ def _graph_context_is_visible(entity: Entity, partner: dict) -> bool:
 def _graph_context_tags(entity: Entity) -> dict:
     what = entity.tags.what if isinstance(entity.tags.what, list) else [entity.tags.what] if entity.tags.what else []
     who = entity.tags.who if isinstance(entity.tags.who, list) else [entity.tags.who] if entity.tags.who else []
+    product_id = getattr(t, "product_id", getattr(t, "project_id", None))
     return {
         "what": [str(item).strip() for item in what if str(item).strip()],
         "why": str(entity.tags.why or "").strip(),
@@ -932,6 +933,7 @@ def _task_to_dict(t: Task) -> dict:
         "blocked": "todo",
         "archived": "done",
     }.get(t.status, t.status)
+    product_id = getattr(t, "product_id", getattr(t, "project_id", None))
     return {
         "id": t.id,
         "title": t.title,
@@ -963,8 +965,8 @@ def _task_to_dict(t: Task) -> dict:
         "rejectionReason": t.rejection_reason,
         "result": t.result,
         "project": t.project,
-        "productId": t.product_id,
-        "product_id": t.product_id,
+        "productId": product_id,
+        "product_id": product_id,
         "dispatcher": t.dispatcher,
         "parentTaskId": t.parent_task_id,
         "handoffEvents": [
