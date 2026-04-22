@@ -272,6 +272,11 @@ describe("SPEC-project-progress-console acceptance tests", () => {
   });
 
   beforeEach(() => {
+    window.history.replaceState({}, "", "/projects");
+    Object.defineProperty(window, "scrollTo", {
+      writable: true,
+      value: vi.fn(),
+    });
     getProjectEntitiesMock.mockReset();
     getProjectProgressMock.mockReset();
     getTasksByEntityMock.mockReset();
@@ -567,5 +572,21 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(screen.getAllByText("Launch project progress console").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Ship grouped open work").length).toBeGreaterThan(0);
     expect(screen.getByTestId("project-recap-panel")).toBeInTheDocument();
+  });
+
+  it("AC-PPC-16: Given 產品頁主內容很長 When 使用者向下捲動 Then 右側 task copilot 應固定在 viewport 內而不是跟主內容一起滑走", async function acPpc16RecapRailStickyColumn() {
+    render(
+      <ProjectProgressConsole
+        progress={makeProgressFixture()}
+        onOpenTasks={() => {}}
+      />
+    );
+
+    expect(screen.getByTestId("project-recap-rail-column")).toHaveStyle({
+      position: "sticky",
+      top: "20px",
+      alignSelf: "start",
+      maxHeight: "calc(100vh - 40px)",
+    });
   });
 });

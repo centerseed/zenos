@@ -3,7 +3,7 @@
 // ZenOS · Products page — Zen Ink redesign with real data
 // Wired to getProjectEntities + getTasksByEntity + getEntityContext + getChildEntities
 
-import { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useInk } from "@/lib/zen-ink/tokens";
 import { Icon, ICONS } from "@/components/zen/Icons";
 import { Section } from "@/components/zen/Section";
@@ -16,12 +16,14 @@ import { MilestoneCreateDialog } from "@/components/MilestoneCreateDialog";
 import { ProjectProgressConsole } from "@/features/projects/ProjectProgressConsole";
 import { useAuth } from "@/lib/auth";
 import {
+  applyHomeWorkspaceBootstrap,
   confirmTask,
   createMilestone,
   createPlan,
   createTask,
   getAllBlindspots,
   getProjectEntities,
+  getProjectEntitiesInWorkspace,
   getProjectProgress,
   getTasksByEntity,
   getEntityContext,
@@ -29,6 +31,7 @@ import {
   handoffTask,
   updateTask,
 } from "@/lib/api";
+import { resolveActiveWorkspace } from "@/lib/partner";
 import type { EntityContextResponse, ProjectProgressResponse } from "@/lib/api";
 import type { Blindspot, Entity, Task } from "@/types";
 
@@ -110,6 +113,14 @@ function computeProgress(tasks: Task[]): TaskProgress {
 function formatShortDate(date: Date | null | undefined): string {
   if (!date) return "—";
   return date.toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" });
+}
+
+function scrollPageToTop(): void {
+  if (typeof window === "undefined" || typeof window.scrollTo !== "function") {
+    return;
+  }
+
+  window.scrollTo({ top: 0, behavior: "auto" });
 }
 
 // ─── Loading state ────────────────────────────────────────────────────────────
@@ -202,6 +213,87 @@ function InkErrorCard({
   );
 }
 
+function HomeWorkspaceBootstrapBanner({
+  productNames,
+  loading,
+  error,
+  onApply,
+}: {
+  productNames: string[];
+  loading: boolean;
+  error: string | null;
+  onApply: () => void;
+}) {
+  const t = useInk("light");
+  const { c, fontMono, fontHead } = t;
+
+  return (
+    <div
+      style={{
+        background: c.surface,
+        border: `1px solid ${c.vermLine}`,
+        marginBottom: 24,
+        padding: 20,
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: 20,
+      }}
+    >
+      <div style={{ flex: 1 }}>
+        <div
+          style={{
+            fontFamily: fontMono,
+            fontSize: 10,
+            letterSpacing: "0.16em",
+            color: c.vermillion,
+            textTransform: "uppercase",
+            marginBottom: 8,
+          }}
+        >
+          Home Workspace Bootstrap
+        </div>
+        <div
+          style={{
+            fontFamily: fontHead,
+            fontSize: 20,
+            lineHeight: 1.35,
+            color: c.ink,
+            marginBottom: 8,
+          }}
+        >
+          可匯入的起始產品
+        </div>
+        <div style={{ fontSize: 13, color: c.inkMuted, lineHeight: 1.7 }}>
+          這些 product 目前只在共享工作區可見。按下匯入後，會在你的 home workspace 建立自己的 copy。
+        </div>
+        <div
+          style={{
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            marginTop: 12,
+          }}
+        >
+          {productNames.map((name) => (
+            <Chip key={name} t={t} tone="accent">
+              {name}
+            </Chip>
+          ))}
+        </div>
+        {error ? (
+          <div style={{ marginTop: 12, fontSize: 12, color: c.vermillion }}>
+            {error}
+          </div>
+        ) : null}
+      </div>
+      <Btn t={t} variant="seal" onClick={onApply} disabled={loading}>
+        {loading ? "匯入中…" : "匯入到 Home Workspace"}
+      </Btn>
+    </div>
+  );
+}
+
 // ─── Products List ────────────────────────────────────────────────────────────
 
 interface ProjectWithProgress {
@@ -211,9 +303,11 @@ interface ProjectWithProgress {
 
 function InkProjectsList({
   projects,
+  bootstrapBanner,
   onOpen,
 }: {
   projects: ProjectWithProgress[];
+  bootstrapBanner?: ReactNode;
   onOpen: (id: string) => void;
 }) {
   const t = useInk("light");
@@ -272,6 +366,8 @@ function InkProjectsList({
           </div>
         }
       />
+
+      {bootstrapBanner}
 
       {/* KPI strip */}
       <div
@@ -1334,7 +1430,8 @@ function InkProjectDetail({
 // ─── Page entry ───────────────────────────────────────────────────────────────
 
 export default function ProjectsPage() {
-  const { user } = useAuth();
+  const { user, partner, refetchPartner } = useAuth();
+  const activeWorkspace = resolveActiveWorkspace(partner);
 
   const [entities, setEntities] = useState<Entity[]>([]);
   // Map from entityId to TaskProgress (null = not yet loaded)
@@ -1379,13 +1476,13 @@ export default function ProjectsPage() {
     if (nextId) {
       url.searchParams.set("id", nextId);
       window.history.pushState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-      window.scrollTo({ top: 0, behavior: "auto" });
+      scrollPageToTop();
       return;
     }
 
     url.searchParams.delete("id");
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
-    window.scrollTo({ top: 0, behavior: "auto" });
+    scrollPageToTop();
   }, []);
 
   const fetchProjects = useCallback(async () => {
