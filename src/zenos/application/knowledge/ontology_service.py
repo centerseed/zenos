@@ -1102,6 +1102,7 @@ class OntologyService:
     _L1_TYPES: frozenset[str] = frozenset({"product", "company", "person"})
     _L2_TYPES: frozenset[str] = frozenset({"module"})
     _L3_TYPES: frozenset[str] = frozenset({"document", "goal", "role", "project"})
+    _MODULE_SCOPED_L3_TYPES: frozenset[str] = frozenset({"document", "role", "project"})
 
     async def _enforce_guest_write_guard(self, data: dict, partner: dict) -> None:
         """Enforce write restrictions for guest partners.
@@ -1407,9 +1408,9 @@ class OntologyService:
                     f"Create the parent entity first."
                 )
 
-        # 6b. Auto-infer module parent for L3 entities
-        l3_types = {"document", "goal", "role", "project"}
-        if entity_type in l3_types:
+        # 6b. Auto-infer module parent for module-scoped L3 entities.
+        # Milestones are represented as type=goal and stay directly under product.
+        if entity_type in self._MODULE_SCOPED_L3_TYPES:
             inferred_parent = await self._infer_module_parent(merged_data)
             if inferred_parent and inferred_parent != merged_data.get("parent_id"):
                 warnings.append(

@@ -1499,6 +1499,7 @@ class TestGetProjectProgress:
         milestone = _make_entity("goal-1")
         milestone.type = "goal"
         milestone.level = 3
+        milestone.parent_id = "proj-1"
         milestone.name = "Milestone Alpha"
         plan = _make_plan("plan-1")
         plan.goal = "Ship S01 aggregate"
@@ -1579,6 +1580,9 @@ class TestGetProjectProgress:
         assert body["project"]["id"] == "proj-1"
         assert body["active_plans"][0]["id"] == "plan-1"
         assert body["active_plans"][0]["goal"] == "Ship S01 aggregate"
+        assert body["active_plans"][0]["milestones"] == [
+            {"id": "goal-1", "name": "Milestone Alpha"}
+        ]
         assert body["active_plans"][0]["open_count"] == 4
         assert body["active_plans"][0]["blocked_count"] == 1
         assert body["active_plans"][0]["review_count"] == 1
@@ -1680,6 +1684,66 @@ class TestGetProjectProgress:
             {"id": "goal-1", "name": "Milestone Alpha", "open_count": 0}
         ]
         assert any(item["kind"] == "plan" and item["id"] == "plan-empty" for item in body["recent_progress"])
+
+
+class TestCreateMilestone:
+
+    async def test_creates_goal_entity_under_product(self):
+        from zenos.interface.dashboard_api import create_milestone
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={
+            "name": "M1 稅務申報完成",
+            "summary": "完成公司稅務啟動",
+            "product_id": "prod-1",
+            "status": "active",
+            "owner": "Barry",
+        })
+        product = _make_entity("prod-1")
+        product.type = "product"
+        product.level = 1
+        product.name = "個人"
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_entity_repo.get_by_id = AsyncMock(return_value=product)
+            mock_entity_repo.upsert = AsyncMock(side_effect=lambda entity: entity)
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await create_milestone(request)
+
+        body = json.loads(resp.body)
+        assert resp.status_code == 201
+        assert body["milestone"]["type"] == "goal"
+        assert body["milestone"]["parentId"] == "prod-1"
+        saved_entity = mock_entity_repo.upsert.await_args.args[0]
+        assert saved_entity.type == "goal"
+        assert saved_entity.parent_id == "prod-1"
+        assert saved_entity.tags.what == ["milestone"]
+
+    async def test_rejects_non_product_parent(self):
+        from zenos.interface.dashboard_api import create_milestone
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={"name": "M1", "product_id": "mod-1"})
+        module = _make_entity("mod-1")
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_entity_repo.get_by_id = AsyncMock(return_value=module)
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await create_milestone(request)
+
+        body = json.loads(resp.body)
+        assert resp.status_code == 400
+        assert "product entity" in body["message"]
 
 
 class TestListPlans:

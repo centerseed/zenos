@@ -1753,8 +1753,8 @@ class TestConfirmedEntityFieldUpdate:
 
 
 class TestAutoInferModuleParent:
-    """Verify that L3 entities (document/goal/role/project) with parent_id
-    pointing to a Product or null get auto-inferred to the best matching Module."""
+    """Verify module-scoped L3 entities are inferred to the best matching module,
+    while milestone goals remain attached to their product parent."""
 
     @pytest.mark.asyncio
     async def test_document_with_product_parent_auto_inferred_to_module(self):
@@ -1886,6 +1886,52 @@ class TestAutoInferModuleParent:
 
         assert result.entity.parent_id == "mod-1"
         # No auto-inference warning expected
+        if result.warnings:
+            assert not any("自動推斷" in w for w in result.warnings)
+
+    @pytest.mark.asyncio
+    async def test_goal_with_product_parent_remains_under_product(self):
+        """Milestone goals should stay directly under the product parent."""
+        repos = _mock_repos()
+
+        product = Entity(
+            id="prod-1", name="Dogfood Test Product", type="product",
+            summary="Internal smoke test product",
+            tags=Tags(what=["dogfood"], why="testing", how="manual", who=["team"]),
+        )
+        module = Entity(
+            id="mod-1", name="Internal Tooling", type="module",
+            parent_id="prod-1",
+            summary="Tooling module",
+            tags=Tags(what=["tooling"], why="ops", how="python", who=["dev"]),
+        )
+
+        def mock_get_by_id(eid):
+            lookup = {"prod-1": product, "mod-1": module}
+            return lookup.get(eid)
+
+        def mock_list_all(type_filter=None):
+            if type_filter == "module":
+                return [module]
+            return [product, module]
+
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=mock_get_by_id)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(side_effect=mock_list_all)
+        repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
+
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity({
+            "name": "M1 Smoke Test",
+            "type": "goal",
+            "summary": "Milestone entity should remain directly under product",
+            "tags": {"what": ["milestone"], "why": "tracking", "how": "manual", "who": ["team"]},
+            "parent_id": "prod-1",
+            "force": True,
+        })
+
+        assert result.entity.parent_id == "prod-1"
         if result.warnings:
             assert not any("自動推斷" in w for w in result.warnings)
 

@@ -8,6 +8,7 @@ Endpoints:
   GET    /api/data/entities/{id}/relationships            — get entity relationships
   GET    /api/data/relationships                          — list all relationships
   GET    /api/data/blindspots                             — list blindspots
+  POST   /api/data/milestones                             — create milestone(goal) under a product
   GET    /api/data/plans                                  — list plans / plan details
   GET    /api/data/tasks                                  — list tasks
   POST   /api/data/tasks                                  — create task
@@ -1895,6 +1896,36 @@ async def list_plans(request: Request) -> Response:
 
     return _json_response({"plans": plans}, request=request)
 
+
+def _derive_plan_milestones(
+    *,
+    project_id: str,
+    plan_tasks: list[Task],
+    entity_cache: dict[str, Entity],
+    partner: dict,
+    existing_milestones: list[dict] | None = None,
+) -> list[dict[str, str]]:
+    milestone_by_id: dict[str, dict[str, str]] = {}
+
+    for item in existing_milestones or []:
+        milestone_id = str(item.get("id") or "").strip() if isinstance(item, dict) else ""
+        milestone_name = str(item.get("name") or "").strip() if isinstance(item, dict) else ""
+        if milestone_id and milestone_name:
+            milestone_by_id[milestone_id] = {"id": milestone_id, "name": milestone_name}
+
+    for task in plan_tasks:
+        for entity_id in task.linked_entities or []:
+            if not isinstance(entity_id, str) or entity_id == project_id:
+                continue
+            entity = entity_cache.get(entity_id)
+            if not entity or entity.type != EntityType.GOAL.value or entity.parent_id != project_id:
+                continue
+            if not OntologyService.is_entity_visible_for_partner(entity, partner):
+                continue
+            milestone_by_id.setdefault(entity.id, {"id": entity.id, "name": entity.name})
+
+    return sorted(milestone_by_id.values(), key=lambda item: item["name"])
+
 # ──────────────────────────────────────────────
 # Endpoint: GET /api/data/projects/{id}/progress
 # ──────────────────────────────────────────────
@@ -2013,6 +2044,13 @@ async def get_project_progress(request: Request) -> Response:
             })
 
         if plan_payload and plan_status == "active":
+            plan_milestones = _derive_plan_milestones(
+                project_id=project_id,
+                plan_tasks=plan_tasks,
+                entity_cache=entity_cache,
+                partner=partner,
+                existing_milestones=plan_payload.get("milestones", []),
+            )
             top_level_tasks = [
                 task for task in open_tasks
                 if not task.parent_task_id or task.parent_task_id not in {candidate.id for candidate in open_tasks if candidate.id}
@@ -2026,7 +2064,7 @@ async def get_project_progress(request: Request) -> Response:
                 "goal": plan_payload["goal"],
                 "status": plan_payload["status"],
                 "owner": plan_payload["owner"],
-                "milestones": plan_payload.get("milestones", []),
+                "milestones": plan_milestones,
                 "tasks_summary": plan_payload.get("tasks_summary", {}),
                 **counts,
                 "updated_at": plan_payload["updated_at"],
@@ -2108,6 +2146,81 @@ async def get_project_progress(request: Request) -> Response:
         },
         request=request,
     )
+
+
+# ──────────────────────────────────────────────
+# Endpoint: POST /api/data/milestones
+# ──────────────────────────────────────────────
+
+
+async def create_milestone(request: Request) -> Response:
+    """Create a milestone as a goal entity under a product."""
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    partner, effective_id = await _auth_and_scope(request)
+    if not partner:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+    if is_unassigned_partner(partner):
+        return _error_response("FORBIDDEN", "Current workspace cannot create milestones", 403, request=request)
+    if is_guest(partner):
+        return _error_response("FORBIDDEN", "Guest cannot create milestones", 403, request=request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return _error_response("INVALID_INPUT", "Invalid JSON body", 400, request=request)
+    if not isinstance(body, dict):
+        return _error_response("INVALID_INPUT", "Request body must be a JSON object", 400, request=request)
+
+    name = str(body.get("name") or "").strip()
+    summary = str(body.get("summary") or "").strip()
+    status = str(body.get("status") or "active").strip() or "active"
+    owner = str(body.get("owner") or "").strip() or None
+    product_id = str(body.get("product_id") or body.get("productId") or body.get("parentId") or "").strip()
+
+    if len(name) < 2:
+        return _error_response("INVALID_INPUT", "name must be at least 2 chars", 400, request=request)
+    if not product_id:
+        return _error_response("INVALID_INPUT", "product_id is required", 400, request=request)
+    if status not in {"planned", "active"}:
+        return _error_response("INVALID_INPUT", "status must be planned or active", 400, request=request)
+
+    await _ensure_repos()
+    token = current_partner_id.set(effective_id)
+    try:
+        product = await _entity_repo.get_by_id(product_id)
+        if product is None or product.type != EntityType.PRODUCT.value:
+            return _error_response("INVALID_INPUT", "product_id must point to a product entity", 400, request=request)
+
+        now = datetime.now(timezone.utc)
+        milestone = Entity(
+            id=uuid.uuid4().hex,
+            name=name,
+            type=EntityType.GOAL.value,
+            level=3,
+            parent_id=product_id,
+            status=status,
+            summary=summary or f"{name} milestone",
+            tags=Tags(
+                what=["milestone"],
+                why="標記產品進度階段與結果錨點",
+                how="透過 goal entity 讓 plan / task 可聚合到同一階段",
+                who=[owner] if owner else [],
+            ),
+            confirmed_by_user=True,
+            owner=owner,
+            sources=[],
+            visibility="public",
+            created_at=now,
+            updated_at=now,
+        )
+        created = await _entity_repo.upsert(milestone)
+    finally:
+        current_partner_id.reset(token)
+
+    logger.info("Created milestone %s under product %s by partner %s", created.id, product_id, effective_id)
+    return _json_response({"milestone": _entity_to_dict(created, partner)}, status_code=201, request=request)
 
 
 # ──────────────────────────────────────────────
@@ -3604,6 +3717,7 @@ dashboard_routes = [
     Route("/api/data/blindspots", list_blindspots, methods=["GET", "OPTIONS"]),
     Route("/api/data/quality-signals", get_quality_signals, methods=["GET", "OPTIONS"]),
     Route("/api/data/governance-health", get_governance_health, methods=["GET", "OPTIONS"]),
+    Route("/api/data/milestones", create_milestone, methods=["POST", "OPTIONS"]),
     Route("/api/data/plans", list_plans, methods=["GET", "OPTIONS"]),
     Route("/api/data/projects/{id}/progress", get_project_progress, methods=["GET", "OPTIONS"]),
     Route("/api/data/tasks/by-entity/{entityId}", list_tasks_by_entity, methods=["GET", "OPTIONS"]),
