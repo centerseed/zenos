@@ -45,7 +45,7 @@ HOST_VARIANT_FILES = {
 }
 
 
-def sync_skills_to(target_root: Path, host: str) -> None:
+def sync_skills_to(target_root: Path, host: str = "claude_code") -> None:
     """Sync SSOT-managed files from release/ to target, preserving non-SSOT files (e.g. LOCAL.md).
 
     Only overwrites files that exist in the release source directory.
