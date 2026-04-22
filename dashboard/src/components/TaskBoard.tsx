@@ -206,6 +206,10 @@ export function TaskBoard({
   // B3-02: warn dialog state for bad status jumps
   const [pendingDrag, setPendingDrag] = useState<{ taskId: string; newStatus: string } | null>(null);
   const [dragWarning, setDragWarning] = useState<string | null>(null);
+  const [pendingReviewTask, setPendingReviewTask] = useState<Task | null>(null);
+  const [pendingReviewResult, setPendingReviewResult] = useState("");
+  const [pendingReviewError, setPendingReviewError] = useState<string | null>(null);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const suppressTimeoutRef = useRef<number | null>(null);
   const suppressSelectionUntilRef = useRef(0);
 
@@ -353,9 +357,11 @@ export function TaskBoard({
       setPendingDrag({ taskId, newStatus });
       return;
     }
-    // review requires a result; open the task instead of offering a fake force path
+    // review requires a result; collect it inline instead of kicking users into the drawer
     if (newStatus === "review" && !task.result?.trim()) {
-      setSelectedTask(task);
+      setPendingReviewTask(task);
+      setPendingReviewResult("");
+      setPendingReviewError(null);
       return;
     }
 
@@ -372,6 +378,45 @@ export function TaskBoard({
   function cancelDrag() {
     setPendingDrag(null);
     setDragWarning(null);
+  }
+
+  async function submitPendingReview() {
+    if (!pendingReviewTask) return;
+    const result = pendingReviewResult.trim();
+    if (!result) {
+      setPendingReviewError("請先填寫任務成果再送審。");
+      return;
+    }
+
+    try {
+      setReviewSubmitting(true);
+      setPendingReviewError(null);
+
+      if (onUpdateTask) {
+        await onUpdateTask(pendingReviewTask.id, {
+          result,
+          status: "review",
+        });
+      } else if (onStatusChange) {
+        await onStatusChange(pendingReviewTask.id, "review");
+      }
+
+      setPendingReviewTask(null);
+      setPendingReviewResult("");
+    } catch (error) {
+      setPendingReviewError(
+        error instanceof Error ? error.message : "送審失敗，請稍後再試。",
+      );
+    } finally {
+      setReviewSubmitting(false);
+    }
+  }
+
+  function cancelPendingReview() {
+    if (reviewSubmitting) return;
+    setPendingReviewTask(null);
+    setPendingReviewResult("");
+    setPendingReviewError(null);
   }
 
   useEffect(() => {
@@ -588,6 +633,74 @@ export function TaskBoard({
         >
           {dragWarning}
         </p>
+      </Dialog>
+
+      <Dialog
+        t={t}
+        open={!!pendingReviewTask}
+        onOpenChange={(v) => {
+          if (!v) cancelPendingReview();
+        }}
+        title="送審前補上成果"
+        size="sm"
+        footer={
+          <>
+            <Btn t={t} variant="ghost" onClick={cancelPendingReview} disabled={reviewSubmitting}>
+              取消
+            </Btn>
+            <Btn t={t} variant="seal" onClick={submitPendingReview} disabled={reviewSubmitting}>
+              送審
+            </Btn>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <p
+            style={{
+              margin: 0,
+              fontFamily: t.fontBody,
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: c.inkMuted,
+            }}
+          >
+            拖到「審查中」前，先補上這張任務的成果摘要。
+          </p>
+          <textarea
+            value={pendingReviewResult}
+            onChange={(event) => {
+              setPendingReviewResult(event.target.value);
+              if (pendingReviewError) setPendingReviewError(null);
+            }}
+            placeholder="例如：已取得完整公司文件包，並整理缺件清單供下一步審查。"
+            rows={5}
+            style={{
+              width: "100%",
+              resize: "vertical",
+              border: `1px solid ${pendingReviewError ? c.vermillion : c.inkHair}`,
+              borderRadius: radius,
+              padding: "10px 12px",
+              fontFamily: t.fontBody,
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: c.ink,
+              background: c.paper,
+            }}
+          />
+          {pendingReviewError ? (
+            <p
+              style={{
+                margin: 0,
+                fontFamily: t.fontBody,
+                fontSize: 12,
+                lineHeight: 1.5,
+                color: c.vermillion,
+              }}
+            >
+              {pendingReviewError}
+            </p>
+          ) : null}
+        </div>
       </Dialog>
 
       <TaskDetailDrawer

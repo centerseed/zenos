@@ -1,6 +1,6 @@
 import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, cleanup } from "@testing-library/react";
 import { TaskBoard } from "@/components/TaskBoard";
 import type { Task } from "@/types";
 
@@ -93,6 +93,7 @@ describe("TaskBoard drag selection guard", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    cleanup();
   });
 
   it("does not open drawer when clicking immediately after a drag-end status change", () => {
@@ -119,5 +120,46 @@ describe("TaskBoard drag selection guard", () => {
     fireEvent.click(screen.getByText("委託稅理士"));
 
     expect(screen.getByTestId("task-drawer")).toHaveTextContent("委託稅理士");
+  });
+
+  it("asks for result when dragging into review instead of opening the drawer", async () => {
+    const onStatusChange = vi.fn().mockResolvedValue(undefined);
+    const onUpdateTask = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TaskBoard
+        tasks={[makeTask({ result: "" })]}
+        onStatusChange={onStatusChange}
+        onUpdateTask={onUpdateTask}
+      />
+    );
+
+    act(() => {
+      dndHandlers.onDragEnd?.({
+        active: { id: "task-1" },
+        over: { id: "review" },
+      });
+    });
+
+    expect(screen.queryByTestId("task-drawer")).toBeNull();
+    expect(screen.getByText("送審前補上成果")).toBeInTheDocument();
+
+    fireEvent.change(
+      screen.getByPlaceholderText(
+        "例如：已取得完整公司文件包，並整理缺件清單供下一步審查。"
+      ),
+      { target: { value: "已補齊審查摘要" } }
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "送審" }));
+    });
+
+    expect(onUpdateTask).toHaveBeenCalledWith("task-1", {
+      result: "已補齊審查摘要",
+      status: "review",
+    });
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(screen.queryByText("送審前補上成果")).toBeNull();
   });
 });
