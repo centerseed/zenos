@@ -4,7 +4,7 @@ id: SPEC-agent-integration-contract
 status: Approved
 ontology_entity: agent-integration
 created: 2026-03-26
-updated: 2026-04-10
+updated: 2026-04-22
 ---
 
 # SPEC: ZenOS Agent Integration Contract
@@ -222,6 +222,15 @@ integration contract 必須保留這個分界。
 - 發現知識缺口或治理問題時，用 `analyze`
 - 每次會話啟動時，先查自己角色可處理的 queue（pull model）
 
+### Codex host adapter requirement
+
+這一條只約束 **Codex 路徑**，不改變 Claude Code 的既有 skill 行為：
+
+- Codex 的 orchestrator 類角色（尤其 Architect）必須明示：`handoff` 不是完成，worker 回來後要先由 orchestrator 自己決定下一步
+- Codex skill / prompt 必須明示：Developer Completion Report 先經 Architect 審查，合格才派 QA
+- Codex skill / prompt 必須明示：QA PASS 不是最終交付宣告；Architect 仍需自己對齊 AC / Done Criteria
+- Codex skill / prompt 必須明示：只有高風險 / 不可逆 / 缺關鍵外部資訊時，才停下來問用戶
+
 ---
 
 ## 半自動跨廠牌審核契約
@@ -352,3 +361,4 @@ ZenOS 的 agent integration 採用以下原則：
 3. 補一份 approval surface 規格，定義三個面板欄位與操作事件。
 4. 設計 reviewer/editor/owner 的責任邊界與驗收標準。
 5. 規劃從半自動模式升級到事件驅動模式的遷移路徑。
+6. 補 Codex 專用的 orchestrator skill 變體與安裝路徑，避免 Codex host 在 worker/QA 回來後過早停住。

@@ -37,8 +37,15 @@ SKILLS = (
     "coach",
 )
 
+HOST_VARIANT_FILES = {
+    "architect": {
+        "claude_code": "SKILL.md",
+        "codex": "SKILL.codex.md",
+    },
+}
 
-def sync_skills_to(target_root: Path) -> None:
+
+def sync_skills_to(target_root: Path, host: str) -> None:
     """Sync SSOT-managed files from release/ to target, preserving non-SSOT files (e.g. LOCAL.md).
 
     Only overwrites files that exist in the release source directory.
@@ -52,9 +59,16 @@ def sync_skills_to(target_root: Path) -> None:
         for src_file in src.rglob("*"):
             if src_file.is_file():
                 rel = src_file.relative_to(src)
+                if rel.name.startswith("SKILL.") and rel.name != "SKILL.md":
+                    continue
                 dst_file = dst / rel
                 dst_file.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src_file, dst_file)
+        variant_name = HOST_VARIANT_FILES.get(name, {}).get(host)
+        if variant_name:
+            variant_src = src / variant_name
+            if variant_src.exists():
+                shutil.copy2(variant_src, dst / "SKILL.md")
     # Sync manifest.json so version numbers stay in sync
     manifest_src = RELEASE_ROOT / "manifest.json"
     if manifest_src.exists():
@@ -87,8 +101,8 @@ def sync_versions(project_root: Path) -> None:
 
 def main() -> int:
     home = Path.home()
-    sync_skills_to(home / ".claude" / "skills")
-    sync_skills_to(home / ".codex" / "skills")
+    sync_skills_to(home / ".claude" / "skills", host="claude_code")
+    sync_skills_to(home / ".codex" / "skills", host="codex")
     n_agents = sync_agents_to(home / ".claude" / "agents")
     sync_agents_to(home / ".codex" / "agents")
     sync_versions(REPO_ROOT)

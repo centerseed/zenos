@@ -149,7 +149,7 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
 
 | 層級 | 機制 | 覆蓋範圍 | 設定方式 |
 |------|------|---------|---------|
-| ① 角色 skill | 角色 SKILL.md 開頭的「ZenOS 治理」表 | 該角色啟動時 | 修改 `skills/release/{role}/SKILL.md`，跑 sync script |
+| ① 角色 skill | 角色 SKILL.md 開頭的「ZenOS 治理」表 | 該角色啟動時 | Claude Code 改 `skills/release/{role}/SKILL.md`；Codex 變體改 `skills/release/{role}/SKILL.codex.md`，再跑 sync script |
 | ② 專案 prompt | CLAUDE.md / AGENTS.md / system prompt | 所有對話，不限角色 | 在專案設定加入載入指示（見下方） |
 | ③ 治理 skill 本身 | `skills/governance/*.md` 開頭的「適用場景」 | agent 讀到 skill 時 | 由 `/zenos-setup` 自動安裝 |
 
@@ -178,6 +178,7 @@ ZenOS 治理不綁定角色——**治理是能力，不是身份**。任何 age
    → 問用戶裝在當前目錄還是家目錄
    → 先安裝 `zenos-setup`
    → 再依 `manifest` + `instructions` 完成正式安裝
+   → 若某 role 存在 `skills/release/{role}/SKILL.codex.md`，Codex 路徑使用該檔，不再與 Claude 共用同一份 role skill
 
 2. 在 agent 的 system prompt / Instructions 加入：
 

@@ -131,6 +131,10 @@ curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/
 curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/{skill.path}/SKILL.md
 ```
 
+Codex 角色 skill 例外：
+- 若 `skills/release/{role}/SKILL.codex.md` 存在，Codex 安裝時必須下載那個檔案，並寫成目標路徑的 `SKILL.md`
+- Claude Code 維持下載 `skills/release/{role}/SKILL.md`
+
 > 不下載 `setup.py`。MCP 設定與後續 project 更新都直接透過讀寫對應平台的 MCP 設定檔完成。
 
 ### Governance 檔案
@@ -161,7 +165,10 @@ Workflow 檔案（`skills/workflows/`）也必須寫到**專案根目錄**，因
 
 ### Addon-aware merge
 
-安裝 skill 到 `.claude/skills/{role}/SKILL.md` 時：
+安裝 role skill 時：
+
+- Claude Code：來源用 `skills/release/{role}/SKILL.md`，目標寫到 `.claude/skills/{role}/SKILL.md`
+- Codex：若存在 `skills/release/{role}/SKILL.codex.md`，來源用該檔，目標仍寫到 `.codex/skills/{role}/SKILL.md`
 
 1. 檢查目標檔案是否存在
 2. 若存在：找 `<!-- ZENOS_ADDON_SECTION_START -->` 標記

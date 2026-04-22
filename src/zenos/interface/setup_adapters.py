@@ -372,6 +372,7 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
                 "2. 安裝 skill 文件（addon-aware merge）：\n"
                 "   a. 若使用者選當前目錄：將 skills/governance/ 和 skills/workflows/ 直接寫入專案\n"
                 "   b. 對於 skills/release/{role}/SKILL.md：\n"
+                "      - Codex 角色 skill 一律以 `skills/release/{role}/SKILL.codex.md` 為來源，再寫成目標路徑的 `SKILL.md`\n"
                 "      - 當前目錄模式：寫到你目前這個 Codex 專案採用的 project-local skills 路徑\n"
                 "      - 家目錄模式：寫到 ~/.codex/skills/{role}/SKILL.md\n"
                 "      - 寫入前先確認目標 SKILL.md 是否存在\n"

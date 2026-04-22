@@ -138,6 +138,62 @@ mcp__zenos__write(
    - P1 測試場景（應該通過）
    - 結尾：「按 QA skill 流程：靜態檢查 → 跑測試 → 場景測試 → QA Verdict」
 
+### Codex / Claude 共用的 Orchestration Closure 規則
+
+`handoff` 只是交棒，不是 Architect 的責任結束。誰發起這一輪調度，誰就持續擁有 orchestration ownership，直到 AC closure。
+
+#### 一輪完整 loop 必須長這樣
+
+1. Architect 準備 executable spec / TD / Done Criteria / AC stub
+2. Architect `handoff` + 真正啟動 Developer agent
+3. Developer 回 Completion Report
+4. Architect 先審 Completion Report 與證據
+5. 合格才派 QA；不合格就直接重派 Developer
+6. QA 回 QA Verdict
+7. Architect 先消化 Verdict；FAIL 就直接重派 Developer，PASS 才做最終 AC sign-off
+8. Architect 自己完成 AC sign-off 後，才可對用戶宣稱完成
+
+#### Host 行為指引
+
+- **不要把用戶當排程器**：worker 回來後，預設是 Architect 自己決定下一步，不是先問用戶「要不要繼續」
+- **不要把 QA 當 completion auditor**：Completion Report 太弱時，先退回 Developer；不要把模糊交付丟給 QA
+- **不要把 QA PASS 當終點**：QA PASS 只代表驗收節點過關，Architect 仍需對 AC / Done Criteria 做最後 closure
+
+#### Codex 特別容易出錯的點
+
+Codex 傾向在下面兩種情況停下來：
+
+1. 派工後把 `handoff` 當成「這回合做完了」
+2. 收到 worker / QA 結果後，把決策權丟回用戶
+
+因此 prompt / skill 必須明講：
+
+- 「收到 Completion Report 後，先自行審查，合格才派 QA」
+- 「收到 QA Verdict 後，先自行判定是否重派或 sign-off，不要先問用戶」
+- 「只有高風險/不可逆/缺關鍵資訊時，才停下來確認」
+
+#### Agent tool 使用節奏（以 Codex 為例）
+
+- 啟動 worker 後，若下一步被其結果阻塞，再 `wait_agent`
+- 若還有本地可做的事（PLAN 更新、AC 對照、QA 驗收矩陣），先做，不要立即空等
+- 收到結果後，若只是補件或小修，優先 `send_input` 同一個 agent；若上下文已亂或責任切換，再開新 agent
+- 驗收完成或確定不再需要時，`close_agent`，避免殘留背景 agent
+
+#### Architect 對 Completion Report 的最低檢查
+
+- Done Criteria 是否逐條有狀態與證據
+- AC 對照是否逐條可追到 test / grep / 實測
+- 測試輸出是否足以支撐「綠燈」判定
+- 發現 / 未完成 / 風險是否會影響 QA 或最終 AC
+
+少一項，就不是可直接交 QA 的交付。
+
+#### Architect 對 QA Verdict 的最低處理
+
+- `FAIL`：轉成明確 fix list，直接重派 Developer
+- `CONDITIONAL PASS`：先判定條件是否仍阻擋某條 AC；若阻擋，一樣重派
+- `PASS`：補做 Architect final sign-off，逐條確認 AC / Done Criteria 關閉
+
 ---
 
 ## 決策框架（六約束）
