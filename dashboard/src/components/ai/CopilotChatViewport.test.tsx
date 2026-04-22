@@ -33,7 +33,7 @@ describe("CopilotChatViewport", () => {
           {
             role: "assistant",
             content: "hello",
-            timestamp: "2026-04-22T00:00:00.000Z",
+            timestamp: Date.parse("2026-04-22T00:00:00.000Z"),
           },
         ]}
         streamingText=""
