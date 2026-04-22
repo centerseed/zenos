@@ -401,6 +401,9 @@ export function TaskDetailDrawer({
   const [advancedSubmitting, setAdvancedSubmitting] = useState(false);
   const [advancedError, setAdvancedError] = useState<string | null>(null);
   const [draftAcceptanceCriteria, setDraftAcceptanceCriteria] = useState("");
+  const [draftResult, setDraftResult] = useState("");
+  const [resultSubmitting, setResultSubmitting] = useState(false);
+  const [resultError, setResultError] = useState<string | null>(null);
   const [draftAssigneeRoleId, setDraftAssigneeRoleId] = useState("");
   const [draftPlanId, setDraftPlanId] = useState("");
   const [draftPlanOrder, setDraftPlanOrder] = useState("");
@@ -434,7 +437,10 @@ export function TaskDetailDrawer({
     setHandoffTarget("agent:developer");
     setAdvancedSubmitting(false);
     setAdvancedError(null);
+    setResultSubmitting(false);
+    setResultError(null);
     setDraftAcceptanceCriteria(criteriaToText(task?.acceptanceCriteria));
+    setDraftResult(task?.result ?? "");
     setDraftAssigneeRoleId(task?.assigneeRoleId ?? "");
     setDraftPlanId(task?.planId ?? "");
     setDraftPlanOrder(task?.planOrder?.toString() ?? "");
@@ -609,7 +615,24 @@ export function TaskDetailDrawer({
     onUpdateTask,
   ]);
 
-  function requestStatusChange(newStatus: string) {
+  const handleResultSave = useCallback(async () => {
+    if (!localTask || !onUpdateTask) return;
+    const prev = localTask;
+    const nextResult = draftResult.trim();
+    setResultSubmitting(true);
+    setResultError(null);
+    setLocalTask({ ...localTask, result: nextResult || null });
+    try {
+      await onUpdateTask(localTask.id, { result: nextResult || null });
+    } catch (err) {
+      setLocalTask(prev);
+      setResultError(err instanceof Error ? err.message : "任務成果更新失敗");
+    } finally {
+      setResultSubmitting(false);
+    }
+  }, [draftResult, localTask, onUpdateTask]);
+
+  async function requestStatusChange(newStatus: string) {
     if (!localTask) return;
     setShowStatusDropdown(false);
 
@@ -618,9 +641,26 @@ export function TaskDetailDrawer({
       setPendingStatusChange(newStatus);
       return;
     }
-    if (newStatus === "review" && !localTask.result) {
-      setWarningMessage("建議填寫任務成果後再送審，確定要送審？");
-      setPendingStatusChange(newStatus);
+    if (newStatus === "review" && !localTask.result?.trim()) {
+      const nextResult = draftResult.trim();
+      if (!nextResult || !onUpdateTask) {
+        setDetailMode("overview");
+        setResultError("送審前必須先填寫任務成果。");
+        return;
+      }
+      const prev = localTask;
+      setDetailMode("overview");
+      setResultSubmitting(true);
+      setResultError(null);
+      setLocalTask({ ...localTask, result: nextResult, status: newStatus as Task["status"] });
+      try {
+        await onUpdateTask(localTask.id, { result: nextResult, status: newStatus });
+      } catch (err) {
+        setLocalTask(prev);
+        setResultError(err instanceof Error ? err.message : "送審失敗");
+      } finally {
+        setResultSubmitting(false);
+      }
       return;
     }
     applyStatusChange(newStatus);
@@ -1977,11 +2017,129 @@ export function TaskDetailDrawer({
     >
       <MarkdownRenderer content={displayTask.result} />
     </div>
+  ) : onUpdateTask ? (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <Textarea
+        t={t}
+        value={draftResult}
+        onChange={(value) => {
+          setDraftResult(value);
+          if (resultError) setResultError(null);
+        }}
+        placeholder="填寫這張 task 完成了什麼、輸出了什麼，之後才能送 review。"
+        rows={5}
+        resize="vertical"
+      />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        {resultError ? (
+          <span style={{ fontFamily: t.fontBody, fontSize: 12, color: c.vermillion }}>{resultError}</span>
+        ) : (
+          <span style={{ fontFamily: t.fontBody, fontSize: 12, color: c.inkFaint }}>
+            review 前一定要先填成果；這裡就是輸入的地方。
+          </span>
+        )}
+        <Btn
+          t={t}
+          variant="ink"
+          size="sm"
+          onClick={handleResultSave}
+          style={{ opacity: resultSubmitting ? 0.5 : 1 }}
+        >
+          {resultSubmitting ? "儲存中…" : "儲存成果"}
+        </Btn>
+      </div>
+    </div>
   ) : null;
   const attachmentsNode =
     localTask && authToken ? (
       <TaskAttachments task={localTask} token={authToken} onAttachmentsChanged={handleAttachmentsChanged} />
     ) : null;
+  const contextBody = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 14 }}>
+        {[
+          {
+            label: "Owner",
+            value: <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>{displayTask.assigneeName || displayTask.assignee || "Unassigned"}</span>,
+          },
+          {
+            label: "Due",
+            value: <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>{formatDate(displayTask.dueDate)}</span>,
+          },
+          {
+            label: "Project",
+            value: <span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.ocher }}>{displayTask.project || "N/A"}</span>,
+          },
+          {
+            label: "Dispatcher",
+            value: <span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>{dispatcherLabel(displayTask.dispatcher)}</span>,
+          },
+        ].map((item) => (
+          <div key={item.label} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <span
+              style={{
+                fontFamily: t.fontMono,
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.12em",
+                color: c.inkFaint,
+              }}
+            >
+              {item.label}
+            </span>
+            <div style={{ fontSize: 13, lineHeight: 1.5 }}>{item.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {displayTask.linkedEntities.length > 0 ? (
+        <section>
+          {sectionLabel("Contextual Assets")}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+            {displayTask.linkedEntities.map((id) => (
+              <ContextCard key={id} name={id} entity={entitiesById[id]} />
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section>
+        {sectionLabel("Instruction & Logic")}
+        {descriptionNode}
+      </section>
+
+      {acceptanceCriteriaNode ? <section>{sectionLabel("Success Criteria")}{acceptanceCriteriaNode}</section> : null}
+
+      {displayTask.contextSummary ? (
+        <section
+          style={{
+            padding: 14,
+            borderRadius: t.radius,
+            background: c.surface,
+            border: `1px solid ${c.inkHair}`,
+          }}
+        >
+          <div
+            style={{
+              fontFamily: t.fontMono,
+              fontSize: 10,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.14em",
+              color: c.inkFaint,
+              marginBottom: 6,
+            }}
+          >
+            Context Summary
+          </div>
+          <p style={{ margin: 0, fontFamily: t.fontBody, fontSize: 12, color: c.inkMuted, lineHeight: 1.6 }}>
+            {displayTask.contextSummary}
+          </p>
+        </section>
+      ) : null}
+    </div>
+  );
   const canDeleteComment = (comment: TaskComment) => Boolean(partner?.isAdmin || (partner && partner.id === comment.partnerId));
   const drawerBody = (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
@@ -2053,7 +2211,7 @@ export function TaskDetailDrawer({
         />
       ) : null}
 
-      {detailMode === "context" ? legacyContextBody : null}
+      {detailMode === "context" ? contextBody : null}
 
       {detailMode === "history" ? (
         <TaskHistoryPanel

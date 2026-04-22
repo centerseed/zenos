@@ -300,10 +300,9 @@ export function TaskBoard({
       setPendingDrag({ taskId, newStatus });
       return;
     }
-    // Warning: moving to review with no result
-    if (newStatus === "review" && !task.result) {
-      setDragWarning("建議填寫任務成果後再送審，確定要送審？");
-      setPendingDrag({ taskId, newStatus });
+    // review requires a result; open the task instead of offering a fake force path
+    if (newStatus === "review" && !task.result?.trim()) {
+      setSelectedTask(task);
       return;
     }
 

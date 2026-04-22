@@ -2,7 +2,7 @@
 // Verifies that the Drawer's headerExtras slot receives React nodes and renders them.
 import React from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TaskDetailDrawer } from "@/components/TaskDetailDrawer";
 import { Drawer } from "@/components/zen/Drawer";
 import { useInk } from "@/lib/zen-ink/tokens";
@@ -218,6 +218,62 @@ describe("TaskDetailDrawer — B4 Zen migration", () => {
     fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const link = screen.getByRole("link", { name: /個人/i });
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+
+  it("shows context content without leaking hierarchy panels", () => {
+    const entity = {
+      id: "product-1",
+      name: "個人",
+      type: "product" as const,
+      summary: "個人知識圖譜",
+      tags: { what: ["方法論"], why: "why", how: "how", who: ["Barry"] },
+      status: "active" as const,
+      parentId: null,
+      details: null,
+      confirmedByUser: true,
+      owner: null,
+      sources: [],
+      visibility: "public" as const,
+      lastReviewedAt: null,
+      createdAt: new Date("2026-04-20T10:00:00Z"),
+      updatedAt: new Date("2026-04-20T10:00:00Z"),
+    };
+
+    render(
+      <TaskDetailDrawer
+        task={makeTask({ linkedEntities: ["product-1"] })}
+        entitiesById={{ "product-1": entity }}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
+
+    expect(screen.getByText("Contextual Assets")).toBeDefined();
+    expect(screen.queryByText("Hierarchy")).toBeNull();
+    expect(screen.queryByText("Plan Outline")).toBeNull();
+  });
+
+  it("lets users save outcome before sending review", async () => {
+    const onUpdateTask = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TaskDetailDrawer
+        task={makeTask()}
+        onUpdateTask={onUpdateTask}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.change(
+      screen.getByPlaceholderText("填寫這張 task 完成了什麼、輸出了什麼，之後才能送 review。"),
+      { target: { value: "已完成委外範圍確認" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "儲存成果" }));
+
+    await waitFor(() => {
+      expect(onUpdateTask).toHaveBeenCalledWith("task-b4-test", { result: "已完成委外範圍確認" });
+    });
   });
 
   it("closes via onClose when close button is clicked", () => {

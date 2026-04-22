@@ -107,6 +107,10 @@ function getEntityTimestamp(entity: Entity): number {
   return entity.updatedAt?.getTime() ?? entity.createdAt?.getTime() ?? 0;
 }
 
+function isPortfolioRootProduct(entity: Entity): boolean {
+  return entity.type === "product" && !entity.parentId && (entity.level === 1 || entity.level == null);
+}
+
 function buildProductLookup(products: Entity[]) {
   const byId = new Map(products.map((entity) => [entity.id, entity]));
   const byName = new Map(products.map((entity) => [normalizeName(entity.name), entity]));
@@ -189,7 +193,7 @@ export function buildTaskHubSnapshot(params: {
   now?: Date;
 }): TaskHubSnapshot {
   const { entities, tasks, plans, now = new Date() } = params;
-  const products = entities.filter((entity) => entity.type === "product");
+  const products = entities.filter(isPortfolioRootProduct);
   const goals = entities.filter((entity) => entity.type === "goal");
   const goalsById = new Map(goals.map((goal) => [goal.id, goal]));
   const plansById = new Map(plans.map((plan) => [plan.id, plan]));

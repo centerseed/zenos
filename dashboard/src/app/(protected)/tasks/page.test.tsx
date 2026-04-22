@@ -555,4 +555,53 @@ describe("TasksPage", () => {
 
     expect(snapshot.products[0]?.currentMilestone).toEqual({ id: "goal-1", name: "WS7 里程碑" });
   });
+
+  it("excludes non-root product entities from the task hub portfolio", async () => {
+    const { buildTaskHubSnapshot } = await import("@/features/tasks/taskHub");
+
+    const snapshot = buildTaskHubSnapshot({
+      entities: [
+        {
+          id: "root-1",
+          name: "naru_agent",
+          type: "product",
+          summary: "root product",
+          tags: { what: [], why: "", how: "", who: [] },
+          status: "active",
+          parentId: null,
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+          level: 1,
+        },
+        {
+          id: "child-1",
+          name: "Banila Co",
+          type: "product",
+          summary: "child product under Amy",
+          tags: { what: [], why: "", how: "", who: [] },
+          status: "active",
+          parentId: "amy-root",
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+          level: 2,
+        },
+      ],
+      tasks: [],
+      plans: [],
+    });
+
+    expect(snapshot.products.map((product) => product.productName)).toEqual(["naru_agent"]);
+  });
 });

@@ -249,7 +249,7 @@ export function TaskDetailOverview({
       </section>
 
       {acceptanceCriteria && <section>{sectionLabel("Success Criteria", c.vermillion)}{acceptanceCriteria}</section>}
-      {result && <section>{sectionLabel("Outcome", c.jade)}{result}</section>}
+      {result != null && <section>{sectionLabel("Outcome", c.jade)}{result}</section>}
       {attachments && <section>{attachments}</section>}
 
       {task.contextSummary && (
