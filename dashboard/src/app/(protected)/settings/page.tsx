@@ -553,7 +553,7 @@ export default function SettingsPage() {
         eyebrow="Workspace · Preferences"
         title="Settings"
         en="Control Room"
-        subtitle="這一頁按用途整理設定：API key、外部 agent 的 MCP、Dashboard AI 的 Helper、以及 connector / diagnostics。進階 manifest / skill 細節仍看 Agent 頁。"
+        subtitle="這一頁只放長期管理用的設定：API key、外部 agent 的 MCP、Dashboard AI 的 Helper 參數、以及 connector / diagnostics。第一次接入請先走 Setup。"
         right={
           <Link
             href="/agent"
@@ -626,8 +626,8 @@ export default function SettingsPage() {
         <div style={{ display: "grid", gap: 22 }}>
           <Panel
             eyebrow="Access / API Key"
-            title="API key 與外部 agent 設定"
-            subtitle="先確認這把 key。下面所有 MCP 設定與 Helper 啟動指令，都會直接帶入同一把 user API key。"
+            title="API key 與外部 agent MCP"
+            subtitle="這塊只管外部 agent。要讓 Claude Code / ChatGPT / Codex / Gemini 讀 ZenOS，就從這裡重新拿 MCP 設定。"
             t={t}
             status={
               <div
@@ -666,7 +666,7 @@ export default function SettingsPage() {
               <DetailRow label="SSE" value={getMcpUrl({ useSSE: true }, apiKey)} mono t={t} />
               <DetailRow
                 label="用途"
-                value="外部 agent 要接 ZenOS 時，用這一組 hosted MCP 設定。Dashboard 內建 AI 不走這條。"
+                value="外部 agent 要接 ZenOS 時，用這一組 hosted MCP 設定。Dashboard 內建 AI 的 helper 參數不在這裡改。"
                 t={t}
               />
             </div>
@@ -725,7 +725,7 @@ export default function SettingsPage() {
                   marginBottom: 10,
                 }}
               >
-                設定說明
+                這塊負責什麼
               </div>
               <div
                 style={{
@@ -737,17 +737,17 @@ export default function SettingsPage() {
                   lineHeight: 1.7,
                 }}
               >
-                <div>1. 外部 agent：先複製 MCP 設定，再在 agent 內跑 <code style={{ fontFamily: fontMono }}>/zenos-setup</code>。</div>
-                <div>2. Dashboard 內建 AI：看右側的 Helper，不要改這組 MCP URL。</div>
-                <div>3. 如果 API key 還沒載入完成，複製按鈕會先停用，避免你拿到不能用的 placeholder。</div>
+                <div>1. 重新複製 HTTP / SSE MCP 設定。</div>
+                <div>2. 把設定貼回你的外部 agent，再跑 <code style={{ fontFamily: fontMono }}>/zenos-setup</code>。</div>
+                <div>3. 如果你要改 dashboard 內建 AI 的 helper 參數，請看右側 Helper 區塊。</div>
               </div>
             </div>
           </Panel>
 
           <Panel
-            eyebrow="分類導引"
-            title="設定分成兩條線"
-            subtitle="外部 agent 用 MCP。Dashboard 內建 AI 用 Helper。這兩條線的故障排查也不同。"
+            eyebrow="Settings Scope"
+            title="這一頁管什麼"
+            subtitle="Setup 負責第一次接起來；Settings 負責之後的重拿、改值、檢查、排錯。"
             t={t}
           >
             <div
@@ -762,18 +762,27 @@ export default function SettingsPage() {
                   title: "MCP",
                   icon: ICONS.spark,
                   points: [
-                    "讓 Claude Code / ChatGPT / Codex / Gemini 看得到 ZenOS 資料。",
-                    "主要影響 setup、capture、task、search、get 這些 tool 流程。",
-                    "一個 AI 工具接一次，之後多半不用再碰。",
+                    "外部 agent 連 ZenOS 用。",
+                    "你要重拿 hosted MCP 設定時來這裡。",
+                    "第一次接入流程本身不在這頁做。",
                   ],
                 },
                 {
                   title: "Helper",
                   icon: ICONS.link,
                   points: [
-                    "讓 dashboard 內的 Marketing / Clients AI rail 把操作代理到本機 CLI。",
-                    "主要影響討論、briefing、debrief、apply 這些頁內 AI 功能。",
-                    "helper 沒開時，頁面會退化成說明或 repair guidance。",
+                    "Dashboard 內建 AI 對話與 apply flow 用。",
+                    "要改 token、base URL、workspace path、model 時在這裡改。",
+                    "要檢查 health 與排錯，也在這裡做。",
+                  ],
+                },
+                {
+                  title: "Connector",
+                  icon: ICONS.arrow,
+                  points: [
+                    "Google Workspace sidecar 與 live retrieval 用。",
+                    "要改 sidecar URL、token、allowed containers 時在這裡改。",
+                    "這些都屬於長期管理，不屬於 Setup。",
                   ],
                 },
               ].map((item) => (
@@ -835,7 +844,7 @@ export default function SettingsPage() {
           <Panel
             eyebrow="Dashboard AI / Helper"
             title="Local helper"
-            subtitle="這是給 dashboard 內建 AI 功能用的本機代理。複製後可直接在新機器執行，已自動帶入你的 API key。"
+            subtitle="這塊是 helper 的長期管理區。要改 token、base URL、workspace path、model，或重新檢查 health，都在這裡。"
             t={t}
             status={
               <div

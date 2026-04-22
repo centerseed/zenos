@@ -8,11 +8,6 @@ import { useToast } from "@/components/zen/Toast";
 import { updatePreferences } from "@/lib/api";
 import { resolveActiveWorkspace } from "@/lib/partner";
 import {
-  checkCoworkHelperHealth,
-  setDefaultHelperBaseUrl,
-  setDefaultHelperToken,
-} from "@/lib/cowork-helper";
-import {
   AGENT_PLATFORMS as PLATFORMS,
   buildExternalAgentPrompt,
   buildHelperInstallAndStartCommand,
@@ -21,8 +16,6 @@ import {
   maskApiKey,
   type AgentPlatformId as PlatformId,
 } from "@/lib/agent-config";
-
-const HELPER_DEFAULT_URL = "http://127.0.0.1:4317";
 
 type SkillGroup = {
   title: string;
@@ -70,8 +63,6 @@ function SetupPage() {
   const { pushToast } = useToast();
   const [selectedId, setSelectedId] = useState<PlatformId>("claude-code");
   const [showToken, setShowToken] = useState(false);
-
-  // Helper section state
   const [helperToken] = useState<string>(() => {
     if (typeof window === "undefined") return "";
     const stored = window.sessionStorage.getItem("zenos.setup.helperToken");
@@ -81,10 +72,6 @@ function SetupPage() {
     window.sessionStorage.setItem("zenos.setup.helperToken", token);
     return token;
   });
-  const [helperConfigured, setHelperConfigured] = useState(false);
-  const [helperStatus, setHelperStatus] = useState<
-    "idle" | "checking" | "ok" | "error"
-  >("idle");
 
   // Persist platform type when user selects a platform
   const handlePlatformSelect = async (platformId: PlatformId) => {
@@ -120,22 +107,6 @@ function SetupPage() {
         helperToken,
       })
     : "";
-
-  const handleConfigureHelper = async () => {
-    setDefaultHelperBaseUrl(HELPER_DEFAULT_URL);
-    setDefaultHelperToken(helperToken);
-    setHelperConfigured(true);
-    setHelperStatus("checking");
-    try {
-      const result = await checkCoworkHelperHealth(
-        HELPER_DEFAULT_URL,
-        helperToken,
-      );
-      setHelperStatus(result.ok ? "ok" : "error");
-    } catch {
-      setHelperStatus("error");
-    }
-  };
 
   const maskedKey = maskApiKey(apiKey);
   const displayKey = showToken ? apiKey : maskedKey;
@@ -304,50 +275,15 @@ function SetupPage() {
             這個指令會自動下載 helper、檢查 Node.js / Claude CLI，並直接啟動。
           </p>
           <p className="mt-2 text-xs text-dim">
-            這一段是給 Dashboard 內建 AI 用的，和上面的 MCP 設定不同。
+            這一段是給 Dashboard 內建 AI 用的，和上面的 MCP 設定不同。要改 helper 的 token、base URL、workspace path、model，請到 Settings。
           </p>
-
-          {/* Step B: 自動設定 Dashboard 連線 */}
-          <div className="mt-5 flex items-center gap-3">
-            <button
-              onClick={handleConfigureHelper}
-              className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 transition-colors"
-            >
-              自動設定 Dashboard 連線
-            </button>
-            {helperConfigured && helperStatus !== "checking" && (
-              <span
-                className={`text-sm ${
-                  helperStatus === "ok"
-                    ? "text-emerald-400"
-                    : "text-dim"
-                }`}
-              >
-                {helperStatus === "ok" ? "已設定" : "已設定"}
-              </span>
-            )}
+          <div className="mt-5 rounded-zen border bd-hair bg-base p-4 text-sm text-dim">
+            Setup 只負責把 helper 裝起來。安裝後請到{" "}
+            <Link href="/settings" className="text-blue-400 hover:underline">
+              Settings
+            </Link>{" "}
+            管理 helper 參數、做 health check 與排錯。
           </div>
-
-          {/* Step C: 連線狀態 */}
-          {helperConfigured && (
-            <div className="mt-4 rounded-zen border bd-hair bg-base p-4">
-              {helperStatus === "checking" && (
-                <span className="text-sm text-dim">
-                  正在檢查連線...
-                </span>
-              )}
-              {helperStatus === "ok" && (
-                <span className="text-sm text-emerald-400">
-                  Helper 已連線
-                </span>
-              )}
-              {helperStatus === "error" && (
-                <span className="text-sm text-red-400">
-                  無法連線，請確認 Helper 已啟動後重試
-                </span>
-              )}
-            </div>
-          )}
         </section>
 
         {/* Section 4 — Step 3: 安裝完成後的功能 */}

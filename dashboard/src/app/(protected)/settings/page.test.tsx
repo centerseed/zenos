@@ -111,10 +111,10 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
 
     expect(screen.getByText("Settings")).toBeInTheDocument();
-    expect(screen.getByText("API key 與外部 agent 設定")).toBeInTheDocument();
+    expect(screen.getByText("API key 與外部 agent MCP")).toBeInTheDocument();
     expect(screen.getByText("Local helper")).toBeInTheDocument();
     expect(screen.getByText("Per-user live retrieval")).toBeInTheDocument();
-    expect(screen.getByText("設定分成兩條線")).toBeInTheDocument();
+    expect(screen.getByText("這一頁管什麼")).toBeInTheDocument();
     expect(screen.getByText(/Marketing \/ Clients 裡的 AI rail 打不開/)).toBeInTheDocument();
   });
 
