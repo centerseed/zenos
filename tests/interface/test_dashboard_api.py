@@ -1743,7 +1743,38 @@ class TestCreateMilestone:
 
         body = json.loads(resp.body)
         assert resp.status_code == 400
-        assert "product entity" in body["message"]
+        assert "collaboration root entity" in body["message"]
+
+    async def test_creates_goal_entity_under_company_root(self):
+        from zenos.interface.dashboard_api import create_milestone
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={
+            "name": "M1 啟動共編",
+            "summary": "開始客戶協作",
+            "product_id": "company-1",
+            "status": "active",
+            "owner": "Barry",
+        })
+        company = _make_entity("company-1")
+        company.type = "company"
+        company.level = 1
+        company.name = "原心生技"
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_entity_repo.get_by_id = AsyncMock(return_value=company)
+            mock_entity_repo.upsert = AsyncMock(side_effect=lambda entity: entity)
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await create_milestone(request)
+
+        body = json.loads(resp.body)
+        assert resp.status_code == 201
+        assert body["milestone"]["parentId"] == "company-1"
 
 
 class TestListPlans:

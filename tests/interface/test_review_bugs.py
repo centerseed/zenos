@@ -219,3 +219,68 @@ class TestListTasksByEntityScopedPartner:
             "_is_task_visible_for_partner called without allowed_ids, "
             "so scoped partners always get False (line 174: if allowed_ids is None: return False)"
         )
+
+    async def test_company_root_queries_owned_tasks_by_product_id(self):
+        from zenos.interface.dashboard_api import list_tasks_by_entity
+
+        partner = {
+            "id": "p-owner",
+            "email": "owner@test.com",
+            "displayName": "Owner",
+            "authorizedEntityIds": [],
+            "isAdmin": True,
+            "sharedPartnerId": None,
+            "roles": [],
+            "department": None,
+            "status": "active",
+        }
+
+        company = Entity(
+            id="company-1",
+            name="原心生技",
+            type="company",
+            level=1,
+            parent_id=None,
+            status="active",
+            summary="client root",
+            tags=Tags(what=["company"], why="", how="crm", who=[]),
+            details=None,
+            confirmed_by_user=True,
+            owner="Owner",
+            sources=[],
+            visibility="public",
+            last_reviewed_at=None,
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        task = _make_task("t-company")
+        task.product_id = "company-1"
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"entityId": "company-1"},
+        )
+
+        with (
+            patch("zenos.interface.dashboard_api._verify_firebase_token",
+                  return_value={"email": "owner@test.com", "uid": "u1"}),
+            patch("zenos.interface.dashboard_api._get_partner_by_email_sql",
+                  return_value=partner),
+            patch("zenos.interface.dashboard_api._ensure_repos"),
+            patch("zenos.interface.dashboard_api._entity_repo") as mock_erepo,
+            patch("zenos.interface.dashboard_api._task_repo") as mock_trepo,
+            patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx,
+            patch("zenos.interface.dashboard_api.OntologyService") as mock_osvc,
+        ):
+            mock_ctx.set = MagicMock(return_value="tok")
+            mock_ctx.reset = MagicMock()
+            mock_erepo.get_by_id = AsyncMock(return_value=company)
+            mock_trepo.list_all = AsyncMock(return_value=[task])
+            mock_osvc.is_entity_visible_for_partner.return_value = True
+
+            resp = await list_tasks_by_entity(request)
+
+        body = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert [item["id"] for item in body["tasks"]] == ["t-company"]
+        assert mock_trepo.list_all.await_args.kwargs["product_id"] == "company-1"

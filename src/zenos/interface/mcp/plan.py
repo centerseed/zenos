@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import _unified_response
 from zenos.interface.mcp._audit import _audit_log
@@ -25,15 +26,15 @@ async def _resolve_plan_product_id(
 
     effective_project = project_hint or partner_default_project
     if not effective_project:
-        return None, "product_id is required when project/defaultProject cannot be resolved to a product entity"
+        return None, "product_id is required when project/defaultProject cannot be resolved to a collaboration root entity"
     if entity_repo is None:
         return None, "entity repository is unavailable for product resolution"
 
     resolved = await entity_repo.get_by_name(str(effective_project).strip())
     if resolved is None:
-        return None, "product_id is required when project/defaultProject cannot be resolved to a product entity"
-    if resolved.type != "product":
-        return None, f"project/defaultProject '{effective_project}' resolved to non-product entity '{resolved.id}'"
+        return None, "product_id is required when project/defaultProject cannot be resolved to a collaboration root entity"
+    if not is_collaboration_root_entity(resolved):
+        return None, f"project/defaultProject '{effective_project}' resolved to non-collaboration-root entity '{resolved.id}'"
     return resolved.id, None
 
 

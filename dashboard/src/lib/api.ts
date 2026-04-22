@@ -130,7 +130,7 @@ function isLegacyCrmProductProxy(entity: Entity): boolean {
   );
 }
 
-function isShareableRootEntity(entity: Entity): boolean {
+export function isShareableRootEntity(entity: Entity): boolean {
   const isSupportedType = entity.type === "product" || entity.type === "company";
   const isRoot = !entity.parentId && (entity.level === 1 || entity.level == null);
   return (
@@ -158,12 +158,12 @@ export async function getProjectEntities(
 }
 
 export async function getProjectEntitiesInWorkspace(token: string, workspaceId: string): Promise<Entity[]> {
-  const res = await apiRequest<{ entities: Entity[] }>("/api/data/entities?type=product", {
+  const res = await apiRequest<{ entities: Entity[] }>("/api/data/entities", {
     headers: { "X-Active-Workspace-Id": workspaceId },
     token,
     useWorkspace: false,
   });
-  return hydrateDates(res.entities ?? []) as Entity[];
+  return (hydrateDates(res.entities ?? []) as Entity[]).filter(isShareableRootEntity);
 }
 
 /** Fetch a single entity by ID */

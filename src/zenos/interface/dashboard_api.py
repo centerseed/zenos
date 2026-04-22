@@ -54,6 +54,7 @@ from zenos.application.knowledge.source_service import SourceService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.action import Task
 from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship, SourceType, Tags
+from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.application.identity.workspace_context import (
     active_partner_view,
     build_available_workspaces,
@@ -1813,7 +1814,7 @@ async def list_tasks_by_entity(request: Request) -> Response:
         entity = await _entity_repo.get_by_id(entity_id)
         if entity and not OntologyService.is_entity_visible_for_partner(entity, partner):
             return _json_response({"tasks": []}, request=request)
-        if entity and entity.type == EntityType.PRODUCT.value:
+        if is_collaboration_root_entity(entity):
             tasks = await _task_repo.list_all(product_id=entity_id)
         else:
             tasks = await _task_repo.list_all(linked_entity=entity_id)
@@ -2190,8 +2191,8 @@ async def create_milestone(request: Request) -> Response:
     token = current_partner_id.set(effective_id)
     try:
         product = await _entity_repo.get_by_id(product_id)
-        if product is None or product.type != EntityType.PRODUCT.value:
-            return _error_response("INVALID_INPUT", "product_id must point to a product entity", 400, request=request)
+        if not is_collaboration_root_entity(product):
+            return _error_response("INVALID_INPUT", "product_id must point to a collaboration root entity", 400, request=request)
 
         now = datetime.now(timezone.utc)
         milestone = Entity(

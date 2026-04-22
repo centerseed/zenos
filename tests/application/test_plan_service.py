@@ -37,7 +37,7 @@ def _make_entity(entity_id: str, name: str, entity_type: str) -> Entity:
         id=entity_id,
         name=name,
         type=entity_type,
-        level=1 if entity_type == "product" else 2,
+        level=1 if entity_type in {"product", "company"} else 2,
         parent_id=None,
         status="active",
         summary="summary",
@@ -128,10 +128,20 @@ async def test_create_plan_accepts_valid_product_id_and_derives_project_name():
 
 
 @pytest.mark.asyncio
-async def test_create_plan_rejects_non_product_entity_as_product_id():
+async def test_create_plan_accepts_company_root_as_collaboration_scope():
+    svc = _make_service(entity=_make_entity("company-1", "原心生技", "company"))
+
+    plan = await svc.create_plan({"goal": "Kick off client workspace", "created_by": "pm", "product_id": "company-1"})
+
+    assert plan.product_id == "company-1"
+    assert plan.project == "原心生技"
+
+
+@pytest.mark.asyncio
+async def test_create_plan_rejects_non_collaboration_root_entity_as_product_id():
     svc = _make_service(entity=_make_entity("goal-1", "Goal", "goal"))
 
-    with pytest.raises(ValueError, match="invalid or not a product entity"):
+    with pytest.raises(ValueError, match="invalid or not a collaboration root entity"):
         await svc.create_plan({"goal": "Deploy v1", "created_by": "pm", "product_id": "goal-1"})
 
 
@@ -216,11 +226,11 @@ async def test_update_plan_not_found():
 
 
 @pytest.mark.asyncio
-async def test_update_plan_rejects_non_product_entity_as_product_id():
+async def test_update_plan_rejects_non_collaboration_root_entity_as_product_id():
     plan = _make_plan(product_id="prod-1", project="ZenOS")
     svc = _make_service(plan=plan, entity=_make_entity("goal-1", "Goal", "goal"))
 
-    with pytest.raises(ValueError, match="invalid or not a product entity"):
+    with pytest.raises(ValueError, match="invalid or not a collaboration root entity"):
         await svc.update_plan("plan-1", {"product_id": "goal-1"})
 
 

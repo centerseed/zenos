@@ -74,6 +74,14 @@ interface TaskProgress {
   pct: number;
 }
 
+interface ProjectListStats {
+  dueThisWeek: number;
+  unassignedCount: number;
+  memberCount: number;
+  sourceCount: number;
+  updatedAt: Date | null;
+}
+
 function isPlaceholderCompletedProject(entity: Entity): boolean {
   return (
     entity.type === "product" &&
@@ -111,6 +119,34 @@ function computeProgress(tasks: Task[]): TaskProgress {
   const done = tasks.filter((t) => t.status === "done").length;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   return { done, total, pct };
+}
+
+function computeProjectListStats(entity: Entity, tasks: Task[]): ProjectListStats {
+  const now = Date.now();
+  const weekFromNow = now + 7 * 24 * 60 * 60 * 1000;
+  const openTasks = tasks.filter((task) => task.status !== "done" && task.status !== "cancelled");
+  const dueThisWeek = openTasks.filter((task) => {
+    const due = task.dueDate?.getTime();
+    return typeof due === "number" && due >= now && due <= weekFromNow;
+  }).length;
+  const unassignedCount = openTasks.filter((task) => !task.assignee && !task.assigneeName).length;
+  const members = new Set<string>();
+  if (entity.owner?.trim()) members.add(entity.owner.trim());
+  for (const task of tasks) {
+    const label = task.assigneeName || task.assignee || task.creatorName || task.createdBy;
+    if (label?.trim()) members.add(label.trim());
+  }
+  const latestTaskUpdate = tasks
+    .map((task) => task.updatedAt?.getTime() ?? task.createdAt?.getTime() ?? 0)
+    .sort((left, right) => right - left)[0];
+
+  return {
+    dueThisWeek,
+    unassignedCount,
+    memberCount: members.size,
+    sourceCount: entity.sources.length,
+    updatedAt: latestTaskUpdate ? new Date(latestTaskUpdate) : entity.updatedAt ?? null,
+  };
 }
 
 function formatShortDate(date: Date | null | undefined): string {
@@ -310,6 +346,7 @@ function HomeWorkspaceBootstrapBanner({
 interface ProjectWithProgress {
   entity: Entity;
   progress: TaskProgress | null; // null = still loading
+  stats: ProjectListStats | null;
 }
 
 function InkProjectsList({
@@ -337,6 +374,8 @@ function InkProjectsList({
   const activeCount = projects.filter(
     (p) => p.entity.status === "active" || p.entity.status === "current"
   ).length;
+  const dueThisWeekCount = projects.reduce((sum, project) => sum + (project.stats?.dueThisWeek ?? 0), 0);
+  const unassignedCount = projects.reduce((sum, project) => sum + (project.stats?.unassignedCount ?? 0), 0);
 
   let totalDone = 0;
   let totalTasks = 0;
@@ -357,10 +396,10 @@ function InkProjectsList({
       : "…";
 
   const kpiItems = [
-    { k: "進行中", v: String(activeCount), sub: "—" },
-    { k: "本週到期", v: "—", sub: "—" },
-    { k: "整體進度", v: overallPct, sub: "—" },
-    { k: "待分派任務", v: "—", sub: "—" },
+    { k: "進行中", v: String(activeCount), sub: `${projects.length} 產品` },
+    { k: "本週到期", v: String(dueThisWeekCount), sub: "open tasks" },
+    { k: "整體進度", v: overallPct, sub: `${totalDone}/${totalTasks} tasks` },
+    { k: "待分派任務", v: String(unassignedCount), sub: "open tasks" },
   ];
 
   return (
@@ -380,7 +419,7 @@ function InkProjectsList({
               Agent 盤點
             </Btn>
             <Btn t={t} variant="seal" icon={ICONS.plus} onClick={onOpenCreateProductGuide}>
-              新產品
+              建產品指引
             </Btn>
           </div>
         }
@@ -459,7 +498,7 @@ function InkProjectsList({
           gap: 14,
         }}
       >
-        {projects.map(({ entity: proj, progress }) => {
+        {projects.map(({ entity: proj, progress, stats }) => {
           const h = entityStatusToHealth(proj.status);
           const accent = c.vermillion; // product type = vermillion
           const ownerLetter = proj.owner ? proj.owner[0] : "—";
@@ -648,7 +687,7 @@ function InkProjectsList({
                     <span style={{ color: c.inkFaint, marginRight: 4 }}>
                       成員
                     </span>
-                    —
+                    {stats?.memberCount ?? "…"}
                   </span>
                   <span>
                     <span style={{ color: c.inkFaint, marginRight: 4 }}>
@@ -658,9 +697,9 @@ function InkProjectsList({
                   </span>
                   <span>
                     <span style={{ color: c.inkFaint, marginRight: 4 }}>
-                      文件
+                      來源
                     </span>
-                    —
+                    {stats?.sourceCount ?? "…"}
                   </span>
                   <span style={{ flex: 1 }} />
                   <span
@@ -670,7 +709,7 @@ function InkProjectsList({
                       letterSpacing: "0.04em",
                     }}
                   >
-                    —
+                    {stats?.updatedAt ? formatShortDate(stats.updatedAt) : "—"}
                   </span>
                 </div>
               </div>
@@ -1511,6 +1550,7 @@ export default function ProjectsPage() {
   const [progressMap, setProgressMap] = useState<
     Map<string, TaskProgress | null>
   >(new Map());
+  const [statsMap, setStatsMap] = useState<Map<string, ProjectListStats | null>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -1578,25 +1618,34 @@ export default function ProjectsPage() {
     setError(null);
     try {
       const token = await user.getIdToken();
-      const fetched = await getProjectEntities(token);
+      const fetched = await getProjectEntities(token, { scope: "shareableRoots" });
       const visibleProjects = fetched.filter((entity) => !isPlaceholderCompletedProject(entity));
       setEntities(visibleProjects);
 
       // Initialize all progress slots as null (loading)
       const initMap = new Map<string, TaskProgress | null>();
+      const initStatsMap = new Map<string, ProjectListStats | null>();
       for (const e of visibleProjects) {
         initMap.set(e.id, null);
+        initStatsMap.set(e.id, null);
       }
       setProgressMap(new Map(initMap));
+      setStatsMap(new Map(initStatsMap));
 
       // Fetch tasks for each project in parallel; update progress as they resolve
       const taskFetches = visibleProjects.map(async (e) => {
         try {
           const tasks = await getTasksByEntity(token, e.id);
           const prog = computeProgress(tasks);
+          const stats = computeProjectListStats(e, tasks);
           setProgressMap((prev) => {
             const next = new Map(prev);
             next.set(e.id, prog);
+            return next;
+          });
+          setStatsMap((prev) => {
+            const next = new Map(prev);
+            next.set(e.id, stats);
             return next;
           });
         } catch {
@@ -1604,6 +1653,17 @@ export default function ProjectsPage() {
           setProgressMap((prev) => {
             const next = new Map(prev);
             next.set(e.id, { done: 0, total: 0, pct: 0 });
+            return next;
+          });
+          setStatsMap((prev) => {
+            const next = new Map(prev);
+            next.set(e.id, {
+              dueThisWeek: 0,
+              unassignedCount: 0,
+              memberCount: e.owner?.trim() ? 1 : 0,
+              sourceCount: e.sources.length,
+              updatedAt: e.updatedAt ?? null,
+            });
             return next;
           });
         }
@@ -1690,6 +1750,7 @@ export default function ProjectsPage() {
   const projects: ProjectWithProgress[] = entities.map((e) => ({
     entity: e,
     progress: progressMap.get(e.id) ?? null,
+    stats: statsMap.get(e.id) ?? null,
   }));
   const visibleProjects = showDormantProducts
     ? projects
@@ -1781,7 +1842,7 @@ export default function ProjectsPage() {
         t={t}
         open={showCreateProductGuide}
         onOpenChange={setShowCreateProductGuide}
-        title="新增產品"
+        title="從知識地圖建立產品"
         size="sm"
         footer={
           <Btn t={t} variant="seal" onClick={() => {
@@ -1793,7 +1854,7 @@ export default function ProjectsPage() {
         }
       >
         <p style={{ margin: 0 }}>
-          目前 L1 product 仍從 Knowledge Map 建立。先進入知識地圖建立產品節點，再回這頁管理任務。
+          目前 L1 product 仍從 Knowledge Map 建立。這裡提供的是建立指引，不是 inline create flow。
         </p>
       </Dialog>
     </>

@@ -318,7 +318,9 @@ describe("ProjectsPage", () => {
     const { default: ProjectsPage } = await import("./page");
     render(<ProjectsPage />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "新產品" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "建產品指引" })).toBeInTheDocument());
+    expect(screen.getByText("本週到期")).toBeInTheDocument();
+    expect(screen.getByText("待分派任務")).toBeInTheDocument();
 
     expect(screen.queryByText("Paused Product")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "顯示暫停" }));
@@ -329,8 +331,8 @@ describe("ProjectsPage", () => {
     expect(screen.getByText("Owner")).toBeInTheDocument();
     expect(screen.getByText(/產品 · .* open/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "新產品" }));
-    expect(await screen.findByText("新增產品")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "建產品指引" }));
+    expect(await screen.findByText("從知識地圖建立產品")).toBeInTheDocument();
     expect(screen.getByText(/Knowledge Map/)).toBeInTheDocument();
   });
 
@@ -1068,5 +1070,36 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByTestId("project-progress-console")).toBeInTheDocument();
     expect(getProjectProgressMock).toHaveBeenCalledWith("token-1", "entity-1");
+  });
+
+  it("loads shareable L1 roots so company entities also appear in projects list", async () => {
+    getProjectEntitiesMock.mockResolvedValue([
+      {
+        id: "company-1",
+        name: "原心生技",
+        type: "company",
+        summary: "client root",
+        tags: { what: ["company"], why: "", how: "crm", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+        level: 1,
+      },
+    ]);
+    getTasksByEntityMock.mockResolvedValue([]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+
+    const { default: ProjectsPage } = await import("./page");
+    render(<ProjectsPage />);
+
+    expect(await screen.findByRole("button", { name: /原心生技/ })).toBeInTheDocument();
+    expect(getProjectEntitiesMock).toHaveBeenCalledWith("token-1", { scope: "shareableRoots" });
   });
 });

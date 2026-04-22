@@ -9,7 +9,7 @@ date: 2026-04-21
 supersedes: null
 l2_entity: Dashboard 知識地圖
 created: 2026-04-21
-updated: 2026-04-21
+updated: 2026-04-22
 ---
 
 # Feature Spec: Product Progress Console
@@ -71,7 +71,7 @@ updated: 2026-04-21
 
 ## 名詞與視圖語義
 
-- `產品頁 / Product Progress Console`：`/projects/[id]` 的管理層視圖。
+- `產品頁 / Product Progress Console`：`/projects/[id]` 的管理層視圖；route 名稱沿用 `projects`，但合法 root 可為 `product` 或 `company`。
 - `plan`：Action Layer 的 orchestration primitive，以 `goal` 作為顯示名稱。
 - `milestone`：沿用既有治理語義，為 `goal` entity；在產品頁可作為進度階段或分組語意，但不重定義為新的 task kind。
 - `subtask`：沿用既有治理語義，為 `parent_task_id != null` 的 task；在產品頁不得與 parent task 平鋪於同一層。
@@ -81,7 +81,8 @@ updated: 2026-04-21
 
 > 2026-04-22 contract note（ADR-044）：
 > 本頁所有 task / plan ownership 查詢以 `product_id` 為唯一 SSOT。
-> `project` 字串只可做顯示派生，不可再作為篩選主鍵；產品頁 task 清單也不得靠 `linked_entities` 內的 product entity 反查。
+> `project` 字串只可做顯示派生，不可再作為篩選主鍵；產品頁 task 清單也不得靠 `linked_entities` 內的 root entity 反查。
+> `product_id` 欄位名沿用不變，但合法 ownership target 為 L1 collaboration root entity（`product` / `company`）。
 
 ## 需求（含優先級與對應驗收）
 

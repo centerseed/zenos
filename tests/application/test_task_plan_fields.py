@@ -15,7 +15,7 @@ def _make_entity(entity_id: str, name: str, entity_type: str) -> Entity:
         id=entity_id,
         name=name,
         type=entity_type,
-        level=1 if entity_type == "product" else 2,
+        level=1 if entity_type in {"product", "company"} else 2,
         parent_id=None,
         status="active",
         summary="summary",
@@ -99,6 +99,28 @@ async def test_create_accepts_product_id_when_provided():
 
 
 @pytest.mark.asyncio
+async def test_create_accepts_company_root_as_product_scope():
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("company-1", "原心生技", "company"))
+    blindspot_repo = AsyncMock()
+
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    result = await svc.create_task(
+        {
+            "title": "Prepare client collaboration space",
+            "created_by": "pm",
+            "product_id": "company-1",
+        }
+    )
+
+    assert result.task.product_id == "company-1"
+    assert result.task.project == "原心生技"
+
+
+@pytest.mark.asyncio
 async def test_create_rejects_missing_product_id_when_unresolved():
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
@@ -151,7 +173,7 @@ async def test_create_rejects_invalid_product_id():
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
 
-    with pytest.raises(ValueError, match="invalid or not a product entity"):
+    with pytest.raises(ValueError, match="invalid or not a collaboration root entity"):
         await svc.create_task(
             {
                 "title": "Implement ownership SSOT",
@@ -162,13 +184,16 @@ async def test_create_rejects_invalid_product_id():
 
 
 @pytest.mark.asyncio
-async def test_create_strips_product_entities_from_linked_entities():
+async def test_create_strips_collaboration_root_entities_from_linked_entities():
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     product = _make_entity("prod-1", "ZenOS", "product")
+    company = _make_entity("company-1", "原心生技", "company")
     module = _make_entity("mod-1", "Auth", "module")
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(side_effect=lambda entity_id: {"prod-1": product, "mod-1": module}.get(entity_id))
+    entity_repo.get_by_id = AsyncMock(
+        side_effect=lambda entity_id: {"prod-1": product, "company-1": company, "mod-1": module}.get(entity_id)
+    )
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -178,7 +203,7 @@ async def test_create_strips_product_entities_from_linked_entities():
             "title": "Implement ownership SSOT",
             "created_by": "pm",
             "product_id": "prod-1",
-            "linked_entities": ["prod-1", "mod-1"],
+            "linked_entities": ["prod-1", "company-1", "mod-1"],
         }
     )
 

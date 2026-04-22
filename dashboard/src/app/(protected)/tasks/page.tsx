@@ -14,6 +14,7 @@ import { TaskCreateDialog } from "@/components/TaskCreateDialog";
 import { TaskHubRecap } from "@/features/tasks/TaskHubRecap";
 import { ProductHealthList } from "@/features/tasks/ProductHealthList";
 import { MilestonePlanRadar } from "@/features/tasks/MilestonePlanRadar";
+import { TaskHubMorningPanel } from "@/features/tasks/TaskHubMorningPanel";
 import { TaskHubRail } from "@/features/tasks/TaskHubRail";
 import {
   buildProjectFocusHref,
@@ -82,7 +83,7 @@ export function buildAvailableProjectOptions(tasks: Task[], entities: Entity[]):
   const entitiesById = Object.fromEntries(entities.map((entity) => [entity.id, entity]));
 
   for (const entity of entities) {
-    if (entity.type !== "product" && entity.type !== "project") continue;
+    if (entity.type !== "product" && entity.type !== "company" && entity.type !== "project") continue;
     const label = entity.name?.trim();
     const key = normalizeProjectKey(label);
     if (!key || projects.has(key)) continue;
@@ -374,6 +375,44 @@ export function TasksPage() {
     const selfIds = [partner?.id, partner?.displayName, user?.email].filter(Boolean);
     return selfIds.some((value) => value && (task.assignee === value || task.assigneeName === value));
   }).length;
+  const myTasks = filteredTasks.filter((task) => {
+    const selfIds = [partner?.id, partner?.displayName, user?.email].filter(Boolean);
+    return selfIds.some((value) => value && (task.assignee === value || task.assigneeName === value));
+  });
+  const myReviewCount = myTasks.filter((task) => task.status === "review").length;
+  const myBlockedCount = myTasks.filter((task) => task.blockedBy.length > 0 || Boolean(task.blockedReason)).length;
+  const myOverdueCount = myTasks.filter(
+    (task) => task.dueDate && task.dueDate.getTime() < Date.now() && task.status !== "done",
+  ).length;
+  const filterSnapshot = useMemo(() => {
+    const next: string[] = [];
+    if (selectedStatuses.length > 0) {
+      next.push(`Status · ${selectedStatuses.join(", ")}`);
+    }
+    if (selectedPriority) {
+      next.push(`Priority · ${selectedPriority}`);
+    }
+    if (selectedProject) {
+      const current = availableProjects.find((item) => item.value === selectedProject);
+      next.push(`Product · ${current?.label ?? selectedProject}`);
+    }
+    if (selectedDispatcher) {
+      next.push(`Dispatcher · ${selectedDispatcher}`);
+    }
+    if (selectedBlockedMode === "blocked") {
+      next.push("Blocked only");
+    } else if (selectedBlockedMode === "unblocked") {
+      next.push("Unblocked only");
+    }
+    return next;
+  }, [
+    availableProjects,
+    selectedBlockedMode,
+    selectedDispatcher,
+    selectedPriority,
+    selectedProject,
+    selectedStatuses,
+  ]);
 
   const handleCreateTask = useCallback(async (data: CreateTaskInput) => {
     if (!user) return;
@@ -524,6 +563,16 @@ export function TasksPage() {
         >
           <div style={{ display: "grid", gap: 16 }}>
             <TaskHubRecap snapshot={taskHubSnapshot} onOpenBoard={openExecutionBoard} />
+            <TaskHubMorningPanel
+              snapshot={taskHubSnapshot}
+              mySummary={{
+                openCount: mineCount,
+                reviewCount: myReviewCount,
+                blockedCount: myBlockedCount,
+                overdueCount: myOverdueCount,
+              }}
+              filterSummary={filterSnapshot}
+            />
             <ProductHealthList
               snapshot={taskHubSnapshot}
               onOpenProduct={(productId) => navigateToProject(productId)}

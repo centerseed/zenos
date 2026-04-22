@@ -468,6 +468,71 @@ describe("TasksPage", () => {
     });
   });
 
+  it("renders morning brief, personal risk summary, and filter snapshot on the task hub first screen", async () => {
+    getTasksMock.mockResolvedValue([
+      {
+        id: "task-1",
+        title: "更新後任務",
+        description: "",
+        status: "review",
+        priority: "high",
+        project: "ZenOS",
+        productId: "entity-1",
+        priorityReason: "",
+        assignee: "partner-1",
+        assigneeName: "Owner",
+        createdBy: "partner-1",
+        linkedEntities: ["entity-1"],
+        linkedProtocol: null,
+        linkedBlindspot: null,
+        sourceType: "manual",
+        contextSummary: "",
+        dueDate: new Date("2026-04-24T00:00:00Z"),
+        blockedBy: ["task-blocker"],
+        blockedReason: "Waiting for API",
+        acceptanceCriteria: [],
+        confirmedByCreator: false,
+        rejectionReason: null,
+        result: null,
+        completedBy: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-20T00:00:00Z"),
+        completedAt: null,
+      },
+    ]);
+    getAllEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+    getPlansMock.mockResolvedValue([]);
+
+    const { TasksPage } = await import("./page");
+    render(<TasksPage />);
+
+    expect((await screen.findAllByTestId("task-hub-morning-panel")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Morning Brief / Recent Changes").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Personal Risk Summary").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Filter Snapshot").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("更新後任務").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("All tasks · All products · All dispatchers").length).toBeGreaterThan(0);
+  });
+
   it("builds milestone focus from plan-linked milestone when goal status is not active", async () => {
     const { buildTaskHubSnapshot } = await import("@/features/tasks/taskHub");
 
@@ -603,5 +668,36 @@ describe("TasksPage", () => {
     });
 
     expect(snapshot.products.map((product) => product.productName)).toEqual(["naru_agent"]);
+  });
+
+  it("includes root company entities in the task hub portfolio", async () => {
+    const { buildTaskHubSnapshot } = await import("@/features/tasks/taskHub");
+
+    const snapshot = buildTaskHubSnapshot({
+      entities: [
+        {
+          id: "company-1",
+          name: "原心生技",
+          type: "company",
+          summary: "client root",
+          tags: { what: ["company"], why: "", how: "crm", who: [] },
+          status: "active",
+          parentId: null,
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+          level: 1,
+        },
+      ],
+      tasks: [],
+      plans: [],
+    });
+
+    expect(snapshot.products.map((product) => product.productName)).toEqual(["原心生技"]);
   });
 });

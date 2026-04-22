@@ -108,7 +108,11 @@ function getEntityTimestamp(entity: Entity): number {
 }
 
 function isPortfolioRootProduct(entity: Entity): boolean {
-  return entity.type === "product" && !entity.parentId && (entity.level === 1 || entity.level == null);
+  return (
+    (entity.type === "product" || entity.type === "company") &&
+    !entity.parentId &&
+    (entity.level === 1 || entity.level == null)
+  );
 }
 
 function buildProductLookup(products: Entity[]) {

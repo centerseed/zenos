@@ -50,6 +50,8 @@ def _mock_entity(eid, name="test", etype="module"):
     e.id = eid
     e.name = name
     e.type = etype
+    e.level = 1 if etype in {"product", "company"} else 2
+    e.parent_id = None if etype in {"product", "company"} else "parent-1"
     e.status = "active"
     e.tags = MagicMock(what="x", why="x", how="x", who="x")
     return e

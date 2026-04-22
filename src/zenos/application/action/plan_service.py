@@ -11,7 +11,8 @@ from typing import Any
 
 from zenos.domain.action import Plan, PlanStatus
 from zenos.domain.action.repositories import PlanRepository, TaskRepository
-from zenos.domain.knowledge import EntityRepository, EntityType
+from zenos.domain.knowledge import EntityRepository
+from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.infrastructure.sql_common import _new_id, _now
 
 # Terminal task statuses — a plan can only complete when all tasks reach these states.
@@ -230,16 +231,16 @@ class PlanService:
 
         if product_id:
             entity = await self._entities.get_by_id(product_id)
-            if entity is None or entity.type != EntityType.PRODUCT.value:
-                raise ValueError(f"product_id '{product_id}' is invalid or not a product entity")
+            if not is_collaboration_root_entity(entity):
+                raise ValueError(f"product_id '{product_id}' is invalid or not a collaboration root entity")
             return entity
 
         if project_hint:
             entity = await self._entities.get_by_name(str(project_hint).strip())
             if entity is None:
                 return None
-            if entity.type != EntityType.PRODUCT.value:
-                raise ValueError(f"project '{project_hint}' resolved to non-product entity '{entity.id}'")
+            if not is_collaboration_root_entity(entity):
+                raise ValueError(f"project '{project_hint}' resolved to non-collaboration-root entity '{entity.id}'")
             return entity
         return None
 

@@ -113,7 +113,7 @@ async def test_ac_tosc_05_missing_product_id_rejected():
 
 @pytest.mark.spec("AC-TOSC-06")
 async def test_ac_tosc_06_invalid_product_id_rejected():
-    """AC-TOSC-06: product_id 指向不存在 entity 或 type ≠ product 的 entity 時,
+    """AC-TOSC-06: product_id 指向不存在 entity 或非 collaboration root entity 時,
     reject INVALID_PRODUCT_ID."""
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
@@ -137,7 +137,7 @@ async def test_ac_tosc_06_invalid_product_id_rejected():
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
-    with pytest.raises(ValueError, match="INVALID_PRODUCT_ID|invalid or not a product entity"):
+    with pytest.raises(ValueError, match="INVALID_PRODUCT_ID|invalid or not a collaboration root entity"):
         await svc.create_task({"title": "Implement X", "created_by": "pm", "product_id": "goal-1"})
 
 

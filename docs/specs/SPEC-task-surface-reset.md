@@ -165,7 +165,8 @@ AC-TSR-03:
 
 ### P0-1A（R1A）Task Hub：全產品高層 recap
 
-- `/tasks` 第一屏必須先顯示所有產品的高層任務概況。
+- `/tasks` 第一屏必須先顯示所有 L1 collaboration root entity 的高層任務概況。
+- 此處的「產品」是 route / UI 語言，不是限制 entity.type；只要是 `level=1`、`parent_id=null`、可分享的 `product` 或 `company`，都必須納入同一套入口。
 - 每個 product 至少顯示：
   - product 名稱
   - current milestone / stage
@@ -175,9 +176,9 @@ AC-TSR-03:
 - 使用者必須能從 milestone 或 plan 直接進入對應產品頁。
 
 AC-TSR-04:
-- Given 系統有多個 active products
+- Given 系統有多個 active L1 collaboration roots（含 `product` 與 `company`）
   When 使用者進入 `/tasks`
-  Then 第一屏必須可直接看到各產品的 milestone / plan 進度概況，而不是只看到 task board 或單純 task 統計卡。
+  Then 第一屏必須可直接看到各 root 的 milestone / plan 進度概況，而不是只看到 task board 或單純 task 統計卡。
 
 AC-TSR-05:
 - Given 某 product 底下有 blocked plan 或 overdue open work
@@ -191,6 +192,8 @@ AC-TSR-06:
 
 > 2026-04-22 contract note（ADR-044）：
 > 產品頁 task 查詢契約以 `product_id` 為唯一 ownership SSOT。
+> 2026-04-22 collaboration-root note：
+> `product_id` 的欄位名沿用不變，但合法 ownership target 已擴為 L1 collaboration root entity（`product` / `company`）。
 > `/projects` 與 `/tasks` 之間的跳轉、focus 與 filter 不得再依賴 `project` 字串或把 product entity 偷塞進 `linked_entities`。
 
 ### P0-2（R2）Task Detail 第一屏只保留操作關鍵

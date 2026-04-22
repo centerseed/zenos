@@ -13,6 +13,7 @@ from typing import Any
 
 from zenos.domain.action import DISPATCHER_PATTERN, HandoffEvent, Task, TaskPriority, TaskStatus
 from zenos.domain.knowledge import Blindspot, EntityType
+from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.domain.action import TaskRepository
 from zenos.domain.action.repositories import PlanRepository
 from zenos.domain.knowledge import BlindspotRepository, EntityRepository
@@ -84,9 +85,9 @@ async def _resolve_product_entity(
     """Resolve a canonical product entity from explicit product_id or project hint."""
     if product_id:
         entity = await entity_repo.get_by_id(product_id)
-        if entity is None or entity.type != EntityType.PRODUCT.value:
+        if not is_collaboration_root_entity(entity):
             raise TaskValidationError(
-                f"product_id '{product_id}' is invalid or not a product entity.",
+                f"product_id '{product_id}' is invalid or not a collaboration root entity.",
                 error_code="INVALID_PRODUCT_ID",
             )
         return entity
@@ -94,9 +95,9 @@ async def _resolve_product_entity(
     if project_hint:
         entity = await entity_repo.get_by_name(str(project_hint).strip())
         if entity is not None:
-            if entity.type != EntityType.PRODUCT.value:
+            if not is_collaboration_root_entity(entity):
                 raise TaskValidationError(
-                    f"project '{project_hint}' resolved to non-product entity '{entity.id}'.",
+                    f"project '{project_hint}' resolved to non-collaboration-root entity '{entity.id}'.",
                     error_code="INVALID_PRODUCT_ID",
                 )
             return entity
@@ -246,7 +247,7 @@ class TaskService:
         for eid in linked_entity_ids:
             entity = await self._entities.get_by_id(eid)
             if entity:
-                if entity.type == EntityType.PRODUCT.value:
+                if is_collaboration_root_entity(entity):
                     continue
                 filtered_linked_entity_ids.append(eid)
                 linked_entities.append(entity)
@@ -476,7 +477,7 @@ class TaskService:
                         f"linked_entities 包含不存在的 entity ID: {entity_id}。"
                         f"請先建立這些 entity 或移除無效 ID。"
                     )
-                if entity.type == EntityType.PRODUCT.value:
+                if is_collaboration_root_entity(entity):
                     continue
                 filtered_linked_entity_ids.append(entity_id)
             task.linked_entities = filtered_linked_entity_ids

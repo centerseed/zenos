@@ -57,6 +57,31 @@ async def test_create_task_accepts_valid_title():
 
 
 @pytest.mark.asyncio
+async def test_create_task_accepts_company_root_as_product_scope():
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(
+        return_value=Entity(
+            id="company-1",
+            name="原心生技",
+            type=EntityType.COMPANY,
+            summary="client company",
+            tags=Tags(what=[], why="", how="", who=[]),
+            status="active",
+            level=1,
+            parent_id=None,
+        )
+    )
+    entity_repo.list_all = AsyncMock(return_value=[])
+    blindspot_repo = AsyncMock()
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    result = await svc.create_task({"title": "Prepare client workspace", "created_by": "u1", "product_id": "company-1"})
+    assert result.task.product_id == "company-1"
+
+
+@pytest.mark.asyncio
 async def test_create_task_rejects_empty_title():
     svc = _make_task_service()
     with pytest.raises(ValueError, match="Task title 驗證失敗"):

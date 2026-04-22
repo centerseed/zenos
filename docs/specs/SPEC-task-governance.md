@@ -4,7 +4,7 @@ id: SPEC-task-governance
 status: Approved
 ontology_entity: action-layer
 created: 2026-03-26
-updated: 2026-04-21
+updated: 2026-04-22
 ---
 
 # Feature Spec: ZenOS Task Governance
@@ -289,7 +289,7 @@ Task 對外有且只有三條關聯繩子，各管各的，不可混用：
 
 | 繩子 | 欄位 | Cardinality | 必填 | 語意 | 變更來源 |
 |------|------|-------------|------|------|----------|
-| **歸屬繩** | `product_id` (FK to L1 product entity) | 1:1 | ✅ **必填** | 「這 task 屬於哪個 **產品**」唯一 SSOT | caller 顯式傳入或 server 從 partner default 解析 |
+| **歸屬繩** | `product_id` (FK to L1 collaboration root entity) | 1:1 | ✅ **必填** | 「這 task 屬於哪個 **協作主軸**」唯一 SSOT；欄位名沿用 `product_id` 但合法 root 可為 `product` 或 `company` | caller 顯式傳入或 server 從 partner default 解析 |
 | **編組繩** | `plan_id` + `parent_task_id` | 1:1 | 選填 | 「這 task 在哪個 plan / 是誰的 subtask」 | caller 傳入，subtask 必須繼承 parent.plan_id 與 parent.product_id |
 | **知識繩** | `linked_entities` (N:N) | 0..3 | 建議 | 「這 task 跟哪些 L2 module / L3 milestone 有 ontology 關聯」純 context | caller 傳入，**禁止包含 type=product 的 entity** |
 
@@ -310,7 +310,7 @@ Task 對外有且只有三條關聯繩子，各管各的，不可混用：
 |------|------|------------|
 | 沒傳 `product_id` 也無 `partner.defaultProject` 可解析 | reject | `MISSING_PRODUCT_ID` |
 | `product_id` 指向不存在 entity | reject | `INVALID_PRODUCT_ID` |
-| `product_id` 指向 type ≠ product 的 entity | reject | `INVALID_PRODUCT_ID` |
+| `product_id` 指向不存在 entity、type 不在 `{product, company}`，或不是 L1 root entity | reject | `INVALID_PRODUCT_ID` |
 | `linked_entities` 包含 type=product 的 entity | strip + warning | `LINKED_ENTITIES_PRODUCT_STRIPPED` |
 | 同時傳 `project` 字串和 `product_id` 但對不上 | 以 `product_id` 為準 + warning | `PROJECT_STRING_IGNORED` |
 | subtask.product_id ≠ parent.product_id | reject | `CROSS_PRODUCT_SUBTASK` |
@@ -323,6 +323,7 @@ Task 對外有且只有三條關聯繩子，各管各的，不可混用：
 
 1. **partner.defaultProject 字串解析**：在當前 partner 範圍內找 `type='product'` 且 `LOWER(name) = LOWER(defaultProject)` 的 entity；取第一筆
 2. **失敗** → reject。**不再 fallback first product entity**——猜錯比 reject 更危險
+3. 若解析結果是 `company`，只要它是 `level=1` 且 `parent_id=null` 的 collaboration root，也視為合法 ownership target
 
 ### linked_entities 的正確掛法（語意收緊）
 
@@ -331,7 +332,7 @@ Task 對外有且只有三條關聯繩子，各管各的，不可混用：
 - 1-3 個，不可超過
 - 至少包含一個最相關的 L2 module（最強建議）
 - Milestone 沿用 `Milestone (= Goal entity)` 規則，掛在這裡
-- **不可包含 type=product entity**——歸屬已由 product_id 表達，重複放會被 server strip
+- **不可包含 L1 collaboration root entity（type=product/company）**——歸屬已由 product_id 表達，重複放會被 server strip
 
 ### 查詢 Pattern（取代 linked_entities join）
 
@@ -376,8 +377,8 @@ Backfill 兜底的 task 會 insert 一筆 `governance:review_product_assignment`
 #### Server Validation（P0）
 
 - **AC-TOSC-05**：`task(action="create")` / `write(collection="tasks")` 沒傳 `product_id`，且 `partner.defaultProject` 解析無結果時，reject `MISSING_PRODUCT_ID`。
-- **AC-TOSC-06**：`product_id` 指向不存在 entity 或 type ≠ product 的 entity 時，reject `INVALID_PRODUCT_ID`。
-- **AC-TOSC-07**：`linked_entities` 含 type=product entity 時，server strip 並回傳 warning `LINKED_ENTITIES_PRODUCT_STRIPPED`，DB 不會寫入該關聯。
+- **AC-TOSC-06**：`product_id` 指向不存在 entity、type 不在 `{product, company}`、或不是 `level=1` 且 `parent_id=null` 的 root entity 時，reject `INVALID_PRODUCT_ID`。
+- **AC-TOSC-07**：`linked_entities` 含 L1 collaboration root entity（type=product/company）時，server strip 並回傳 warning `LINKED_ENTITIES_PRODUCT_STRIPPED`，DB 不會寫入該關聯。
 - **AC-TOSC-08**：同時傳 `project` 字串與 `product_id` 且 product entity.name ≠ project 字串時，以 `product_id` 為準並回傳 warning `PROJECT_STRING_IGNORED`。
 - **AC-TOSC-09**：subtask 的 `product_id` ≠ parent task `product_id` 時，reject `CROSS_PRODUCT_SUBTASK`。
 - **AC-TOSC-10**：task 有 `plan_id` 且 `task.product_id` ≠ `plan.product_id` 時，reject `CROSS_PRODUCT_PLAN_TASK`。
@@ -392,9 +393,9 @@ Backfill 兜底的 task 會 insert 一筆 `governance:review_product_assignment`
 
 #### Read Path 改造（P0）
 
-- **AC-TOSC-16**：`GET /api/data/tasks/by-entity/{entityId}` 當 entity.type=product 時走 `WHERE product_id = $entityId`；當 entity.type 為其他（goal / module）時走 task_entities join。
+- **AC-TOSC-16**：`GET /api/data/tasks/by-entity/{entityId}` 當 entity 為 L1 collaboration root（type=product/company，且為 root）時走 `WHERE product_id = $entityId`；當 entity.type 為其他（goal / module）時走 task_entities join。
 - **AC-TOSC-17**：MCP `search(tasks, product_id=X)` 純走 `product_id` 欄位，不再 fallback `project` 字串 match。
-- **AC-TOSC-18**：Frontend 全域 `/tasks` 的 product filter 改用 `product_id`，顯示 product entity name。
+- **AC-TOSC-18**：Frontend 全域 `/tasks` 的 product filter 改用 `product_id`，顯示 ownership root entity name；`company` 型 L1 也必須可被列入同一套產品視圖。
 
 #### Frontend（P0）
 
@@ -410,7 +411,7 @@ Backfill 兜底的 task 會 insert 一筆 `governance:review_product_assignment`
 
 - **AC-TOSC-23**：本節（2026-04-22 Task Ownership SSOT 收斂）已落入 `SPEC-task-governance.md`，且 `governance_guide(topic="task", level=2)` 回傳內容包含三條繩子原則與七條 validation 規則。
 - **AC-TOSC-24**：`skills/governance/task-governance.md`、`skills/governance/shared-rules.md` 同步加註對齊本節（reference-only）。
-- **AC-TOSC-25**：`SPEC-task-surface-reset`、`SPEC-project-progress-console` 加註腳對齊 product_id query contract，無語意衝突。
+- **AC-TOSC-25**：`SPEC-task-surface-reset`、`SPEC-project-progress-console` 加註腳對齊 `product_id = L1 collaboration root entity` contract，無語意衝突。
 
 ### 下游 SSOT 同步清單
 

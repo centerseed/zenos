@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.domain.task_rules import normalize_task_status
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
@@ -279,7 +280,7 @@ async def _task_handler(
                     return _error_response(
                         status="rejected",
                         error_code="MISSING_PRODUCT_ID",
-                        message="product_id is required when project/defaultProject cannot be resolved to a product entity",
+                        message="product_id is required when project/defaultProject cannot be resolved to a collaboration root entity",
                     )
                 if entity_repo is None:
                     return _error_response(
@@ -294,16 +295,16 @@ async def _task_handler(
                         error_code="MISSING_PRODUCT_ID",
                         message=(
                             "product_id is required when project/defaultProject "
-                            "cannot be resolved to a product entity"
+                            "cannot be resolved to a collaboration root entity"
                         ),
                     )
-                if resolved_product.type != "product":
+                if not is_collaboration_root_entity(resolved_product):
                     return _error_response(
                         status="rejected",
                         error_code="INVALID_PRODUCT_ID",
                         message=(
                             f"project/defaultProject '{effective_project}' resolved to "
-                            f"non-product entity '{resolved_product.id}'"
+                            f"non-collaboration-root entity '{resolved_product.id}'"
                         ),
                     )
                 auto_resolved_product_id = resolved_product.id

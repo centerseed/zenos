@@ -115,7 +115,7 @@ export function TaskCreateDialog({
   const productOptions = useMemo(
     () =>
       entities
-        .filter((entity) => entity.type === "product")
+        .filter((entity) => entity.type === "product" || entity.type === "company")
         .map((entity) => ({ value: entity.id, label: entity.name })),
     [entities],
   );
@@ -177,7 +177,7 @@ export function TaskCreateDialog({
   async function handleSubmit() {
     if (!title.trim()) return;
     if (!productId) {
-      setError("product 為必填");
+      setError("協作主軸為必填");
       return;
     }
 
@@ -280,15 +280,15 @@ export function TaskCreateDialog({
           />
         </FormField>
 
-        <FormField t={t} label="Product" required htmlFor="task-product">
+        <FormField t={t} label="協作主軸" required htmlFor="task-product">
           <Select
             t={t}
             id="task-product"
             value={productId}
             onChange={setProductId}
             options={productOptions}
-            placeholder="選擇 product"
-            aria-label="Task product"
+            placeholder="選擇產品或客戶"
+            aria-label="Task collaboration root"
             invalid={!productId && Boolean(error)}
           />
         </FormField>
