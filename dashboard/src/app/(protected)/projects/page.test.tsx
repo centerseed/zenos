@@ -155,7 +155,7 @@ describe("ProjectsPage", () => {
     });
   });
 
-  it("creates project task with linked_entities", async () => {
+  it("creates project task with product_id and no forced linked_entities hack", async () => {
     getProjectEntitiesMock.mockResolvedValue([
       {
         id: "entity-1",
@@ -229,10 +229,11 @@ describe("ProjectsPage", () => {
       status: "todo",
       priority: "medium",
       project: "ZenOS",
+      productId: "entity-1",
       priorityReason: "",
       assignee: null,
       createdBy: "partner-1",
-      linkedEntities: ["entity-1"],
+      linkedEntities: [],
       linkedProtocol: null,
       linkedBlindspot: null,
       sourceType: "manual",
@@ -262,10 +263,11 @@ describe("ProjectsPage", () => {
         "token-1",
         expect.objectContaining({
           title: "Project Task",
+          product_id: "entity-1",
           project: "ZenOS",
-          linked_entities: ["entity-1"],
         }),
       );
+      expect(createTaskMock.mock.calls[0]?.[1]).not.toHaveProperty("linked_entities");
     });
   });
 
@@ -651,12 +653,12 @@ describe("ProjectsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "create-project-plan" }));
 
     await waitFor(() => {
-      expect(createPlanMock).toHaveBeenCalledWith(
+        expect(createPlanMock).toHaveBeenCalledWith(
         "token-1",
         expect.objectContaining({
           goal: "Launch project progress console",
           project: "ZenOS",
-          project_id: "entity-1",
+          product_id: "entity-1",
           status: "active",
         }),
       );
