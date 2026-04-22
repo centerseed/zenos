@@ -182,7 +182,7 @@ describe("ProjectRecapRail", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "設定 helper" }));
-    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getAllByRole("dialog").length).toBeGreaterThan(1);
     expect(screen.getByRole("heading", { name: "設定 helper" })).toBeInTheDocument();
     expect(screen.getByLabelText("Helper Base URL")).toBeInTheDocument();
 
