@@ -39,7 +39,7 @@ def test_plan_creation_with_all_fields():
         entry_criteria="ADR approved",
         exit_criteria="All tasks done and QA passed",
         project="zenos",
-        project_id="entity-zenos",
+        product_id="entity-zenos",
         updated_by="architect",
         result=None,
     )
@@ -47,6 +47,7 @@ def test_plan_creation_with_all_fields():
     assert plan.status == PlanStatus.ACTIVE
     assert plan.owner == "tech-lead"
     assert plan.project == "zenos"
+    assert plan.product_id == "entity-zenos"
 
 
 def test_plan_timestamps_default_to_utcnow():
@@ -69,6 +70,13 @@ def test_plan_result_starts_none():
     assert plan.result is None
 
 
-def test_plan_project_id_optional():
+def test_plan_product_id_optional():
     plan = Plan(goal="G", status="draft", created_by="u")
-    assert plan.project_id is None
+    assert plan.product_id is None
+
+
+def test_plan_project_id_alias_writes_back_to_product_id():
+    plan = Plan(goal="G", status="draft", created_by="u")
+    plan.project_id = "prod-1"
+    assert plan.product_id == "prod-1"
+    assert plan.project_id == "prod-1"

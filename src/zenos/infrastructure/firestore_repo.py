@@ -794,7 +794,7 @@ class FirestoreTaskRepository:
                 continue
             if normalized_project:
                 task_project = _normalize_project_scope(getattr(task, "project", ""))
-                task_project_id = str(getattr(task, "project_id", "") or "").strip()
+                task_project_id = str(getattr(task, "product_id", getattr(task, "project_id", "")) or "").strip()
                 if task_project != normalized_project and task_project_id != str(project).strip():
                     continue
             results.append(task)

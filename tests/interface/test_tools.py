@@ -212,6 +212,7 @@ class TestSearchTool:
                 limit=200,
                 offset=0,
                 project=None,
+                product_id=None,
                 plan_id=None,
             )
             assert "tasks" in data
@@ -234,6 +235,7 @@ class TestSearchTool:
                 limit=200,
                 offset=0,
                 project=None,
+                product_id=None,
                 plan_id=None,
             )
 
@@ -255,6 +257,7 @@ class TestSearchTool:
                 limit=200,
                 offset=0,
                 project="paceriz",
+                product_id=None,
                 plan_id=None,
             )
 
@@ -416,6 +419,7 @@ class TestSearchNewParams:
                 limit=5,
                 offset=10,
                 project=None,
+                product_id=None,
                 plan_id=None,
             )
 
@@ -1663,15 +1667,16 @@ class TestTaskTool:
             assert payload["acceptance_criteria"] == ["a", "b"]
 
     async def test_create_task_normalizes_project_scope(self):
-        from zenos.interface.mcp import task, _current_partner
+        from zenos.interface.mcp import task, _current_partner, entity_repo
         from zenos.application.action.task_service import TaskResult
 
-        t = _make_task(project="paceriz")
+        t = _make_task(project="Paceriz", product_id="prod-1")
         create_result = TaskResult(task=t, cascade_updates=[])
         token_partner = _current_partner.set({"id": "partner-1", "defaultProject": "  Paceriz  "})
         try:
             with patch("zenos.interface.mcp.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
+                entity_repo.get_by_name = AsyncMock(return_value=_make_entity(id="prod-1", name="Paceriz"))
 
                 await task(
                     action="create",
@@ -1683,6 +1688,25 @@ class TestTaskTool:
                 assert payload["project"] == "paceriz"
         finally:
             _current_partner.reset(token_partner)
+
+    async def test_create_task_forwards_product_id(self):
+        from zenos.interface.mcp import task
+        from zenos.application.action.task_service import TaskResult
+
+        t = _make_task(project="paceriz", product_id="prod-1")
+        create_result = TaskResult(task=t, cascade_updates=[])
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+
+            await task(
+                action="create",
+                title="Fix login",
+                created_by="architect",
+                product_id="prod-1",
+            )
+
+            payload = mock_ts.create_task.call_args.args[0]
+            assert payload["product_id"] == "prod-1"
 
     async def test_create_task_missing_title(self):
         from zenos.interface.mcp import task
@@ -1961,8 +1985,8 @@ class TestTaskTool:
             assert linked[0]["id"] == entity_id
             assert "name" in linked[0]
 
-    async def test_update_task_forwards_linked_entities_and_project(self):
-        """task update must forward linked_entities/project into task_service updates."""
+    async def test_update_task_forwards_linked_entities_project_and_product_id(self):
+        """task update must forward linked_entities/project/product_id into task_service updates."""
         from zenos.interface.mcp import _task_handler
         from zenos.application.action.task_service import TaskResult
 
@@ -1978,12 +2002,14 @@ class TestTaskTool:
                 id="task-1",
                 linked_entities=["ent-1", "ent-2"],
                 project="ZenOS",
+                product_id="prod-1",
             )
 
             assert result["status"] == "ok"
             _, updates = mock_ts.update_task.await_args.args
             assert updates["linked_entities"] == ["ent-1", "ent-2"]
             assert updates["project"] == "zenos"
+            assert updates["product_id"] == "prod-1"
 
 
 # ---------------------------------------------------------------------------

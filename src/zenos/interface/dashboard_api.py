@@ -932,7 +932,7 @@ def _task_to_dict(t: Task) -> dict:
         "blocked": "todo",
         "archived": "done",
     }.get(t.status, t.status)
-    product_id = getattr(t, "product_id", getattr(t, "project_id", None))
+    product_id = t.product_id
     return {
         "id": t.id,
         "title": t.title,
@@ -1844,8 +1844,8 @@ def _plan_payload_to_dict(plan: object) -> dict[str, object]:
         "entry_criteria": getattr(plan, "entry_criteria", None),
         "exit_criteria": getattr(plan, "exit_criteria", None),
         "project": getattr(plan, "project", None),
-        "project_id": getattr(plan, "project_id", None),
-        "product_id": getattr(plan, "product_id", getattr(plan, "project_id", None)),
+        "project_id": plan.product_id,
+        "product_id": plan.product_id,
         "created_by": getattr(plan, "created_by", None),
         "updated_by": getattr(plan, "updated_by", None),
         "result": getattr(plan, "result", None),
@@ -1875,6 +1875,7 @@ async def list_plans(request: Request) -> Response:
 
     ids = [plan_id.strip() for plan_id in request.query_params.getlist("id") if plan_id.strip()]
     deduped_ids = list(dict.fromkeys(ids))
+    product_id = str(request.query_params.get("product_id") or "").strip() or None
 
     token = current_partner_id.set(effective_id)
     try:
@@ -1887,7 +1888,7 @@ async def list_plans(request: Request) -> Response:
                 except ValueError:
                     continue
         else:
-            listed = await plan_service.list_plans(limit=200)
+            listed = await plan_service.list_plans(limit=200, product_id=product_id)
             plans = [_plan_payload_to_dict(plan) for plan in listed]
     finally:
         current_partner_id.reset(token)

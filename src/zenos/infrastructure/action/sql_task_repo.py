@@ -77,7 +77,7 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         rejection_reason=row["rejection_reason"],
         result=row["result"],
         project=row["project"],
-        project_id=row["project_id"] if "project_id" in row else None,
+        product_id=row["product_id"] if "product_id" in row else (row["project_id"] if "project_id" in row else None),
         attachments=_json_loads_safe(row["attachments"] if "attachments" in row else None) or [],
         parent_task_id=row["parent_task_id"] if "parent_task_id" in row else None,
         dispatcher=row["dispatcher"] if "dispatcher" in row else None,
@@ -215,7 +215,7 @@ class SqlTaskRepository:
                     plan_id, plan_order, depends_on_task_ids_json,
                     linked_protocol, linked_blindspot, source_type, source_metadata_json, context_summary,
                     due_date, blocked_reason, acceptance_criteria_json, completed_by,
-                    confirmed_by_creator, rejection_reason, result, project, project_id,
+                    confirmed_by_creator, rejection_reason, result, project, product_id,
                     attachments,
                     parent_task_id, dispatcher, handoff_events,
                     created_at, updated_at, completed_at
@@ -248,7 +248,7 @@ class SqlTaskRepository:
                     confirmed_by_creator=EXCLUDED.confirmed_by_creator,
                     rejection_reason=EXCLUDED.rejection_reason,
                     result=EXCLUDED.result, project=EXCLUDED.project,
-                    project_id=EXCLUDED.project_id,
+                    product_id=EXCLUDED.product_id,
                     attachments=EXCLUDED.attachments,
                     parent_task_id=EXCLUDED.parent_task_id,
                     dispatcher=EXCLUDED.dispatcher,
@@ -265,7 +265,7 @@ class SqlTaskRepository:
                 task.source_type, _dumps(task.source_metadata), task.context_summary, task.due_date,
                 task.blocked_reason, _dumps(task.acceptance_criteria),
                 task.completed_by, task.confirmed_by_creator,
-                task.rejection_reason, task.result, task.project, task.project_id,
+                task.rejection_reason, task.result, task.project, task.product_id,
                 _dumps(task.attachments),
                 task.parent_task_id, task.dispatcher, handoff_events_json,
                 task.created_at, task.updated_at, task.completed_at,
@@ -328,6 +328,7 @@ class SqlTaskRepository:
         limit: int = 200,
         offset: int = 0,
         project: str | None = None,
+        product_id: str | None = None,
         plan_id: str | None = None,
     ) -> list[Task]:
         pid = _get_partner_id()
@@ -358,9 +359,13 @@ class SqlTaskRepository:
             idx += 1
         if project is not None:
             conditions.append(
-                f"(LOWER(BTRIM(COALESCE(t.project, ''))) = LOWER(BTRIM(${idx})) OR t.project_id = ${idx})"
+                f"(LOWER(BTRIM(COALESCE(t.project, ''))) = LOWER(BTRIM(${idx})) OR t.product_id = ${idx})"
             )
             params.append(str(project).strip())
+            idx += 1
+        if product_id is not None:
+            conditions.append(f"t.product_id = ${idx}")
+            params.append(product_id)
             idx += 1
         if plan_id is not None:
             conditions.append(f"t.plan_id = ${idx}")

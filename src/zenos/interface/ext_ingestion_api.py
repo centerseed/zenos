@@ -36,6 +36,7 @@ async def _canonical_task_adapter(_workspace_id: str, payload: dict) -> dict:
         description=payload.get("description"),
         acceptance_criteria=payload.get("acceptance_criteria"),
         linked_entities=payload.get("linked_entities"),
+        product_id=payload.get("product_id"),
         priority=payload.get("priority"),
         assignee=payload.get("assignee"),
         assignee_role_id=payload.get("assignee_role_id"),
@@ -235,6 +236,7 @@ async def _commit_atomic(
                 description=payload.get("description"),
                 acceptance_criteria=payload.get("acceptance_criteria"),
                 linked_entities=payload.get("linked_entities"),
+                product_id=payload.get("product_id") or product_id,
                 priority=payload.get("priority"),
                 assignee=payload.get("assignee"),
                 assignee_role_id=payload.get("assignee_role_id"),
@@ -540,6 +542,11 @@ async def commit_candidates(request: Request) -> JSONResponse:
         except RuntimeError as exc:
             return _backend_unavailable(str(exc))
     else:
+        async def _task_adapter_with_product(workspace_id_arg: str, payload: dict) -> dict:
+            merged_payload = dict(payload)
+            merged_payload.setdefault("product_id", product_id)
+            return await _task_adapter(workspace_id_arg, merged_payload)
+
         result = await service.commit(
             workspace_id=workspace_id,
             product_id=product_id,
@@ -547,7 +554,7 @@ async def commit_candidates(request: Request) -> JSONResponse:
             task_candidates=task_candidates,
             entry_candidates=entry_candidates,
             l2_update_candidates=l2_update_candidates,
-            task_adapter=_task_adapter,
+            task_adapter=_task_adapter_with_product,
             entry_adapter=_entry_adapter,
             atomic=False,
         )

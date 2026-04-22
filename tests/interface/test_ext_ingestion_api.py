@@ -204,6 +204,39 @@ class TestExtIngestionApi:
         assert body["status"] == "error"
         assert body["data"]["error"] == "FORBIDDEN"
 
+    def test_commit_forwards_product_id_to_task_adapter(self):
+        token = _build_token(
+            scopes=["read", "write", "task"],
+            workspace_ids=[WORKSPACE_HOME, WORKSPACE_SHARED],
+        )
+        created_tasks: list[dict] = []
+
+        async def _fake_task_adapter(_workspace_id: str, payload: dict) -> dict:
+            created_tasks.append(payload)
+            return {"status": "ok", "data": {"id": "task-created-1", "product_id": payload.get("product_id")}}
+
+        async def _fake_entry_adapter(_workspace_id: str, payload: dict) -> dict:
+            return {"status": "ok", "data": {"id": "entry-created-1", **payload}}
+
+        _set_commit_adapters(_fake_task_adapter, _fake_entry_adapter)
+
+        with _jwt_client() as client:
+            resp = client.post(
+                "/api/ext/candidates/commit",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "workspace_id": WORKSPACE_HOME,
+                    "product_id": "prod-1",
+                    "batch_id": "batch-product-forward",
+                    "task_candidates": [{"title": "Create from ingestion"}],
+                    "entry_candidates": [],
+                },
+            )
+
+        assert resp.status_code == 200
+        assert created_tasks
+        assert created_tasks[0]["product_id"] == "prod-1"
+
     def test_raw_to_distill_to_commit_to_review_queue(self):
         token = _build_token(
             scopes=["read", "write", "task"],

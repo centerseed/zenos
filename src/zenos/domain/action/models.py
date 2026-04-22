@@ -41,11 +41,20 @@ class Plan:
     entry_criteria: str | None = None
     exit_criteria: str | None = None
     project: str = ""
-    project_id: str | None = None
+    product_id: str | None = None
     updated_by: str | None = None
     result: str | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
+
+    @property
+    def project_id(self) -> str | None:
+        """Deprecated alias kept for backward-compatible reads."""
+        return self.product_id
+
+    @project_id.setter
+    def project_id(self, value: str | None) -> None:
+        self.product_id = value
 
 
 @dataclass
@@ -86,7 +95,7 @@ class Task:
     rejection_reason: str | None = None
     result: str | None = None
     project: str = ""  # Partner-level project grouping (e.g. "zenos", "paceriz")
-    project_id: str | None = None  # Link to product/project entity ID
+    product_id: str | None = None
     attachments: list[dict] = field(default_factory=list)  # [{id, filename, content_type, gcs_path, ...}]
     # Action-Layer upgrade fields (2026-04-19)
     parent_task_id: str | None = None
@@ -95,3 +104,12 @@ class Task:
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
     completed_at: datetime | None = None
+
+    @property
+    def project_id(self) -> str | None:
+        """Deprecated alias kept for backward-compatible reads."""
+        return self.product_id
+
+    @project_id.setter
+    def project_id(self, value: str | None) -> None:
+        self.product_id = value

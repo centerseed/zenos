@@ -79,6 +79,10 @@ updated: 2026-04-21
 - `AI recap`：AI 針對當前產品狀態所產出的決策摘要。
 - `copy prompt`：可直接複製到 Claude Code / Codex 的 continuation prompt。
 
+> 2026-04-22 contract note（ADR-044）：
+> 本頁所有 task / plan ownership 查詢以 `product_id` 為唯一 SSOT。
+> `project` 字串只可做顯示派生，不可再作為篩選主鍵；產品頁 task 清單也不得靠 `linked_entities` 內的 product entity 反查。
+
 ## 需求（含優先級與對應驗收）
 
 ### P0-1（R1）Current Plans：產品當前進行中的 Plan 總覽

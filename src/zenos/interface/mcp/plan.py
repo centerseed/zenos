@@ -12,6 +12,31 @@ from zenos.application.action.plan_service import _plan_to_dict
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_plan_product_id(
+    *,
+    explicit_product_id: str | None,
+    project_hint: str | None,
+    partner_default_project: str | None,
+    entity_repo: object | None,
+) -> tuple[str | None, str | None]:
+    """Resolve canonical product_id for plan mutations from explicit ID or project hint."""
+    if explicit_product_id is not None:
+        return explicit_product_id, None
+
+    effective_project = project_hint or partner_default_project
+    if not effective_project:
+        return None, "product_id is required when project/defaultProject cannot be resolved to a product entity"
+    if entity_repo is None:
+        return None, "entity repository is unavailable for product resolution"
+
+    resolved = await entity_repo.get_by_name(str(effective_project).strip())
+    if resolved is None:
+        return None, "product_id is required when project/defaultProject cannot be resolved to a product entity"
+    if resolved.type != "product":
+        return None, f"project/defaultProject '{effective_project}' resolved to non-product entity '{resolved.id}'"
+    return resolved.id, None
+
+
 async def _plan_handler(
     action: str,
     goal: str | None = None,
@@ -19,6 +44,7 @@ async def _plan_handler(
     entry_criteria: str | None = None,
     exit_criteria: str | None = None,
     project: str | None = None,
+    product_id: str | None = None,
     project_id: str | None = None,
     id: str | None = None,
     status: str | None = None,
@@ -34,6 +60,7 @@ async def _plan_handler(
         partner = _current_partner.get()
         partner_default_project = partner.get("defaultProject", "") if partner else ""
         actor_id = (partner or {}).get("id")
+        effective_product_id = product_id if product_id is not None else project_id
 
         if action == "create":
             if not goal:
@@ -48,10 +75,23 @@ async def _plan_handler(
                     rejection_reason="created_by cannot be determined — no authenticated partner",
                 )
 
-            effective_project = project or partner_default_project
-
-            if _mcp.plan_service is None:
+            if _mcp.plan_service is None or getattr(_mcp, "entity_repo", None) is None:
                 await _ensure_services()
+            entity_repo = getattr(_mcp, "entity_repo", None)
+            effective_project = project or partner_default_project
+            effective_product_id, resolution_error = await _resolve_plan_product_id(
+                explicit_product_id=effective_product_id,
+                project_hint=project,
+                partner_default_project=partner_default_project,
+                entity_repo=entity_repo,
+            )
+            if resolution_error is not None:
+                return _unified_response(
+                    status="rejected",
+                    data={},
+                    rejection_reason=resolution_error,
+                )
+
             plan = await _mcp.plan_service.create_plan({
                 "goal": goal,
                 "created_by": created_by,
@@ -59,7 +99,7 @@ async def _plan_handler(
                 "entry_criteria": entry_criteria,
                 "exit_criteria": exit_criteria,
                 "project": effective_project,
-                "project_id": project_id,
+                "product_id": effective_product_id,
                 "updated_by": created_by,
             })
             _audit_log(
@@ -75,6 +115,8 @@ async def _plan_handler(
                     status="rejected", data={},
                     rejection_reason="id is required for plan update",
                 )
+            if _mcp.plan_service is None or getattr(_mcp, "entity_repo", None) is None:
+                await _ensure_services()
 
             updates: dict = {}
             if status is not None:
@@ -91,13 +133,13 @@ async def _plan_handler(
                 updates["exit_criteria"] = exit_criteria
             if project is not None:
                 updates["project"] = project
-            if project_id is not None:
-                updates["project_id"] = project_id
+            if effective_product_id is not None:
+                updates["product_id"] = effective_product_id
             if actor_id:
                 updates["updated_by"] = actor_id
+            if "product_id" in updates and updates["product_id"] is None:
+                updates.pop("product_id")
 
-            if _mcp.plan_service is None:
-                await _ensure_services()
             plan = await _mcp.plan_service.update_plan(id, updates)
             _audit_log(
                 event_type="plan.update",
@@ -127,6 +169,7 @@ async def _plan_handler(
             plans = await _mcp.plan_service.list_plans(
                 status=status_filter,
                 project=project or None,
+                product_id=effective_product_id,
                 limit=limit,
                 offset=offset,
             )
@@ -150,6 +193,7 @@ async def plan(
     entry_criteria: str | None = None,
     exit_criteria: str | None = None,
     project: str | None = None,
+    product_id: str | None = None,
     project_id: str | None = None,
     id: str | None = None,
     status: str | None = None,
@@ -183,7 +227,8 @@ async def plan(
         entry_criteria: 進入條件（何時算 Plan 可以開始）
         exit_criteria: 完成條件（何時算 Plan 達成目標）
         project: 所屬專案識別碼（如 "zenos"），未傳時使用 partner 預設
-        project_id: 連結到 product/project entity ID（選填）
+        product_id: 連結到 product entity ID（選填）
+        project_id: 舊 alias；若同時傳入，`product_id` 優先
         id: Plan ID（update/get 必填）
         status: 目標狀態（update 時使用）
         result: 完成產出描述（完成 Plan 時必填）
@@ -202,6 +247,7 @@ async def plan(
         entry_criteria=entry_criteria,
         exit_criteria=exit_criteria,
         project=project,
+        product_id=product_id,
         project_id=project_id,
         id=id,
         status=status,

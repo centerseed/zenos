@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -25,8 +26,8 @@ def _make_plan(**kwargs) -> Plan:
         "owner": None,
         "entry_criteria": None,
         "exit_criteria": None,
-        "project": "zenos",
-        "project_id": None,
+        "project": "ZenOS",
+        "product_id": "prod-1",
         "updated_by": "pm",
         "result": None,
     }
@@ -58,9 +59,11 @@ def mock_plan_service():
 async def test_create_plan_returns_ok(mock_plan_service):
     plan = _make_plan()
     mock_plan_service.create_plan = AsyncMock(return_value=plan)
+    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product")))
 
     with patch(_PLAN_SVC, mock_plan_service), \
          patch(_ENSURE, new=AsyncMock()), \
+         patch("zenos.interface.mcp.entity_repo", new=entity_repo), \
          patch(_AUDIT):
         result = await _plan_handler(action="create", goal="Ship v1", project="zenos")
 
@@ -80,17 +83,49 @@ async def test_create_plan_rejects_missing_goal():
 
 @pytest.mark.asyncio
 async def test_create_plan_uses_default_project_from_partner(mock_plan_service):
-    plan = _make_plan(project="zenos")
+    plan = _make_plan(project="ZenOS")
     mock_plan_service.create_plan = AsyncMock(return_value=plan)
+    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product")))
 
     with patch(_PLAN_SVC, mock_plan_service), \
          patch(_ENSURE, new=AsyncMock()), \
+         patch("zenos.interface.mcp.entity_repo", new=entity_repo), \
          patch(_AUDIT):
         # No project passed — should use defaultProject from partner
         await _plan_handler(action="create", goal="Implicit project")
 
     call_args = mock_plan_service.create_plan.call_args[0][0]
     assert call_args["project"] == "zenos"
+
+
+@pytest.mark.asyncio
+async def test_create_plan_passes_product_id_when_provided(mock_plan_service):
+    plan = _make_plan(product_id="prod-1")
+    mock_plan_service.create_plan = AsyncMock(return_value=plan)
+
+    with patch(_PLAN_SVC, mock_plan_service), \
+         patch(_ENSURE, new=AsyncMock()), \
+         patch(_AUDIT):
+        await _plan_handler(action="create", goal="Ship v1", product_id="prod-1")
+
+    call_args = mock_plan_service.create_plan.call_args[0][0]
+    assert call_args["product_id"] == "prod-1"
+
+
+@pytest.mark.asyncio
+async def test_create_plan_resolves_product_id_from_default_project(mock_plan_service):
+    plan = _make_plan(product_id="prod-1")
+    mock_plan_service.create_plan = AsyncMock(return_value=plan)
+    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product")))
+
+    with patch(_PLAN_SVC, mock_plan_service), \
+         patch(_ENSURE, new=AsyncMock()), \
+         patch("zenos.interface.mcp.entity_repo", new=entity_repo), \
+         patch(_AUDIT):
+        await _plan_handler(action="create", goal="Ship v1")
+
+    call_args = mock_plan_service.create_plan.call_args[0][0]
+    assert call_args["product_id"] == "prod-1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -191,6 +226,18 @@ async def test_list_plans_with_status_filter(mock_plan_service):
 
     call_kwargs = mock_plan_service.list_plans.call_args[1]
     assert call_kwargs["status"] == ["draft", "active"]
+
+
+@pytest.mark.asyncio
+async def test_list_plans_forwards_product_id_filter(mock_plan_service):
+    mock_plan_service.list_plans = AsyncMock(return_value=[])
+
+    with patch(_PLAN_SVC, mock_plan_service), \
+         patch(_ENSURE, new=AsyncMock()):
+        await _plan_handler(action="list", product_id="prod-1")
+
+    call_kwargs = mock_plan_service.list_plans.call_args[1]
+    assert call_kwargs["product_id"] == "prod-1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

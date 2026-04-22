@@ -889,8 +889,8 @@ class TestSqlTaskRepository:
         assert "confirmed_by_creator" in sql
         assert PARTNER_ID == conn.fetch.call_args_list[0][0][1]
 
-    def test_list_all_project_filter_matches_case_insensitively_and_by_project_id(self):
-        """project filter should survive case drift and future project_id-backed rows."""
+    def test_list_all_project_filter_matches_case_insensitively_and_by_product_id(self):
+        """project filter should survive case drift and future product_id-backed rows."""
         from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
@@ -901,7 +901,7 @@ class TestSqlTaskRepository:
         sql = conn.fetch.call_args_list[0][0][0]
         project_param = conn.fetch.call_args_list[0][0][2]
         assert "LOWER(BTRIM(COALESCE(t.project, ''))) = LOWER(BTRIM($2))" in sql
-        assert "t.project_id = $2" in sql
+        assert "t.product_id = $2" in sql
         assert project_param == "Paceriz"
 
     def test_upsert_new_task_generates_id(self):

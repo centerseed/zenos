@@ -298,6 +298,7 @@ async def _ensure_services() -> None:
         plan_service = PlanService(
             plan_repo=plan_repo,
             task_repo=task_repo,
+            entity_repo=entity_repo,
         )
     if task_service is None:
         task_service = TaskService(

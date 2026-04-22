@@ -141,6 +141,7 @@ async def _task_handler(
     acceptance_criteria: list[str] | None = None,
     result: str | None = None,
     project: str | None = None,
+    product_id: str | None = None,
     assignee_role_id: str | None = None,
     plan_id: str | None = None,
     plan_order: int | None = None,
@@ -267,6 +268,46 @@ async def _task_handler(
             # Auto-fill project from partner's default_project if caller omits it
             effective_project = _normalize_project_scope(project) or partner_default_project
 
+            if _mcp.task_service is None:
+                await _ensure_services()
+
+            entity_repo = _mcp.entity_repo or getattr(_mcp.task_service, "_entities", None)
+
+            auto_resolved_product_id: str | None = None
+            if product_id is None:
+                if not effective_project:
+                    return _error_response(
+                        status="rejected",
+                        error_code="MISSING_PRODUCT_ID",
+                        message="product_id is required when project/defaultProject cannot be resolved to a product entity",
+                    )
+                if entity_repo is None:
+                    return _error_response(
+                        status="error",
+                        error_code="BACKEND_UNAVAILABLE",
+                        message="entity repository is unavailable for product resolution",
+                    )
+                resolved_product = await entity_repo.get_by_name(str(effective_project).strip())
+                if resolved_product is None:
+                    return _error_response(
+                        status="rejected",
+                        error_code="MISSING_PRODUCT_ID",
+                        message=(
+                            "product_id is required when project/defaultProject "
+                            "cannot be resolved to a product entity"
+                        ),
+                    )
+                if resolved_product.type != "product":
+                    return _error_response(
+                        status="rejected",
+                        error_code="INVALID_PRODUCT_ID",
+                        message=(
+                            f"project/defaultProject '{effective_project}' resolved to "
+                            f"non-product entity '{resolved_product.id}'"
+                        ),
+                    )
+                auto_resolved_product_id = resolved_product.id
+
             # Parse due_date string to datetime
             parsed_due = None
             if due_date:
@@ -307,6 +348,7 @@ async def _task_handler(
                 "blocked_reason": blocked_reason,
                 "acceptance_criteria": normalized_acceptance_criteria,
                 "project": effective_project,
+                "product_id": product_id,
                 "assignee_role_id": assignee_role_id,
                 "plan_id": plan_id,
                 "plan_order": plan_order,
@@ -322,14 +364,22 @@ async def _task_handler(
                     return validated
                 data["attachments"] = validated
 
-            if _mcp.task_service is None:
-                await _ensure_services()
             task_result = await _mcp.task_service.create_task(data, conn=conn)
             task_data = await _enrich_task_result(task_result.task)
+            if normalized_linked_entities and len(task_result.task.linked_entities) < len(normalized_linked_entities):
+                mutation_warnings.append("LINKED_ENTITIES_PRODUCT_STRIPPED")
+            if project is not None:
+                normalized_input_project = _normalize_project_scope(project)
+                normalized_saved_project = _normalize_project_scope(task_result.task.project)
+                if normalized_input_project and normalized_saved_project and normalized_input_project != normalized_saved_project:
+                    mutation_warnings.append("PROJECT_STRING_IGNORED")
             _audit_log(
                 event_type="task.create",
                 target={"collection": "tasks", "id": task_data.get("id")},
-                changes={"input": data},
+                changes={
+                    "input": data,
+                    "auto_resolved_product_id": auto_resolved_product_id,
+                },
             )
             create_warnings: list[str] = list(mutation_warnings)
             if not task_result.task.linked_entities:
@@ -385,6 +435,8 @@ async def _task_handler(
                 updates["acceptance_criteria"] = normalized_acceptance_criteria
             if project is not None:
                 updates["project"] = _normalize_project_scope(project)
+            if product_id is not None:
+                updates["product_id"] = product_id
             if due_date is not None:
                 try:
                     updates["due_date"] = datetime.fromisoformat(due_date)
@@ -429,6 +481,13 @@ async def _task_handler(
                 await _ensure_services()
             task_result = await _mcp.task_service.update_task(id, updates)
             task_data = await _enrich_task_result(task_result.task)
+            if "linked_entities" in updates and len(task_result.task.linked_entities) < len(updates["linked_entities"]):
+                mutation_warnings.append("LINKED_ENTITIES_PRODUCT_STRIPPED")
+            if project is not None:
+                normalized_input_project = _normalize_project_scope(project)
+                normalized_saved_project = _normalize_project_scope(task_result.task.project)
+                if normalized_input_project and normalized_saved_project and normalized_input_project != normalized_saved_project:
+                    mutation_warnings.append("PROJECT_STRING_IGNORED")
             if task_result.cascade_updates:
                 task_data["cascadeUpdates"] = [
                     {"taskId": c.task_id, "change": c.change, "reason": c.reason}
@@ -529,6 +588,7 @@ async def task(
     acceptance_criteria: list[str] | None = None,
     result: str | None = None,
     project: str | None = None,
+    product_id: str | None = None,
     assignee_role_id: str | None = None,
     plan_id: str | None = None,
     plan_order: int | None = None,
@@ -605,6 +665,7 @@ async def task(
         result: 完成產出描述（status=review 時必填）
         project: 所屬專案識別碼（如 "zenos"、"paceriz"），用於任務隔離。
             未傳時自動使用 partner 的 default_project，確保任務不會跨專案污染。
+        product_id: 任務歸屬的 product entity ID。新 write path 應優先傳這個欄位。
         assignee_role_id: 指向 role entity 的 ID（可選），表達「這個任務需要什麼角色」而非「指派給誰」。
                           get 時會展開為角色的 name/summary context。
         plan_id: 任務群組 ID（PLAN 層識別）
@@ -655,6 +716,7 @@ async def task(
         acceptance_criteria=acceptance_criteria,
         result=result,
         project=project,
+        product_id=product_id,
         assignee_role_id=assignee_role_id,
         plan_id=plan_id,
         plan_order=plan_order,

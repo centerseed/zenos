@@ -8,6 +8,7 @@ import pytest
 
 from zenos.application.action.plan_service import PlanService
 from zenos.domain.action import Plan, PlanStatus, Task
+from zenos.domain.knowledge import Entity, Tags
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -15,7 +16,14 @@ from zenos.domain.action import Plan, PlanStatus, Task
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _make_plan(**kwargs) -> Plan:
-    defaults = {"goal": "Ship feature", "status": PlanStatus.DRAFT, "created_by": "pm", "id": "plan-1"}
+    defaults = {
+        "goal": "Ship feature",
+        "status": PlanStatus.DRAFT,
+        "created_by": "pm",
+        "id": "plan-1",
+        "project": "ZenOS",
+        "product_id": "prod-1",
+    }
     defaults.update(kwargs)
     return Plan(**defaults)
 
@@ -24,7 +32,26 @@ def _make_task(status: str, id: str = "task-1") -> Task:
     return Task(id=id, title="T", status=status, priority="medium", created_by="pm")
 
 
-def _make_service(plan=None, tasks=None) -> PlanService:
+def _make_entity(entity_id: str, name: str, entity_type: str) -> Entity:
+    return Entity(
+        id=entity_id,
+        name=name,
+        type=entity_type,
+        level=1 if entity_type == "product" else 2,
+        parent_id=None,
+        status="active",
+        summary="summary",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+
+
+def _make_service(plan=None, tasks=None, entity=None) -> PlanService:
     plan_repo = AsyncMock()
     plan_repo.get_by_id = AsyncMock(return_value=plan)
     plan_repo.upsert = AsyncMock(side_effect=lambda p: p)
@@ -32,8 +59,12 @@ def _make_service(plan=None, tasks=None) -> PlanService:
 
     task_repo = AsyncMock()
     task_repo.list_all = AsyncMock(return_value=tasks or [])
+    resolved_entity = entity if entity is not None else _make_entity("prod-1", "ZenOS", "product")
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=resolved_entity)
+    entity_repo.get_by_name = AsyncMock(return_value=resolved_entity)
 
-    return PlanService(plan_repo=plan_repo, task_repo=task_repo)
+    return PlanService(plan_repo=plan_repo, task_repo=task_repo, entity_repo=entity_repo)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,15 +86,22 @@ async def test_create_plan_requires_created_by():
 
 
 @pytest.mark.asyncio
+async def test_create_plan_requires_product_id():
+    svc = _make_service(entity=None)
+    with pytest.raises(ValueError, match="product_id is required"):
+        await svc.create_plan({"goal": "Deploy v1", "created_by": "pm"})
+
+
+@pytest.mark.asyncio
 async def test_create_plan_defaults_to_draft():
-    svc = _make_service()
-    plan = await svc.create_plan({"goal": "Deploy v1", "created_by": "pm"})
+    svc = _make_service(entity=_make_entity("prod-1", "ZenOS", "product"))
+    plan = await svc.create_plan({"goal": "Deploy v1", "created_by": "pm", "product_id": "prod-1"})
     assert plan.status == PlanStatus.DRAFT
 
 
 @pytest.mark.asyncio
 async def test_create_plan_stores_optional_fields():
-    svc = _make_service()
+    svc = _make_service(entity=_make_entity("prod-1", "ZenOS", "product"))
     plan = await svc.create_plan({
         "goal": "Ship X",
         "created_by": "pm",
@@ -71,11 +109,30 @@ async def test_create_plan_stores_optional_fields():
         "entry_criteria": "ADR approved",
         "exit_criteria": "QA passed",
         "project": "zenos",
+        "product_id": "prod-1",
     })
     assert plan.owner == "tech-lead"
     assert plan.entry_criteria == "ADR approved"
     assert plan.exit_criteria == "QA passed"
-    assert plan.project == "zenos"
+    assert plan.project == "ZenOS"
+
+
+@pytest.mark.asyncio
+async def test_create_plan_accepts_valid_product_id_and_derives_project_name():
+    svc = _make_service(entity=_make_entity("prod-1", "ZenOS", "product"))
+
+    plan = await svc.create_plan({"goal": "Deploy v1", "created_by": "pm", "product_id": "prod-1"})
+
+    assert plan.product_id == "prod-1"
+    assert plan.project == "ZenOS"
+
+
+@pytest.mark.asyncio
+async def test_create_plan_rejects_non_product_entity_as_product_id():
+    svc = _make_service(entity=_make_entity("goal-1", "Goal", "goal"))
+
+    with pytest.raises(ValueError, match="invalid or not a product entity"):
+        await svc.create_plan({"goal": "Deploy v1", "created_by": "pm", "product_id": "goal-1"})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -158,6 +215,15 @@ async def test_update_plan_not_found():
         await svc.update_plan("nonexistent", {"status": "active"})
 
 
+@pytest.mark.asyncio
+async def test_update_plan_rejects_non_product_entity_as_product_id():
+    plan = _make_plan(product_id="prod-1", project="ZenOS")
+    svc = _make_service(plan=plan, entity=_make_entity("goal-1", "Goal", "goal"))
+
+    with pytest.raises(ValueError, match="invalid or not a product entity"):
+        await svc.update_plan("plan-1", {"product_id": "goal-1"})
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # get_plan
 # ─────────────────────────────────────────────────────────────────────────────
@@ -197,10 +263,10 @@ async def test_list_plans_delegates_to_repo():
     task_repo = AsyncMock()
 
     svc = PlanService(plan_repo=plan_repo, task_repo=task_repo)
-    result = await svc.list_plans(status=["draft"], project="zenos")
+    result = await svc.list_plans(status=["draft"], project="zenos", product_id="prod-1")
 
     plan_repo.list_all.assert_awaited_once_with(
-        status=["draft"], project="zenos", limit=50, offset=0
+        status=["draft"], project="zenos", product_id="prod-1", limit=50, offset=0
     )
     assert len(result) == 2
 

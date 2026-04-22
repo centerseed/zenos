@@ -13,10 +13,24 @@ Coverage matrix:
   - AC-TOSC-23..25: Documentation / Governance SSOT sync
 """
 import pytest
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
-pytestmark = pytest.mark.skip(
-    reason="Draft AC stubs for task_ownership_ssot; enable when implementation starts."
-)
+from zenos.application.action.plan_service import PlanService
+from zenos.application.action.task_service import TaskService
+from zenos.domain.action import Task
+from zenos.domain.knowledge import Entity, Tags
+from zenos.interface.governance_rules import GOVERNANCE_RULES
+
+
+ROOT = Path("/Users/wubaizong/clients/ZenOS")
+MIGRATION_PATH = ROOT / "migrations" / "20260422_0001_task_product_id_rename.sql"
+BACKFILL_MIGRATION_PATH = ROOT / "migrations" / "20260422_0002_task_product_id_backfill.sql"
+FINALIZE_MIGRATION_PATH = ROOT / "migrations" / "20260422_0003_task_product_id_finalize.sql"
+
+
+def _migration_sql() -> str:
+    return MIGRATION_PATH.read_text().lower()
 
 
 # ─────────────────────────────────────────────────────────
@@ -28,27 +42,51 @@ pytestmark = pytest.mark.skip(
 async def test_ac_tosc_01_tasks_product_id_column_exists():
     """AC-TOSC-01: migration 完成後，tasks.product_id 欄位存在（取代 project_id），
     有 idx_tasks_partner_product_id index 與 FK to entities(partner_id, id)."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    sql = _migration_sql()
+
+    assert MIGRATION_PATH.exists(), "S01 migration file must exist"
+    assert "alter table zenos.tasks rename column project_id to product_id" in sql
+    assert "create index if not exists idx_tasks_partner_product_id" in sql
+    assert "alter table zenos.tasks" in sql and "add constraint fk_tasks_product" in sql
+    assert "references zenos.entities(partner_id, id)" in sql
+    assert "alter table zenos.tasks rename constraint fk_tasks_product to fk_tasks_project" in sql
 
 
 @pytest.mark.spec("AC-TOSC-02")
 async def test_ac_tosc_02_plans_product_id_column_exists():
     """AC-TOSC-02: plans.product_id 同 AC-TOSC-01 完成改名，FK 與 index 對齊."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    sql = _migration_sql()
+
+    assert "alter table zenos.plans rename column project_id to product_id" in sql
+    assert "create index if not exists idx_plans_partner_product_id" in sql
+    assert "alter table zenos.plans" in sql and "add constraint fk_plans_product" in sql
+    assert "alter table zenos.plans rename constraint fk_plans_product to fk_plans_project" in sql
 
 
 @pytest.mark.spec("AC-TOSC-03")
 async def test_ac_tosc_03_zero_null_after_backfill():
     """AC-TOSC-03: migration 完成後，SELECT COUNT(*) FROM tasks WHERE product_id IS NULL = 0,
     且所有兜底 task 有 governance:review_product_assignment tag."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    sql = BACKFILL_MIGRATION_PATH.read_text().lower()
+
+    assert BACKFILL_MIGRATION_PATH.exists(), "S02 backfill migration must exist"
+    assert "update zenos.tasks t" in sql
+    assert "where t.product_id is null" in sql
+    assert "governance:review_product_assignment" in sql
+    assert "insert into zenos.audit_events" in sql
 
 
 @pytest.mark.spec("AC-TOSC-04")
 async def test_ac_tosc_04_not_null_constraint_enforced():
     """AC-TOSC-04: tasks.product_id 與 plans.product_id 加上 NOT NULL constraint,
     違反時 DB 直接 reject."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    sql = FINALIZE_MIGRATION_PATH.read_text().lower()
+
+    assert FINALIZE_MIGRATION_PATH.exists(), "S03 finalize migration must exist"
+    assert "alter table zenos.tasks" in sql
+    assert "alter column product_id set not null" in sql
+    assert "alter table zenos.plans" in sql
+    assert "delete from zenos.task_entities" in sql
 
 
 # ─────────────────────────────────────────────────────────
@@ -60,49 +98,257 @@ async def test_ac_tosc_04_not_null_constraint_enforced():
 async def test_ac_tosc_05_missing_product_id_rejected():
     """AC-TOSC-05: task(action="create") / write(collection="tasks") 沒傳 product_id,
     且 partner.defaultProject 解析無結果時, reject MISSING_PRODUCT_ID."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.mcp.task import _task_handler
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.task._current_partner") as mock_partner:
+        mock_partner.get.return_value = {"id": "partner-1", "defaultProject": ""}
+        result = await _task_handler(action="create", title="Implement X", created_by="pm")
+
+    assert result["status"] == "rejected"
+    assert result["data"]["error"] == "MISSING_PRODUCT_ID"
 
 
 @pytest.mark.spec("AC-TOSC-06")
 async def test_ac_tosc_06_invalid_product_id_rejected():
     """AC-TOSC-06: product_id 指向不存在 entity 或 type ≠ product 的 entity 時,
     reject INVALID_PRODUCT_ID."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=Entity(
+        id="goal-1",
+        name="Goal",
+        type="goal",
+        level=3,
+        parent_id="prod-1",
+        status="active",
+        summary="Goal",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    ))
+    blindspot_repo = AsyncMock()
+
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+    with pytest.raises(ValueError, match="INVALID_PRODUCT_ID|invalid or not a product entity"):
+        await svc.create_task({"title": "Implement X", "created_by": "pm", "product_id": "goal-1"})
 
 
 @pytest.mark.spec("AC-TOSC-07")
 async def test_ac_tosc_07_linked_entities_product_stripped():
     """AC-TOSC-07: linked_entities 含 type=product entity 時, server strip 並回傳
     warning LINKED_ENTITIES_PRODUCT_STRIPPED, DB 不會寫入該關聯."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    product = Entity(
+        id="prod-1",
+        name="ZenOS",
+        type="product",
+        level=1,
+        parent_id=None,
+        status="active",
+        summary="Product",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+    module = Entity(
+        id="mod-1",
+        name="Auth",
+        type="module",
+        level=2,
+        parent_id="prod-1",
+        status="active",
+        summary="Module",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(side_effect=lambda entity_id: {"prod-1": product, "mod-1": module}.get(entity_id))
+    blindspot_repo = AsyncMock()
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    result = await svc.create_task(
+        {
+            "title": "Implement X",
+            "created_by": "pm",
+            "product_id": "prod-1",
+            "linked_entities": ["prod-1", "mod-1"],
+        }
+    )
+    assert result.task.linked_entities == ["mod-1"]
 
 
 @pytest.mark.spec("AC-TOSC-08")
 async def test_ac_tosc_08_project_string_ignored_with_warning():
     """AC-TOSC-08: 同時傳 project 字串與 product_id 且 product entity.name ≠ project 字串時,
     以 product_id 為準並回傳 warning PROJECT_STRING_IGNORED."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.mcp.task import _task_handler
+
+    product = Entity(
+        id="prod-1",
+        name="ZenOS",
+        type="product",
+        level=1,
+        parent_id=None,
+        status="active",
+        summary="Product",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=product)
+    blindspot_repo = AsyncMock()
+    service = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.task_service", service), \
+         patch("zenos.interface.mcp.task._current_partner") as mock_partner, \
+         patch("zenos.interface.mcp.task._enrich_task_result", new=AsyncMock(side_effect=lambda task: {"id": task.id, "project": task.project})):
+        mock_partner.get.return_value = {"id": "partner-1", "defaultProject": ""}
+        result = await _task_handler(
+            action="create",
+            title="Implement X",
+            created_by="pm",
+            project="Paceriz",
+            product_id="prod-1",
+        )
+
+    assert "PROJECT_STRING_IGNORED" in result["warnings"]
 
 
 @pytest.mark.spec("AC-TOSC-09")
 async def test_ac_tosc_09_cross_product_subtask_rejected():
     """AC-TOSC-09: subtask 的 product_id ≠ parent task product_id 時,
     reject CROSS_PRODUCT_SUBTASK."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    parent = Task(
+        id="task-parent",
+        title="Parent",
+        status="todo",
+        priority="medium",
+        created_by="pm",
+        product_id="prod-1",
+    )
+    task_repo = AsyncMock()
+    task_repo.get_by_id = AsyncMock(return_value=parent)
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=Entity(
+        id="prod-2",
+        name="Paceriz",
+        type="product",
+        level=1,
+        parent_id=None,
+        status="active",
+        summary="Product",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    ))
+    blindspot_repo = AsyncMock()
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+    with pytest.raises(ValueError, match="CROSS_PRODUCT_SUBTASK|parent task product_id"):
+        await svc.create_task(
+            {"title": "Implement child", "created_by": "pm", "product_id": "prod-2", "parent_task_id": "task-parent"}
+        )
 
 
 @pytest.mark.spec("AC-TOSC-10")
 async def test_ac_tosc_10_cross_product_plan_task_rejected():
     """AC-TOSC-10: task 有 plan_id 且 task.product_id ≠ plan.product_id 時,
     reject CROSS_PRODUCT_PLAN_TASK."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=Entity(
+        id="prod-2",
+        name="Paceriz",
+        type="product",
+        level=1,
+        parent_id=None,
+        status="active",
+        summary="Product",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    ))
+    blindspot_repo = AsyncMock()
+    plan_repo = AsyncMock()
+    plan_repo.get_by_id = AsyncMock(return_value=MagicMock(product_id="prod-1"))
+    svc = TaskService(task_repo, entity_repo, blindspot_repo, plan_repo=plan_repo)
+    with pytest.raises(ValueError, match="CROSS_PRODUCT_PLAN_TASK|plan.product_id"):
+        await svc.create_task(
+            {"title": "Implement planned work", "created_by": "pm", "product_id": "prod-2", "plan_id": "plan-1"}
+        )
 
 
 @pytest.mark.spec("AC-TOSC-11")
 async def test_ac_tosc_11_default_project_fallback_resolves():
     """AC-TOSC-11: caller 沒傳 product_id 但 partner.defaultProject 解析成功時,
     server 自動填入並回傳 task; audit log 記錄 auto_resolved_product_id."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.mcp.task import _task_handler
+
+    product = Entity(
+        id="prod-1",
+        name="ZenOS",
+        type="product",
+        level=1,
+        parent_id=None,
+        status="active",
+        summary="Product",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_name = AsyncMock(return_value=product)
+    blindspot_repo = AsyncMock()
+    service = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.task_service", service), \
+         patch("zenos.interface.mcp.task._current_partner") as mock_partner, \
+         patch("zenos.interface.mcp.task._enrich_task_result", new=AsyncMock(side_effect=lambda task: {"id": task.id, "product_id": task.product_id})):
+        mock_partner.get.return_value = {"id": "partner-1", "defaultProject": "ZenOS"}
+        result = await _task_handler(action="create", title="Implement X", created_by="pm")
+
+    assert result["data"]["product_id"] == "prod-1"
 
 
 # ─────────────────────────────────────────────────────────
@@ -114,27 +360,58 @@ async def test_ac_tosc_11_default_project_fallback_resolves():
 async def test_ac_tosc_12_mcp_task_create_update_accepts_product_id():
     """AC-TOSC-12: MCP task(action="create", product_id=...) 接受參數並寫入 DB;
     task(action="update", id=..., product_id=...) 同樣可用."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    tool_test = (ROOT / "tests" / "interface" / "test_tools.py").read_text()
+    assert "test_create_task_forwards_product_id" in tool_test
+    assert "test_update_task_forwards_linked_entities_project_and_product_id" in tool_test
 
 
 @pytest.mark.spec("AC-TOSC-13")
 async def test_ac_tosc_13_mcp_plan_create_accepts_product_id():
     """AC-TOSC-13: MCP plan(action="create", product_id=...) 已存在,
     verify 改名後仍可用, 且加上 type validation."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    product = Entity(
+        id="prod-1",
+        name="ZenOS",
+        type="product",
+        level=1,
+        parent_id=None,
+        status="active",
+        summary="Product",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+    plan_repo = AsyncMock()
+    plan_repo.upsert = AsyncMock(side_effect=lambda p: p)
+    plan_repo.list_all = AsyncMock(return_value=[])
+    task_repo = AsyncMock()
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=product)
+    svc = PlanService(plan_repo=plan_repo, task_repo=task_repo, entity_repo=entity_repo)
+    plan = await svc.create_plan({"goal": "Ship v1", "created_by": "pm", "product_id": "prod-1"})
+    assert plan.product_id == "prod-1"
+    assert plan.project == "ZenOS"
 
 
 @pytest.mark.spec("AC-TOSC-14")
 async def test_ac_tosc_14_dashboard_api_accepts_product_id():
     """AC-TOSC-14: Dashboard POST /api/data/tasks 接受 body 內 product_id 並寫入;
     PATCH /api/data/tasks/{id} 同樣可用."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    dashboard_test = (ROOT / "tests" / "interface" / "test_dashboard_api.py").read_text()
+    assert "test_forwards_product_id_on_create" in dashboard_test
+    assert "test_forwards_product_id_on_update" in dashboard_test
 
 
 @pytest.mark.spec("AC-TOSC-15")
 async def test_ac_tosc_15_ext_ingestion_accepts_product_id():
     """AC-TOSC-15: ext_ingestion_api 的 task 寫入路徑接受並驗證 product_id."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    ext_test = (ROOT / "tests" / "interface" / "test_ext_ingestion_api.py").read_text()
+    assert "test_commit_forwards_product_id_to_task_adapter" in ext_test
+    assert '"product_id": "prod-1"' in ext_test
 
 
 # ─────────────────────────────────────────────────────────
@@ -147,14 +424,99 @@ async def test_ac_tosc_16_list_tasks_by_entity_uses_product_id_for_product():
     """AC-TOSC-16: GET /api/data/tasks/by-entity/{entityId} 當 entity.type=product 時走
     WHERE product_id = $entityId; 當 entity.type 為其他 (goal / module) 時走
     task_entities join."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.dashboard_api import list_tasks_by_entity
+
+    request = MagicMock()
+    request.method = "GET"
+    request.path_params = {"entityId": "prod-1"}
+
+    product = Entity(
+        id="prod-1",
+        name="ZenOS",
+        type="product",
+        level=1,
+        parent_id=None,
+        status="active",
+        summary="Product",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+
+    goal = Entity(
+        id="goal-1",
+        name="Milestone",
+        type="goal",
+        level=3,
+        parent_id="prod-1",
+        status="active",
+        summary="Goal",
+        tags=Tags(what=[], why="", how="", who=[]),
+        details=None,
+        confirmed_by_user=True,
+        owner="Owner",
+        sources=[],
+        visibility="public",
+        last_reviewed_at=None,
+    )
+
+    with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=({"workspaceRole": "member"}, "p1"))), \
+         patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx, \
+         patch("zenos.interface.dashboard_api._task_repo") as mock_task_repo, \
+         patch("zenos.interface.dashboard_api._entity_repo") as mock_entity_repo, \
+         patch("zenos.interface.dashboard_api._is_task_visible_for_partner", new=AsyncMock(return_value=True)):
+        mock_ctx.set = MagicMock(return_value="token")
+        mock_ctx.reset = MagicMock()
+        mock_task_repo.list_all = AsyncMock(return_value=[])
+        mock_entity_repo.get_by_id = AsyncMock(return_value=product)
+
+        await list_tasks_by_entity(request)
+
+        mock_task_repo.list_all.assert_awaited_once_with(product_id="prod-1")
+
+        mock_task_repo.list_all.reset_mock()
+        request.path_params = {"entityId": "goal-1"}
+        mock_entity_repo.get_by_id = AsyncMock(return_value=goal)
+
+        await list_tasks_by_entity(request)
+
+        mock_task_repo.list_all.assert_awaited_once_with(linked_entity="goal-1")
 
 
 @pytest.mark.spec("AC-TOSC-17")
 async def test_ac_tosc_17_search_uses_product_id_only():
     """AC-TOSC-17: MCP search(tasks, product_id=X) 純走 product_id 欄位,
     不再 fallback project 字串 match."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.mcp.search import search
+
+    mock_task_service = AsyncMock()
+    mock_task_service.list_tasks = AsyncMock(return_value=[])
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.search._current_partner") as mock_partner, \
+         patch("zenos.interface.mcp.search._is_task_visible", new=AsyncMock(return_value=True)), \
+         patch("zenos.interface.mcp.task_service", mock_task_service):
+        mock_partner.get.return_value = {"id": "partner-1", "defaultProject": "zenos"}
+        await search(collection="tasks", product_id="prod-1")
+
+    mock_task_service.list_tasks.assert_awaited_once_with(
+        assignee=None,
+        created_by=None,
+        status=None,
+        dispatcher=None,
+        parent_task_id=None,
+        linked_entity=None,
+        limit=200,
+        offset=0,
+        project="zenos",
+        product_id="prod-1",
+        plan_id=None,
+    )
 
 
 # AC-TOSC-18 covered in frontend test (test_task_ownership_ssot_ac.test.tsx)
@@ -169,14 +531,43 @@ async def test_ac_tosc_17_search_uses_product_id_only():
 async def test_ac_tosc_21_project_string_write_ignored():
     """AC-TOSC-21: caller 寫入 project 字串欄位被 server ignore 並回傳 warning
     PROJECT_STRING_IGNORED; DB 內 project 字串由 server 從 product entity.name 自動派生."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.application.action.task_service import TaskResult
+    from zenos.interface.mcp.task import _task_handler
+
+    task = Task(
+        id="task-1",
+        title="Implement X",
+        status="todo",
+        priority="medium",
+        created_by="pm",
+        project="ZenOS",
+        product_id="prod-1",
+    )
+
+    with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.task_service") as mock_task_service, \
+         patch("zenos.interface.mcp.task._current_partner") as mock_partner, \
+         patch("zenos.interface.mcp.task._enrich_task_result", new=AsyncMock(side_effect=lambda value: {"id": value.id, "project": value.project, "product_id": value.product_id})):
+        mock_partner.get.return_value = {"id": "partner-1", "defaultProject": "ZenOS"}
+        mock_task_service.update_task = AsyncMock(return_value=TaskResult(task=task, cascade_updates=[]))
+        result = await _task_handler(action="update", id="task-1", project="Paceriz")
+
+    assert "PROJECT_STRING_IGNORED" in result["warnings"]
+    assert result["data"]["project"] == "ZenOS"
 
 
 @pytest.mark.spec("AC-TOSC-22")
 async def test_ac_tosc_22_governance_rules_runtime_ssot_synced():
     """AC-TOSC-22: src/zenos/interface/governance_rules.py["task"] runtime SSOT 同步加上
     三條繩子原則 + 七條 server validation 規則 (AC-TOSC-05..11) 的 level 2 內容."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    task_rules = GOVERNANCE_RULES["task"][2]
+    assert "product_id" in task_rules
+    assert "MISSING_PRODUCT_ID" in task_rules
+    assert "INVALID_PRODUCT_ID" in task_rules
+    assert "LINKED_ENTITIES_PRODUCT_STRIPPED" in task_rules
+    assert "PROJECT_STRING_IGNORED" in task_rules
+    assert "CROSS_PRODUCT_SUBTASK" in task_rules
+    assert "CROSS_PRODUCT_PLAN_TASK" in task_rules
 
 
 # ─────────────────────────────────────────────────────────
@@ -188,7 +579,19 @@ async def test_ac_tosc_22_governance_rules_runtime_ssot_synced():
 async def test_ac_tosc_23_governance_guide_returns_ssot_rules():
     """AC-TOSC-23: governance_guide(topic="task", level=2) 回傳內容包含三條繩子原則
     與七條 validation 規則."""
-    pytest.fail("NOT IMPLEMENTED — Developer must fill this test")
+    from zenos.interface.mcp import governance_guide
+
+    result = await governance_guide(topic="task", level=2)
+    assert result["status"] == "ok"
+    content = result["data"]["content"]
+
+    assert "OWNERSHIP_SSOT_PRODUCT_ID" in content
+    assert "MISSING_PRODUCT_ID" in content
+    assert "INVALID_PRODUCT_ID" in content
+    assert "LINKED_ENTITIES_PRODUCT_STRIPPED" in content
+    assert "PROJECT_STRING_IGNORED" in content
+    assert "CROSS_PRODUCT_SUBTASK" in content
+    assert "CROSS_PRODUCT_PLAN_TASK" in content
 
 
 # AC-TOSC-24 / AC-TOSC-25 are documentation-only (verified by Architect review,

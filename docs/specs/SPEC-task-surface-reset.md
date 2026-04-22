@@ -189,6 +189,10 @@ AC-TSR-06:
   When 系統完成導頁
   Then 必須進入對應的 `/projects?id=<product_id>&focus=...` 狀態，而不是只打開一般產品頁或直接掉進 task board。
 
+> 2026-04-22 contract note（ADR-044）：
+> 產品頁 task 查詢契約以 `product_id` 為唯一 ownership SSOT。
+> `/projects` 與 `/tasks` 之間的跳轉、focus 與 filter 不得再依賴 `project` 字串或把 product entity 偷塞進 `linked_entities`。
+
 ### P0-2（R2）Task Detail 第一屏只保留操作關鍵
 
 - `TaskDetailDrawer` 第一屏只保留單張 task 的操作與風險資訊。

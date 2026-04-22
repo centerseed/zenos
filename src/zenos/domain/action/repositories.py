@@ -28,6 +28,7 @@ class TaskRepository(TypingProtocol):
         limit: int = 200,
         offset: int = 0,
         project: str | None = None,
+        product_id: str | None = None,
         plan_id: str | None = None,
     ) -> list[Task]: ...
 
@@ -56,6 +57,7 @@ class PlanRepository(TypingProtocol):
         *,
         status: list[str] | None = None,
         project: str | None = None,
+        product_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Plan]: ...

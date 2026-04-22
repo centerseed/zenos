@@ -453,6 +453,7 @@ async def test_ac_task_upg_06_search_filters_dispatcher_parent_linked_entity():
         limit=200,
         offset=0,
         project="zenos",
+        product_id=None,
         plan_id=None,
     )
 
@@ -466,16 +467,9 @@ async def test_ac_task_upg_07_filter_composability_with_product_id():
     from zenos.interface.mcp.search import search
 
     keep = MagicMock(id="task-keep", title="Keep", description="", linked_entities=["module-1"])
-    drop = MagicMock(id="task-drop", title="Drop", description="", linked_entities=["module-2"])
-    product = MagicMock(id="product-1", parent_id=None)
-    module_1 = MagicMock(id="module-1", parent_id="product-1")
-    module_2 = MagicMock(id="module-2", parent_id="product-2")
-    product_2 = MagicMock(id="product-2", parent_id=None)
 
     mock_task_service = AsyncMock()
-    mock_task_service.list_tasks = AsyncMock(return_value=[keep, drop])
-    mock_ontology_service = MagicMock()
-    mock_ontology_service._entities.list_all = AsyncMock(return_value=[product, module_1, product_2, module_2])
+    mock_task_service.list_tasks = AsyncMock(return_value=[keep])
 
     with patch("zenos.interface.mcp._ensure_services", new=AsyncMock()), \
          patch("zenos.interface.mcp.search._current_partner") as mock_cp, \
@@ -483,8 +477,7 @@ async def test_ac_task_upg_07_filter_composability_with_product_id():
          patch("zenos.interface.mcp.search._enrich_task_result", new=AsyncMock(side_effect=[
              {"id": "task-keep"},
          ])), \
-         patch("zenos.interface.mcp.task_service", mock_task_service), \
-         patch("zenos.interface.mcp.ontology_service", mock_ontology_service):
+         patch("zenos.interface.mcp.task_service", mock_task_service):
         mock_cp.get.return_value = {"id": "partner-1", "defaultProject": "zenos"}
         result = await search(
             collection="tasks",
@@ -505,6 +498,7 @@ async def test_ac_task_upg_07_filter_composability_with_product_id():
         limit=200,
         offset=0,
         project="zenos",
+        product_id="product-1",
         plan_id=None,
     )
 

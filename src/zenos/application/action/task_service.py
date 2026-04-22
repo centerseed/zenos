@@ -75,6 +75,34 @@ def _parse_due_date(value: object) -> datetime | None:
     return None
 
 
+async def _resolve_product_entity(
+    entity_repo: EntityRepository,
+    *,
+    product_id: str | None,
+    project_hint: str | None,
+) -> Entity | None:
+    """Resolve a canonical product entity from explicit product_id or project hint."""
+    if product_id:
+        entity = await entity_repo.get_by_id(product_id)
+        if entity is None or entity.type != EntityType.PRODUCT.value:
+            raise TaskValidationError(
+                f"product_id '{product_id}' is invalid or not a product entity.",
+                error_code="INVALID_PRODUCT_ID",
+            )
+        return entity
+
+    if project_hint:
+        entity = await entity_repo.get_by_name(str(project_hint).strip())
+        if entity is not None:
+            if entity.type != EntityType.PRODUCT.value:
+                raise TaskValidationError(
+                    f"project '{project_hint}' resolved to non-product entity '{entity.id}'.",
+                    error_code="INVALID_PRODUCT_ID",
+                )
+            return entity
+    return None
+
+
 @dataclass
 class CascadeUpdate:
     """Record of a cascade status change triggered by unblocking."""
@@ -157,6 +185,14 @@ class TaskService:
                 error_code="INVALID_DISPATCHER",
             )
 
+        product_entity = await _resolve_product_entity(
+            self._entities,
+            product_id=data.get("product_id") or data.get("project_id"),
+            project_hint=data.get("project"),
+        )
+        effective_product_id = product_entity.id if product_entity else None
+        effective_project_name = product_entity.name if product_entity else None
+
         # Cross-plan subtask validation
         parent_task_id = data.get("parent_task_id")
         if parent_task_id is not None:
@@ -172,6 +208,12 @@ class TaskService:
                     f"parent task plan_id '{parent.plan_id}'. "
                     f"Subtasks must inherit the parent's plan_id.",
                     error_code="CROSS_PLAN_SUBTASK",
+                )
+            if effective_product_id and parent.product_id and parent.product_id != effective_product_id:
+                raise TaskValidationError(
+                    f"Subtask product_id '{effective_product_id}' does not match "
+                    f"parent task product_id '{parent.product_id}'.",
+                    error_code="CROSS_PRODUCT_SUBTASK",
                 )
 
         # Build linked context for priority recommendation
@@ -193,11 +235,15 @@ class TaskService:
                     existing_entities=entity_dicts,
                 )
 
+        filtered_linked_entity_ids: list[str] = []
         linked_entities = []
         missing_ids = []
         for eid in linked_entity_ids:
             entity = await self._entities.get_by_id(eid)
             if entity:
+                if entity.type == EntityType.PRODUCT.value:
+                    continue
+                filtered_linked_entity_ids.append(eid)
                 linked_entities.append(entity)
             else:
                 missing_ids.append(eid)
@@ -229,6 +275,12 @@ class TaskService:
             if existing_plan is None:
                 raise ValueError(
                     f"plan_id '{plan_id}' does not exist. Create the plan first."
+                )
+            if effective_product_id and existing_plan.product_id and existing_plan.product_id != effective_product_id:
+                raise TaskValidationError(
+                    f"task.product_id '{effective_product_id}' does not match "
+                    f"plan.product_id '{existing_plan.product_id}'.",
+                    error_code="CROSS_PRODUCT_PLAN_TASK",
                 )
 
         # Priority recommendation
@@ -266,7 +318,7 @@ class TaskService:
             depends_on_task_ids=depends_on_task_ids,
             created_by=data["created_by"],
             updated_by=data.get("updated_by") or data["created_by"],
-            linked_entities=linked_entity_ids,
+            linked_entities=filtered_linked_entity_ids,
             linked_protocol=data.get("linked_protocol") or None,
             linked_blindspot=linked_blindspot_id,
             source_type=data.get("source_type") or "",
@@ -276,7 +328,8 @@ class TaskService:
             blocked_by=blocked_by,
             blocked_reason=blocked_reason,
             acceptance_criteria=data.get("acceptance_criteria") or [],
-            project=_normalize_project_scope(data.get("project")),
+            project=effective_project_name or _normalize_project_scope(data.get("project")),
+            product_id=effective_product_id or data.get("product_id") or data.get("project_id") or None,
             attachments=data.get("attachments") or [],
             parent_task_id=parent_task_id,
             dispatcher=dispatcher,
@@ -307,6 +360,7 @@ class TaskService:
                 )
 
         # Cross-plan subtask validation
+        parent: Task | None = None
         if "parent_task_id" in updates:
             new_parent_id = updates["parent_task_id"]
             if new_parent_id is not None:
@@ -324,6 +378,37 @@ class TaskService:
                         f"Subtasks must inherit the parent's plan_id.",
                         error_code="CROSS_PLAN_SUBTASK",
                     )
+
+        product_entity = await _resolve_product_entity(
+            self._entities,
+            product_id=updates.get("product_id") or updates.get("project_id") or task.product_id,
+            project_hint=updates.get("project") or task.project,
+        )
+        effective_product_id = product_entity.id if product_entity else None
+        effective_project_name = product_entity.name if product_entity else None
+
+        if parent is None and (updates.get("parent_task_id") or task.parent_task_id):
+            parent = await self._tasks.get_by_id(updates.get("parent_task_id") or task.parent_task_id)
+        if parent is not None and effective_product_id and parent.product_id and parent.product_id != effective_product_id:
+            raise TaskValidationError(
+                f"Subtask product_id '{effective_product_id}' does not match "
+                f"parent task product_id '{parent.product_id}'.",
+                error_code="CROSS_PRODUCT_SUBTASK",
+            )
+
+        effective_plan_id = updates.get("plan_id", task.plan_id)
+        if effective_plan_id and self._plans is not None:
+            existing_plan = await self._plans.get_by_id(effective_plan_id)
+            if existing_plan is None:
+                raise ValueError(
+                    f"plan_id '{effective_plan_id}' does not exist. Create the plan first."
+                )
+            if effective_product_id and existing_plan.product_id and existing_plan.product_id != effective_product_id:
+                raise TaskValidationError(
+                    f"task.product_id '{effective_product_id}' does not match "
+                    f"plan.product_id '{existing_plan.product_id}'.",
+                    error_code="CROSS_PRODUCT_PLAN_TASK",
+                )
 
         new_status = normalize_task_status(updates.get("status")) if updates.get("status") else None
         cascades: list[CascadeUpdate] = []
@@ -365,11 +450,32 @@ class TaskService:
             "assignee", "priority", "description", "blocked_reason",
             "result", "acceptance_criteria", "blocked_by",
             "plan_id", "plan_order", "depends_on_task_ids", "source_metadata",
-            "updated_by", "project", "linked_entities", "attachments",
+            "updated_by", "attachments",
             "parent_task_id", "dispatcher",
         ):
             if field in updates:
                 setattr(task, field, updates[field])
+        if "project" in updates or effective_project_name:
+            task.project = effective_project_name or _normalize_project_scope(updates.get("project"))
+        if "linked_entities" in updates:
+            filtered_linked_entity_ids: list[str] = []
+            for entity_id in updates["linked_entities"]:
+                entity = await self._entities.get_by_id(entity_id)
+                if entity is None:
+                    raise ValueError(
+                        f"linked_entities 包含不存在的 entity ID: {entity_id}。"
+                        f"請先建立這些 entity 或移除無效 ID。"
+                    )
+                if entity.type == EntityType.PRODUCT.value:
+                    continue
+                filtered_linked_entity_ids.append(entity_id)
+            task.linked_entities = filtered_linked_entity_ids
+        if "product_id" in updates:
+            task.product_id = effective_product_id or updates["product_id"]
+        elif "project_id" in updates:
+            task.product_id = effective_product_id or updates["project_id"]
+        elif effective_product_id:
+            task.product_id = effective_product_id
         if "due_date" in updates:
             task.due_date = _parse_due_date(updates["due_date"])
 
@@ -582,6 +688,7 @@ class TaskService:
         limit: int = 200,
         offset: int = 0,
         project: str | None = None,
+        product_id: str | None = None,
         plan_id: str | None = None,
     ) -> list[Task]:
         """List tasks with filters. Delegates to repository."""
@@ -597,6 +704,7 @@ class TaskService:
             limit=limit,
             offset=offset,
             project=project,
+            product_id=product_id,
             plan_id=plan_id,
         )
 

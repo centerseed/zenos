@@ -1610,7 +1610,7 @@ class TestGetProjectProgress:
         project.name = "Project Console"
         empty_plan = _make_plan("plan-empty")
         empty_plan.goal = "Already shipped plan"
-        empty_plan.project_id = "proj-1"
+        empty_plan.product_id = "proj-1"
         empty_plan.project = "Project Console"
         milestone = _make_entity("goal-1")
         milestone.type = "goal"
@@ -1714,3 +1714,28 @@ class TestListPlans:
         assert body["plans"] == [{"id": "plan-1", "goal": "Ship aggregate", "status": "active"}]
         assert mock_plan_service.get_plan.await_args_list[0].args == ("plan-1",)
         assert len(mock_plan_service.get_plan.await_args_list) == 2
+
+    async def test_forwards_product_id_filter_when_listing(self):
+        from zenos.interface.dashboard_api import list_plans
+
+        request = _make_request(
+            headers={"authorization": "Bearer fake-token"},
+            query_params=QueryParams("product_id=prod-1"),
+        )
+
+        with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api.PlanService") as mock_plan_service_cls, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_plan_service = MagicMock()
+            mock_plan_service.list_plans = AsyncMock(return_value=[])
+            mock_plan_service_cls.return_value = mock_plan_service
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            resp = await list_plans(request)
+
+        body = json.loads(resp.body)
+        assert resp.status_code == 200
+        assert body["plans"] == []
+        mock_plan_service.list_plans.assert_awaited_once_with(limit=200, product_id="prod-1")

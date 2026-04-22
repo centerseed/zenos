@@ -11,6 +11,7 @@ from typing import Any
 
 from zenos.domain.action import Plan, PlanStatus
 from zenos.domain.action.repositories import PlanRepository, TaskRepository
+from zenos.domain.knowledge import EntityRepository, EntityType
 from zenos.infrastructure.sql_common import _new_id, _now
 
 # Terminal task statuses — a plan can only complete when all tasks reach these states.
@@ -32,9 +33,11 @@ class PlanService:
         self,
         plan_repo: PlanRepository,
         task_repo: TaskRepository,
+        entity_repo: EntityRepository | None = None,
     ) -> None:
         self._plans = plan_repo
         self._tasks = task_repo
+        self._entities = entity_repo
 
     # ──────────────────────────────────────────
     # Create
@@ -49,6 +52,15 @@ class PlanService:
         if not created_by:
             raise ValueError("created_by is required for plan creation")
 
+        product_entity = await self._resolve_product_entity(
+            product_id=data.get("product_id") or data.get("project_id"),
+            project_hint=data.get("project"),
+        )
+        if product_entity is None:
+            raise ValueError("product_id is required for plan creation")
+        product_name = getattr(product_entity, "name", None) or (data.get("project") or "")
+        canonical_product_id = getattr(product_entity, "id", None) or data.get("product_id") or data.get("project_id")
+
         plan = Plan(
             goal=goal,
             status=PlanStatus.DRAFT,
@@ -56,8 +68,8 @@ class PlanService:
             owner=data.get("owner") or None,
             entry_criteria=data.get("entry_criteria") or None,
             exit_criteria=data.get("exit_criteria") or None,
-            project=data.get("project") or "",
-            project_id=data.get("project_id") or None,
+            project=product_name,
+            product_id=canonical_product_id,
             updated_by=data.get("updated_by") or created_by,
         )
         return await self._plans.upsert(plan)
@@ -94,11 +106,30 @@ class PlanService:
                 await self._validate_completion(plan_id, updates, current_plan=plan)
             plan.status = new_status
 
+        normalized_updates = dict(updates)
+        if "project_id" in normalized_updates and "product_id" not in normalized_updates:
+            normalized_updates["product_id"] = normalized_updates["project_id"]
+
+        product_entity = await self._resolve_product_entity(
+            product_id=normalized_updates.get("product_id") or plan.product_id,
+            project_hint=normalized_updates.get("project") or plan.project,
+        )
+        if product_entity is None:
+            raise ValueError("product_id is required for plan update")
+        product_name = getattr(product_entity, "name", None) or normalized_updates.get("project") or plan.project
+        canonical_product_id = (
+            getattr(product_entity, "id", None)
+            or normalized_updates.get("product_id")
+            or plan.product_id
+        )
+
         # Apply scalar field updates (non-status)
         for field_name in ("goal", "owner", "entry_criteria", "exit_criteria",
-                           "project", "project_id", "result", "updated_by"):
-            if field_name in updates and field_name != "status":
-                setattr(plan, field_name, updates[field_name])
+                           "result", "updated_by"):
+            if field_name in normalized_updates and field_name != "status":
+                setattr(plan, field_name, normalized_updates[field_name])
+        plan.project = product_name
+        plan.product_id = canonical_product_id
 
         plan.updated_at = _now()
         return await self._plans.upsert(plan)
@@ -159,6 +190,7 @@ class PlanService:
         *,
         status: list[str] | None = None,
         project: str | None = None,
+        product_id: str | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Plan]:
@@ -166,6 +198,7 @@ class PlanService:
         return await self._plans.list_all(
             status=status,
             project=project,
+            product_id=product_id,
             limit=limit,
             offset=offset,
         )
@@ -183,6 +216,33 @@ class PlanService:
         plan.updated_at = _now()
         await self._plans.upsert(plan)
 
+    async def _resolve_product_entity(
+        self,
+        *,
+        product_id: str | None,
+        project_hint: str | None,
+    ) -> Any | None:
+        """Resolve the canonical product entity for a plan mutation."""
+        if self._entities is None:
+            if product_id:
+                return {"id": product_id, "name": project_hint or ""}
+            return None
+
+        if product_id:
+            entity = await self._entities.get_by_id(product_id)
+            if entity is None or entity.type != EntityType.PRODUCT.value:
+                raise ValueError(f"product_id '{product_id}' is invalid or not a product entity")
+            return entity
+
+        if project_hint:
+            entity = await self._entities.get_by_name(str(project_hint).strip())
+            if entity is None:
+                return None
+            if entity.type != EntityType.PRODUCT.value:
+                raise ValueError(f"project '{project_hint}' resolved to non-product entity '{entity.id}'")
+            return entity
+        return None
+
 
 def _plan_to_dict(plan: Plan) -> dict[str, Any]:
     """Convert a Plan dataclass to a JSON-safe dict."""
@@ -194,7 +254,8 @@ def _plan_to_dict(plan: Plan) -> dict[str, Any]:
         "entry_criteria": plan.entry_criteria,
         "exit_criteria": plan.exit_criteria,
         "project": plan.project,
-        "project_id": plan.project_id,
+        "product_id": plan.product_id,
+        "project_id": plan.product_id,
         "created_by": plan.created_by,
         "updated_by": plan.updated_by,
         "result": plan.result,
