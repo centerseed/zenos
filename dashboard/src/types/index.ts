@@ -207,6 +207,7 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   project: string;
+  productId?: string | null;
   priorityReason: string;
   assignee: string | null;
   assigneeName?: string | null;

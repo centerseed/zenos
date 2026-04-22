@@ -13,6 +13,7 @@ import { FormField } from "@/components/zen/_formField";
 
 interface TaskCreateData {
   title: string;
+  product_id: string;
   description?: string;
   priority?: string;
   assignee?: string;
@@ -111,11 +112,20 @@ export function TaskCreateDialog({
     [blindspots]
   );
 
+  const productOptions = useMemo(
+    () =>
+      entities
+        .filter((entity) => entity.type === "product")
+        .map((entity) => ({ value: entity.id, label: entity.name })),
+    [entities],
+  );
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<string | null>(null);
   const [assignee, setAssignee] = useState("");
   const [dueDate, setDueDate] = useState("");
+  const [productId, setProductId] = useState<string | null>(null);
   const [project, setProject] = useState("");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [linkedEntities, setLinkedEntities] = useState<string[]>([]);
@@ -140,6 +150,7 @@ export function TaskCreateDialog({
     setPriority(null);
     setAssignee("");
     setDueDate("");
+    setProductId(null);
     setProject("");
     setShowAdvanced(false);
     setLinkedEntities([]);
@@ -165,6 +176,10 @@ export function TaskCreateDialog({
 
   async function handleSubmit() {
     if (!title.trim()) return;
+    if (!productId) {
+      setError("product 為必填");
+      return;
+    }
 
     setSubmitting(true);
     setError(null);
@@ -183,12 +198,13 @@ export function TaskCreateDialog({
       const dependsOn = parseCommaSeparatedIds(dependsOnTaskIds);
       const blockedByIds = parseCommaSeparatedIds(blockedBy);
 
-      const data: TaskCreateData = { title: title.trim() };
+      const selectedProduct = entities.find((entity) => entity.id === productId);
+      const data: TaskCreateData = { title: title.trim(), product_id: productId };
       if (description.trim()) data.description = description.trim();
       if (priority) data.priority = priority;
       if (assignee.trim()) data.assignee = assignee.trim();
       if (dueDate) data.due_date = dueDate;
-      if (project.trim()) data.project = project.trim();
+      data.project = selectedProduct?.name ?? (project.trim() || "");
       if (linkedEntities.length > 0) data.linked_entities = linkedEntities;
       if (acceptanceCriteria.length > 0) data.acceptance_criteria = acceptanceCriteria;
       if (assigneeRoleId) data.assignee_role_id = assigneeRoleId;
@@ -261,6 +277,19 @@ export function TaskCreateDialog({
             placeholder="任務描述（選填）"
             rows={3}
             resize="none"
+          />
+        </FormField>
+
+        <FormField t={t} label="Product" required htmlFor="task-product">
+          <Select
+            t={t}
+            id="task-product"
+            value={productId}
+            onChange={setProductId}
+            options={productOptions}
+            placeholder="選擇 product"
+            aria-label="Task product"
+            invalid={!productId && Boolean(error)}
           />
         </FormField>
 

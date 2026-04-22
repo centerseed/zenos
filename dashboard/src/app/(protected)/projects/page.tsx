@@ -84,6 +84,7 @@ function isPlaceholderCompletedProject(entity: Entity): boolean {
 
 type CreateTaskInput = {
   title: string;
+  product_id?: string;
   description?: string;
   priority?: string;
   assignee?: string;
@@ -856,8 +857,8 @@ function InkProjectDetail({
       const token = await user.getIdToken();
       const created = await createTask(token, {
         ...data,
-        project: data.project ?? entity.name,
-        linked_entities: Array.from(new Set([entity.id, ...(data.linked_entities ?? [])])),
+        product_id: entity.id,
+        project: entity.name,
       });
       replaceTask(created);
       setTab("tasks");
@@ -882,7 +883,7 @@ function InkProjectDetail({
       await createPlan(token, {
         ...data,
         project: entity.name,
-        project_id: entity.id,
+        product_id: entity.id,
       });
       setCreateKind(null);
       await fetchDetail();
