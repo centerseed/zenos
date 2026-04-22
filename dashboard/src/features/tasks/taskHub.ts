@@ -103,6 +103,10 @@ function getTaskTimestamp(task: Task): number {
   return task.updatedAt?.getTime() ?? task.createdAt?.getTime() ?? 0;
 }
 
+function getEntityTimestamp(entity: Entity): number {
+  return entity.updatedAt?.getTime() ?? entity.createdAt?.getTime() ?? 0;
+}
+
 function buildProductLookup(products: Entity[]) {
   const byId = new Map(products.map((entity) => [entity.id, entity]));
   const byName = new Map(products.map((entity) => [normalizeName(entity.name), entity]));
@@ -116,6 +120,10 @@ function resolveTaskProductId(
   goalsById: Map<string, Entity>,
   plansById: Map<string, PlanSummary>,
 ): string | null {
+  const legacyProductId = (task as Task & { product_id?: string | null }).product_id;
+  if (task.productId && productsById.has(task.productId)) return task.productId;
+  if (legacyProductId && productsById.has(legacyProductId)) return legacyProductId;
+
   for (const linkedId of task.linkedEntities) {
     if (productsById.has(linkedId)) return linkedId;
     const goal = goalsById.get(linkedId);
@@ -126,7 +134,8 @@ function resolveTaskProductId(
 
   if (task.planId) {
     const plan = plansById.get(task.planId);
-    if (plan?.project_id && productsById.has(plan.project_id)) return plan.project_id;
+    const planProductId = plan?.product_id ?? plan?.project_id;
+    if (planProductId && productsById.has(planProductId)) return planProductId;
     const byPlanName = productsByName.get(normalizeName(plan?.project));
     if (byPlanName) return byPlanName.id;
   }
@@ -205,10 +214,14 @@ export function buildTaskHubSnapshot(params: {
     }
   }
 
+  const planMilestoneLookup = new Map(
+    goals.map((goal) => [goal.id, { id: goal.id, name: goal.name }] as const),
+  );
+
   const productRecaps = products.map((product) => {
     const relatedGoals = goals.filter((goal) => goal.parentId === product.id);
     const relatedPlans = plans.filter((plan) => {
-      if (plan.project_id === product.id) return true;
+      if ((plan.product_id ?? plan.project_id) === product.id) return true;
       return normalizeName(plan.project) === normalizeName(product.name);
     });
     const relatedTasks = (productTasks.get(product.id) ?? []).filter(isOpenTask);
@@ -238,10 +251,25 @@ export function buildTaskHubSnapshot(params: {
       };
     });
 
-    const currentMilestoneEntity =
+    const preferredMilestoneEntity =
       relatedGoals
         .filter((goal) => goal.status === "active" || goal.status === "current" || goal.status === "planned")
-        .sort((left, right) => (right.updatedAt?.getTime() ?? 0) - (left.updatedAt?.getTime() ?? 0))[0] ?? null;
+        .sort((left, right) => getEntityTimestamp(right) - getEntityTimestamp(left))[0] ?? null;
+    const milestoneFromPlans =
+      relatedPlans
+        .flatMap((plan) => plan.milestones ?? [])
+        .map((milestone) => planMilestoneLookup.get(milestone.id) ?? milestone)
+        .find((milestone, index, items) => items.findIndex((item) => item.id === milestone.id) === index) ?? null;
+    const fallbackMilestoneEntity =
+      relatedGoals.slice().sort((left, right) => getEntityTimestamp(right) - getEntityTimestamp(left))[0] ?? null;
+    const currentMilestone =
+      preferredMilestoneEntity
+        ? { id: preferredMilestoneEntity.id, name: preferredMilestoneEntity.name }
+        : milestoneFromPlans
+          ? { id: milestoneFromPlans.id, name: milestoneFromPlans.name }
+          : fallbackMilestoneEntity
+            ? { id: fallbackMilestoneEntity.id, name: fallbackMilestoneEntity.name }
+            : null;
     const blockedCount = relatedTasks.filter(isTaskBlocked).length;
     const reviewCount = relatedTasks.filter((task) => task.status === "review").length;
     const overdueCount = relatedTasks.filter((task) => isTaskOverdue(task, nowMs)).length;
@@ -259,9 +287,7 @@ export function buildTaskHubSnapshot(params: {
       productId: product.id,
       productName: product.name,
       productSummary: product.summary,
-      currentMilestone: currentMilestoneEntity
-        ? { id: currentMilestoneEntity.id, name: currentMilestoneEntity.name }
-        : null,
+      currentMilestone,
       activePlanCount: relatedPlansWithCounts.filter(
         (plan) => plan.openCount > 0 || plan.blockedCount > 0 || plan.reviewCount > 0 || plan.overdueCount > 0,
       ).length,

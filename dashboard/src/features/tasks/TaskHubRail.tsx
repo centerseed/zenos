@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
 import { HelperSetupDialog } from "@/components/ai/HelperSetupDialog";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
@@ -15,10 +15,12 @@ export function TaskHubRail({
   snapshot,
   open,
   onOpenChange,
+  onAssistantUpdate,
 }: {
   snapshot: TaskHubSnapshot;
   open: boolean;
   onOpenChange: (next: boolean) => void;
+  onAssistantUpdate?: (recap: string) => void;
 }) {
   const [helperDialogOpen, setHelperDialogOpen] = useState(false);
   const { partner } = useAuth();
@@ -27,6 +29,10 @@ export function TaskHubRail({
   const { status, connectorStatus, messages, streamingText, capability, lastError, send, cancel, retry } =
     useCopilotChat(entry);
   const visibleMessages = useMemo(() => messages.filter((message) => message.role !== "system"), [messages]);
+  const latestAssistant = useMemo(
+    () => [...visibleMessages].reverse().find((message) => message.role === "assistant")?.content ?? "",
+    [visibleMessages],
+  );
   const helperIssue = useMemo(() => {
     if (connectorStatus === "checking") return "正在檢查 helper";
     if (connectorStatus === "disconnected") return "helper 未連線";
@@ -35,6 +41,11 @@ export function TaskHubRail({
     return null;
   }, [capability?.missingSkills, connectorStatus, lastError]);
   const helperHealthy = connectorStatus === "connected" && !helperIssue;
+
+  useEffect(() => {
+    if (!latestAssistant.trim()) return;
+    onAssistantUpdate?.(latestAssistant);
+  }, [latestAssistant, onAssistantUpdate]);
 
   return (
     <CopilotRailShell

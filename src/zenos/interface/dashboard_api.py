@@ -963,6 +963,8 @@ def _task_to_dict(t: Task) -> dict:
         "rejectionReason": t.rejection_reason,
         "result": t.result,
         "project": t.project,
+        "productId": t.product_id,
+        "product_id": t.product_id,
         "dispatcher": t.dispatcher,
         "parentTaskId": t.parent_task_id,
         "handoffEvents": [
@@ -1809,7 +1811,10 @@ async def list_tasks_by_entity(request: Request) -> Response:
         entity = await _entity_repo.get_by_id(entity_id)
         if entity and not OntologyService.is_entity_visible_for_partner(entity, partner):
             return _json_response({"tasks": []}, request=request)
-        tasks = await _task_repo.list_all(linked_entity=entity_id)
+        if entity and entity.type == EntityType.PRODUCT.value:
+            tasks = await _task_repo.list_all(product_id=entity_id)
+        else:
+            tasks = await _task_repo.list_all(linked_entity=entity_id)
     finally:
         current_partner_id.reset(token)
 
@@ -1839,6 +1844,7 @@ def _plan_payload_to_dict(plan: object) -> dict[str, object]:
         "exit_criteria": getattr(plan, "exit_criteria", None),
         "project": getattr(plan, "project", None),
         "project_id": getattr(plan, "project_id", None),
+        "product_id": getattr(plan, "product_id", getattr(plan, "project_id", None)),
         "created_by": getattr(plan, "created_by", None),
         "updated_by": getattr(plan, "updated_by", None),
         "result": getattr(plan, "result", None),
@@ -1864,7 +1870,7 @@ async def list_plans(request: Request) -> Response:
 
     token = current_partner_id.set(effective_id)
     try:
-        plan_service = PlanService(_plan_repo, _task_repo)
+        plan_service = PlanService(_plan_repo, _task_repo, _entity_repo)
         if deduped_ids:
             plans: list[dict[str, object]] = []
             for plan_id in deduped_ids:
@@ -1914,11 +1920,38 @@ async def get_project_progress(request: Request) -> Response:
     if not project or not OntologyService.is_entity_visible_for_partner(project, partner):
         return _error_response("NOT_FOUND", "Project not found", 404, request=request)
 
+    project_children = await _list_children_with_context(effective_id, project_id)
+    project_goals = [
+        entity
+        for entity in project_children
+        if entity.type == EntityType.GOAL.value
+        and OntologyService.is_entity_visible_for_partner(entity, partner)
+    ]
+    for goal in project_goals:
+        entity_cache[goal.id] = goal
+
     token = current_partner_id.set(effective_id)
     try:
-        linked_tasks = await _task_repo.list_all(linked_entity=project_id, limit=500)
-        plan_service = PlanService(_plan_repo, _task_repo)
-        plan_ids = sorted({task.plan_id for task in linked_tasks if task.plan_id})
+        linked_tasks = await _task_repo.list_all(product_id=project_id, limit=500)
+        plan_service = PlanService(_plan_repo, _task_repo, _entity_repo)
+        listed_plans = await plan_service.list_plans(limit=200)
+        normalized_project_name = str(project.name or "").strip().lower()
+        plan_ids = sorted(
+            {
+                task.plan_id
+                for task in linked_tasks
+                if task.plan_id
+            }
+            | {
+                plan.id
+                for plan in listed_plans
+                if plan.id
+                and (
+                    plan.product_id == project_id
+                    or str(plan.project or "").strip().lower() == normalized_project_name
+                )
+            }
+        )
         plan_payloads: dict[str, dict] = {}
         for plan_id in plan_ids:
             try:
@@ -1970,7 +2003,7 @@ async def get_project_progress(request: Request) -> Response:
                 "tasks": task_tree,
             })
 
-        if plan_payload and plan_status == "active" and counts["open_count"] > 0:
+        if plan_payload and plan_status == "active":
             top_level_tasks = [
                 task for task in open_tasks
                 if not task.parent_task_id or task.parent_task_id not in {candidate.id for candidate in open_tasks if candidate.id}
@@ -1984,6 +2017,7 @@ async def get_project_progress(request: Request) -> Response:
                 "goal": plan_payload["goal"],
                 "status": plan_payload["status"],
                 "owner": plan_payload["owner"],
+                "milestones": plan_payload.get("milestones", []),
                 "tasks_summary": plan_payload.get("tasks_summary", {}),
                 **counts,
                 "updated_at": plan_payload["updated_at"],
@@ -2005,7 +2039,14 @@ async def get_project_progress(request: Request) -> Response:
         )
     )
 
-    milestone_counts: dict[str, dict] = {}
+    milestone_counts: dict[str, dict] = {
+        goal.id: {
+            "id": goal.id,
+            "name": goal.name,
+            "open_count": 0,
+        }
+        for goal in project_goals
+    }
     for task in visible_tasks:
         if not _progress_task_is_open(task.status):
             continue
@@ -2286,6 +2327,7 @@ def _make_task_service() -> TaskService:
         blindspot_repo=_blindspot_repo,
         relationship_repo=_relationship_repo,
         uow_factory=lambda: UnitOfWork(_task_repo._pool),
+        plan_repo=_plan_repo,
     )
 
 
@@ -2313,12 +2355,15 @@ async def create_task(request: Request) -> Response:
         return _error_response("INVALID_INPUT", "title is required", 400, request=request)
 
     data: dict = {"title": title, "created_by": effective_id}
+    if body.get("product_id") is None and partner.get("defaultProject"):
+        data["project"] = str(partner.get("defaultProject")).strip()
     for _field in (
         "description",
         "priority",
         "assignee",
         "due_date",
         "project",
+        "product_id",
         "linked_entities",
         "acceptance_criteria",
         "assignee_role_id",
@@ -2381,6 +2426,8 @@ async def update_task(request: Request) -> Response:
         "priority",
         "assignee",
         "due_date",
+        "project",
+        "product_id",
         "result",
         "acceptance_criteria",
         "assignee_role_id",

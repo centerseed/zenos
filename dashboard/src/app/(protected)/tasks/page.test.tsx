@@ -56,7 +56,12 @@ vi.mock("@/components/TaskCreateDialog", () => ({
 }));
 
 vi.mock("@/features/tasks/TaskHubRail", () => ({
-  TaskHubRail: () => <div data-testid="task-hub-rail">task-hub-rail</div>,
+  TaskHubRail: ({ onAssistantUpdate }: { onAssistantUpdate?: (recap: string) => void }) => (
+    <div data-testid="task-hub-rail">
+      task-hub-rail
+      <button onClick={() => onAssistantUpdate?.("assistant-updated")}>assistant-updated</button>
+    </div>
+  ),
 }));
 
 describe("TasksPage", () => {
@@ -66,6 +71,7 @@ describe("TasksPage", () => {
     getAllBlindspotsMock.mockReset();
     getPlansMock.mockReset();
     mockRouterPush.mockReset();
+    window.scrollTo = vi.fn();
     getPlansMock.mockResolvedValue([]);
   });
 
@@ -157,6 +163,7 @@ describe("TasksPage", () => {
           status: "todo",
           priority: "high",
           project: "PACERIZ",
+          productId: "entity-1",
           priorityReason: "",
           assignee: null,
           createdBy: "partner-1",
@@ -184,6 +191,7 @@ describe("TasksPage", () => {
           status: "todo",
           priority: "high",
           project: "  paceriz  ",
+          productId: "entity-1",
           priorityReason: "",
           assignee: null,
           createdBy: "partner-1",
@@ -238,6 +246,7 @@ describe("TasksPage", () => {
         status: "todo",
         priority: "high",
         project: "ZenOS",
+        productId: "entity-1",
         priorityReason: "",
         assignee: null,
         createdBy: "partner-1",
@@ -306,6 +315,7 @@ describe("TasksPage", () => {
         status: "review",
         priority: "high",
         project: "ZenOS",
+        productId: "entity-1",
         priorityReason: "",
         assignee: null,
         createdBy: "partner-1",
@@ -384,5 +394,165 @@ describe("TasksPage", () => {
     await waitFor(() => {
       expect(mockRouterPush).toHaveBeenCalledWith("/projects?id=entity-1&focus=plan%3Aplan-1");
     });
+  });
+
+  it("refreshes task hub data after helper updates the recap", async () => {
+    getTasksMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "task-1",
+          title: "更新後任務",
+          description: "",
+          status: "todo",
+          priority: "high",
+          project: "ZenOS",
+          priorityReason: "",
+          assignee: null,
+          createdBy: "partner-1",
+          linkedEntities: ["entity-1"],
+          linkedProtocol: null,
+          linkedBlindspot: null,
+          sourceType: "manual",
+          contextSummary: "",
+          dueDate: null,
+          blockedBy: [],
+          blockedReason: null,
+          acceptanceCriteria: [],
+          confirmedByCreator: false,
+          rejectionReason: null,
+          result: null,
+          completedBy: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+          completedAt: null,
+        },
+      ]);
+    getAllEntitiesMock
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: "entity-1",
+          name: "ZenOS",
+          type: "product",
+          summary: "summary",
+          tags: { what: [], why: "", how: "", who: [] },
+          status: "active",
+          parentId: null,
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+        },
+      ]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+    getPlansMock.mockResolvedValue([]);
+
+    const { TasksPage } = await import("./page");
+    render(<TasksPage />);
+
+    await screen.findAllByTestId("task-hub-rail");
+    expect(getTasksMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getAllByRole("button", { name: "assistant-updated" })[0]!);
+
+    await waitFor(() => {
+      expect(getTasksMock.mock.calls.length).toBeGreaterThan(1);
+      expect(
+        screen.getAllByTestId("task-board").some((node) => node.textContent?.includes("更新後任務")),
+      ).toBe(true);
+    });
+  });
+
+  it("builds milestone focus from plan-linked milestone when goal status is not active", async () => {
+    const { buildTaskHubSnapshot } = await import("@/features/tasks/taskHub");
+
+    const snapshot = buildTaskHubSnapshot({
+      entities: [
+        {
+          id: "entity-1",
+          name: "ZenOS",
+          type: "product",
+          summary: "summary",
+          tags: { what: [], why: "", how: "", who: [] },
+          status: "active",
+          parentId: null,
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+        },
+        {
+          id: "goal-1",
+          name: "WS7 里程碑",
+          type: "goal",
+          summary: "milestone summary",
+          tags: { what: [], why: "", how: "", who: [] },
+          status: "draft",
+          parentId: "entity-1",
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-20T00:00:00Z"),
+        },
+      ],
+      tasks: [
+        {
+          id: "task-1",
+          title: "接回真實任務流",
+          description: "",
+          status: "todo",
+          priority: "high",
+          project: "ZenOS",
+          productId: "entity-1",
+          priorityReason: "",
+          assignee: null,
+          createdBy: "partner-1",
+          linkedEntities: ["entity-1"],
+          linkedProtocol: null,
+          linkedBlindspot: null,
+          sourceType: "manual",
+          contextSummary: "",
+          dueDate: null,
+          blockedBy: [],
+          blockedReason: null,
+          acceptanceCriteria: [],
+          confirmedByCreator: false,
+          rejectionReason: null,
+          result: null,
+          completedBy: null,
+          planId: "plan-1",
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+          completedAt: null,
+        },
+      ],
+      plans: [
+        {
+          id: "plan-1",
+          goal: "Ship project progress console",
+          status: "active",
+          owner: "Barry",
+          project: "ZenOS",
+          product_id: "entity-1",
+          project_id: "entity-1",
+          milestones: [{ id: "goal-1", name: "WS7 里程碑" }],
+        },
+      ],
+    });
+
+    expect(snapshot.products[0]?.currentMilestone).toEqual({ id: "goal-1", name: "WS7 里程碑" });
   });
 });

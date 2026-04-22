@@ -321,8 +321,7 @@ function normalizeProjectProgress(
       ...plan,
       milestones: Array.isArray(plan.milestones) ? plan.milestones : [],
       next_tasks: Array.isArray(plan.next_tasks) ? plan.next_tasks : [],
-    }))
-    .filter((plan) => plan.open_count > 0);
+    }));
   const visiblePlanIds = new Set(activePlans.map((plan) => plan.id));
   const openWorkGroups = (response.open_work_groups ?? [])
     .map((group) => ({
@@ -330,7 +329,7 @@ function normalizeProjectProgress(
       tasks: Array.isArray(group.tasks) ? group.tasks : [],
     }))
     .filter((group) => group.open_count > 0);
-  const milestones = (response.milestones ?? []).filter((milestone) => milestone.open_count > 0);
+  const milestones = response.milestones ?? [];
   const recentProgress = (response.recent_progress ?? []).filter((item) => {
     if (item.kind !== "plan") return true;
     return visiblePlanIds.has(item.id);
@@ -349,10 +348,15 @@ export interface PlanSummary {
   goal: string;
   status: string;
   owner: string | null;
+  milestones?: Array<{
+    id: string;
+    name: string;
+  }>;
   entry_criteria?: string | null;
   exit_criteria?: string | null;
   project?: string | null;
   project_id?: string | null;
+  product_id?: string | null;
   created_by?: string | null;
   updated_by?: string | null;
   result?: string | null;
@@ -686,6 +690,7 @@ export async function createPlan(
     exit_criteria?: string | null;
     project?: string | null;
     project_id?: string | null;
+    product_id?: string | null;
     status?: "draft" | "active";
   },
 ): Promise<PlanSummary> {
@@ -980,6 +985,7 @@ export async function createTask(
   token: string,
   data: {
     title: string;
+    product_id: string;
     description?: string;
     priority?: string;
     assignee?: string;
@@ -1019,6 +1025,7 @@ export async function updateTask(
     priority?: string;
     assignee?: string | null;
     due_date?: string | null;
+    product_id?: string | null;
     result?: string;
     acceptance_criteria?: string[];
     assignee_role_id?: string | null;

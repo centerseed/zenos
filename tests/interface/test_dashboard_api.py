@@ -1042,6 +1042,28 @@ class TestCreateTask:
         call_data = mock_svc.create_task.call_args[0][0]
         assert call_data["created_by"] == "p1"
 
+    async def test_forwards_product_id_on_create(self):
+        from zenos.interface.dashboard_api import create_task
+
+        request = _make_request(method="POST", headers={"authorization": "Bearer fake-token"})
+        request.json = AsyncMock(return_value={"title": "Task from p1", "product_id": "prod-1"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.create_task = AsyncMock(return_value=_make_task_result())
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            await create_task(request)
+
+        call_data = mock_svc.create_task.call_args[0][0]
+        assert call_data["product_id"] == "prod-1"
+
     async def test_returns_400_on_service_value_error(self):
         from zenos.interface.dashboard_api import create_task
 
@@ -1159,6 +1181,31 @@ class TestUpdateTask:
             resp = await update_task(request)
 
         assert resp.status_code == 400
+
+    async def test_forwards_product_id_on_update(self):
+        from zenos.interface.dashboard_api import update_task
+
+        request = _make_request(
+            method="PATCH",
+            headers={"authorization": "Bearer fake-token"},
+            path_params={"taskId": "t1"},
+        )
+        request.json = AsyncMock(return_value={"product_id": "prod-1"})
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=_PARTNER), \
+             patch("zenos.interface.dashboard_api._ensure_repos"), \
+             patch("zenos.interface.dashboard_api._make_task_service") as mock_svc_factory, \
+             patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
+            mock_svc = MagicMock()
+            mock_svc.update_task = AsyncMock(return_value=_make_task_result("t1"))
+            mock_svc_factory.return_value = mock_svc
+            mock_ctx.set = MagicMock(return_value="token")
+            mock_ctx.reset = MagicMock()
+
+            await update_task(request)
+
+        assert mock_svc.update_task.await_args.args[1]["product_id"] == "prod-1"
 
     async def test_returns_401_without_auth(self):
         from zenos.interface.dashboard_api import update_task
@@ -1493,7 +1540,7 @@ class TestGetProjectProgress:
         subtask.plan_order = 4
 
         async def list_all_side_effect(**kwargs):
-            if kwargs.get("linked_entity") == "proj-1":
+            if kwargs.get("product_id") == "proj-1":
                 return [blocked_task, review_task, parent_task, subtask]
             if kwargs.get("plan_id") == "plan-1":
                 return [blocked_task, review_task, parent_task, subtask]
@@ -1506,15 +1553,22 @@ class TestGetProjectProgress:
                 return milestone
             return None
 
+        async def list_children_side_effect(_effective_id: str, entity_id: str):
+            if entity_id == "proj-1":
+                return [milestone]
+            return []
+
         with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
              patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
              patch("zenos.interface.dashboard_api._get_entity_by_id_with_context", new=AsyncMock(side_effect=get_entity_side_effect)), \
+             patch("zenos.interface.dashboard_api._list_children_with_context", new=AsyncMock(side_effect=list_children_side_effect)), \
              patch("zenos.interface.dashboard_api._is_task_visible_for_partner", new=AsyncMock(return_value=True)), \
              patch("zenos.interface.dashboard_api._task_repo") as mock_task_repo, \
              patch("zenos.interface.dashboard_api._plan_repo") as mock_plan_repo, \
              patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
             mock_task_repo.list_all = AsyncMock(side_effect=list_all_side_effect)
             mock_plan_repo.get_by_id = AsyncMock(return_value=plan)
+            mock_plan_repo.list_all = AsyncMock(return_value=[plan])
             mock_ctx.set = MagicMock(return_value="token")
             mock_ctx.reset = MagicMock()
 
@@ -1544,7 +1598,7 @@ class TestGetProjectProgress:
         assert body["recent_progress"][0]["id"] == "task-4"
         assert any(item["kind"] == "plan" and item["id"] == "plan-1" for item in body["recent_progress"])
 
-    async def test_hides_active_plan_when_it_has_no_open_tasks(self):
+    async def test_keeps_active_plan_and_milestone_when_open_work_is_zero(self):
         from zenos.interface.dashboard_api import get_project_progress
 
         request = _make_request(
@@ -1556,6 +1610,12 @@ class TestGetProjectProgress:
         project.name = "Project Console"
         empty_plan = _make_plan("plan-empty")
         empty_plan.goal = "Already shipped plan"
+        empty_plan.project_id = "proj-1"
+        empty_plan.project = "Project Console"
+        milestone = _make_entity("goal-1")
+        milestone.type = "goal"
+        milestone.parent_id = "proj-1"
+        milestone.name = "Milestone Alpha"
 
         done_task = _make_task("task-done")
         done_task.title = "Ship everything"
@@ -1565,7 +1625,7 @@ class TestGetProjectProgress:
         done_task.updated_at = datetime(2026, 4, 21, 8, 0, tzinfo=timezone.utc)
 
         async def list_all_side_effect(**kwargs):
-            if kwargs.get("linked_entity") == "proj-1":
+            if kwargs.get("product_id") == "proj-1":
                 return [done_task]
             if kwargs.get("plan_id") == "plan-empty":
                 return [done_task]
@@ -1576,15 +1636,22 @@ class TestGetProjectProgress:
                 return project
             return None
 
+        async def list_children_side_effect(_effective_id: str, entity_id: str):
+            if entity_id == "proj-1":
+                return [milestone]
+            return []
+
         with patch("zenos.interface.dashboard_api._auth_and_scope", new=AsyncMock(return_value=(_PARTNER, "p1"))), \
              patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
              patch("zenos.interface.dashboard_api._get_entity_by_id_with_context", new=AsyncMock(side_effect=get_entity_side_effect)), \
+             patch("zenos.interface.dashboard_api._list_children_with_context", new=AsyncMock(side_effect=list_children_side_effect)), \
              patch("zenos.interface.dashboard_api._is_task_visible_for_partner", new=AsyncMock(return_value=True)), \
              patch("zenos.interface.dashboard_api._task_repo") as mock_task_repo, \
              patch("zenos.interface.dashboard_api._plan_repo") as mock_plan_repo, \
              patch("zenos.interface.dashboard_api.current_partner_id") as mock_ctx:
             mock_task_repo.list_all = AsyncMock(side_effect=list_all_side_effect)
             mock_plan_repo.get_by_id = AsyncMock(return_value=empty_plan)
+            mock_plan_repo.list_all = AsyncMock(return_value=[empty_plan])
             mock_ctx.set = MagicMock(return_value="token")
             mock_ctx.reset = MagicMock()
 
@@ -1592,8 +1659,26 @@ class TestGetProjectProgress:
 
         body = json.loads(resp.body)
         assert resp.status_code == 200
-        assert body["active_plans"] == []
+        assert body["active_plans"] == [
+            {
+                "id": "plan-empty",
+                "goal": "Already shipped plan",
+                "status": "active",
+                "owner": "Barry",
+                "milestones": [],
+                "tasks_summary": {"total": 1, "by_status": {"done": 1}},
+                "open_count": 0,
+                "blocked_count": 0,
+                "review_count": 0,
+                "overdue_count": 0,
+                "updated_at": empty_plan.updated_at.isoformat(),
+                "next_tasks": [],
+            }
+        ]
         assert body["open_work_groups"] == []
+        assert body["milestones"] == [
+            {"id": "goal-1", "name": "Milestone Alpha", "open_count": 0}
+        ]
         assert any(item["kind"] == "plan" and item["id"] == "plan-empty" for item in body["recent_progress"])
 
 

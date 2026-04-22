@@ -469,7 +469,7 @@ describe("getProjectProgress", () => {
     expect(result.project.updatedAt).toBeInstanceOf(Date);
   });
 
-  it("filters empty active plans from stale aggregate payloads", async () => {
+  it("keeps recap-level plans and milestones even when open work is zero", async () => {
     vi.stubGlobal("fetch", mockFetch({
       project: {
         id: "proj-1",
@@ -527,10 +527,11 @@ describe("getProjectProgress", () => {
 
     const result = await getProjectProgress(FAKE_TOKEN, "proj-1");
 
-    expect(result.active_plans).toEqual([]);
+    expect(result.active_plans).toHaveLength(1);
+    expect(result.active_plans[0]?.id).toBe("plan-empty");
     expect(result.open_work_groups).toEqual([]);
-    expect(result.milestones).toEqual([]);
-    expect(result.recent_progress.map((item) => item.id)).toEqual(["task-1"]);
+    expect(result.milestones).toEqual([{ id: "goal-1", name: "Alpha", open_count: 0 }]);
+    expect(result.recent_progress.map((item) => item.id)).toEqual(["plan-empty", "task-1"]);
   });
 
   it("normalizes missing milestone arrays on active plans", async () => {

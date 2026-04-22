@@ -225,10 +225,7 @@ describe("Team page — invited partner actions", () => {
 
     await renderTeamPage();
 
-    // Wait for initial fetch (list partners)
-    await waitFor(() => screen.findByRole("button", { name: /delete invite for invited@test\.com/i }));
-
-    const deleteBtn = screen.getByRole("button", { name: /delete invite for invited@test\.com/i });
+    const deleteBtn = await screen.findByRole("button", { name: /delete invite for invited@test\.com/i });
     fireEvent.click(deleteBtn);
 
     // Confirm cancelled — no DELETE call should follow the initial GET

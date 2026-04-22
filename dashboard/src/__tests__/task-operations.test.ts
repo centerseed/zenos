@@ -60,7 +60,7 @@ describe("createTask", () => {
     const fakeFetch = mockFetch({ task: fakeTask });
     vi.stubGlobal("fetch", fakeFetch);
 
-    await createTask(FAKE_TOKEN, { title: "Test Task" });
+    await createTask(FAKE_TOKEN, { title: "Test Task", product_id: "product-1" });
 
     expect(fakeFetch).toHaveBeenCalledWith(
       `${API_BASE}/api/data/tasks`,
@@ -70,7 +70,7 @@ describe("createTask", () => {
           Authorization: `Bearer ${FAKE_TOKEN}`,
           "Content-Type": "application/json",
         }),
-        body: JSON.stringify({ title: "Test Task" }),
+        body: JSON.stringify({ title: "Test Task", product_id: "product-1" }),
       })
     );
   });
@@ -81,6 +81,7 @@ describe("createTask", () => {
 
     await createTask(FAKE_TOKEN, {
       title: "My Task",
+      product_id: "product-1",
       description: "desc",
       priority: "high",
       assignee: "user-2",
@@ -93,6 +94,7 @@ describe("createTask", () => {
     const body = JSON.parse(call[1].body);
     expect(body).toMatchObject({
       title: "My Task",
+      product_id: "product-1",
       description: "desc",
       priority: "high",
       assignee: "user-2",
@@ -106,7 +108,7 @@ describe("createTask", () => {
     const fakeFetch = mockFetch({ task: fakeTask });
     vi.stubGlobal("fetch", fakeFetch);
 
-    const result = await createTask(FAKE_TOKEN, { title: "Test" });
+    const result = await createTask(FAKE_TOKEN, { title: "Test", product_id: "product-1" });
     expect(result.id).toBe("task-1");
     expect(result.createdAt).toBeInstanceOf(Date);
   });
@@ -115,7 +117,7 @@ describe("createTask", () => {
     const fakeFetch = mockFetch(fakeTask);
     vi.stubGlobal("fetch", fakeFetch);
 
-    const result = await createTask(FAKE_TOKEN, { title: "Test" });
+    const result = await createTask(FAKE_TOKEN, { title: "Test", product_id: "product-1" });
     expect(result.id).toBe("task-1");
   });
 
@@ -123,7 +125,7 @@ describe("createTask", () => {
     const fakeFetch = mockFetch({}, false, 400);
     vi.stubGlobal("fetch", fakeFetch);
 
-    await expect(createTask(FAKE_TOKEN, { title: "x" })).rejects.toThrow(
+    await expect(createTask(FAKE_TOKEN, { title: "x", product_id: "product-1" })).rejects.toThrow(
       "API /api/data/tasks: 400"
     );
   });

@@ -39,6 +39,7 @@ import type { Blindspot, Entity, Task, TaskPriority, TaskStatus } from "@/types"
 
 type CreateTaskInput = {
   title: string;
+  product_id: string;
   description?: string;
   priority?: string;
   assignee?: string;
@@ -69,8 +70,16 @@ export function normalizeProjectKey(value: string | null | undefined): string {
   return value.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
 }
 
+function resolveTaskProjectLabel(task: Task, entitiesById: Record<string, Entity>): string | null {
+  if (task.productId) {
+    return entitiesById[task.productId]?.name ?? task.project ?? null;
+  }
+  return task.project?.trim() || null;
+}
+
 export function buildAvailableProjectOptions(tasks: Task[], entities: Entity[]): ProjectFilterOption[] {
   const projects = new Map<string, string>();
+  const entitiesById = Object.fromEntries(entities.map((entity) => [entity.id, entity]));
 
   for (const entity of entities) {
     if (entity.type !== "product" && entity.type !== "project") continue;
@@ -81,7 +90,8 @@ export function buildAvailableProjectOptions(tasks: Task[], entities: Entity[]):
   }
 
   for (const task of tasks) {
-    const label = task.project?.trim();
+    const label = resolveTaskProjectLabel(task, entitiesById)?.trim();
+    if (!label) continue;
     const key = normalizeProjectKey(label);
     if (!key || projects.has(key)) continue;
     projects.set(key, label);
@@ -291,6 +301,10 @@ export function TasksPage() {
     void fetchData();
   }, [fetchData]);
 
+  const handleAssistantUpdate = useCallback((_recap: string) => {
+    void fetchData();
+  }, [fetchData]);
+
   const entityNames = useMemo(
     () => ({
       ...Object.fromEntries(entities.map((entity) => [entity.id, entity.name])),
@@ -324,7 +338,8 @@ export function TasksPage() {
       if (selectedPriority && task.priority !== selectedPriority) {
         return false;
       }
-      if (selectedProject && normalizeProjectKey(task.project) !== selectedProject) {
+      const taskProjectLabel = resolveTaskProjectLabel(task, entitiesById);
+      if (selectedProject && normalizeProjectKey(taskProjectLabel) !== selectedProject) {
         return false;
       }
       if (selectedDispatcher && task.dispatcher !== selectedDispatcher) {
@@ -339,7 +354,7 @@ export function TasksPage() {
       }
       return true;
     });
-  }, [selectedBlockedMode, selectedDispatcher, selectedPriority, selectedProject, selectedStatuses, tasks]);
+  }, [entitiesById, selectedBlockedMode, selectedDispatcher, selectedPriority, selectedProject, selectedStatuses, tasks]);
 
   const visibleStatuses = useMemo(
     () => selectedStatuses.filter((status) => status !== "cancelled"),
@@ -524,7 +539,12 @@ export function TasksPage() {
               alignSelf: "start",
             }}
           >
-            <TaskHubRail snapshot={taskHubSnapshot} open={hubRailOpen} onOpenChange={setHubRailOpen} />
+            <TaskHubRail
+              snapshot={taskHubSnapshot}
+              open={hubRailOpen}
+              onOpenChange={setHubRailOpen}
+              onAssistantUpdate={handleAssistantUpdate}
+            />
           </div>
         </div>
 
