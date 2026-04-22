@@ -102,8 +102,57 @@ function unwrapTaskPayload(payload: { task?: Task } | Task): Task {
   throw new Error("Task payload missing task");
 }
 
-/** Fetch all product entities */
-export async function getProjectEntities(token: string): Promise<Entity[]> {
+function normalizeTagList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean);
+  }
+  if (typeof value === "string" && value.trim()) {
+    return [value.trim().toLowerCase()];
+  }
+  return [];
+}
+
+function isProbablyTestRoot(entity: Entity): boolean {
+  return /\btest\b|dogfood|demo/i.test(entity.name);
+}
+
+function isLegacyCrmProductProxy(entity: Entity): boolean {
+  if (entity.type !== "product") return false;
+  const whatTags = normalizeTagList(entity.tags?.what);
+  if (whatTags.includes("company")) return true;
+
+  const details = entity.details && typeof entity.details === "object" ? entity.details : {};
+  return ["crm_company_id", "crm_record_id", "company_id", "crm_snapshot"].some((key) =>
+    Object.prototype.hasOwnProperty.call(details, key)
+  );
+}
+
+function isShareableRootEntity(entity: Entity): boolean {
+  const isSupportedType = entity.type === "product" || entity.type === "company";
+  const isRoot = !entity.parentId && (entity.level === 1 || entity.level == null);
+  return (
+    isSupportedType &&
+    isRoot &&
+    entity.status === "active" &&
+    entity.visibility === "public" &&
+    !isProbablyTestRoot(entity) &&
+    !isLegacyCrmProductProxy(entity)
+  );
+}
+
+/** Fetch project entities or shareable L1 roots used by Team sharing. */
+export async function getProjectEntities(
+  token: string,
+  options?: { scope?: "projects" | "shareableRoots" }
+): Promise<Entity[]> {
+  if (options?.scope === "shareableRoots") {
+    const res = await apiFetch<{ entities: Entity[] }>("/api/data/entities", token);
+    return (res.entities ?? []).filter(isShareableRootEntity);
+  }
+
   const res = await apiFetch<{ entities: Entity[] }>("/api/data/entities?type=product", token);
   return res.entities;
 }

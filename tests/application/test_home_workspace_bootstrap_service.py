@@ -184,3 +184,61 @@ async def test_reapply_preserves_existing_home_copy_and_reports_applied_sources(
     assert len(target_relationships) == 1
     assert target_relationships[0].source_entity_id == "guest-product-1"
     assert target_relationships[0].target_id == "guest-module-1"
+
+
+@pytest.mark.asyncio
+async def test_apply_accepts_company_l1_root():
+    source_company = Entity(
+        id="company-1",
+        name="Banila Co",
+        type="company",
+        level=1,
+        summary="CRM company",
+        tags=_tags(),
+        status="active",
+        visibility="public",
+    )
+    source_person = Entity(
+        id="person-1",
+        name="Alice",
+        type="person",
+        level=1,
+        parent_id="company-1",
+        summary="contact",
+        tags=_tags(),
+        status="active",
+        visibility="public",
+    )
+
+    entity_repo = FakeEntityRepo(
+        {
+            "owner-shared-id": [source_company, source_person],
+            "guest-home-id": [],
+        }
+    )
+    relationship_repo = FakeRelationshipRepo(
+        {
+            "owner-shared-id": [
+                Relationship(
+                    id="source-rel-1",
+                    source_entity_id="company-1",
+                    target_id="person-1",
+                    type="enables",
+                    description="company relation",
+                )
+            ],
+            "guest-home-id": [],
+        }
+    )
+
+    service = HomeWorkspaceBootstrapService(entity_repo, relationship_repo)
+    result = await service.apply(
+        source_workspace_id="owner-shared-id",
+        target_workspace_id="guest-home-id",
+        source_root_entity_ids=["company-1"],
+    )
+
+    assert result.applied_source_entity_ids == ["company-1"]
+    assert result.copied_entity_count == 2
+    assert result.copied_relationship_count == 1
+    assert result.skipped_source_entity_ids == []

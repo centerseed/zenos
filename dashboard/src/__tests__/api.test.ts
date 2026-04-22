@@ -72,6 +72,21 @@ describe("getProjectEntities", () => {
     const result = await getProjectEntities(FAKE_TOKEN);
     expect(result).toEqual(entities);
   });
+
+  it("filters shareable L1 roots to product + company and hides test / CRM proxy products", async () => {
+    const entities = [
+      { id: "product-1", name: "ZenOS", type: "product", level: 1, parentId: null, status: "active", visibility: "public", tags: { what: ["product"], why: "", how: "", who: [] }, details: null },
+      { id: "company-1", name: "Banila Co", type: "company", level: 1, parentId: null, status: "active", visibility: "public", tags: { what: ["company"], why: "", how: "crm", who: [] }, details: null },
+      { id: "product-test", name: "Dogfood Test Product", type: "product", level: 1, parentId: null, status: "active", visibility: "public", tags: { what: ["product"], why: "", how: "", who: [] }, details: null },
+      { id: "product-crm-proxy", name: "Legacy CRM Proxy", type: "product", level: 1, parentId: null, status: "active", visibility: "public", tags: { what: ["company"], why: "CRM 客戶公司", how: "crm", who: [] }, details: null },
+      { id: "module-1", name: "Module", type: "module", level: 2, parentId: "product-1", status: "active", visibility: "public", tags: { what: ["module"], why: "", how: "", who: [] }, details: null },
+    ];
+    vi.stubGlobal("fetch", mockFetch({ entities }));
+
+    const result = await getProjectEntities(FAKE_TOKEN, { scope: "shareableRoots" });
+
+    expect(result.map((entity) => entity.id)).toEqual(["product-1", "company-1"]);
+  });
 });
 
 // ─── getEntity ───

@@ -1,7 +1,8 @@
 """Home workspace bootstrap service.
 
-Copies selected shared `product(L1)` subtrees into the caller's home workspace
-as owned copies. P0 scope only handles public entities + relationships.
+Copies selected shared `L1 root` subtrees into the caller's home workspace
+as owned copies. Current supported roots are `product` and `company`.
+P0 scope only handles public entities + relationships.
 """
 
 from __future__ import annotations
@@ -140,10 +141,11 @@ class HomeWorkspaceBootstrapService:
         source_root_by_entity_id: dict[str, str] = {}
         valid_root_ids: list[str] = []
         skipped_source_ids: list[str] = []
+        supported_root_types = {"product", "company"}
 
         for root_id in source_root_entity_ids:
             root = source_entity_map.get(root_id)
-            if root is None or root.type != "product" or not root.id:
+            if root is None or root.type not in supported_root_types or not root.id:
                 skipped_source_ids.append(root_id)
                 continue
             subtree_ids = _collect_subtree_ids(root.id, source_entity_map)

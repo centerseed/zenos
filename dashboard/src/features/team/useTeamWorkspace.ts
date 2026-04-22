@@ -140,11 +140,11 @@ export function useTeamWorkspace() {
 
   useEffect(() => {
     if (!canManageWorkspace) return;
-    void fetchPartners();
-    void fetchDepartments();
+      void fetchPartners();
+      void fetchDepartments();
     user
       ?.getIdToken()
-      .then((token) => getProjectEntities(token).then(setProjectEntities))
+      .then((token) => getProjectEntities(token, { scope: "shareableRoots" }).then(setProjectEntities))
       .catch(console.error);
   }, [canManageWorkspace, fetchDepartments, fetchPartners, user]);
 

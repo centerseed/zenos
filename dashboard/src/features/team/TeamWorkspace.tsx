@@ -108,6 +108,10 @@ function StatusChip({ status, t }: { status: Partner["status"]; t: ReturnType<ty
   );
 }
 
+function l1EntityLabel(entity: { name: string; type: string }) {
+  return `${entity.name} · ${entity.type === "company" ? "公司" : "產品"}`;
+}
+
 // ─── ScopeDialog ─────────────────────────────────────────────────────────────
 
 interface ScopeDialogProps {
@@ -312,10 +316,10 @@ function ScopeDialog({
               }}
             >
               <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>
-                選擇訪客可存取的產品空間：
+                選擇訪客可存取的 L1 空間：
               </div>
               {projectEntities.length === 0 ? (
-                <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>尚無產品空間</div>
+                <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>尚無可分享的 L1 空間</div>
               ) : (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {projectEntities.map((entity) => (
@@ -342,7 +346,7 @@ function ScopeDialog({
                           })
                         }
                       />
-                      {entity.name}
+                      {l1EntityLabel(entity)}
                     </label>
                   ))}
                 </div>
@@ -361,7 +365,7 @@ function ScopeDialog({
               }}
             >
               <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>
-                選擇要在對方 home workspace 預設匯入的產品：
+                選擇要在對方 home workspace 預設匯入的 L1 空間：
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                 {projectEntities
@@ -384,7 +388,7 @@ function ScopeDialog({
                           })
                         }
                       />
-                      {entity.name}
+                      {l1EntityLabel(entity)}
                     </label>
                   ))}
               </div>
@@ -550,10 +554,10 @@ function TeamPage() {
                 }}
               >
                 <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>
-                  選擇訪客可存取的產品空間：
+                  選擇訪客可存取的 L1 空間：
                 </p>
                 {projectEntities.length === 0 ? (
-                  <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>尚無產品空間</p>
+                  <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>尚無可分享的 L1 空間</p>
                 ) : (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                     {projectEntities.map((entity) => (
@@ -576,7 +580,7 @@ function TeamPage() {
                             });
                           }}
                         />
-                        {entity.name}
+                        {l1EntityLabel(entity)}
                       </label>
                     ))}
                   </div>
@@ -595,7 +599,7 @@ function TeamPage() {
                 }}
               >
                 <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>
-                  選擇要預設匯入到對方 home workspace 的產品：
+                  選擇要預設匯入到對方 home workspace 的 L1 空間：
                 </p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
                   {projectEntities
@@ -616,7 +620,7 @@ function TeamPage() {
                             )
                           }
                         />
-                        {entity.name}
+                        {l1EntityLabel(entity)}
                       </label>
                     ))}
                 </div>
@@ -818,7 +822,7 @@ function TeamPage() {
                                 </Chip>
                                 {isScopedPartner(p) && (
                                   <span style={{ fontSize: 11, color: c.inkMuted, fontFamily: fontBody }}>
-                                    授權 {p.authorizedEntityIds!.length} 個產品空間
+                                    授權 {p.authorizedEntityIds!.length} 個 L1 空間
                                   </span>
                                 )}
                               </div>

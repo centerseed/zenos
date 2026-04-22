@@ -403,7 +403,7 @@ class TestApplyHomeWorkspaceBootstrap:
             resp = await apply_home_workspace_bootstrap(request)
 
         assert resp.status_code == 403
-        assert "outside the current shared product scope" in resp.body.decode()
+        assert "outside the current shared L1 scope" in resp.body.decode()
 
     async def test_returns_not_found_when_all_configured_sources_are_gone(self):
         from zenos.interface.dashboard_api import apply_home_workspace_bootstrap

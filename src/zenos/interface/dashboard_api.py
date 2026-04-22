@@ -1231,7 +1231,7 @@ def _validate_home_workspace_bootstrap_scope(
     }
     unauthorized_sources = [entity_id for entity_id in source_entity_ids if entity_id not in authorized_entity_ids]
     if unauthorized_sources:
-        return "Configured bootstrap sources are outside the current shared product scope"
+        return "Configured bootstrap sources are outside the current shared L1 scope"
     return None
 
 
