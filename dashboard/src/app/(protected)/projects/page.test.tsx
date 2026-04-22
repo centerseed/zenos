@@ -982,7 +982,7 @@ describe("ProjectsPage", () => {
   });
 
   it("refreshes project detail after helper updates the recap", async () => {
-    let resolveBackgroundProgress: ((value: unknown) => void) | null = null;
+    let resolveBackgroundProgress: any = null;
     getProjectEntitiesMock.mockResolvedValue([
       {
         id: "entity-1",
@@ -1077,29 +1077,31 @@ describe("ProjectsPage", () => {
       expect(getProjectProgressMock.mock.calls.length).toBeGreaterThan(initialProgressCalls)
     );
 
-    resolveBackgroundProgress?.({
-      project: {
-        id: "entity-1",
-        name: "ZenOS",
-        type: "product",
-        summary: "summary",
-        tags: { what: [], why: "", how: "", who: [] },
-        status: "active",
-        parentId: null,
-        details: null,
-        confirmedByUser: true,
-        owner: "Owner",
-        sources: [],
-        visibility: "public",
-        lastReviewedAt: null,
-        createdAt: new Date("2026-04-19T00:00:00Z"),
-        updatedAt: new Date("2026-04-19T00:00:00Z"),
-      },
-      active_plans: [],
-      open_work_groups: [],
-      milestones: [],
-      recent_progress: [],
-    });
+    if (resolveBackgroundProgress) {
+      resolveBackgroundProgress({
+        project: {
+          id: "entity-1",
+          name: "ZenOS",
+          type: "product",
+          summary: "summary",
+          tags: { what: [], why: "", how: "", who: [] },
+          status: "active",
+          parentId: null,
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+        },
+        active_plans: [],
+        open_work_groups: [],
+        milestones: [],
+        recent_progress: [],
+      });
+    }
 
     await waitFor(() => {
       expect(getTasksByEntityMock.mock.calls.length).toBeGreaterThan(initialTaskCalls);
