@@ -28,7 +28,11 @@ export function CopilotChatViewport({
   useEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+    if (typeof viewport.scrollTo === "function") {
+      viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
+      return;
+    }
+    viewport.scrollTop = viewport.scrollHeight;
   }, [messages, streamingText]);
 
   const hasContent = messages.length > 0 || streamingText;
