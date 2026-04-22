@@ -88,17 +88,15 @@ vi.mock("@/components/MilestoneCreateDialog", () => ({
 vi.mock("@/features/projects/ProjectProgressConsole", () => ({
   ProjectProgressConsole: ({
     onOpenTasks,
-    recapRailOpen,
     onAssistantUpdate,
   }: {
     onOpenTasks: () => void;
-    recapRailOpen?: boolean;
     onAssistantUpdate?: () => void;
   }) => (
     <div data-testid="project-progress-console">
       <button onClick={onOpenTasks}>open-task-board</button>
       <button onClick={() => onAssistantUpdate?.()}>assistant-updated</button>
-      {recapRailOpen ? <div>project-recap-open</div> : null}
+      <div>project-copilot-inline</div>
     </div>
   ),
 }));
@@ -580,7 +578,7 @@ describe("ProjectsPage", () => {
     });
   });
 
-  it("opens project AI recap from Agent 建議", async () => {
+  it("focuses the inline project copilot from Agent 建議", async () => {
     getProjectEntitiesMock.mockResolvedValue([
       {
         id: "entity-1",
@@ -655,7 +653,7 @@ describe("ProjectsPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Agent 建議" }));
 
     expect(await screen.findByTestId("project-progress-console")).toBeInTheDocument();
-    expect(screen.getByText("project-recap-open")).toBeInTheDocument();
+    expect(screen.getByText("project-copilot-inline")).toBeInTheDocument();
   });
 
   it("refreshes project detail after helper updates the recap", async () => {
