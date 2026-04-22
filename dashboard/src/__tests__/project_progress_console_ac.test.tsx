@@ -66,21 +66,21 @@ vi.mock("@/components/TaskCreateDialog", () => ({
 
 vi.mock("@/features/projects/ProjectRecapRail", () => ({
   ProjectRecapRail: ({
-    open,
     preset,
     nextStep,
     onRecapChange,
   }: {
-    open: boolean;
     preset: string;
     nextStep: string;
     onRecapChange: (value: string | null) => void;
   }) =>
-    open ? (
-      <button onClick={() => onRecapChange(`AI recap for ${preset}: ${nextStep}`)}>
+    (
+      <div data-testid="project-recap-panel">
+        <button onClick={() => onRecapChange(`AI recap for ${preset}: ${nextStep}`)}>
         deliver-mock-recap
-      </button>
-    ) : null,
+        </button>
+      </div>
+    ),
 }));
 
 function makeTaskSummary(
@@ -474,8 +474,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "開始任務討論" }));
-    fireEvent.click(await screen.findByRole("button", { name: "deliver-mock-recap" }));
+    fireEvent.click(screen.getByRole("button", { name: "deliver-mock-recap" }));
     fireEvent.click(screen.getByRole("button", { name: "複製 continuation prompt" }));
 
     await waitFor(() => {
@@ -510,7 +509,8 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(screen.getByTestId("project-milestone-strip")).toBeInTheDocument();
     expect(screen.getByTestId("project-plans-overview")).toBeInTheDocument();
     expect(screen.getByTestId("project-open-work-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("project-recap-card")).toBeInTheDocument();
+    expect(screen.getByTestId("project-recap-toolbar")).toBeInTheDocument();
+    expect(screen.getByTestId("project-recap-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("project-task-board")).not.toBeInTheDocument();
   });
 

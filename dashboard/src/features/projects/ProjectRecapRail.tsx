@@ -89,6 +89,7 @@ export function ProjectRecapRail({
       entry={entry}
       chatStatus={status}
       connectorStatus={connectorStatus}
+      inlineOnly
       diagnostics={
         <div className="flex flex-wrap items-center gap-2 text-[11px]">
           <span>{connectorStatus === "connected" ? "Connector 已連線" : connectorStatus === "checking" ? "Connector 檢查中" : "Connector 未連線"}</span>
@@ -111,36 +112,38 @@ export function ProjectRecapRail({
         />
       }
     >
-      <CopilotChatViewport
-        messages={visibleMessages}
-        streamingText={streamingText}
-        isStreaming={status === "loading" || status === "streaming"}
-        emptyStateTitle="Product Task Copilot"
-        emptyStateDescription="直接討論這個 product 的 milestone、plans、tasks、subtasks、blockers 與下一步。"
-      />
-      {rawTranscript ? (
-        <div className="mt-3 rounded-[2px] border bd-hair bg-panel">
-          <button
-            type="button"
-            data-testid="project-raw-transcript-toggle"
-            className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-dim"
-            onClick={() => setShowRawTranscript((value) => !value)}
-          >
-            <span>Claude Code 原文</span>
-            <span>{showRawTranscript ? "Hide" : "Show"}</span>
-          </button>
-          {showRawTranscript ? (
-            <pre
-              data-testid="project-raw-transcript"
-              className="overflow-x-auto border-t bd-hair px-3 py-3 text-xs text-foreground"
-              style={{ whiteSpace: "pre-wrap" }}
+      <div data-testid="project-recap-panel">
+        <CopilotChatViewport
+          messages={visibleMessages}
+          streamingText={streamingText}
+          isStreaming={status === "loading" || status === "streaming"}
+          emptyStateTitle="Product Task Copilot"
+          emptyStateDescription="直接討論這個 product 的 milestone、plans、tasks、subtasks、blockers 與下一步。"
+        />
+        {rawTranscript ? (
+          <div className="mt-3 rounded-[2px] border bd-hair bg-panel">
+            <button
+              type="button"
+              data-testid="project-raw-transcript-toggle"
+              className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-dim"
+              onClick={() => setShowRawTranscript((value) => !value)}
             >
-              {rawTranscript}
-              {streamingText ? `\n\n[assistant/streaming] ${streamingText}` : ""}
-            </pre>
-          ) : null}
-        </div>
-      ) : null}
+              <span>Claude Code 原文</span>
+              <span>{showRawTranscript ? "Hide" : "Show"}</span>
+            </button>
+            {showRawTranscript ? (
+              <pre
+                data-testid="project-raw-transcript"
+                className="overflow-x-auto border-t bd-hair px-3 py-3 text-xs text-foreground"
+                style={{ whiteSpace: "pre-wrap" }}
+              >
+                {rawTranscript}
+                {streamingText ? `\n\n[assistant/streaming] ${streamingText}` : ""}
+              </pre>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </CopilotRailShell>
   );
 }

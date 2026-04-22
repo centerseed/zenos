@@ -36,7 +36,6 @@ export function ProjectProgressConsole({
   const [latestRecap, setLatestRecap] = useState<string | null>(null);
   const nextStepOptions = useMemo(() => deriveProjectNextStepOptions(progress), [progress]);
   const [selectedNextStep, setSelectedNextStep] = useState(nextStepOptions[0]?.value || "");
-  const railOpen = recapRailOpen ?? internalRailOpen;
 
   useEffect(() => {
     setSelectedNextStep(nextStepOptions[0]?.value || "");
@@ -85,7 +84,7 @@ export function ProjectProgressConsole({
 
         <div style={{ display: "grid", gap: 16 }}>
           <section
-            data-testid="project-recap-card"
+            data-testid="project-recap-toolbar"
             style={{
               background: c.paperWarm,
               border: `1px solid ${c.inkHair}`,
@@ -131,10 +130,14 @@ export function ProjectProgressConsole({
               ))}
             </div>
 
-            <label style={{ display: "block", fontSize: 11, color: c.inkMuted, marginBottom: 6 }}>
+            <label
+              htmlFor="project-copilot-focus"
+              style={{ display: "block", fontSize: 11, color: c.inkMuted, marginBottom: 6 }}
+            >
               討論焦點
             </label>
             <select
+              id="project-copilot-focus"
               aria-label="討論焦點"
               value={selectedNextStep}
               onChange={(event) => setSelectedNextStep(event.target.value)}
@@ -158,20 +161,6 @@ export function ProjectProgressConsole({
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button
                 type="button"
-                onClick={() => handleRailOpenChange(true)}
-                style={{
-                  border: `1px solid ${c.inkHairBold}`,
-                  background: c.surface,
-                  color: c.ink,
-                  padding: "8px 12px",
-                  fontSize: 12,
-                  cursor: "pointer",
-                }}
-              >
-                開始任務討論
-              </button>
-              <button
-                type="button"
                 onClick={() => void handleCopyPrompt()}
                 style={{
                   border: `1px solid ${c.vermLine}`,
@@ -193,7 +182,7 @@ export function ProjectProgressConsole({
                   ? "複製失敗"
                   : latestRecap
                     ? "已捕捉最新 task copilot 回覆，可直接複製 continuation prompt"
-                    : "尚未開始 task 討論，複製時會使用 fallback context"}
+                    : "直接在下方討論；尚未開始時複製會使用 fallback context"}
             </div>
 
             <div
@@ -210,19 +199,19 @@ export function ProjectProgressConsole({
             </div>
           </section>
 
+          <ProjectRecapRail
+            open={recapRailOpen ?? internalRailOpen}
+            onOpenChange={handleRailOpenChange}
+            progress={progress}
+            preset={preset}
+            nextStep={selectedNextStep}
+            onRecapChange={setLatestRecap}
+            onAssistantUpdate={onAssistantUpdate}
+          />
+
           <ProjectRecentProgress items={progress.recent_progress} />
         </div>
       </div>
-
-      <ProjectRecapRail
-        open={railOpen}
-        onOpenChange={handleRailOpenChange}
-        progress={progress}
-        preset={preset}
-        nextStep={selectedNextStep}
-        onRecapChange={setLatestRecap}
-        onAssistantUpdate={onAssistantUpdate}
-      />
     </>
   );
 }
