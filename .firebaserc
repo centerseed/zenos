@@ -1,5 +1,12 @@
 {
   "projects": {
     "default": "zenos-naruvia"
+  },
+  "targets": {
+    "zenos-naruvia": {
+      "hosting": {
+        "app": ["zenos-naruvia"]
+      }
+    }
   }
 }

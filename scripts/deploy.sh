@@ -10,6 +10,7 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DASHBOARD_DIR="$ROOT_DIR/dashboard"
 PROJECT_ID="zenos-naruvia"
 HOSTING_URL="https://zenos-naruvia.web.app"
+HOSTING_TARGET="app"
 SKIP_TESTS=false
 VENV_PYTHON=""
 
@@ -149,13 +150,13 @@ echo ""
 # Step 5: Deploy
 echo "[5/5] Deploying to Firebase (hosting + firestore rules)..."
 cd "$ROOT_DIR"
-"$FIREBASE_CLI" deploy --only hosting,firestore --project "$PROJECT_ID"
+"$FIREBASE_CLI" deploy --only "hosting:${HOSTING_TARGET},firestore" --project "$PROJECT_ID"
 echo "  ✓ Deploy completed"
 echo ""
 
 # Post-deploy verification
 echo "=== Post-deploy verification ==="
-for path in / /tasks /knowledge-map /marketing
+for path in / /tasks /knowledge-map /projects
 do
   HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${HOSTING_URL}${path}")
   if [ "$HTTP_STATUS" = "200" ]; then
