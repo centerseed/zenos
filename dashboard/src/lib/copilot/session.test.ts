@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearSessionStarted,
+  clearSessionSnapshot,
   COPILOT_SESSION_TTL_MS,
   markSessionStarted,
   readFreshSessionStartedAt,
+  readFreshSessionSnapshot,
+  writeSessionSnapshot,
 } from "@/lib/copilot/session";
 
 function makeStorage(seed: Record<string, string> = {}) {
@@ -85,5 +88,64 @@ describe("copilot session storage", () => {
 
     expect(storage.removeItem).toHaveBeenCalledWith("new.started");
     expect(storage.removeItem).toHaveBeenCalledWith("legacy.started");
+  });
+
+  it("stores and restores fresh session snapshots", () => {
+    const storage = makeStorage();
+    Object.defineProperty(window, "localStorage", {
+      value: storage,
+      configurable: true,
+    });
+
+    writeSessionSnapshot("chat.snapshot", {
+      messages: [{ role: "assistant", content: "hello" }],
+      status: "idle",
+    });
+
+    expect(readFreshSessionSnapshot<{ messages: Array<{ role: string; content: string }>; status: string }>(
+      "chat.snapshot"
+    )).toEqual({
+      messages: [{ role: "assistant", content: "hello" }],
+      status: "idle",
+    });
+  });
+
+  it("expires stale snapshots and clears them", () => {
+    const now = 1_000_000;
+    const storage = makeStorage({
+      "stale.snapshot": JSON.stringify({
+        updatedAt: now - COPILOT_SESSION_TTL_MS - 1,
+        data: { messages: [] },
+      }),
+    });
+    Object.defineProperty(window, "localStorage", {
+      value: storage,
+      configurable: true,
+    });
+
+    expect(readFreshSessionSnapshot("stale.snapshot", [], COPILOT_SESSION_TTL_MS, now)).toBeNull();
+    expect(storage.removeItem).toHaveBeenCalledWith("stale.snapshot");
+  });
+
+  it("can clear stored snapshots explicitly", () => {
+    const storage = makeStorage({
+      "new.snapshot": JSON.stringify({
+        updatedAt: 123,
+        data: { messages: [] },
+      }),
+      "legacy.snapshot": JSON.stringify({
+        updatedAt: 456,
+        data: { messages: [] },
+      }),
+    });
+    Object.defineProperty(window, "localStorage", {
+      value: storage,
+      configurable: true,
+    });
+
+    clearSessionSnapshot("new.snapshot", ["legacy.snapshot"]);
+
+    expect(storage.removeItem).toHaveBeenCalledWith("new.snapshot");
+    expect(storage.removeItem).toHaveBeenCalledWith("legacy.snapshot");
   });
 });

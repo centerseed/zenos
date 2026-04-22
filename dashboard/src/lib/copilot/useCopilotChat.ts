@@ -23,8 +23,11 @@ import {
 } from "@/lib/copilot/state";
 import {
   clearSessionStarted,
+  clearSessionSnapshot,
   markSessionStarted,
   readFreshSessionStartedAt,
+  readFreshSessionSnapshot,
+  writeSessionSnapshot,
 } from "@/lib/copilot/session";
 import { buildCopilotPromptEnvelope } from "@/lib/copilot/envelope";
 import { COWORK_MAX_TURNS } from "@/lib/cowork-knowledge";
@@ -64,9 +67,24 @@ export interface UseCopilotChatReturn {
 }
 
 const STARTED_KEY_PREFIX = "zenos.copilot.started.";
+const SNAPSHOT_KEY_PREFIX = "zenos.copilot.snapshot.";
 
 function getStartedKey(conversationKey: string): string {
   return `${STARTED_KEY_PREFIX}${conversationKey}`;
+}
+
+function getSnapshotKey(conversationKey: string): string {
+  return `${SNAPSHOT_KEY_PREFIX}${conversationKey}`;
+}
+
+interface CopilotSessionSnapshot {
+  messages: CopilotChatMessage[];
+  streamingText: string;
+  structuredResult: StructuredResult | null;
+  missingKeys: string[];
+  lastError: string | null;
+  lastSubmittedInput: string;
+  status: CopilotChatStatus;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,6 +94,9 @@ function getStartedKey(conversationKey: string): string {
 export function useCopilotChat(
   entry: CopilotEntryConfig | null
 ): UseCopilotChatReturn {
+  const conversationKey = entry ? getCopilotConversationKey(entry) : null;
+  const scopedResume = entry ? usesScopedResume(entry) : false;
+
   // Core chat state
   const [status, setStatus] = useState<CopilotChatStatus>("idle");
   const [connectorStatus, setConnectorStatus] =
@@ -95,17 +116,18 @@ export function useCopilotChat(
   const currentRequestIdRef = useRef<string | undefined>(undefined);
   const lastSubmittedInputRef = useRef<string>("");
   const isRunningRef = useRef<boolean>(false);
+  const didHydrateRef = useRef<boolean>(false);
 
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
 
-  function pushMessage(
+  const pushMessage = useCallback((
     role: CopilotChatMessage["role"],
     content: string
-  ): void {
+  ): void => {
     setMessages((prev) => [...prev, { role, content, timestamp: Date.now() }]);
-  }
+  }, []);
 
   // ---------------------------------------------------------------------------
   // checkHealth
@@ -116,7 +138,11 @@ export function useCopilotChat(
     const baseUrl = getDefaultHelperBaseUrl();
     const token = getDefaultHelperToken();
     try {
-      const result = await checkCoworkHelperHealth(baseUrl, token);
+      const result = await checkCoworkHelperHealth(
+        baseUrl,
+        token,
+        entry?.scope.workspace_id
+      );
       if (result.capability) {
         setCapability(result.capability);
       }
@@ -124,12 +150,89 @@ export function useCopilotChat(
     } catch {
       setConnectorStatus("disconnected");
     }
-  }, []);
+  }, [entry?.scope.workspace_id]);
 
   // Run health check on mount
   useEffect(() => {
     void checkHealth();
   }, [checkHealth]);
+
+  useEffect(() => {
+    abortControllerRef.current?.abort();
+    currentRequestIdRef.current = undefined;
+    isRunningRef.current = false;
+    didHydrateRef.current = false;
+
+    setStatus("idle");
+    setConnectorStatus("checking");
+    setStreamingText("");
+    setStructuredResult(null);
+    setMissingKeys([]);
+    setCapability(null);
+    setLastError(null);
+    setMessages([]);
+    lastSubmittedInputRef.current = "";
+
+    if (!conversationKey || !scopedResume) return;
+
+    const snapshot = readFreshSessionSnapshot<CopilotSessionSnapshot>(
+      getSnapshotKey(conversationKey)
+    );
+    if (!snapshot) {
+      didHydrateRef.current = true;
+      return;
+    }
+
+    setMessages(snapshot.messages ?? []);
+    setStreamingText(snapshot.streamingText ?? "");
+    setStructuredResult(snapshot.structuredResult ?? null);
+    setMissingKeys(snapshot.missingKeys ?? []);
+    setLastError(snapshot.lastError ?? null);
+    setStatus(
+      snapshot.status === "loading" || snapshot.status === "streaming"
+        ? "idle"
+        : snapshot.status ?? "idle"
+    );
+    lastSubmittedInputRef.current = snapshot.lastSubmittedInput ?? "";
+    didHydrateRef.current = true;
+  }, [conversationKey, scopedResume]);
+
+  useEffect(() => {
+    if (!conversationKey || !scopedResume) return;
+    if (!didHydrateRef.current) return;
+
+    const hasState =
+      messages.length > 0 ||
+      Boolean(streamingText) ||
+      Boolean(structuredResult) ||
+      missingKeys.length > 0 ||
+      Boolean(lastError) ||
+      Boolean(lastSubmittedInputRef.current);
+
+    if (!hasState) {
+      clearSessionSnapshot(getSnapshotKey(conversationKey));
+      return;
+    }
+
+    writeSessionSnapshot<CopilotSessionSnapshot>(getSnapshotKey(conversationKey), {
+      messages,
+      streamingText,
+      structuredResult,
+      missingKeys,
+      lastError,
+      lastSubmittedInput: lastSubmittedInputRef.current,
+      status,
+    });
+  }, [
+    conversationKey,
+    lastError,
+    messages,
+    missingKeys,
+    scopedResume,
+    status,
+    streamingText,
+    structuredResult,
+  ]);
 
   // ---------------------------------------------------------------------------
   // send
@@ -138,29 +241,31 @@ export function useCopilotChat(
   const send = useCallback(
     async (userInput: string): Promise<void> => {
       if (!entry) return;
+      if (!conversationKey) return;
       if (isRunningRef.current) return;
 
       isRunningRef.current = true;
       lastSubmittedInputRef.current = userInput;
 
-      // Push user message
-      pushMessage("user", userInput);
+      if (userInput.trim()) {
+        pushMessage("user", userInput);
+      }
       setStatus(nextCopilotStatus("idle", "send")); // → "loading"
       setLastError(null);
       setStructuredResult(null);
       setMissingKeys([]);
+      setStreamingText("");
 
       const baseUrl = getDefaultHelperBaseUrl();
       const token = getDefaultHelperToken();
       const model = getDefaultHelperModel();
       const cwd = getDefaultHelperCwd();
 
-      const conversationKey = getCopilotConversationKey(entry);
-      const scopedResume = usesScopedResume(entry);
-
       // Determine mode: "continue" if scoped_resume and session already started
       const alreadyStarted =
-        scopedResume && Boolean(readFreshSessionStartedAt(getStartedKey(conversationKey)));
+        scopedResume &&
+        conversationKey &&
+        Boolean(readFreshSessionStartedAt(getStartedKey(conversationKey)));
       const mode: "start" | "continue" = alreadyStarted ? "continue" : "start";
 
       const prompt = buildCopilotPromptEnvelope(entry, userInput);
@@ -318,7 +423,7 @@ export function useCopilotChat(
         }
 
         // Mark the conversation as started so subsequent sends use "continue"
-        if (scopedResume) {
+        if (scopedResume && conversationKey) {
           markSessionStarted(getStartedKey(conversationKey));
         }
       } catch (err) {
@@ -337,7 +442,7 @@ export function useCopilotChat(
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [entry]
+    [conversationKey, entry, pushMessage, scopedResume]
   );
 
   // ---------------------------------------------------------------------------
@@ -367,7 +472,7 @@ export function useCopilotChat(
     setStreamingText("");
     setStatus(nextCopilotStatus("streaming", "cancel")); // → "idle"
     pushMessage("system", "[Cancelled]");
-  }, [entry]);
+  }, [entry, pushMessage]);
 
   // ---------------------------------------------------------------------------
   // retry
@@ -413,9 +518,11 @@ export function useCopilotChat(
     setStructuredResult(null);
     setMissingKeys([]);
     setLastError(null);
-    // Intentionally leave messages intact so the user can see history
+    setMessages([]);
     if (entry && usesScopedResume(entry)) {
-      clearSessionStarted(getStartedKey(getCopilotConversationKey(entry)));
+      const activeConversationKey = getCopilotConversationKey(entry);
+      clearSessionStarted(getStartedKey(activeConversationKey));
+      clearSessionSnapshot(getSnapshotKey(activeConversationKey));
     }
   }, [entry]);
 

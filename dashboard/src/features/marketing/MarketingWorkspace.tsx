@@ -36,6 +36,9 @@ import {
   clearSessionStarted,
   markSessionStarted,
   readFreshSessionStartedAt,
+  readFreshSessionSnapshot,
+  clearSessionSnapshot,
+  writeSessionSnapshot,
 } from "@/lib/copilot/session";
 import {
   MarketingProject,
@@ -89,6 +92,11 @@ import {
 } from "@/features/marketing/logic";
 import { useMarketingWorkspace } from "@/features/marketing/useMarketingWorkspace";
 import {
+  buildHelperInstallAndStartCommand,
+  buildHelperInstallCommand,
+  canCopyAgentConfig,
+} from "@/lib/agent-config";
+import {
   AlertTriangle,
   ArrowLeft,
   Bot,
@@ -117,6 +125,19 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 
 type Campaign = MarketingProject;
 type CampaignGroup = MarketingProjectGroup;
+
+interface MarketingCopilotSnapshot {
+  logLines: string[];
+  streamingOutput: string;
+  currentToolUse: string | null;
+  applyPayload: StructuredApplyPayload | null;
+  missingApplyKeys: string[];
+  lastSubmittedPrompt: string;
+  prompt: string;
+  chatStatus: ChatStatus;
+  hasStartedConversation: boolean;
+  requestId: string | null;
+}
 
 const platformIcon: Record<string, string> = {
   Threads: "T",
@@ -1355,22 +1376,26 @@ export function CoworkChatSheet({
     `mk-${Math.random().toString(36).slice(2, 8)}${Math.random().toString(36).slice(2, 8)}`;
   const effectiveCampaignId = campaignId || "global";
   const conversationScope = promptContext ? `prompt-${promptContext.skill}` : fieldContext?.fieldId || "general";
-  const startedStorageKey = `zenos.copilot.started.${effectiveCampaignId}.${conversationScope}`;
-  const legacyStartedStorageKey = `zenos.marketing.cowork.started.${effectiveCampaignId}.${conversationScope}`;
   const { partner: chatPartner, user: authUser } = useAuth();
+  const workspaceId = resolveCopilotWorkspaceId(chatPartner);
+  const startedStorageKey = `zenos.copilot.started.marketing.${workspaceId || "default"}.${effectiveCampaignId}.${conversationScope}`;
+  const legacyStartedStorageKey = `zenos.marketing.cowork.started.${effectiveCampaignId}.${conversationScope}`;
+  const snapshotStorageKey = `zenos.copilot.snapshot.marketing.${workspaceId || "default"}.${effectiveCampaignId}.${conversationScope}`;
   const allowedOrigins = "https://zenos-naruvia.web.app";
-  const helperInstallCommand = "curl -fsSL https://zenos-naruvia.web.app/installers/install-claude-code-helper-macos.sh | bash";
+  const helperInstallCommand = buildHelperInstallCommand();
   const [helperBaseUrl, setHelperBaseUrlState] = useState(getDefaultHelperBaseUrl());
   const [helperToken, setHelperTokenState] = useState(getDefaultHelperToken() || generateHelperToken());
   const [helperCwd, setHelperCwdState] = useState(getDefaultHelperCwd());
   const [helperModel, setHelperModelState] = useState(getDefaultHelperModel());
-  const zenosApiKey = chatPartner?.apiKey || "<your_api_key>";
-  const helperSecureStartCommand = `cd ~/.zenos/claude-code-helper && \\
-ZENOS_API_KEY="${zenosApiKey}" \\
-ALLOWED_ORIGINS="${allowedOrigins}" \\
-LOCAL_HELPER_TOKEN="${helperToken || "<your_token>"}" \\
-ALLOWED_CWDS="$HOME/.zenos/claude-code-helper/workspace" \\
-node server.mjs`;
+  const zenosApiKey = chatPartner?.apiKey || "";
+  const canCopyHelperCommand = canCopyAgentConfig(chatPartner?.apiKey || "");
+  const helperSecureStartCommand = canCopyHelperCommand
+    ? buildHelperInstallAndStartCommand({
+        apiKey: zenosApiKey,
+        helperToken,
+        allowedOrigins,
+      })
+    : "";
   const [internalOpen, setInternalOpen] = useState(false);
   const [prompt, setPrompt] = useState("");
   const [checkingHealth, setCheckingHealth] = useState(false);
@@ -1415,17 +1440,15 @@ node server.mjs`;
   const activeConflictLabel = promptContext ? `${promptContext.title} Draft` : fieldContext?.conflictLabel || fieldContext?.fieldLabel || "目前內容";
 
   useEffect(() => {
-    const started = Boolean(readFreshSessionStartedAt(startedStorageKey, [legacyStartedStorageKey]));
-    setHasStartedConversation(started);
-  }, [legacyStartedStorageKey, startedStorageKey]);
-
-  useEffect(() => {
     const el = chatViewportRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [logLines, streamingOutput]);
 
   useEffect(() => {
+    const started = Boolean(readFreshSessionStartedAt(startedStorageKey, [legacyStartedStorageKey]));
+    const snapshot = readFreshSessionSnapshot<MarketingCopilotSnapshot>(snapshotStorageKey);
+    setHasStartedConversation(started);
     setLogLines([]);
     setStreamingOutput("");
     setApplyPayload(null);
@@ -1437,7 +1460,70 @@ node server.mjs`;
     setGraphContext(null);
     setGraphContextUnavailableReason(null);
     baselineConflictVersionRef.current = activeConflictVersion;
-  }, [effectiveCampaignId, conversationScope]);
+    if (!snapshot) return;
+    setLogLines(snapshot.logLines ?? []);
+    setStreamingOutput(snapshot.streamingOutput ?? "");
+    setApplyPayload(snapshot.applyPayload ?? null);
+    setMissingApplyKeys(snapshot.missingApplyKeys ?? []);
+    setChatStatus(
+      snapshot.chatStatus === "loading" || snapshot.chatStatus === "streaming"
+        ? "idle"
+        : snapshot.chatStatus ?? "idle"
+    );
+    setRequestId(snapshot.requestId ?? null);
+    setCurrentToolUse(snapshot.currentToolUse ?? null);
+    setLastSubmittedPrompt(snapshot.lastSubmittedPrompt ?? "");
+    setPrompt(snapshot.prompt ?? "");
+    if (snapshot.hasStartedConversation) {
+      setHasStartedConversation(true);
+    }
+  }, [
+    conversationScope,
+    effectiveCampaignId,
+    legacyStartedStorageKey,
+    snapshotStorageKey,
+    startedStorageKey,
+  ]);
+
+  useEffect(() => {
+    const hasState =
+      logLines.length > 0 ||
+      Boolean(streamingOutput) ||
+      Boolean(currentToolUse) ||
+      Boolean(applyPayload) ||
+      missingApplyKeys.length > 0 ||
+      Boolean(lastSubmittedPrompt) ||
+      Boolean(prompt) ||
+      hasStartedConversation;
+    if (!hasState) {
+      clearSessionSnapshot(snapshotStorageKey);
+      return;
+    }
+    writeSessionSnapshot<MarketingCopilotSnapshot>(snapshotStorageKey, {
+      logLines,
+      streamingOutput,
+      currentToolUse,
+      applyPayload,
+      missingApplyKeys,
+      lastSubmittedPrompt,
+      prompt,
+      chatStatus,
+      hasStartedConversation,
+      requestId,
+    });
+  }, [
+    applyPayload,
+    chatStatus,
+    currentToolUse,
+    hasStartedConversation,
+    lastSubmittedPrompt,
+    logLines,
+    missingApplyKeys,
+    prompt,
+    requestId,
+    snapshotStorageKey,
+    streamingOutput,
+  ]);
 
   useEffect(() => {
     if (!railVisible || healthText !== "未檢查") return;
@@ -1453,7 +1539,7 @@ node server.mjs`;
     return () => clearInterval(timer);
   }, [railVisible, healthText, checkingHealth, running]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const conversationId = `marketing-${effectiveCampaignId}-${conversationScope}`;
+  const conversationId = `marketing-${workspaceId || "default"}-${effectiveCampaignId}-${conversationScope}`;
   const contextPack = useMemo(
     () => {
       if (promptContext) {
@@ -1545,7 +1631,7 @@ node server.mjs`;
         ],
       },
       scope: {
-        workspace_id: resolveCopilotWorkspaceId(chatPartner),
+        workspace_id: workspaceId,
         campaign_id: campaignId || undefined,
         entity_ids: campaignId ? [campaignId] : undefined,
         scope_label: scopeLabel,
@@ -1594,7 +1680,7 @@ node server.mjs`;
   const runHealthCheck = async () => {
     setCheckingHealth(true);
     persistHelperSettings();
-    const health = await checkCoworkHelperHealth(helperBaseUrl, helperToken);
+    const health = await checkCoworkHelperHealth(helperBaseUrl, helperToken, workspaceId);
     if (!health) {
       setCapability(null);
       setHealthText("不可用：helper unavailable");
@@ -2184,6 +2270,7 @@ node server.mjs`;
                         size="sm"
                         variant="outline"
                         className="h-6 px-2 text-[10px]"
+                        disabled={!canCopyHelperCommand}
                         onClick={async () => {
                           await navigator.clipboard.writeText(helperSecureStartCommand);
                           setCopiedSecureStart(true);
@@ -2193,6 +2280,11 @@ node server.mjs`;
                         {copiedSecureStart ? "已複製" : "複製啟動指令"}
                       </Button>
                     </div>
+                    {!canCopyHelperCommand && (
+                      <div className="mt-2 text-[10px] text-amber-400">
+                        尚未取得 API key，暫時不能複製可直接執行的啟動指令。
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

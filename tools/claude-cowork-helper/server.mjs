@@ -23,6 +23,7 @@ const ALLOWED_MODELS = new Set(["sonnet", "opus", "haiku"]);
 const DEFAULT_MODEL = ALLOWED_MODELS.has(String(process.env.DEFAULT_MODEL || "").trim().toLowerCase())
   ? String(process.env.DEFAULT_MODEL || "").trim().toLowerCase()
   : "sonnet";
+const LOG_CLAUDE_IO = String(process.env.LOG_CLAUDE_IO || "1").trim() !== "0";
 const CLAUDE_BIN = String(process.env.CLAUDE_BIN || "claude").trim() || "claude";
 const CLAUDE_BIN_ARGS = String(process.env.CLAUDE_BIN_ARGS || "")
   .split(/\s+/)
@@ -276,6 +277,27 @@ function buildEnv() {
   const env = { ...process.env };
   delete env.ANTHROPIC_API_KEY;
   return env;
+}
+
+function createLineMirror(prefix, writer) {
+  let buffer = "";
+  return {
+    push(chunk) {
+      buffer += chunk.toString("utf8");
+      let lineEnd = buffer.indexOf("\n");
+      while (lineEnd >= 0) {
+        const line = buffer.slice(0, lineEnd).replace(/\r$/, "");
+        buffer = buffer.slice(lineEnd + 1);
+        writer(`${prefix}${line}\n`);
+        lineEnd = buffer.indexOf("\n");
+      }
+    },
+    flush() {
+      if (!buffer.length) return;
+      writer(`${prefix}${buffer.replace(/\r$/, "")}\n`);
+      buffer = "";
+    },
+  };
 }
 
 function stopChildProcess(child) {
@@ -604,6 +626,11 @@ function startStreamingRun({
     env: buildEnv(),
     stdio: ["ignore", "pipe", "pipe"],
   });
+  if (LOG_CLAUDE_IO) {
+    console.log(
+      `[claude-run] cwd=${session.cwd} bin=${CLAUDE_BIN} args=${JSON.stringify([...CLAUDE_BIN_ARGS, ...args])}`
+    );
+  }
   registerRun(runtimeState, {
     requestId,
     conversationId,
@@ -614,6 +641,8 @@ function startStreamingRun({
   let stdoutBuffer = "";
   let permissionState = null;
   let permissionTimer = null;
+  const stdoutMirror = createLineMirror("[claude stdout] ", (line) => process.stdout.write(line));
+  const stderrMirror = createLineMirror("[claude stderr] ", (line) => process.stderr.write(line));
 
   function clearPermissionTimer() {
     if (permissionTimer) {
@@ -651,6 +680,7 @@ function startStreamingRun({
   }
 
   child.stdout.on("data", (chunk) => {
+    if (LOG_CLAUDE_IO) stdoutMirror.push(chunk);
     if (permissionState?.pending) {
       finishPermission(permissionState.toolName, true, "approved");
     }
@@ -665,6 +695,7 @@ function startStreamingRun({
   });
 
   child.stderr.on("data", (chunk) => {
+    if (LOG_CLAUDE_IO) stderrMirror.push(chunk);
     const text = chunk.toString("utf8");
     const permission = classifyPermissionLine(text);
     if (permission?.kind === "request") {
@@ -686,6 +717,11 @@ function startStreamingRun({
   });
 
   child.on("close", (code, signal) => {
+    if (LOG_CLAUDE_IO) {
+      stdoutMirror.flush();
+      stderrMirror.flush();
+      console.log(`[claude-exit] requestId=${requestId} code=${typeof code === "number" ? code : "null"} signal=${signal || "null"}`);
+    }
     clearPermissionTimer();
     unregisterRun(runtimeState, requestId);
     if (stdoutBuffer.trim()) {
@@ -701,6 +737,10 @@ function startStreamingRun({
   });
 
   child.on("error", (error) => {
+    if (LOG_CLAUDE_IO) {
+      stdoutMirror.flush();
+      stderrMirror.flush();
+    }
     clearPermissionTimer();
     unregisterRun(runtimeState, requestId);
     sendSse(res, "stderr", {

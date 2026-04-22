@@ -12,60 +12,17 @@ import {
   setDefaultHelperBaseUrl,
   setDefaultHelperToken,
 } from "@/lib/cowork-helper";
+import {
+  AGENT_PLATFORMS as PLATFORMS,
+  buildExternalAgentPrompt,
+  buildHelperInstallAndStartCommand,
+  canCopyAgentConfig,
+  getMcpUrl,
+  maskApiKey,
+  type AgentPlatformId as PlatformId,
+} from "@/lib/agent-config";
 
 const HELPER_DEFAULT_URL = "http://127.0.0.1:4317";
-
-const MCP_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
-
-type PlatformId =
-  | "claude-code"
-  | "claude-cowork"
-  | "chatgpt"
-  | "codex"
-  | "gemini-cli"
-  | "antigravity";
-
-type Platform = {
-  id: PlatformId;
-  name: string;
-  useSSE: boolean;
-};
-
-const PLATFORMS: Platform[] = [
-  { id: "claude-code", name: "Claude Code", useSSE: false },
-  { id: "claude-cowork", name: "Claude.ai / Cowork", useSSE: false },
-  { id: "chatgpt", name: "ChatGPT", useSSE: false },
-  { id: "codex", name: "Codex", useSSE: false },
-  { id: "gemini-cli", name: "Gemini CLI", useSSE: true },
-  { id: "antigravity", name: "Antigravity", useSSE: true },
-];
-
-function getMcpUrl(platform: Platform, apiKey: string): string {
-  const endpoint = platform.useSSE ? "sse" : "mcp";
-  return `${MCP_BASE}/${endpoint}?api_key=${apiKey}`;
-}
-
-function getPrompt(platform: Platform, apiKey: string): string {
-  const url = getMcpUrl(platform, apiKey);
-  const protocol = platform.useSSE ? "SSE" : "Streamable HTTP";
-  return `我要連接 ZenOS MCP server，請完成以下設定：
-
-1. MCP 連線設定
-   Server URL: ${url}
-   這是 ${protocol} 協議的 MCP server。
-   請根據你的平台，把這個 MCP server 加入設定。
-
-2. 安裝治理能力
-   連線成功後，請先判斷你目前是 ${platform.name}，再呼叫對應的 setup(platform=...)。
-   接著請主動問我要安裝在當前目錄還是家目錄；若我沒特別指定，預設推薦當前目錄。
-   如果是首次安裝，先把 zenos-setup 裝進來。
-
-3. 完成正式安裝
-   zenos-setup 裝好後，請執行 /zenos-setup 完成正式安裝或後續更新。
-
-4. 安裝完成後說明
-   請用很短的方式告訴我 /zenos-setup、/zenos-capture、/zenos-sync、/zenos-governance 分別什麼時候用。`;
-}
 
 type SkillGroup = {
   title: string;
@@ -154,15 +111,15 @@ function SetupPage() {
   if (!canManageWorkspace) return null;
 
   const platform = PLATFORMS.find((p) => p.id === selectedId) ?? PLATFORMS[0];
-  const apiKey = partner!.apiKey;
+  const apiKey = partner!.apiKey ?? "";
+  const canCopy = canCopyAgentConfig(apiKey);
 
-  const helperCommand = `cd ~/clients/ZenOS/tools/claude-cowork-helper && \\
-ZENOS_API_KEY="${apiKey}" \\
-ZENOS_PROJECT="Paceriz" \\
-ALLOWED_ORIGINS="https://zenos-naruvia.web.app" \\
-LOCAL_HELPER_TOKEN="${helperToken}" \\
-ALLOWED_CWDS="$HOME/.zenos/claude-code-helper/workspace" \\
-node server.mjs`;
+  const helperCommand = canCopy
+    ? buildHelperInstallAndStartCommand({
+        apiKey,
+        helperToken,
+      })
+    : "";
 
   const handleConfigureHelper = async () => {
     setDefaultHelperBaseUrl(HELPER_DEFAULT_URL);
@@ -180,13 +137,13 @@ node server.mjs`;
     }
   };
 
-  const maskedKey = apiKey.slice(0, 8) + "••••••••";
+  const maskedKey = maskApiKey(apiKey);
   const displayKey = showToken ? apiKey : maskedKey;
 
   const mcpUrl = getMcpUrl(platform, apiKey);
   const displayMcpUrl = getMcpUrl(platform, displayKey);
 
-  const prompt = getPrompt(platform, apiKey);
+  const prompt = canCopy ? buildExternalAgentPrompt(platform, apiKey) : "";
 
   const copyText = async (text: string, label: string) => {
     await navigator.clipboard.writeText(text);
@@ -257,6 +214,7 @@ node server.mjs`;
                 </button>
                 <button
                   onClick={() => copyText(mcpUrl, "MCP 連結")}
+                  disabled={!canCopy}
                   className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-500 hover:bg-slate-800"
                 >
                   Copy
@@ -270,6 +228,11 @@ node server.mjs`;
               ? "此平台使用 SSE 協議 (/sse)。"
               : "此平台使用 Streamable HTTP 協議 (/mcp)。"}
           </p>
+          {!canCopy && (
+            <p className="mt-2 text-xs text-amber-300">
+              尚未取得 API key，暫時不能複製可直接使用的設定。
+            </p>
+          )}
         </section>
 
         {/* Section 3 — Step 2: 貼給 AI 的指令 */}
@@ -288,6 +251,7 @@ node server.mjs`;
               </p>
               <button
                 onClick={() => copyText(prompt, "安裝指令")}
+                disabled={!canCopy}
                 className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-500 hover:bg-slate-800"
               >
                 Copy
@@ -300,6 +264,9 @@ node server.mjs`;
               {prompt}
             </pre>
           </div>
+          <p className="mt-3 text-xs text-dim">
+            這一段是給外部 agent 用的。複製後已自動帶入你的 API key，不需要再手填。
+          </p>
         </section>
 
         {/* Section — Dashboard AI Helper (optional) */}
@@ -323,6 +290,7 @@ node server.mjs`;
               </p>
               <button
                 onClick={() => copyText(helperCommand, "Helper 啟動指令")}
+                disabled={!canCopy}
                 className="rounded-full border border-slate-700 px-3 py-1.5 text-xs font-medium text-slate-300 hover:border-slate-500 hover:bg-slate-800"
               >
                 Copy
@@ -333,8 +301,10 @@ node server.mjs`;
             </pre>
           </div>
           <p className="mt-2 text-xs text-dim">
-            路徑 <code className="text-slate-400">~/clients/ZenOS/tools/claude-cowork-helper</code>{" "}
-            可能需要根據你的安裝位置調整。
+            這個指令會自動下載 helper、檢查 Node.js / Claude CLI，並直接啟動。
+          </p>
+          <p className="mt-2 text-xs text-dim">
+            這一段是給 Dashboard 內建 AI 用的，和上面的 MCP 設定不同。
           </p>
 
           {/* Step B: 自動設定 Dashboard 連線 */}

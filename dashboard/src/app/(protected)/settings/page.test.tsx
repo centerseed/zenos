@@ -21,7 +21,7 @@ vi.mock("@/lib/auth", () => ({
       id: "partner-1",
       email: "barry@example.com",
       displayName: "Barry",
-      apiKey: "test-key-12345678", // pragma: allowlist secret
+      apiKey: "demo-user-value", // pragma: allowlist secret
       authorizedEntityIds: [],
       sharedPartnerId: null,
       activeWorkspaceId: "ws-active",
@@ -52,7 +52,7 @@ vi.mock("@/lib/api-client", () => ({
 vi.mock("@/lib/cowork-helper", () => ({
   checkCoworkHelperHealth: (...args: unknown[]) => checkCoworkHelperHealthMock(...args),
   getDefaultHelperBaseUrl: () => "http://127.0.0.1:4317",
-  getDefaultHelperToken: () => "mk-legacy-token",
+  getDefaultHelperToken: () => "demo-helper-value", // pragma: allowlist secret
   getDefaultHelperCwd: () => "/tmp/zenos-workspace",
   getDefaultHelperModel: () => "sonnet",
   setDefaultHelperBaseUrl: (...args: unknown[]) => setDefaultHelperBaseUrlMock(...args),
@@ -111,11 +111,19 @@ describe("SettingsPage", () => {
     render(<SettingsPage />);
 
     expect(screen.getByText("Settings")).toBeInTheDocument();
-    expect(screen.getByText("MCP server")).toBeInTheDocument();
+    expect(screen.getByText("API key 與外部 agent 設定")).toBeInTheDocument();
     expect(screen.getByText("Local helper")).toBeInTheDocument();
     expect(screen.getByText("Per-user live retrieval")).toBeInTheDocument();
-    expect(screen.getByText("MCP / Helper 怎麼分工")).toBeInTheDocument();
+    expect(screen.getByText("設定分成兩條線")).toBeInTheDocument();
     expect(screen.getByText(/Marketing \/ Clients 裡的 AI rail 打不開/)).toBeInTheDocument();
+  });
+
+  it("builds helper command with the current user api key", async () => {
+    const { default: SettingsPage } = await import("./page");
+    render(<SettingsPage />);
+
+    expect(screen.getByText(/ZENOS_API_KEY="demo-user-value"/)).toBeInTheDocument(); // pragma: allowlist secret
+    expect(screen.getByText(/LOCAL_HELPER_TOKEN="demo-helper-value"/)).toBeInTheDocument(); // pragma: allowlist secret
   });
 
   it("persists helper fields to local settings", async () => {
@@ -153,7 +161,7 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(checkCoworkHelperHealthMock).toHaveBeenCalledWith(
         "http://127.0.0.1:4317",
-        "mk-legacy-token",
+        "demo-helper-value",
         "ws-active",
       );
     });

@@ -26,46 +26,30 @@ import {
 import { getStoredActiveWorkspaceId } from "@/lib/api-client";
 import { resolveActiveWorkspace } from "@/lib/partner";
 import { useInk } from "@/lib/zen-ink/tokens";
+import {
+  AGENT_PLATFORMS,
+  buildHelperInstallAndStartCommand,
+  canCopyAgentConfig,
+  getMcpConfig,
+  getMcpUrl,
+  maskApiKey,
+} from "@/lib/agent-config";
 
-const MCP_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
 const HELPER_DEFAULT_URL = "http://127.0.0.1:4317";
 const DEFAULT_WORKSPACE = "$HOME/.zenos/claude-code-helper/workspace";
 
 type HealthStatus = "idle" | "checking" | "connected" | "error";
-
-function getMcpUrl(kind: "http" | "sse", apiKey: string): string {
-  const endpoint = kind === "sse" ? "sse" : "mcp";
-  return `${MCP_BASE}/${endpoint}?api_key=${apiKey}`;
-}
-
-function getMcpConfig(kind: "http" | "sse", apiKey: string): string {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        zenos: {
-          type: kind,
-          url: getMcpUrl(kind, apiKey),
-        },
-      },
-    },
-    null,
-    2,
-  );
-}
 
 function buildHelperLaunchCommand(params: {
   apiKey: string;
   helperToken: string;
   cwd: string;
 }) {
-  const cwd = params.cwd.trim() || DEFAULT_WORKSPACE;
-  return `cd ~/clients/ZenOS/tools/claude-cowork-helper && \\
-ZENOS_API_KEY="${params.apiKey}" \\
-ZENOS_PROJECT="Paceriz" \\
-ALLOWED_ORIGINS="https://zenos-naruvia.web.app" \\
-LOCAL_HELPER_TOKEN="${params.helperToken.trim()}" \\
-ALLOWED_CWDS="${cwd}" \\
-node server.mjs`;
+  return buildHelperInstallAndStartCommand({
+    apiKey: params.apiKey,
+    helperToken: params.helperToken,
+    cwd: params.cwd.trim() || DEFAULT_WORKSPACE,
+  });
 }
 
 function formatContainersInput(containers?: string[]): string {
@@ -263,12 +247,14 @@ function ActionButton({
   onClick,
   tone = "default",
   ariaLabel,
+  disabled = false,
   t,
 }: {
   label: string;
   onClick?: () => void;
   tone?: "default" | "accent";
   ariaLabel?: string;
+  disabled?: boolean;
   t: ReturnType<typeof useInk>;
 }) {
   const { c, fontMono } = t;
@@ -277,6 +263,7 @@ function ActionButton({
     <button
       onClick={onClick}
       aria-label={ariaLabel || label}
+      disabled={disabled}
       style={{
         background: isAccent ? c.vermillion : c.surfaceHi,
         color: isAccent ? c.surfaceHi : c.ink,
@@ -287,7 +274,8 @@ function ActionButton({
         fontSize: 11,
         letterSpacing: "0.12em",
         textTransform: "uppercase",
-        cursor: "pointer",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.5 : 1,
       }}
     >
       {label}
@@ -406,7 +394,8 @@ export default function SettingsPage() {
   }, [user]);
 
   const apiKey = partner?.apiKey ?? "";
-  const maskedApiKey = apiKey ? `${apiKey.slice(0, 8)}••••••••` : "尚未取得";
+  const canCopy = canCopyAgentConfig(apiKey);
+  const maskedApiKey = maskApiKey(apiKey);
   const displayApiKey = showApiKey ? apiKey : maskedApiKey;
   const workspace = resolveActiveWorkspace(partner);
   const canManageGoogleWorkspace = workspace.isHomeWorkspace && workspace.workspaceRole === "owner";
@@ -429,7 +418,7 @@ export default function SettingsPage() {
     setMcpLatency(null);
     const startedAt = Date.now();
     try {
-      const res = await fetch(getMcpUrl("http", apiKey), {
+      const res = await fetch(getMcpUrl({ useSSE: false }, apiKey), {
         method: "GET",
         signal: AbortSignal.timeout(8000),
       });
@@ -564,7 +553,7 @@ export default function SettingsPage() {
         eyebrow="Workspace · Preferences"
         title="Settings"
         en="Control Room"
-        subtitle="這一頁處理日常設定：MCP、Dashboard Helper、Google Workspace connector、本機路徑與診斷。進階 manifest / skill 細節仍看 Agent 頁。"
+        subtitle="這一頁按用途整理設定：API key、外部 agent 的 MCP、Dashboard AI 的 Helper、以及 connector / diagnostics。進階 manifest / skill 細節仍看 Agent 頁。"
         right={
           <Link
             href="/agent"
@@ -636,9 +625,9 @@ export default function SettingsPage() {
       >
         <div style={{ display: "grid", gap: 22 }}>
           <Panel
-            eyebrow="Hosted MCP"
-            title="MCP server"
-            subtitle="給 Claude Code / ChatGPT / Codex / Gemini 這類外部 agent 連 ZenOS。這是長期設定，一個工具接一次即可。"
+            eyebrow="Access / API Key"
+            title="API key 與外部 agent 設定"
+            subtitle="先確認這把 key。下面所有 MCP 設定與 Helper 啟動指令，都會直接帶入同一把 user API key。"
             t={t}
             status={
               <div
@@ -673,11 +662,11 @@ export default function SettingsPage() {
           >
             <div style={{ display: "grid", gap: 0 }}>
               <DetailRow label="API key" value={displayApiKey} mono t={t} />
-              <DetailRow label="HTTP" value={getMcpUrl("http", apiKey)} mono t={t} />
-              <DetailRow label="SSE" value={getMcpUrl("sse", apiKey)} mono t={t} />
+              <DetailRow label="HTTP" value={getMcpUrl({ useSSE: false }, apiKey)} mono t={t} />
+              <DetailRow label="SSE" value={getMcpUrl({ useSSE: true }, apiKey)} mono t={t} />
               <DetailRow
-                label="何時用"
-                value="Claude Code / ChatGPT / Codex 通常走 /mcp；Gemini CLI 或需要 GET streaming 的 client 用 /sse。"
+                label="用途"
+                value="外部 agent 要接 ZenOS 時，用這一組 hosted MCP 設定。Dashboard 內建 AI 不走這條。"
                 t={t}
               />
             </div>
@@ -697,13 +686,23 @@ export default function SettingsPage() {
               />
               <ActionButton
                 label="複製 HTTP 設定"
-                onClick={() => void copyText(getMcpConfig("http", apiKey), "HTTP MCP 設定")}
+                onClick={() => void copyText(getMcpConfig(AGENT_PLATFORMS[0], apiKey), "HTTP MCP 設定")}
                 tone="accent"
+                disabled={!canCopy}
                 t={t}
               />
               <ActionButton
                 label="複製 SSE 設定"
-                onClick={() => void copyText(getMcpConfig("sse", apiKey), "SSE MCP 設定")}
+                onClick={() =>
+                  void copyText(
+                    getMcpConfig(
+                      AGENT_PLATFORMS.find((platform) => platform.useSSE) || AGENT_PLATFORMS[0],
+                      apiKey,
+                    ),
+                    "SSE MCP 設定",
+                  )
+                }
+                disabled={!canCopy}
                 t={t}
               />
             </div>
@@ -738,17 +737,17 @@ export default function SettingsPage() {
                   lineHeight: 1.7,
                 }}
               >
-                <div>1. MCP 是讓外部 agent 讀寫 ZenOS ontology，不是 Dashboard 內建 AI rail。</div>
-                <div>2. 新機器或新工具第一次接入時，先貼 MCP 設定，再在 agent 內跑 <code style={{ fontFamily: fontMono }}> /zenos-setup </code>。</div>
-                <div>3. 如果只是 Dashboard 裡的行銷 / CRM AI 壞掉，通常看右側的 Helper 設定，不是改 MCP URL。</div>
+                <div>1. 外部 agent：先複製 MCP 設定，再在 agent 內跑 <code style={{ fontFamily: fontMono }}>/zenos-setup</code>。</div>
+                <div>2. Dashboard 內建 AI：看右側的 Helper，不要改這組 MCP URL。</div>
+                <div>3. 如果 API key 還沒載入完成，複製按鈕會先停用，避免你拿到不能用的 placeholder。</div>
               </div>
             </div>
           </Panel>
 
           <Panel
-            eyebrow="Flow Guide"
-            title="MCP / Helper 怎麼分工"
-            subtitle="最常見的誤解是把兩條線混在一起。MCP 管外部 agent；Helper 管 dashboard 內建 AI 對話。"
+            eyebrow="分類導引"
+            title="設定分成兩條線"
+            subtitle="外部 agent 用 MCP。Dashboard 內建 AI 用 Helper。這兩條線的故障排查也不同。"
             t={t}
           >
             <div
@@ -834,9 +833,9 @@ export default function SettingsPage() {
 
         <div style={{ display: "grid", gap: 22 }}>
           <Panel
-            eyebrow="Dashboard Helper"
+            eyebrow="Dashboard AI / Helper"
             title="Local helper"
-            subtitle="這是給 dashboard 內建 AI 功能用的本機代理。你會在 Marketing / Clients 點『帶進 AI』時用到它。"
+            subtitle="這是給 dashboard 內建 AI 功能用的本機代理。複製後可直接在新機器執行，已自動帶入你的 API key。"
             t={t}
             status={
               <div
@@ -987,6 +986,7 @@ export default function SettingsPage() {
               <ActionButton
                 label="複製啟動指令"
                 onClick={() => void copyText(helperCommand, "Helper 啟動指令")}
+                disabled={!canCopy}
                 t={t}
               />
             </div>
@@ -1024,6 +1024,19 @@ export default function SettingsPage() {
                 {helperCommand}
               </pre>
             </div>
+            {!canCopy && (
+              <div
+                style={{
+                  marginTop: 12,
+                  fontFamily: fontBody,
+                  fontSize: 12,
+                  color: c.ocher,
+                  lineHeight: 1.6,
+                }}
+              >
+                尚未取得 API key，暫時不能產生可直接執行的 helper 指令。
+              </div>
+            )}
           </Panel>
 
           <Panel

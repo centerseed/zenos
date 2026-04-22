@@ -72,10 +72,7 @@ export function ZenShell({ children }: ZenShellProps) {
     if (!id || id === activeWorkspace?.id) return;
     setActiveWorkspaceId(id);
     await refetchPartner();
-    // 切換後強制重整頁面，確保知識地圖等 data view 走新 workspace scope 重新載入
-    if (typeof window !== "undefined") {
-      window.location.reload();
-    }
+    router.refresh();
   };
 
   const allNav = [

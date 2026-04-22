@@ -28,6 +28,14 @@ import {
 import { sanitizeContextValue } from "@/config/ai-redaction-rules";
 import { useAuth } from "@/lib/auth";
 import { resolveCopilotWorkspaceId } from "@/lib/copilot/scope";
+import {
+  clearSessionStarted,
+  clearSessionSnapshot,
+  markSessionStarted,
+  readFreshSessionStartedAt,
+  readFreshSessionSnapshot,
+  writeSessionSnapshot,
+} from "@/lib/copilot/session";
 import type { GraphContextResponse } from "@/lib/api";
 import { fetchGraphContext } from "@/lib/graph-context";
 import { buildCrmKnowledgePrompt, COWORK_MAX_TURNS, graphContextUnavailableNotice } from "@/lib/cowork-knowledge";
@@ -65,6 +73,20 @@ interface BriefingMetadata {
   graph_context_seed?: string;
   graph_context_l2_count?: number;
   graph_context_l3_count?: number;
+}
+
+interface CrmCopilotSnapshot {
+  status: AiStatus;
+  streamingText: string;
+  finalText: string;
+  errorMsg: string | null;
+  followUp: FollowUpDraft | null;
+  permissionLabel: string | null;
+  helperEvents: string[];
+  chatHistory: ChatMessage[];
+  turnCount: number;
+  requestId: string | null;
+  userInput: string;
 }
 
 interface CrmAiPanelProps {
@@ -547,6 +569,7 @@ export function CrmAiPanel({
   onBriefingSaved,
 }: CrmAiPanelProps) {
   const { partner } = useAuth();
+  const workspaceId = resolveCopilotWorkspaceId(partner);
   const t = useInk("light");
   const { c, fontBody, fontHead, fontMono } = t;
   const [status, setStatus] = useState<AiStatus>("idle");
@@ -577,7 +600,10 @@ export function CrmAiPanel({
   const [savingAsNew, setSavingAsNew] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
-  const conversationId = useRef(`crm-${mode}-${deal.id}-${Date.now()}`);
+  const conversationKey = `crm.${workspaceId || "default"}.${mode}.${deal.id}`;
+  const startedStorageKey = `zenos.copilot.started.${conversationKey}`;
+  const snapshotStorageKey = `zenos.copilot.snapshot.${conversationKey}`;
+  const conversationId = useRef(`crm-${workspaceId || "default"}-${mode}-${deal.id}`);
   const hasStartedConversation = useRef(false);
   const hasAutoStarted = useRef(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
@@ -602,7 +628,7 @@ export function CrmAiPanel({
     title,
     mode: "artifact" as const,
     launch_behavior: "auto_start" as const,
-    session_policy: "ephemeral" as const,
+    session_policy: "scoped_resume" as const,
     suggested_skill: mode === "briefing" ? "/crm-briefing" : "/crm-debrief",
     claude_code_bootstrap: {
       use_project_claude_config: true,
@@ -622,7 +648,7 @@ export function CrmAiPanel({
       ],
     },
     scope: {
-      workspace_id: resolveCopilotWorkspaceId(partner),
+      workspace_id: workspaceId,
       deal_id: deal.id,
       entity_ids: [deal.id],
       scope_label: `${deal.title} / ${mode === "briefing" ? "會議準備" : "活動 debrief"}`,
@@ -714,6 +740,52 @@ export function CrmAiPanel({
     }
   }, [capability]);
 
+  useEffect(() => {
+    const hasState =
+      chatHistory.length > 0 ||
+      Boolean(streamingText) ||
+      Boolean(finalText) ||
+      Boolean(errorMsg) ||
+      Boolean(followUp) ||
+      Boolean(permissionLabel) ||
+      helperEvents.length > 0 ||
+      turnCount > 0 ||
+      Boolean(userInput) ||
+      hasStartedConversation.current;
+
+    if (!hasState) {
+      clearSessionSnapshot(snapshotStorageKey);
+      return;
+    }
+
+    writeSessionSnapshot<CrmCopilotSnapshot>(snapshotStorageKey, {
+      status,
+      streamingText,
+      finalText,
+      errorMsg,
+      followUp,
+      permissionLabel,
+      helperEvents,
+      chatHistory,
+      turnCount,
+      requestId,
+      userInput,
+    });
+  }, [
+    chatHistory,
+    errorMsg,
+    finalText,
+    followUp,
+    helperEvents,
+    permissionLabel,
+    requestId,
+    snapshotStorageKey,
+    status,
+    streamingText,
+    turnCount,
+    userInput,
+  ]);
+
   const persistBriefingSnapshot = useCallback(
     async (content: string, saveMode: "upsert" | "clone" = "upsert") => {
       if (mode !== "briefing" || !content.trim() || !token) return null;
@@ -790,7 +862,11 @@ export function CrmAiPanel({
 
     // Health check before streaming
     setHelperChecking(true);
-    const health = await checkCoworkHelperHealth(baseUrl, helperToken || undefined);
+    const health = await checkCoworkHelperHealth(
+      baseUrl,
+      helperToken || undefined,
+      workspaceId
+    );
     setHelperChecking(false);
     if (!health.ok) {
       setHelperOffline(true);
@@ -952,6 +1028,7 @@ export function CrmAiPanel({
           const msg = err instanceof Error ? err.message : String(err);
           if (/not found|session/i.test(msg)) {
             hasStartedConversation.current = false;
+            clearSessionStarted(startedStorageKey);
             completedText = await runOnce(
               "start",
               fallbackStartPrompt ?? resolvedPrompt
@@ -964,11 +1041,10 @@ export function CrmAiPanel({
         completedText = await runOnce("start", resolvedPrompt);
       }
 
-      if (mode === "briefing") {
-        hasStartedConversation.current = true;
-        if (completedText) {
-          await persistBriefingSnapshot(completedText);
-        }
+      hasStartedConversation.current = true;
+      markSessionStarted(startedStorageKey);
+      if (mode === "briefing" && completedText) {
+        await persistBriefingSnapshot(completedText);
       }
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
@@ -996,11 +1072,9 @@ export function CrmAiPanel({
   ]);
 
   useEffect(() => {
-    if (mode !== "briefing") return;
-
     abortRef.current?.abort();
-    conversationId.current = `crm-${mode}-${deal.id}-${Date.now()}`;
-    hasStartedConversation.current = false;
+    conversationId.current = `crm-${workspaceId || "default"}-${mode}-${deal.id}`;
+    hasStartedConversation.current = Boolean(readFreshSessionStartedAt(startedStorageKey));
     setBriefingSaveError(null);
     setUserInput("");
     setStreamingText("");
@@ -1009,6 +1083,44 @@ export function CrmAiPanel({
     graphContextRef.current = null;
     setGraphContext(null);
     setGraphContextUnavailableReason(null);
+    setHelperEvents([]);
+    setPermissionLabel(null);
+    setErrorMsg(null);
+    setRequestId(null);
+
+    const snapshot = readFreshSessionSnapshot<CrmCopilotSnapshot>(snapshotStorageKey);
+    if (snapshot) {
+      if (mode === "briefing" && initialBriefing) {
+        setActiveBriefing(initialBriefing);
+        activeBriefingRef.current = initialBriefing;
+      }
+      replaceChatHistory(snapshot.chatHistory ?? []);
+      setTurnCountValue(snapshot.turnCount ?? 0);
+      setFinalText(snapshot.finalText ?? "");
+      setStreamingText(snapshot.streamingText ?? "");
+      setStatus(
+        snapshot.status === "loading" || snapshot.status === "streaming"
+          ? "idle"
+          : snapshot.status ?? "idle"
+      );
+      setErrorMsg(snapshot.errorMsg ?? null);
+      setFollowUp(snapshot.followUp ?? null);
+      setPermissionLabel(snapshot.permissionLabel ?? null);
+      setHelperEvents(snapshot.helperEvents ?? []);
+      setRequestId(snapshot.requestId ?? null);
+      setUserInput(snapshot.userInput ?? "");
+      hasAutoStarted.current = true;
+      return;
+    }
+
+    if (mode !== "briefing") {
+      replaceChatHistory([]);
+      setTurnCountValue(0);
+      setFinalText("");
+      setStatus("idle");
+      hasAutoStarted.current = false;
+      return;
+    }
 
     if (initialBriefing) {
       const metadata = (initialBriefing.metadata as BriefingMetadata | undefined) ?? {};
@@ -1037,7 +1149,16 @@ export function CrmAiPanel({
     setFinalText("");
     setStatus("idle");
     hasAutoStarted.current = false;
-  }, [deal.id, initialBriefing, mode, replaceChatHistory, setTurnCountValue]);
+  }, [
+    deal.id,
+    initialBriefing,
+    mode,
+    replaceChatHistory,
+    setTurnCountValue,
+    snapshotStorageKey,
+    startedStorageKey,
+    workspaceId,
+  ]);
 
   // Auto-start briefing/debrief on mount so opening the panel immediately does work.
   useEffect(() => {

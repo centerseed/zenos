@@ -11,52 +11,14 @@ import { useToast } from "@/components/zen/Toast";
 import { Section } from "@/components/zen/Section";
 import { Btn } from "@/components/zen/Btn";
 import { Icon, ICONS } from "@/components/zen/Icons";
-
-const MCP_BASE = "https://zenos-mcp-s5oifosv3a-de.a.run.app";
-
-type PlatformId =
-  | "claude-code"
-  | "claude-cowork"
-  | "chatgpt"
-  | "codex"
-  | "gemini-cli"
-  | "antigravity";
-
-type Platform = {
-  id: PlatformId;
-  name: string;
-  useSSE: boolean;
-};
-
-const PLATFORMS: Platform[] = [
-  { id: "claude-code",   name: "Claude Code",       useSSE: false },
-  { id: "claude-cowork", name: "Claude.ai / Cowork", useSSE: false },
-  { id: "chatgpt",       name: "ChatGPT",            useSSE: false },
-  { id: "codex",         name: "Codex",              useSSE: false },
-  { id: "gemini-cli",    name: "Gemini CLI",         useSSE: true  },
-  { id: "antigravity",   name: "Antigravity",        useSSE: true  },
-];
-
-function getMcpUrl(platform: Platform, apiKey: string): string {
-  const endpoint = platform.useSSE ? "sse" : "mcp";
-  return `${MCP_BASE}/${endpoint}?api_key=${apiKey}`;
-}
-
-function getMcpConfig(platform: Platform, apiKey: string): string {
-  const url = getMcpUrl(platform, apiKey);
-  return JSON.stringify(
-    {
-      mcpServers: {
-        zenos: {
-          type: platform.useSSE ? "sse" : "http",
-          url,
-        },
-      },
-    },
-    null,
-    2
-  );
-}
+import {
+  AGENT_PLATFORMS as PLATFORMS,
+  canCopyAgentConfig,
+  getMcpConfig,
+  getMcpUrl,
+  maskApiKey,
+  type AgentPlatformId as PlatformId,
+} from "@/lib/agent-config";
 
 // ─── Skills data from design-ref-v2/page_agent.jsx ─────────────────────
 type SkillKind = "role" | "governance" | "workflow";
@@ -133,6 +95,7 @@ export default function AgentPage() {
   const [showKey, setShowKey] = useState(false);
 
   const apiKey = partner?.apiKey ?? "";
+  const canCopy = canCopyAgentConfig(apiKey);
 
   // Run health check on mount once apiKey is available
   useEffect(() => {
@@ -146,7 +109,7 @@ export default function AgentPage() {
     setHealthStatus("checking");
     setLatencyMs(null);
     const start = Date.now();
-    const url = `${MCP_BASE}/mcp?api_key=${apiKey}`;
+    const url = getMcpUrl({ useSSE: false }, apiKey);
     fetch(url, { method: "GET", signal: AbortSignal.timeout(8000) })
       .then((res) => {
         const ms = Date.now() - start;
@@ -159,7 +122,7 @@ export default function AgentPage() {
       });
   }
 
-  const maskedKey = apiKey ? apiKey.slice(0, 8) + "••••••••" : "————";
+  const maskedKey = apiKey ? maskApiKey(apiKey) : "————";
   const displayKey = showKey ? apiKey : maskedKey;
 
   const httpPlatform = PLATFORMS[0]; // claude-code, http
@@ -167,6 +130,7 @@ export default function AgentPage() {
   const displayConfigUrl = getMcpUrl(httpPlatform, displayKey);
 
   async function copyConfig(platformId: PlatformId) {
+    if (!canCopy) return;
     const platform = PLATFORMS.find((p) => p.id === platformId) ?? PLATFORMS[0];
     const json = getMcpConfig(platform, apiKey);
     await navigator.clipboard.writeText(json);
@@ -178,27 +142,16 @@ export default function AgentPage() {
   }
 
   // The single hosted server JSON preview
-  const jsonPreview = JSON.stringify(
-    {
-      mcpServers: {
-        zenos: {
-          type: "http",
-          url: configUrl,
-        },
-      },
-    },
-    null,
-    2
-  );
+  const jsonPreview = getMcpConfig(httpPlatform, apiKey);
 
   return (
     <div style={{ padding: "40px 48px 60px", maxWidth: 1600 }}>
       <Section
         t={t}
         eyebrow="AGENT · 安裝與設定"
-        title="Agent · MCP"
-        en="Setup"
-        subtitle="接 MCP server，同步 agent 與 skill。本頁顯示 hosted ZenOS MCP server 設定。"
+          title="Agent · MCP"
+          en="Setup"
+        subtitle="這是進階參考頁：看 hosted MCP、skills 與本地 helper 的結構。第一次接入請優先用 /setup 或 /settings。"
       />
 
       {/* KPI strip */}
@@ -370,6 +323,7 @@ export default function AgentPage() {
           fontMono={fontMono}
           c={c}
           apiKey={apiKey}
+          canCopy={canCopy}
           healthStatus={healthStatus}
           latencyMs={latencyMs}
           showJson={showJson}
@@ -825,6 +779,7 @@ function MCPTab({
   fontMono,
   c,
   apiKey,
+  canCopy,
   healthStatus,
   latencyMs,
   showJson,
@@ -842,6 +797,7 @@ function MCPTab({
   fontMono: string;
   c: ReturnType<typeof useInk>["c"];
   apiKey: string;
+  canCopy: boolean;
   healthStatus: HealthStatus;
   latencyMs: number | null;
   showJson: boolean;
@@ -1114,6 +1070,7 @@ function MCPTab({
               <button
                 key={p.id}
                 onClick={() => onCopyConfig(p.id)}
+                disabled={!canCopy}
                 style={{
                   padding: "5px 12px",
                   fontSize: 11,
@@ -1123,16 +1080,19 @@ function MCPTab({
                   color: c.inkMuted,
                   border: `1px solid ${c.inkHair}`,
                   borderRadius: 2,
-                  cursor: "pointer",
+                  cursor: canCopy ? "pointer" : "not-allowed",
                   letterSpacing: "0.02em",
                   transition: "all .12s",
+                  opacity: canCopy ? 1 : 0.5,
                 }}
                 onMouseEnter={(e) => {
+                  if (!canCopy) return;
                   e.currentTarget.style.background = c.surface;
                   e.currentTarget.style.color = c.ink;
                   e.currentTarget.style.borderColor = c.inkHairBold;
                 }}
                 onMouseLeave={(e) => {
+                  if (!canCopy) return;
                   e.currentTarget.style.background = c.paperWarm;
                   e.currentTarget.style.color = c.inkMuted;
                   e.currentTarget.style.borderColor = c.inkHair;
@@ -1142,6 +1102,19 @@ function MCPTab({
               </button>
             ))}
           </div>
+          {!canCopy && (
+            <div
+              style={{
+                marginTop: 10,
+                fontFamily: fontBody,
+                fontSize: 12,
+                color: c.ocher,
+                lineHeight: 1.6,
+              }}
+            >
+              API key 尚未取得，暫時不能複製可直接使用的 MCP 設定。
+            </div>
+          )}
         </div>
 
         {/* Tools list */}
