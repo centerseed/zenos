@@ -454,14 +454,14 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     );
   });
 
-  it("AC-PPC-09: Given 使用者已生成 AI recap，並選定下一步方向 When 點擊 copy prompt Then 系統必須提供一份包含產品 context、active plans、open work、blockers、AI recap 與下一步目標的可複製 prompt", async function acPpc09CopyPromptContainsContinuationContext() {
+  it("AC-PPC-09: Given 使用者已生成 AI recap，並選定下一步方向 When 點擊 copy prompt Then 系統必須提供一份包含 root context、active plans、open work、blockers、AI recap 與下一步目標的可複製 prompt", async function acPpc09CopyPromptContainsContinuationContext() {
     const prompt = buildProjectContinuationPrompt(makeProgressFixture(), {
       preset: "claude_code",
-      recap: "This week shipped grouped open work and needs one product decision.",
+      recap: "This week shipped grouped open work and needs one root-level decision.",
       nextStep: "Resolve API edge case",
     });
 
-    expect(prompt).toContain("Project: ZenOS");
+    expect(prompt).toContain("Root: ZenOS");
     expect(prompt).toContain("[Active Plans]");
     expect(prompt).toContain("[Open Work]");
     expect(prompt).toContain("[Blockers]");

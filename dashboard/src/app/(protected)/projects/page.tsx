@@ -746,16 +746,22 @@ function InkProjectDetail({
   const { user } = useAuth();
   const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailData | null>(null);
   const [createKind, setCreateKind] = useState<"task" | "plan" | "milestone" | null>(null);
   const [mutationError, setMutationError] = useState<string | null>(null);
   const [projectRecapOpen, setProjectRecapOpen] = useState(false);
 
-  const fetchDetail = useCallback(async () => {
+  const fetchDetail = useCallback(async (options?: { background?: boolean }) => {
     if (!user) return;
-    setLoading(true);
-    setError(null);
+    const background = options?.background ?? false;
+    if (background) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const token = await user.getIdToken();
       const [context, progress, tasks, children, blindspots] = await Promise.all([
@@ -770,7 +776,11 @@ function InkProjectDetail({
       console.error("[ProjectDetail] fetch failed:", err);
       setError(err instanceof Error ? err.message : "載入失敗");
     } finally {
-      setLoading(false);
+      if (background) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   }, [user, entityId]);
 
@@ -799,7 +809,7 @@ function InkProjectDetail({
   }, []);
 
   const handleAssistantUpdate = useCallback(() => {
-    void fetchDetail();
+    void fetchDetail({ background: true });
   }, [fetchDetail]);
 
   const entity = detail?.context?.entity ?? null;
@@ -1105,6 +1115,21 @@ function InkProjectDetail({
             </p>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
+            {refreshing ? (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  fontFamily: fontMono,
+                  fontSize: 10,
+                  color: c.inkFaint,
+                  letterSpacing: "0.14em",
+                  textTransform: "uppercase",
+                }}
+              >
+                更新中…
+              </span>
+            ) : null}
             <Btn t={t} variant="ghost" size="sm" icon={ICONS.doc} onClick={() => setTab("docs")}>
               Brief
             </Btn>

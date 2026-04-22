@@ -982,6 +982,7 @@ describe("ProjectsPage", () => {
   });
 
   it("refreshes project detail after helper updates the recap", async () => {
+    let resolveBackgroundProgress: ((value: unknown) => void) | null = null;
     getProjectEntitiesMock.mockResolvedValue([
       {
         id: "entity-1",
@@ -1002,29 +1003,36 @@ describe("ProjectsPage", () => {
       },
     ]);
     getTasksByEntityMock.mockResolvedValue([]);
-    getProjectProgressMock.mockResolvedValue({
-      project: {
-        id: "entity-1",
-        name: "ZenOS",
-        type: "product",
-        summary: "summary",
-        tags: { what: [], why: "", how: "", who: [] },
-        status: "active",
-        parentId: null,
-        details: null,
-        confirmedByUser: true,
-        owner: "Owner",
-        sources: [],
-        visibility: "public",
-        lastReviewedAt: null,
-        createdAt: new Date("2026-04-19T00:00:00Z"),
-        updatedAt: new Date("2026-04-19T00:00:00Z"),
-      },
-      active_plans: [],
-      open_work_groups: [],
-      milestones: [],
-      recent_progress: [],
-    });
+    getProjectProgressMock
+      .mockResolvedValueOnce({
+        project: {
+          id: "entity-1",
+          name: "ZenOS",
+          type: "product",
+          summary: "summary",
+          tags: { what: [], why: "", how: "", who: [] },
+          status: "active",
+          parentId: null,
+          details: null,
+          confirmedByUser: true,
+          owner: "Owner",
+          sources: [],
+          visibility: "public",
+          lastReviewedAt: null,
+          createdAt: new Date("2026-04-19T00:00:00Z"),
+          updatedAt: new Date("2026-04-19T00:00:00Z"),
+        },
+        active_plans: [],
+        open_work_groups: [],
+        milestones: [],
+        recent_progress: [],
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveBackgroundProgress = resolve;
+          })
+      );
     getEntityContextMock.mockResolvedValue({
       entity: {
         id: "entity-1",
@@ -1061,11 +1069,43 @@ describe("ProjectsPage", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "assistant-updated" }));
 
+    expect(screen.getByTestId("project-progress-console")).toBeInTheDocument();
+    expect(screen.queryByText("載入工作台資料…")).not.toBeInTheDocument();
+    expect(screen.getByText("更新中…")).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(getProjectProgressMock.mock.calls.length).toBeGreaterThan(initialProgressCalls)
+    );
+
+    resolveBackgroundProgress?.({
+      project: {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      active_plans: [],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [],
+    });
+
     await waitFor(() => {
-      expect(getProjectProgressMock.mock.calls.length).toBeGreaterThan(initialProgressCalls);
       expect(getTasksByEntityMock.mock.calls.length).toBeGreaterThan(initialTaskCalls);
       expect(getEntityContextMock.mock.calls.length).toBeGreaterThan(initialContextCalls);
     });
+    await waitFor(() => expect(screen.queryByText("更新中…")).not.toBeInTheDocument());
   });
 
   it("keeps selected project in url state so refresh/deep-link still opens detail", async () => {
