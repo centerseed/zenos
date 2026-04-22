@@ -72,6 +72,14 @@ export function ProjectRecapRail({
         .join("\n\n"),
     [messages]
   );
+  const diagnostics = useMemo(() => {
+    const issues: string[] = [];
+    if (connectorStatus === "checking") issues.push("Connector 檢查中");
+    if (connectorStatus === "disconnected") issues.push("Connector 未連線");
+    capability?.missingSkills?.forEach((skill) => issues.push(`缺 skill：${skill}`));
+    if (lastError) issues.push(lastError);
+    return issues;
+  }, [capability?.missingSkills, connectorStatus, lastError]);
 
   useEffect(() => {
     onRecapChange(latestAssistant);
@@ -91,13 +99,13 @@ export function ProjectRecapRail({
       connectorStatus={connectorStatus}
       inlineOnly
       diagnostics={
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <span>{connectorStatus === "connected" ? "Connector 已連線" : connectorStatus === "checking" ? "Connector 檢查中" : "Connector 未連線"}</span>
-          {capability?.missingSkills?.map((skill) => (
-            <span key={skill}>缺 skill：{skill}</span>
-          ))}
-          {lastError ? <span>{lastError}</span> : null}
-        </div>
+        diagnostics.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-[11px]">
+            {diagnostics.map((issue) => (
+              <span key={issue}>{issue}</span>
+            ))}
+          </div>
+        ) : undefined
       }
       footer={
         <CopilotInputBar
@@ -117,8 +125,8 @@ export function ProjectRecapRail({
           messages={visibleMessages}
           streamingText={streamingText}
           isStreaming={status === "loading" || status === "streaming"}
-          emptyStateTitle="Product Task Copilot"
-          emptyStateDescription="直接討論這個 product 的 milestone、plans、tasks、subtasks、blockers 與下一步。"
+          emptyStateTitle="Task Copilot"
+          emptyStateDescription="直接開始問。"
         />
         {rawTranscript ? (
           <div className="mt-3 rounded-[2px] border bd-hair bg-panel">

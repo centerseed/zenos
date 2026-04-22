@@ -104,13 +104,10 @@ export function ProjectProgressConsole({
               Product Task Copilot
             </div>
             <div style={{ fontFamily: fontHead, fontSize: 18, color: c.ink, fontWeight: 500 }}>
-              直接討論這個專案的 milestone、plan 與 task
+              任務討論
             </div>
-            <p style={{ fontSize: 12, color: c.inkMuted, margin: "8px 0 14px", lineHeight: 1.6 }}>
-              直接詢問目前在哪個 milestone、哪個 task 卡住、subtask 怎麼拆、下一步先做什麼。需要丟去 Claude Code 或 Codex 再用 continuation prompt。
-            </p>
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            <div style={{ display: "flex", gap: 8, margin: "10px 0 12px" }}>
               {(["claude_code", "codex"] as ProjectAgentPreset[]).map((value) => (
                 <button
                   key={value}
@@ -180,22 +177,7 @@ export function ProjectProgressConsole({
                 ? `已複製 ${preset === "claude_code" ? "Claude Code" : "Codex"} prompt`
                 : copiedState === "error"
                   ? "複製失敗"
-                  : latestRecap
-                    ? "已捕捉最新 task copilot 回覆，可直接複製 continuation prompt"
-                    : "直接在下方討論；尚未開始時複製會使用 fallback context"}
-            </div>
-
-            <div
-              style={{
-                marginTop: 12,
-                borderTop: `1px solid ${c.inkHair}`,
-                paddingTop: 12,
-                fontSize: 12,
-                color: c.inkMuted,
-                lineHeight: 1.7,
-              }}
-            >
-              {latestRecap || `目前優先 milestone：${progress.milestones[0]?.name || "none"}。先從下列焦點切入：${selectedNextStep || nextStepOptions[0]?.value || buildFallbackRecap(progress)}`}
+                  : "複製會帶目前 product context"}
             </div>
           </section>
 
