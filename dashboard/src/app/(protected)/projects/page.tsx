@@ -1344,6 +1344,49 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [bootstrapNames, setBootstrapNames] = useState<string[]>([]);
+  const [bootstrapLoading, setBootstrapLoading] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+
+  const bootstrapPref = partner?.preferences?.homeWorkspaceBootstrap;
+  const pendingBootstrapSourceIds = useMemo(
+    () =>
+      (bootstrapPref?.state === "pending" ? bootstrapPref.sourceEntityIds ?? [] : []).filter(
+        (value, index, arr) => Boolean(value) && arr.indexOf(value) === index,
+      ),
+    [bootstrapPref?.sourceEntityIds, bootstrapPref?.state],
+  );
+  const showBootstrapBanner =
+    activeWorkspace.isHomeWorkspace &&
+    pendingBootstrapSourceIds.length > 0 &&
+    Boolean(bootstrapPref?.sourceWorkspaceId);
+
+  const readOpenIdFromUrl = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    const value = new URLSearchParams(window.location.search).get("id");
+    return value && value.trim() ? value : null;
+  }, []);
+
+  const syncOpenIdFromUrl = useCallback(() => {
+    setOpenId(readOpenIdFromUrl());
+  }, [readOpenIdFromUrl]);
+
+  const updateOpenId = useCallback((nextId: string | null) => {
+    setOpenId(nextId);
+    if (typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    if (nextId) {
+      url.searchParams.set("id", nextId);
+      window.history.pushState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+      window.scrollTo({ top: 0, behavior: "auto" });
+      return;
+    }
+
+    url.searchParams.delete("id");
+    window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }, []);
 
   const fetchProjects = useCallback(async () => {
     if (!user) return;
@@ -1396,6 +1439,52 @@ export default function ProjectsPage() {
     void fetchProjects();
   }, [fetchProjects]);
 
+  useEffect(() => {
+    if (!user || !showBootstrapBanner || !bootstrapPref?.sourceWorkspaceId) {
+      setBootstrapNames([]);
+      setBootstrapError(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadBootstrapNames = async () => {
+      try {
+        const token = await user.getIdToken();
+        const products = await getProjectEntitiesInWorkspace(token, bootstrapPref.sourceWorkspaceId!);
+        const names = pendingBootstrapSourceIds
+          .map((entityId) => products.find((entity) => entity.id === entityId)?.name)
+          .filter((value): value is string => Boolean(value));
+        if (!cancelled) {
+          setBootstrapNames(names);
+        }
+      } catch (err) {
+        console.error("[ProjectsPage] failed to load bootstrap sources:", err);
+        if (!cancelled) {
+          setBootstrapError("待匯入來源暫時無法讀取，請稍後再試。");
+          setBootstrapNames([]);
+        }
+      }
+    };
+
+    setBootstrapError(null);
+    void loadBootstrapNames();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    bootstrapPref?.sourceWorkspaceId,
+    pendingBootstrapSourceIds,
+    showBootstrapBanner,
+    user,
+  ]);
+
+  useEffect(() => {
+    syncOpenIdFromUrl();
+    if (typeof window === "undefined") return;
+    window.addEventListener("popstate", syncOpenIdFromUrl);
+    return () => window.removeEventListener("popstate", syncOpenIdFromUrl);
+  }, [syncOpenIdFromUrl]);
+
   if (loading) {
     return <InkSpinner message="載入產品…" />;
   }
@@ -1408,7 +1497,7 @@ export default function ProjectsPage() {
     return (
       <InkProjectDetail
         entityId={openId}
-        onBack={() => setOpenId(null)}
+        onBack={() => updateOpenId(null)}
       />
     );
   }
@@ -1418,5 +1507,37 @@ export default function ProjectsPage() {
     progress: progressMap.get(e.id) ?? null,
   }));
 
-  return <InkProjectsList projects={projects} onOpen={setOpenId} />;
+  const handleApplyBootstrap = async () => {
+    if (!user) return;
+    setBootstrapLoading(true);
+    setBootstrapError(null);
+    try {
+      const token = await user.getIdToken();
+      await applyHomeWorkspaceBootstrap(token);
+      await refetchPartner();
+      await fetchProjects();
+    } catch (err) {
+      console.error("[ProjectsPage] bootstrap apply failed:", err);
+      setBootstrapError(err instanceof Error ? err.message : "匯入失敗");
+    } finally {
+      setBootstrapLoading(false);
+    }
+  };
+
+  return (
+    <InkProjectsList
+      projects={projects}
+      bootstrapBanner={
+        showBootstrapBanner ? (
+          <HomeWorkspaceBootstrapBanner
+            productNames={bootstrapNames.length > 0 ? bootstrapNames : pendingBootstrapSourceIds}
+            loading={bootstrapLoading}
+            error={bootstrapError}
+            onApply={handleApplyBootstrap}
+          />
+        ) : undefined
+      }
+      onOpen={updateOpenId}
+    />
+  );
 }

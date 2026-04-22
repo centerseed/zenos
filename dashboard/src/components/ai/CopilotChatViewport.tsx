@@ -23,19 +23,21 @@ export function CopilotChatViewport({
 }: CopilotChatViewportProps) {
   const t = useInk("light");
   const { c } = t;
-  const endRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
 
-  // Auto scroll to bottom on new messages / streaming update
   useEffect(() => {
-    if (typeof endRef.current?.scrollIntoView === "function") {
-      endRef.current.scrollIntoView({ behavior: "smooth" });
-    }
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior: "auto" });
   }, [messages, streamingText]);
 
   const hasContent = messages.length > 0 || streamingText;
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto rounded-[2px] border bd-hair bg-panel p-4">
+    <div
+      ref={viewportRef}
+      className="flex h-full flex-col gap-3 overflow-y-auto rounded-[2px] border bd-hair bg-panel p-4"
+    >
       {!hasContent ? (
         // Empty state
         <div className="m-auto max-w-md text-center">
@@ -87,8 +89,6 @@ export function CopilotChatViewport({
               </div>
             </div>
           )}
-
-          <div ref={endRef} />
         </>
       )}
     </div>

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 const getProjectEntitiesMock = vi.hoisted(() => vi.fn());
+const getProjectEntitiesInWorkspaceMock = vi.hoisted(() => vi.fn());
 const getProjectProgressMock = vi.hoisted(() => vi.fn());
 const getTasksByEntityMock = vi.hoisted(() => vi.fn());
 const getEntityContextMock = vi.hoisted(() => vi.fn());
@@ -11,16 +12,32 @@ const getAllBlindspotsMock = vi.hoisted(() => vi.fn());
 const createTaskMock = vi.hoisted(() => vi.fn());
 const createPlanMock = vi.hoisted(() => vi.fn());
 const createMilestoneMock = vi.hoisted(() => vi.fn());
+const applyHomeWorkspaceBootstrapMock = vi.hoisted(() => vi.fn());
+const refetchPartnerMock = vi.hoisted(() => vi.fn());
 const mockUser = { getIdToken: vi.fn().mockResolvedValue("token-1") };
+const mockPartner = {
+  id: "guest-home-id",
+  email: "guest@test.com",
+  displayName: "Guest User",
+  isAdmin: false,
+  workspaceRole: "owner",
+  accessMode: "internal",
+  status: "active",
+  sharedPartnerId: null,
+  preferences: {},
+};
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
     user: mockUser,
+    partner: mockPartner,
+    refetchPartner: refetchPartnerMock,
   }),
 }));
 
 vi.mock("@/lib/api", () => ({
   getProjectEntities: (...args: unknown[]) => getProjectEntitiesMock(...args),
+  getProjectEntitiesInWorkspace: (...args: unknown[]) => getProjectEntitiesInWorkspaceMock(...args),
   getProjectProgress: (...args: unknown[]) => getProjectProgressMock(...args),
   getTasksByEntity: (...args: unknown[]) => getTasksByEntityMock(...args),
   getEntityContext: (...args: unknown[]) => getEntityContextMock(...args),
@@ -29,6 +46,7 @@ vi.mock("@/lib/api", () => ({
   createTask: (...args: unknown[]) => createTaskMock(...args),
   createPlan: (...args: unknown[]) => createPlanMock(...args),
   createMilestone: (...args: unknown[]) => createMilestoneMock(...args),
+  applyHomeWorkspaceBootstrap: (...args: unknown[]) => applyHomeWorkspaceBootstrapMock(...args),
   updateTask: vi.fn(),
   confirmTask: vi.fn(),
   handoffTask: vi.fn(),
@@ -107,6 +125,11 @@ describe("ProjectsPage", () => {
   });
 
   beforeEach(() => {
+    window.history.replaceState({}, "", "/projects");
+    Object.defineProperty(window, "scrollTo", {
+      writable: true,
+      value: vi.fn(),
+    });
     getProjectEntitiesMock.mockReset();
     getProjectProgressMock.mockReset();
     getTasksByEntityMock.mockReset();
@@ -116,6 +139,20 @@ describe("ProjectsPage", () => {
     createTaskMock.mockReset();
     createPlanMock.mockReset();
     createMilestoneMock.mockReset();
+    getProjectEntitiesInWorkspaceMock.mockReset();
+    applyHomeWorkspaceBootstrapMock.mockReset();
+    refetchPartnerMock.mockReset();
+    Object.assign(mockPartner, {
+      id: "guest-home-id",
+      email: "guest@test.com",
+      displayName: "Guest User",
+      isAdmin: false,
+      workspaceRole: "owner",
+      accessMode: "internal",
+      status: "active",
+      sharedPartnerId: null,
+      preferences: {},
+    });
   });
 
   it("creates project task with linked_entities", async () => {
@@ -276,6 +313,58 @@ describe("ProjectsPage", () => {
 
     expect(await screen.findByText("個人")).toBeInTheDocument();
     expect(screen.queryByText("GRACE ONE")).not.toBeInTheDocument();
+  });
+
+  it("shows bootstrap CTA in home workspace and applies pending bootstrap", async () => {
+    Object.assign(mockPartner, {
+      preferences: {
+        homeWorkspaceBootstrap: {
+          sourceWorkspaceId: "owner-shared-id",
+          sourceEntityIds: ["product-1"],
+          state: "pending",
+        },
+      },
+    });
+    getProjectEntitiesMock.mockResolvedValue([]);
+    getProjectEntitiesInWorkspaceMock.mockResolvedValue([
+      {
+        id: "product-1",
+        name: "合作案 A",
+        type: "product",
+        summary: "shared source",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Barry",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    applyHomeWorkspaceBootstrapMock.mockResolvedValue({
+      copied_root_entity_ids: ["copied-1"],
+      copied_entity_count: 3,
+      copied_relationship_count: 2,
+      skipped_source_entity_ids: [],
+    });
+    refetchPartnerMock.mockResolvedValue(undefined);
+
+    const { default: ProjectsPage } = await import("./page");
+    render(<ProjectsPage />);
+
+    expect(await screen.findByText("可匯入的起始產品")).toBeInTheDocument();
+    expect(screen.getByText("合作案 A")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "匯入到 Home Workspace" }));
+
+    await waitFor(() => {
+      expect(applyHomeWorkspaceBootstrapMock).toHaveBeenCalledWith("token-1");
+      expect(refetchPartnerMock).toHaveBeenCalled();
+    });
   });
 
   it("keeps project console as default detail view and allows task drill-down", async () => {
@@ -741,5 +830,87 @@ describe("ProjectsPage", () => {
       expect(getTasksByEntityMock.mock.calls.length).toBeGreaterThan(initialTaskCalls);
       expect(getEntityContextMock.mock.calls.length).toBeGreaterThan(initialContextCalls);
     });
+  });
+
+  it("keeps selected project in url state so refresh/deep-link still opens detail", async () => {
+    getProjectEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    getTasksByEntityMock.mockResolvedValue([]);
+    getProjectProgressMock.mockResolvedValue({
+      project: {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      active_plans: [],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [],
+    });
+    getEntityContextMock.mockResolvedValue({
+      entity: {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      impact_chain: [],
+      reverse_impact_chain: [],
+    });
+    getChildEntitiesMock.mockResolvedValue([]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+
+    const { default: ProjectsPage } = await import("./page");
+    const { unmount } = render(<ProjectsPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /ZenOS/ }));
+    expect(window.location.search).toContain("id=entity-1");
+    expect(await screen.findByTestId("project-progress-console")).toBeInTheDocument();
+
+    unmount();
+    render(<ProjectsPage />);
+
+    expect(await screen.findByTestId("project-progress-console")).toBeInTheDocument();
+    expect(getProjectProgressMock).toHaveBeenCalledWith("token-1", "entity-1");
   });
 });
