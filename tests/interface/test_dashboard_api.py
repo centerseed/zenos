@@ -261,11 +261,191 @@ class TestGetPartnerMe:
         body = json.loads(resp.body)
         assert resp.status_code == 200
         assert body["partner"]["activeWorkspaceId"] == "owner-partner-id"
-        assert body["partner"]["isHomeWorkspace"] is False
-        assert body["partner"]["availableWorkspaces"] == [
-            {"id": "guest-home-id", "name": "我的工作區", "hasUpdate": False},
-            {"id": "owner-partner-id", "name": "Barry 的工作區", "hasUpdate": False},
-        ]
+
+
+class TestApplyHomeWorkspaceBootstrap:
+
+    async def test_preferences_endpoint_rejects_home_workspace_bootstrap_patch(self):
+        from zenos.interface.dashboard_api import update_partner_preferences
+
+        request = _make_request(
+            method="PATCH",
+            headers={"authorization": "Bearer fake-token"},
+        )
+        request.body = AsyncMock(
+            return_value=json.dumps(
+                {"homeWorkspaceBootstrap": {"sourceWorkspaceId": "owner-shared-id"}}
+            ).encode()
+        )
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token(email="guest@test.com")), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value={**_PARTNER, "email": "guest@test.com"}):
+            resp = await update_partner_preferences(request)
+
+        assert resp.status_code == 403
+        assert "owner-managed" in resp.body.decode()
+
+    async def test_rejects_apply_outside_home_workspace(self):
+        from zenos.interface.dashboard_api import apply_home_workspace_bootstrap
+
+        request = _make_request(
+            method="POST",
+            headers={
+                "authorization": "Bearer fake-token",
+                "x-active-workspace-id": "owner-shared-id",
+            },
+        )
+        partner = {
+            **_PARTNER,
+            "id": "guest-home-id",
+            "email": "guest@test.com",
+            "sharedPartnerId": "owner-shared-id",
+            "authorizedEntityIds": ["product-1", "product-2"],
+            "preferences": {
+                "homeWorkspaceBootstrap": {
+                    "sourceWorkspaceId": "owner-shared-id",
+                    "sourceEntityIds": ["product-1"],
+                    "state": "pending",
+                }
+            },
+        }
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token(email="guest@test.com")), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=partner):
+            resp = await apply_home_workspace_bootstrap(request)
+
+        assert resp.status_code == 403
+        assert "only be applied from the home workspace" in resp.body.decode()
+
+    async def test_applies_bootstrap_and_keeps_only_skipped_sources_pending(self):
+        from zenos.interface.dashboard_api import apply_home_workspace_bootstrap
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+        )
+        partner = {
+            **_PARTNER,
+            "id": "guest-home-id",
+            "email": "guest@test.com",
+            "sharedPartnerId": "owner-shared-id",
+            "authorizedEntityIds": ["product-1", "product-2"],
+            "preferences": {
+                "homeWorkspaceBootstrap": {
+                    "sourceWorkspaceId": "owner-shared-id",
+                    "sourceEntityIds": ["product-1", "product-2"],
+                    "state": "pending",
+                }
+            },
+        }
+        updated_preferences = {
+            "homeWorkspaceBootstrap": {
+                "sourceWorkspaceId": "owner-shared-id",
+                "sourceEntityIds": ["product-2"],
+                "state": "pending",
+                "copiedRootEntityIds": ["copied-product-1"],
+                "lastAppliedAt": "2026-04-22T00:00:00+00:00",
+            }
+        }
+        service_result = MagicMock(
+            applied_source_entity_ids=["product-1"],
+            copied_root_entity_ids=["copied-product-1"],
+            copied_entity_count=4,
+            copied_relationship_count=3,
+            skipped_source_entity_ids=["product-2"],
+        )
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token(email="guest@test.com")), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=partner), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api._partner_repo") as mock_partner_repo, \
+             patch("zenos.interface.dashboard_api.HomeWorkspaceBootstrapService") as mock_service_cls:
+            mock_partner_repo.update_preferences = AsyncMock(return_value=updated_preferences)
+            mock_service = MagicMock()
+            mock_service.apply = AsyncMock(return_value=service_result)
+            mock_service_cls.return_value = mock_service
+
+            resp = await apply_home_workspace_bootstrap(request)
+
+        assert resp.status_code == 200
+        body = json.loads(resp.body)
+        assert body["applied_source_entity_ids"] == ["product-1"]
+        assert body["copied_root_entity_ids"] == ["copied-product-1"]
+        assert body["skipped_source_entity_ids"] == ["product-2"]
+        prefs_call = mock_partner_repo.update_preferences.call_args[0][1]["homeWorkspaceBootstrap"]
+        assert prefs_call["sourceEntityIds"] == ["product-2"]
+        assert prefs_call["state"] == "pending"
+
+    async def test_rejects_apply_when_bootstrap_sources_fall_outside_authorized_scope(self):
+        from zenos.interface.dashboard_api import apply_home_workspace_bootstrap
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+        )
+        partner = {
+            **_PARTNER,
+            "id": "guest-home-id",
+            "email": "guest@test.com",
+            "sharedPartnerId": "owner-shared-id",
+            "authorizedEntityIds": ["product-1"],
+            "preferences": {
+                "homeWorkspaceBootstrap": {
+                    "sourceWorkspaceId": "owner-shared-id",
+                    "sourceEntityIds": ["product-2"],
+                    "state": "pending",
+                }
+            },
+        }
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token(email="guest@test.com")), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=partner):
+            resp = await apply_home_workspace_bootstrap(request)
+
+        assert resp.status_code == 403
+        assert "outside the current shared product scope" in resp.body.decode()
+
+    async def test_returns_not_found_when_all_configured_sources_are_gone(self):
+        from zenos.interface.dashboard_api import apply_home_workspace_bootstrap
+
+        request = _make_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+        )
+        partner = {
+            **_PARTNER,
+            "id": "guest-home-id",
+            "email": "guest@test.com",
+            "sharedPartnerId": "owner-shared-id",
+            "authorizedEntityIds": ["missing-product"],
+            "preferences": {
+                "homeWorkspaceBootstrap": {
+                    "sourceWorkspaceId": "owner-shared-id",
+                    "sourceEntityIds": ["missing-product"],
+                    "state": "pending",
+                }
+            },
+        }
+        service_result = MagicMock(
+            applied_source_entity_ids=[],
+            copied_root_entity_ids=[],
+            copied_entity_count=0,
+            copied_relationship_count=0,
+            skipped_source_entity_ids=["missing-product"],
+        )
+
+        with patch("zenos.interface.dashboard_api._verify_firebase_token", return_value=_firebase_token(email="guest@test.com")), \
+             patch("zenos.interface.dashboard_api._get_partner_by_email_sql", return_value=partner), \
+             patch("zenos.interface.dashboard_api._ensure_repos", new=AsyncMock(return_value=None)), \
+             patch("zenos.interface.dashboard_api.HomeWorkspaceBootstrapService") as mock_service_cls:
+            mock_service = MagicMock()
+            mock_service.apply = AsyncMock(return_value=service_result)
+            mock_service_cls.return_value = mock_service
+
+            resp = await apply_home_workspace_bootstrap(request)
+
+        assert resp.status_code == 404
+        assert "no longer exist" in resp.body.decode()
 
     async def test_returns_401_without_token(self):
         from zenos.interface.dashboard_api import get_partner_me

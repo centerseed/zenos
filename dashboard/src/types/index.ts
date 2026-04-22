@@ -39,6 +39,14 @@ export interface OnboardingPreferences {
   platform_id?: string;
 }
 
+export interface HomeWorkspaceBootstrapPreferences {
+  sourceWorkspaceId?: string;
+  sourceEntityIds?: string[];
+  state?: "pending" | "applied" | "disabled";
+  copiedRootEntityIds?: string[];
+  lastAppliedAt?: Date | null;
+}
+
 export interface ConnectorScopeSettings {
   containers?: string[];
 }
@@ -51,6 +59,7 @@ export interface GoogleWorkspacePreferences {
 
 export interface PartnerPreferences {
   onboarding?: OnboardingPreferences;
+  homeWorkspaceBootstrap?: HomeWorkspaceBootstrapPreferences;
   connectorScopes?: {
     gdrive?: ConnectorScopeSettings;
     notion?: ConnectorScopeSettings;

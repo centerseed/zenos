@@ -16,6 +16,7 @@ export { API_BASE, setActiveWorkspaceId };
 const DATE_FIELDS = new Set([
   "createdAt", "updatedAt", "completedAt", "dueDate", "lastReviewedAt", "generatedAt",
   "summaryUpdatedAt", "highlightsUpdatedAt",
+  "lastAppliedAt",
   "summary_updated_at", "highlights_updated_at", "last_published_at", "due_date",
   "updated_at", "cached_at",
 ]);
@@ -105,6 +106,15 @@ function unwrapTaskPayload(payload: { task?: Task } | Task): Task {
 export async function getProjectEntities(token: string): Promise<Entity[]> {
   const res = await apiFetch<{ entities: Entity[] }>("/api/data/entities?type=product", token);
   return res.entities;
+}
+
+export async function getProjectEntitiesInWorkspace(token: string, workspaceId: string): Promise<Entity[]> {
+  const res = await apiRequest<{ entities: Entity[] }>("/api/data/entities?type=product", {
+    headers: { "X-Active-Workspace-Id": workspaceId },
+    token,
+    useWorkspace: false,
+  });
+  return hydrateDates(res.entities ?? []) as Entity[];
 }
 
 /** Fetch a single entity by ID */
@@ -734,6 +744,7 @@ export async function invitePartner(
     accessMode?: Partner["accessMode"];
     access_mode?: Partner["accessMode"];
     authorized_entity_ids?: string[];
+    home_workspace_bootstrap_entity_ids?: string[];
   }
 ): Promise<void> {
   await apiRequest("/api/partners/invite", {
@@ -774,6 +785,7 @@ export async function updatePartnerScope(
     workspaceRole?: "member" | "guest";
     accessMode?: Partner["accessMode"];
     authorizedEntityIds?: string[];
+    homeWorkspaceBootstrapEntityIds?: string[];
   }
 ): Promise<Partner> {
   const result = await apiRequest<Record<string, unknown>>(`/api/partners/${partnerId}/scope`, {
@@ -782,11 +794,25 @@ export async function updatePartnerScope(
       workspace_role: data.workspaceRole,
       access_mode: data.accessMode,
       authorized_entity_ids: data.authorizedEntityIds,
+      home_workspace_bootstrap_entity_ids: data.homeWorkspaceBootstrapEntityIds,
     },
     method: "PUT",
     token,
   });
   return normalizePartner(result);
+}
+
+export async function applyHomeWorkspaceBootstrap(token: string): Promise<{
+  applied_source_entity_ids: string[];
+  copied_root_entity_ids: string[];
+  copied_entity_count: number;
+  copied_relationship_count: number;
+  skipped_source_entity_ids: string[];
+}> {
+  return apiRequest("/api/partner/home-bootstrap/apply", {
+    method: "POST",
+    token,
+  });
 }
 
 export async function getDepartments(token: string): Promise<string[]> {

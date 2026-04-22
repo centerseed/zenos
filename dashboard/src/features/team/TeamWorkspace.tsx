@@ -167,6 +167,10 @@ function ScopeDialog({
                   scopeEditor.workspaceRole === "guest"
                     ? scopeEditor.authorizedEntityIds
                     : [],
+                homeWorkspaceBootstrapEntityIds:
+                  scopeEditor.workspaceRole === "guest"
+                    ? scopeEditor.homeWorkspaceBootstrapEntityIds
+                    : [],
               });
             },
             variant: "ink",
@@ -287,6 +291,8 @@ function ScopeDialog({
                       workspaceRole: (v ?? "member") as WorkspaceAssignment,
                       authorizedEntityIds:
                         v === "guest" ? prev.authorizedEntityIds : [],
+                      homeWorkspaceBootstrapEntityIds:
+                        v === "guest" ? prev.homeWorkspaceBootstrapEntityIds : [],
                     }
                   : prev
               )
@@ -326,7 +332,13 @@ function ScopeDialog({
                             const next = e.target.checked
                               ? [...prev.authorizedEntityIds, entity.id]
                               : prev.authorizedEntityIds.filter((id) => id !== entity.id);
-                            return { ...prev, authorizedEntityIds: next };
+                            return {
+                              ...prev,
+                              authorizedEntityIds: next,
+                              homeWorkspaceBootstrapEntityIds: prev.homeWorkspaceBootstrapEntityIds.filter((id) =>
+                                next.includes(id)
+                              ),
+                            };
                           })
                         }
                       />
@@ -335,6 +347,47 @@ function ScopeDialog({
                   ))}
                 </div>
               )}
+            </div>
+          )}
+          {scopeEditor.workspaceRole === "guest" && scopeEditor.authorizedEntityIds.length > 0 && (
+            <div
+              style={{
+                border: `1px solid ${c.inkHair}`,
+                borderRadius: radius,
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody }}>
+                選擇要在對方 home workspace 預設匯入的產品：
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                {projectEntities
+                  .filter((entity) => scopeEditor.authorizedEntityIds.includes(entity.id))
+                  .map((entity) => (
+                    <label
+                      key={`bootstrap-${entity.id}`}
+                      style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: fontBody, color: c.ink, cursor: "pointer" }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={scopeEditor.homeWorkspaceBootstrapEntityIds.includes(entity.id)}
+                        onChange={(e) =>
+                          setScopeEditor((prev) => {
+                            if (!prev) return prev;
+                            const next = e.target.checked
+                              ? [...prev.homeWorkspaceBootstrapEntityIds, entity.id]
+                              : prev.homeWorkspaceBootstrapEntityIds.filter((id) => id !== entity.id);
+                            return { ...prev, homeWorkspaceBootstrapEntityIds: next };
+                          })
+                        }
+                      />
+                      {entity.name}
+                    </label>
+                  ))}
+              </div>
             </div>
           )}
         </div>
@@ -374,12 +427,14 @@ function TeamPage() {
     projectEntities,
     scopeEditor,
     selectedL1Ids,
+    selectedBootstrapL1Ids,
     setInviteDepartment,
     setInviteEmail,
     setInviteWorkspaceRole,
     setNewDepartment,
     setScopeEditor,
     setSelectedL1Ids,
+    setSelectedBootstrapL1Ids,
   } = useTeamWorkspace();
 
   if (!canManageWorkspace) return null;
@@ -471,7 +526,10 @@ function TeamPage() {
                     onChange={(v) => {
                       const next = (v ?? "member") as WorkspaceAssignment;
                       setInviteWorkspaceRole(next);
-                      if (next !== "guest") setSelectedL1Ids([]);
+                      if (next !== "guest") {
+                        setSelectedL1Ids([]);
+                        setSelectedBootstrapL1Ids([]);
+                      }
                     }}
                     options={WORKSPACE_ROLE_OPTIONS.map((o) => ({ value: o.value, label: o.label }))}
                     aria-label="邀請工作區角色"
@@ -507,11 +565,15 @@ function TeamPage() {
                           type="checkbox"
                           checked={selectedL1Ids.includes(entity.id)}
                           onChange={(e) => {
-                            setSelectedL1Ids((prev) =>
-                              e.target.checked
+                            setSelectedL1Ids((prev) => {
+                              const next = e.target.checked
                                 ? [...prev, entity.id]
-                                : prev.filter((id) => id !== entity.id)
-                            );
+                                : prev.filter((id) => id !== entity.id);
+                              setSelectedBootstrapL1Ids((bootstrapPrev) =>
+                                bootstrapPrev.filter((id) => next.includes(id))
+                              );
+                              return next;
+                            });
                           }}
                         />
                         {entity.name}
@@ -519,6 +581,45 @@ function TeamPage() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+            {inviteWorkspaceRole === "guest" && selectedL1Ids.length > 0 && (
+              <div
+                style={{
+                  border: `1px solid ${c.inkHair}`,
+                  borderRadius: radius,
+                  padding: 12,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <p style={{ fontSize: 12, color: c.inkMuted, fontFamily: fontBody, margin: 0 }}>
+                  選擇要預設匯入到對方 home workspace 的產品：
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {projectEntities
+                    .filter((entity) => selectedL1Ids.includes(entity.id))
+                    .map((entity) => (
+                      <label
+                        key={`invite-bootstrap-${entity.id}`}
+                        style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: fontBody, color: c.ink, cursor: "pointer" }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedBootstrapL1Ids.includes(entity.id)}
+                          onChange={(e) =>
+                            setSelectedBootstrapL1Ids((prev) =>
+                              e.target.checked
+                                ? [...prev, entity.id]
+                                : prev.filter((id) => id !== entity.id)
+                            )
+                          }
+                        />
+                        {entity.name}
+                      </label>
+                    ))}
+                </div>
               </div>
             )}
           </form>

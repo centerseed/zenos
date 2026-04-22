@@ -48,6 +48,7 @@ export interface ScopeEditorState {
   customDepartment: string;
   workspaceRole: WorkspaceAssignment;
   authorizedEntityIds: string[];
+  homeWorkspaceBootstrapEntityIds: string[];
 }
 
 function deriveScopePayload(
@@ -97,6 +98,7 @@ export function useTeamWorkspace() {
   const [scopeEditor, setScopeEditor] = useState<ScopeEditorState | null>(null);
   const [newDepartment, setNewDepartment] = useState("");
   const [selectedL1Ids, setSelectedL1Ids] = useState<string[]>([]);
+  const [selectedBootstrapL1Ids, setSelectedBootstrapL1Ids] = useState<string[]>([]);
   const [projectEntities, setProjectEntities] = useState<Entity[]>([]);
   const { workspaceRole, isHomeWorkspace } = resolveActiveWorkspace(partner);
   const canManageWorkspace = isHomeWorkspace && workspaceRole === "owner";
@@ -164,6 +166,8 @@ export function useTeamWorkspace() {
           accessMode: scopePayload.accessMode,
           access_mode: scopePayload.accessMode,
           authorized_entity_ids: scopePayload.authorizedEntityIds,
+          home_workspace_bootstrap_entity_ids:
+            scopePayload.accessMode === "scoped" ? selectedBootstrapL1Ids : [],
         });
         await sendSignInLinkToEmail(getAuthInstance(), inviteEmail.trim(), {
           url: `${window.location.origin}/login`,
@@ -179,6 +183,7 @@ export function useTeamWorkspace() {
         setInviteDepartment("all");
         setInviteWorkspaceRole("unassigned");
         setSelectedL1Ids([]);
+        setSelectedBootstrapL1Ids([]);
         await fetchPartners();
         await fetchDepartments();
       } catch (err) {
@@ -197,6 +202,7 @@ export function useTeamWorkspace() {
       inviteEmail,
       inviteWorkspaceRole,
       pushToast,
+      selectedBootstrapL1Ids,
       selectedL1Ids,
       user,
     ]
@@ -281,6 +287,7 @@ export function useTeamWorkspace() {
         department: string;
         workspaceRole: WorkspaceAssignment;
         authorizedEntityIds?: string[];
+        homeWorkspaceBootstrapEntityIds?: string[];
       }
     ) => {
       if (!user) return;
@@ -294,6 +301,12 @@ export function useTeamWorkspace() {
           workspaceRole: scopePayload.workspaceRole,
           accessMode: scopePayload.accessMode,
           authorizedEntityIds: scopePayload.authorizedEntityIds,
+          homeWorkspaceBootstrapEntityIds:
+            scopePayload.accessMode === "scoped"
+              ? (data.authorizedEntityIds ?? []).filter((entityId) =>
+                  (data.homeWorkspaceBootstrapEntityIds ?? []).includes(entityId)
+                )
+              : [],
         });
         await fetchPartners();
         await fetchDepartments();
@@ -389,6 +402,13 @@ export function useTeamWorkspace() {
       customDepartment: "",
       workspaceRole,
       authorizedEntityIds: [...entityIds],
+      homeWorkspaceBootstrapEntityIds: [
+        ...(
+          targetPartner.preferences?.homeWorkspaceBootstrap?.sourceEntityIds?.filter((entityId) =>
+            entityIds.includes(entityId)
+          ) ?? []
+        ),
+      ],
     });
   }, []);
 
@@ -417,11 +437,13 @@ export function useTeamWorkspace() {
     projectEntities,
     scopeEditor,
     selectedL1Ids,
+    selectedBootstrapL1Ids,
     setInviteDepartment,
     setInviteEmail,
     setInviteWorkspaceRole,
     setNewDepartment,
     setScopeEditor,
     setSelectedL1Ids,
+    setSelectedBootstrapL1Ids,
   };
 }

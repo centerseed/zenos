@@ -181,6 +181,7 @@ def _same_tenant_id(partner_id: str | None, partner: dict | None) -> str:
 def _sanitize_partner_for_admin_view(partner_id: str, data: dict) -> dict:
     """Remove sensitive fields before returning partner data to admin UI."""
     access = describe_partner_access(data)
+    preferences = data.get("preferences") if isinstance(data.get("preferences"), dict) else {}
     sanitized = {
         "id": partner_id,
         "email": data.get("email", ""),
@@ -196,6 +197,9 @@ def _sanitize_partner_for_admin_view(partner_id: str, data: dict) -> dict:
         "createdAt": data.get("createdAt"),
         "updatedAt": data.get("updatedAt"),
         "sharedPartnerId": data.get("sharedPartnerId"),
+        "preferences": {
+            "homeWorkspaceBootstrap": preferences.get("homeWorkspaceBootstrap", {}),
+        },
     }
     return sanitized
 
@@ -207,6 +211,61 @@ def _workspace_role_to_access_mode(workspace_role: str) -> str:
         "guest": "scoped",
     }
     return mapping[workspace_role]
+
+
+def _normalize_entity_id_list(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        value = item.strip()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _build_home_workspace_bootstrap_pref(
+    *,
+    source_workspace_id: str,
+    access_mode: str,
+    authorized_entity_ids: list[str],
+    bootstrap_entity_ids: list[str],
+) -> dict:
+    if access_mode != "scoped":
+        return {
+            "homeWorkspaceBootstrap": {
+                "sourceWorkspaceId": source_workspace_id,
+                "sourceEntityIds": [],
+                "state": "disabled",
+                "copiedRootEntityIds": [],
+                "lastAppliedAt": None,
+            }
+        }
+
+    authorized_set = set(authorized_entity_ids)
+    filtered = [entity_id for entity_id in bootstrap_entity_ids if entity_id in authorized_set]
+    return {
+        "homeWorkspaceBootstrap": {
+            "sourceWorkspaceId": source_workspace_id,
+            "sourceEntityIds": filtered,
+            "state": "pending" if filtered else "disabled",
+            "copiedRootEntityIds": [],
+            "lastAppliedAt": None,
+        }
+    }
+
+
+def _has_out_of_scope_bootstrap_sources(
+    authorized_entity_ids: list[str],
+    bootstrap_entity_ids: list[str],
+) -> bool:
+    authorized_set = set(authorized_entity_ids)
+    return any(entity_id not in authorized_set for entity_id in bootstrap_entity_ids)
 
 
 # ──────────────────────────────────────────────
@@ -311,6 +370,9 @@ async def invite_partner(request: Request) -> Response:
     authorized_entity_ids = body.get("authorized_entity_ids", [])
     if not isinstance(authorized_entity_ids, list):
         authorized_entity_ids = []
+    home_workspace_bootstrap_entity_ids = _normalize_entity_id_list(
+        body.get("home_workspace_bootstrap_entity_ids", body.get("homeWorkspaceBootstrapEntityIds", []))
+    )
     workspace_role_raw = body.get("workspace_role", None)
     access_mode_raw = body.get("access_mode", None)
     workspace_role_raw = body.get("workspace_role", None)
@@ -335,6 +397,14 @@ async def invite_partner(request: Request) -> Response:
             )
     if access_mode != "scoped":
         authorized_entity_ids = []
+        home_workspace_bootstrap_entity_ids = []
+    elif _has_out_of_scope_bootstrap_sources(authorized_entity_ids, home_workspace_bootstrap_entity_ids):
+        return _error_response(
+            "INVALID_INPUT",
+            "home_workspace_bootstrap_entity_ids must be a subset of authorized_entity_ids",
+            400,
+            request=request,
+        )
 
     roles_raw = body.get("roles", [])
     department_raw = str(body.get("department", "all") or "all").strip() or "all"
@@ -361,6 +431,15 @@ async def invite_partner(request: Request) -> Response:
             reinvite_fields["accessMode"] = access_mode
             repo = await _ensure_partner_repo()
             await repo.update_fields(existing_id, reinvite_fields)
+            await repo.update_preferences(
+                existing_id,
+                _build_home_workspace_bootstrap_pref(
+                    source_workspace_id=shared_partner_id,
+                    access_mode=access_mode,
+                    authorized_entity_ids=authorized_entity_ids,
+                    bootstrap_entity_ids=home_workspace_bootstrap_entity_ids,
+                ),
+            )
             logger.info(
                 "audit",
                 extra={
@@ -377,6 +456,12 @@ async def invite_partner(request: Request) -> Response:
             existing["authorizedEntityIds"] = authorized_entity_ids
             existing["accessMode"] = access_mode
             existing["workspaceRole"] = "guest" if access_mode == "scoped" else "member"
+            existing["preferences"] = _build_home_workspace_bootstrap_pref(
+                source_workspace_id=shared_partner_id,
+                access_mode=access_mode,
+                authorized_entity_ids=authorized_entity_ids,
+                bootstrap_entity_ids=home_workspace_bootstrap_entity_ids,
+            )
             existing["id"] = existing_id
             sign_in_link = _generate_sign_in_link(email)
             email_sent = await _send_invite_email(
@@ -407,6 +492,15 @@ async def invite_partner(request: Request) -> Response:
         "updatedAt": now,
         "inviteExpiresAt": invite_expires_at,
     })
+    await repo.update_preferences(
+        new_id,
+        _build_home_workspace_bootstrap_pref(
+            source_workspace_id=shared_partner_id,
+            access_mode=access_mode,
+            authorized_entity_ids=authorized_entity_ids,
+            bootstrap_entity_ids=home_workspace_bootstrap_entity_ids,
+        ),
+    )
 
     logger.info(
         "audit",
@@ -444,6 +538,12 @@ async def invite_partner(request: Request) -> Response:
         "createdAt": now,
         "updatedAt": now,
         "inviteExpiresAt": invite_expires_at,
+        "preferences": _build_home_workspace_bootstrap_pref(
+            source_workspace_id=shared_partner_id,
+            access_mode=access_mode,
+            authorized_entity_ids=authorized_entity_ids,
+            bootstrap_entity_ids=home_workspace_bootstrap_entity_ids,
+        ),
         "emailSent": email_sent,
     }
     return _json_response(partner_data, status_code=201, request=request)
@@ -790,6 +890,9 @@ async def update_partner_scope(request: Request) -> Response:
     authorized_entity_ids_raw = body.get("authorized_entity_ids", None)
     if authorized_entity_ids_raw is None:
         authorized_entity_ids_raw = body.get("authorizedEntityIds", None)
+    home_workspace_bootstrap_entity_ids = _normalize_entity_id_list(
+        body.get("home_workspace_bootstrap_entity_ids", body.get("homeWorkspaceBootstrapEntityIds", []))
+    )
     workspace_role_raw = body.get("workspace_role", None)
     access_mode_raw = body.get("access_mode", None)
 
@@ -845,6 +948,17 @@ async def update_partner_scope(request: Request) -> Response:
         access_mode = describe_partner_access(target)["access_mode"]
     if access_mode != "scoped":
         authorized_entity_ids_raw = []
+        home_workspace_bootstrap_entity_ids = []
+    elif _has_out_of_scope_bootstrap_sources(
+        list(authorized_entity_ids_raw or []),
+        home_workspace_bootstrap_entity_ids,
+    ):
+        return _error_response(
+            "INVALID_INPUT",
+            "home_workspace_bootstrap_entity_ids must be a subset of authorized_entity_ids",
+            400,
+            request=request,
+        )
 
     now = datetime.now(timezone.utc)
     await repo.create_department(caller_tenant, department)
@@ -857,6 +971,15 @@ async def update_partner_scope(request: Request) -> Response:
     if authorized_entity_ids_raw is not None:
         update_data["authorizedEntityIds"] = authorized_entity_ids_raw
     await repo.update_fields(partner_id, update_data)
+    await repo.update_preferences(
+        partner_id,
+        _build_home_workspace_bootstrap_pref(
+            source_workspace_id=caller_tenant,
+            access_mode=access_mode,
+            authorized_entity_ids=list(authorized_entity_ids_raw or []),
+            bootstrap_entity_ids=home_workspace_bootstrap_entity_ids,
+        ),
+    )
 
     authorized_entity_ids = (
         authorized_entity_ids_raw
@@ -878,6 +1001,12 @@ async def update_partner_scope(request: Request) -> Response:
         "createdAt": target.get("createdAt"),
         "updatedAt": now,
         "sharedPartnerId": target.get("sharedPartnerId"),
+        "preferences": _build_home_workspace_bootstrap_pref(
+            source_workspace_id=caller_tenant,
+            access_mode=access_mode,
+            authorized_entity_ids=list(authorized_entity_ids or []),
+            bootstrap_entity_ids=home_workspace_bootstrap_entity_ids,
+        ),
     }, request=request)
 
 

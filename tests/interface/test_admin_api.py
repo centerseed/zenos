@@ -286,6 +286,27 @@ class TestInvitePartner:
         assert body["workspaceRole"] == "member"
         assert body["authorizedEntityIds"] == []
 
+    async def test_invite_rejects_bootstrap_sources_outside_authorized_scope(self):
+        from zenos.interface.admin_api import invite_partner
+
+        request = _mock_request(
+            method="POST",
+            headers={"authorization": "Bearer fake-token"},
+            body={
+                "email": "new4@test.com",
+                "access_mode": "scoped",
+                "authorized_entity_ids": ["product-1"],
+                "home_workspace_bootstrap_entity_ids": ["product-2"],
+            },
+        )
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True})):
+            resp = await invite_partner(request)
+
+        assert resp.status_code == 400
+        assert "subset of authorized_entity_ids" in resp.body.decode()
+
     async def test_invite_sets_expires_at_7_days(self):
         """New invite must have inviteExpiresAt set to approximately now + 7 days."""
         from zenos.interface.admin_api import invite_partner
@@ -804,6 +825,47 @@ class TestUpdatePartnerScope:
         fields = mock_repo.update_fields.call_args[0][1]
         assert fields["accessMode"] == "scoped"
         assert fields["authorizedEntityIds"] == ["product-1", "product-2"]
+
+    async def test_update_scope_rejects_bootstrap_sources_outside_authorized_scope(self):
+        from zenos.interface.admin_api import update_partner_scope
+
+        request = _mock_request(
+            method="PUT",
+            headers={"authorization": "Bearer fake-token"},
+            body={
+                "roles": [],
+                "department": "all",
+                "access_mode": "scoped",
+                "authorized_entity_ids": ["product-1"],
+                "home_workspace_bootstrap_entity_ids": ["product-2"],
+            },
+            path_params={"id": "partner-2"},
+        )
+
+        mock_repo = AsyncMock()
+        mock_repo.get_by_id = AsyncMock(return_value={
+            "id": "partner-2",
+            "email": "user@test.com",
+            "displayName": "User",
+            "isAdmin": False,
+            "status": "active",
+            "accessMode": "internal",
+            "sharedPartnerId": "p1",
+            "authorizedEntityIds": [],
+            "roles": [],
+            "department": "all",
+            "invitedBy": None,
+            "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "updatedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+        })
+
+        with patch("zenos.interface.admin_api._verify_firebase_token", return_value=_firebase_token()), \
+             patch("zenos.interface.admin_api._get_caller_partner", return_value=("p1", {"email": "admin@test.com", "isAdmin": True, "sharedPartnerId": "p1"})), \
+             patch("zenos.interface.admin_api._ensure_partner_repo", new_callable=AsyncMock, return_value=mock_repo):
+            resp = await update_partner_scope(request)
+
+        assert resp.status_code == 400
+        assert "subset of authorized_entity_ids" in resp.body.decode()
 
 
 class TestActivatePartner:

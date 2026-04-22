@@ -60,12 +60,14 @@ vi.mock("@/features/team/useTeamWorkspace", () => ({
     projectEntities: [],
     scopeEditor: null,
     selectedL1Ids: [],
+    selectedBootstrapL1Ids: [],
     setInviteDepartment: vi.fn(),
     setInviteEmail: vi.fn(),
     setInviteWorkspaceRole: vi.fn(),
     setNewDepartment: vi.fn(),
     setScopeEditor: vi.fn(),
     setSelectedL1Ids: vi.fn(),
+    setSelectedBootstrapL1Ids: vi.fn(),
   })),
 }));
 
@@ -166,12 +168,14 @@ describe("TeamWorkspace", () => {
       projectEntities: [],
       scopeEditor: null,
       selectedL1Ids: [],
+      selectedBootstrapL1Ids: [],
       setInviteDepartment: vi.fn(),
       setInviteEmail: vi.fn(),
       setInviteWorkspaceRole: vi.fn(),
       setNewDepartment: vi.fn(),
       setScopeEditor: vi.fn(),
       setSelectedL1Ids: vi.fn(),
+      setSelectedBootstrapL1Ids: vi.fn(),
     } as unknown as ReturnType<typeof teamHookModule.useTeamWorkspace>);
     render(<TeamWorkspace />);
     expect(screen.getByText("正在載入成員...")).toBeDefined();

@@ -58,6 +58,9 @@ from zenos.application.identity.workspace_context import (
     build_available_workspaces,
     resolve_active_workspace_id,
 )
+from zenos.application.identity.home_workspace_bootstrap_service import (
+    HomeWorkspaceBootstrapService,
+)
 from zenos.application.identity.source_access_policy import (
     filter_sources_for_partner,
 )
@@ -1198,10 +1201,133 @@ async def update_partner_preferences(request: Request) -> Response:
 
     if not isinstance(patch, dict):
         return _error_response("INVALID_INPUT", "Body must be a JSON object", 400, request=request)
+    if "homeWorkspaceBootstrap" in patch or "home_workspace_bootstrap" in patch:
+        return _error_response(
+            "FORBIDDEN",
+            "homeWorkspaceBootstrap is owner-managed and cannot be updated from self-service preferences",
+            403,
+            request=request,
+        )
 
     await _ensure_repos()
     updated = await _partner_repo.update_preferences(str(raw_partner["id"]), patch)
     return _json_response({"preferences": updated}, request=request)
+
+
+def _validate_home_workspace_bootstrap_scope(
+    raw_partner: dict,
+    *,
+    source_workspace_id: str,
+    source_entity_ids: list[str],
+) -> str | None:
+    shared_workspace_id = str(raw_partner.get("sharedPartnerId") or "").strip()
+    if not shared_workspace_id or source_workspace_id != shared_workspace_id:
+        return "Configured bootstrap source workspace is no longer authorized"
+
+    authorized_entity_ids = {
+        str(entity_id).strip()
+        for entity_id in (raw_partner.get("authorizedEntityIds") or [])
+        if isinstance(entity_id, str) and str(entity_id).strip()
+    }
+    unauthorized_sources = [entity_id for entity_id in source_entity_ids if entity_id not in authorized_entity_ids]
+    if unauthorized_sources:
+        return "Configured bootstrap sources are outside the current shared product scope"
+    return None
+
+
+async def apply_home_workspace_bootstrap(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    decoded = await _verify_firebase_token(request)
+    if not decoded:
+        return _error_response("UNAUTHORIZED", "Invalid or missing Firebase ID token", 401, request=request)
+
+    email = decoded.get("email")
+    if not email:
+        return _error_response("INVALID_INPUT", "Email not found in token", 400, request=request)
+
+    raw_partner = await _get_partner_by_email_sql(email)
+    if not raw_partner:
+        return _error_response("NOT_FOUND", f"No partner found for email {email}", 404, request=request)
+
+    active_workspace_id = resolve_active_workspace_id(
+        raw_partner,
+        _requested_active_workspace_id(request),
+    )
+    home_workspace_id = str(raw_partner["id"])
+    if active_workspace_id != home_workspace_id:
+        return _error_response(
+            "FORBIDDEN",
+            "Home workspace bootstrap can only be applied from the home workspace",
+            403,
+            request=request,
+        )
+
+    preferences = raw_partner.get("preferences") if isinstance(raw_partner.get("preferences"), dict) else {}
+    bootstrap = preferences.get("homeWorkspaceBootstrap") if isinstance(preferences, dict) else {}
+    if not isinstance(bootstrap, dict):
+        bootstrap = {}
+    source_workspace_id = str(bootstrap.get("sourceWorkspaceId") or "").strip()
+    source_entity_ids = [
+        str(entity_id).strip()
+        for entity_id in (bootstrap.get("sourceEntityIds") or [])
+        if isinstance(entity_id, str) and str(entity_id).strip()
+    ]
+    if not source_workspace_id or not source_entity_ids:
+        return _error_response(
+            "INVALID_INPUT",
+            "No pending home workspace bootstrap sources configured",
+            400,
+            request=request,
+        )
+    scope_error = _validate_home_workspace_bootstrap_scope(
+        raw_partner,
+        source_workspace_id=source_workspace_id,
+        source_entity_ids=source_entity_ids,
+    )
+    if scope_error:
+        return _error_response("FORBIDDEN", scope_error, 403, request=request)
+
+    await _ensure_repos()
+    service = HomeWorkspaceBootstrapService(_entity_repo, _relationship_repo)
+    result = await service.apply(
+        source_workspace_id=source_workspace_id,
+        target_workspace_id=home_workspace_id,
+        source_root_entity_ids=source_entity_ids,
+    )
+    if not result.applied_source_entity_ids and set(result.skipped_source_entity_ids) == set(source_entity_ids):
+        return _error_response(
+            "NOT_FOUND",
+            "Configured bootstrap sources no longer exist or are no longer accessible",
+            404,
+            request=request,
+        )
+
+    updated_prefs = await _partner_repo.update_preferences(
+        home_workspace_id,
+        {
+            "homeWorkspaceBootstrap": {
+                "sourceWorkspaceId": source_workspace_id,
+                "sourceEntityIds": result.skipped_source_entity_ids,
+                "state": "applied" if not result.skipped_source_entity_ids else "pending",
+                "copiedRootEntityIds": result.copied_root_entity_ids,
+                "lastAppliedAt": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+
+    return _json_response(
+        {
+            "applied_source_entity_ids": result.applied_source_entity_ids,
+            "copied_root_entity_ids": result.copied_root_entity_ids,
+            "copied_entity_count": result.copied_entity_count,
+            "copied_relationship_count": result.copied_relationship_count,
+            "skipped_source_entity_ids": result.skipped_source_entity_ids,
+            "preferences": updated_prefs,
+        },
+        request=request,
+    )
 
 
 async def google_workspace_connector_health(request: Request) -> Response:
@@ -3411,6 +3537,7 @@ dashboard_routes = [
     Route("/api/partner/me", get_partner_me, methods=["GET", "OPTIONS"]),
     Route("/api/partner/preferences", get_partner_preferences, methods=["GET", "OPTIONS"]),
     Route("/api/partner/preferences", update_partner_preferences, methods=["PATCH", "OPTIONS"]),
+    Route("/api/partner/home-bootstrap/apply", apply_home_workspace_bootstrap, methods=["POST", "OPTIONS"]),
     Route("/api/connectors/google-workspace/health", google_workspace_connector_health, methods=["POST", "OPTIONS"]),
     Route("/api/cowork/graph-context", get_cowork_graph_context, methods=["GET", "OPTIONS"]),
     Route("/api/data/entities", list_entities, methods=["GET", "OPTIONS"]),
