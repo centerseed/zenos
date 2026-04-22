@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
+import { HelperSetupDialog } from "@/components/ai/HelperSetupDialog";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
 import { buildProjectRecapEntry } from "@/features/projects/projectCopilot";
@@ -28,17 +29,18 @@ export function ProjectRecapRail({
   onRecapChange: (recap: string | null) => void;
   onAssistantUpdate?: (recap: string) => void;
 }) {
-  const [showRawTranscript, setShowRawTranscript] = useState(false);
+  const [helperDialogOpen, setHelperDialogOpen] = useState(false);
   const { partner } = useAuth();
+  const workspaceId = resolveCopilotWorkspaceId(partner);
   const entry = useMemo(
     () =>
       buildProjectRecapEntry({
         progress,
         preset,
         nextStep,
-        workspaceId: resolveCopilotWorkspaceId(partner),
+        workspaceId,
       }),
-    [nextStep, partner, preset, progress]
+    [nextStep, preset, progress, workspaceId]
   );
   const {
     status,
@@ -64,22 +66,16 @@ export function ProjectRecapRail({
     () => messages.filter((message) => message.role !== "system"),
     [messages]
   );
-  const rawTranscript = useMemo(
-    () =>
-      messages
-        .map((message) => `[${message.role}] ${message.content}`.trim())
-        .filter((line) => line.length > 0)
-        .join("\n\n"),
-    [messages]
-  );
-  const diagnostics = useMemo(() => {
-    const issues: string[] = [];
-    if (connectorStatus === "checking") issues.push("Connector 檢查中");
-    if (connectorStatus === "disconnected") issues.push("Connector 未連線");
-    capability?.missingSkills?.forEach((skill) => issues.push(`缺 skill：${skill}`));
-    if (lastError) issues.push(lastError);
-    return issues;
+  const helperIssue = useMemo(() => {
+    if (connectorStatus === "checking") return "正在檢查 helper";
+    if (connectorStatus === "disconnected") return "helper 未連線";
+    if (capability?.missingSkills?.length) {
+      return `缺 skill：${capability.missingSkills.join("、")}`;
+    }
+    if (lastError) return lastError;
+    return null;
   }, [capability?.missingSkills, connectorStatus, lastError]);
+  const helperHealthy = connectorStatus === "connected" && !helperIssue;
 
   useEffect(() => {
     onRecapChange(latestAssistant);
@@ -99,13 +95,24 @@ export function ProjectRecapRail({
       connectorStatus={connectorStatus}
       inlineOnly
       diagnostics={
-        diagnostics.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 text-[11px]">
-            {diagnostics.map((issue) => (
-              <span key={issue}>{issue}</span>
-            ))}
-          </div>
-        ) : undefined
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span
+            style={{
+              color: helperHealthy ? "var(--zen-jade, #5f7a45)" : "var(--zen-vermillion, #b63a2c)",
+            }}
+          >
+            {helperHealthy ? "Helper 已連線" : helperIssue || "Helper 需要修復"}
+          </span>
+          {!helperHealthy ? (
+            <button
+              type="button"
+              onClick={() => setHelperDialogOpen(true)}
+              className="border bd-hair px-2 py-1 text-[11px] text-foreground"
+            >
+              設定 helper
+            </button>
+          ) : null}
+        </div>
       }
       footer={
         <CopilotInputBar
@@ -128,30 +135,12 @@ export function ProjectRecapRail({
           emptyStateTitle="Task Copilot"
           emptyStateDescription="直接開始問。"
         />
-        {rawTranscript ? (
-          <div className="mt-3 rounded-[2px] border bd-hair bg-panel">
-            <button
-              type="button"
-              data-testid="project-raw-transcript-toggle"
-              className="flex w-full items-center justify-between px-3 py-2 text-left text-xs text-dim"
-              onClick={() => setShowRawTranscript((value) => !value)}
-            >
-              <span>Claude Code 原文</span>
-              <span>{showRawTranscript ? "Hide" : "Show"}</span>
-            </button>
-            {showRawTranscript ? (
-              <pre
-                data-testid="project-raw-transcript"
-                className="overflow-x-auto border-t bd-hair px-3 py-3 text-xs text-foreground"
-                style={{ whiteSpace: "pre-wrap" }}
-              >
-                {rawTranscript}
-                {streamingText ? `\n\n[assistant/streaming] ${streamingText}` : ""}
-              </pre>
-            ) : null}
-          </div>
-        ) : null}
       </div>
+      <HelperSetupDialog
+        open={helperDialogOpen}
+        onOpenChange={setHelperDialogOpen}
+        workspaceId={workspaceId}
+      />
     </CopilotRailShell>
   );
 }

@@ -466,7 +466,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(prompt).toContain("Resolve API edge case");
   });
 
-  it("AC-PPC-10: Given 同一個產品頁面 When 使用者尚未進入 task 詳情 Then 仍可直接從產品頁生成並複製下一步 prompt，不需跳去 /tasks 手動整理", async function acPpc10CopyPromptAvailableFromProjectPage() {
+  it("AC-PPC-10: Given 同一個產品頁面 When 使用者進入產品頁 Then 右欄只保留 task copilot 與 helper 狀態，不再塞 prompt toolbar", async function acPpc10TaskCopilotRailOnly() {
     render(
       <ProjectProgressConsole
         progress={makeProgressFixture()}
@@ -474,20 +474,12 @@ describe("SPEC-project-progress-console acceptance tests", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "deliver-mock-recap" }));
-    fireEvent.click(screen.getByRole("button", { name: "複製 continuation prompt" }));
-
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
-    });
-
-    const copiedPrompt = vi.mocked(navigator.clipboard.writeText).mock.calls[0]?.[0];
-    expect(copiedPrompt).toContain("Project: ZenOS");
-    expect(copiedPrompt).toContain("[AI Recap]");
-    expect(copiedPrompt).toContain("AI recap for claude_code");
+    expect(screen.getByTestId("project-recap-panel")).toBeInTheDocument();
+    expect(screen.queryByTestId("project-recap-toolbar")).not.toBeInTheDocument();
+    expect(screen.queryByText("複製 continuation prompt")).not.toBeInTheDocument();
   });
 
-  it("AC-PPC-11: Given 使用者進入 /projects/[id] When 畫面載入完成 Then 第一層必須先看到 plan / open work / AI recap / copy prompt 等管理資訊，而不是完整 task board", async function acPpc11ProjectPageNotTaskBoardFirstView() {
+  it("AC-PPC-11: Given 使用者進入 /projects/[id] When 畫面載入完成 Then 第一層必須先看到 plan / open work / AI copilot，而不是完整 task board", async function acPpc11ProjectPageNotTaskBoardFirstView() {
     const progress = makeProgressFixture();
     getProjectEntitiesMock.mockResolvedValue([progress.project]);
     getProjectProgressMock.mockResolvedValue(progress);
@@ -509,7 +501,6 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(screen.getByTestId("project-milestone-strip")).toBeInTheDocument();
     expect(screen.getByTestId("project-plans-overview")).toBeInTheDocument();
     expect(screen.getByTestId("project-open-work-panel")).toBeInTheDocument();
-    expect(screen.getByTestId("project-recap-toolbar")).toBeInTheDocument();
     expect(screen.getByTestId("project-recap-panel")).toBeInTheDocument();
     expect(screen.queryByTestId("project-task-board")).not.toBeInTheDocument();
   });
@@ -565,7 +556,7 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     expect(screen.getByText("task · review")).toBeInTheDocument();
   });
 
-  it("AC-PPC-15: Given 系統已提供不同 agent preset When 使用者切換 prompt preset Then 複製內容可依目標 agent 調整，但核心 product context 不得遺失", async function acPpc15PromptPresetSwitching() {
+  it("AC-PPC-15: Given 近期推進摘要仍有價值 When 產品頁改成 copilot-first Then recent progress 應保留在主內容區，不佔右欄 AI 視窗", async function acPpc15RecentProgressStaysInMainColumn() {
     render(
       <ProjectProgressConsole
         progress={makeProgressFixture()}
@@ -573,16 +564,8 @@ describe("SPEC-project-progress-console acceptance tests", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Codex" }));
-    fireEvent.click(screen.getByRole("button", { name: "複製 continuation prompt" }));
-
-    await waitFor(() => {
-      expect(navigator.clipboard.writeText).toHaveBeenCalled();
-    });
-
-    const copiedPrompt = vi.mocked(navigator.clipboard.writeText).mock.calls[0]?.[0];
-    expect(copiedPrompt).toContain("Continue this product slice in Codex.");
-    expect(copiedPrompt).toContain("Project: ZenOS");
-    expect(copiedPrompt).toContain("[Active Plans]");
+    expect(screen.getAllByText("Launch project progress console").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Ship grouped open work").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("project-recap-panel")).toBeInTheDocument();
   });
 });
