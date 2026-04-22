@@ -139,6 +139,14 @@ function SetupPage() {
           <h1 className="mt-2 text-2xl font-semibold text-foreground">
             選擇你的 AI 工具
           </h1>
+          <div className="mt-4 rounded-zen border bd-hair bg-base p-4">
+            <p className="text-sm font-medium text-foreground">第一次使用照這個順序做</p>
+            <div className="mt-3 grid gap-2 text-sm text-dim">
+              <div>1. 在這頁完成外部 agent 的 MCP 設定。</div>
+              <div>2. 如果要用 Dashboard 內建 AI，再在這頁執行 helper 安裝 / 啟動指令。</div>
+              <div>3. helper 跑起來後，再去 <Link href="/settings" className="text-blue-400 hover:underline">Settings</Link> 檢查連線、調整參數、排錯。</div>
+            </div>
+          </div>
           <div className="mt-5 flex flex-wrap gap-2">
             {PLATFORMS.map((p) => {
               const active = p.id === selectedId;
@@ -238,6 +246,9 @@ function SetupPage() {
           <p className="mt-3 text-xs text-dim">
             這一段是給外部 agent 用的。複製後已自動帶入你的 API key，不需要再手填。
           </p>
+          <p className="mt-2 text-xs text-dim">
+            做完這一步後，外部 agent 就能開始接 ZenOS；不需要再回 Settings 補這段。
+          </p>
         </section>
 
         {/* Section — Dashboard AI Helper (optional) */}
@@ -275,14 +286,14 @@ function SetupPage() {
             這個指令會自動下載 helper、檢查 Node.js / Claude CLI，並直接啟動。
           </p>
           <p className="mt-2 text-xs text-dim">
-            這一段是給 Dashboard 內建 AI 用的，和上面的 MCP 設定不同。要改 helper 的 token、base URL、workspace path、model，請到 Settings。
+            這一段是給 Dashboard 內建 AI 用的，和上面的 MCP 設定不同。
           </p>
           <div className="mt-5 rounded-zen border bd-hair bg-base p-4 text-sm text-dim">
-            Setup 只負責把 helper 裝起來。安裝後請到{" "}
+            helper 成功跑起來後，請到{" "}
             <Link href="/settings" className="text-blue-400 hover:underline">
               Settings
             </Link>{" "}
-            管理 helper 參數、做 health check 與排錯。
+            做兩件事：先檢查 helper 是否已連線；如果有問題，再改 token、base URL、workspace path、model。
           </div>
         </section>
 

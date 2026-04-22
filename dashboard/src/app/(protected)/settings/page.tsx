@@ -617,6 +617,25 @@ export default function SettingsPage() {
 
       <div
         style={{
+          marginBottom: 28,
+          padding: "14px 16px",
+          border: `1px solid ${c.inkHair}`,
+          background: c.paperWarm,
+          fontFamily: fontBody,
+          fontSize: 13,
+          color: c.inkMuted,
+          lineHeight: 1.7,
+        }}
+      >
+        第一次使用請先去{" "}
+        <Link href="/setup" style={{ color: c.ink, textDecoration: "underline" }}>
+          Setup
+        </Link>{" "}
+        完成安裝。這一頁只負責安裝後的檢查、重拿設定、調整 helper 參數與排錯。
+      </div>
+
+      <div
+        style={{
           display: "grid",
           gridTemplateColumns: "minmax(0, 1.1fr) minmax(340px, 0.9fr)",
           gap: 22,

@@ -115,6 +115,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Local helper")).toBeInTheDocument();
     expect(screen.getByText("Per-user live retrieval")).toBeInTheDocument();
     expect(screen.getByText("這一頁管什麼")).toBeInTheDocument();
+    expect(screen.getByText(/第一次使用請先去/i)).toBeInTheDocument();
     expect(screen.getByText(/Marketing \/ Clients 裡的 AI rail 打不開/)).toBeInTheDocument();
   });
 
