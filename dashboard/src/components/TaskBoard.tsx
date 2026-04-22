@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Entity, Task, TaskStatus } from "@/types";
 import { useInk } from "@/lib/zen-ink/tokens";
 import { TaskCard } from "./TaskCard";
@@ -60,10 +60,12 @@ function DraggableTaskCard({
   task,
   onSelect,
   entityNames,
+  suppressSelection,
 }: {
   task: Task;
   onSelect: (t: Task) => void;
   entityNames: Record<string, string>;
+  suppressSelection: boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
@@ -75,6 +77,11 @@ function DraggableTaskCard({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      onClickCapture={(event) => {
+        if (!suppressSelection) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
       style={{
         cursor: "grab",
         opacity: isDragging ? 0.4 : 1,
@@ -177,9 +184,11 @@ export function TaskBoard({
 
   const [internalSelectedTask, setInternalSelectedTask] = useState<Task | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
+  const [suppressSelection, setSuppressSelection] = useState(false);
   // B3-02: warn dialog state for bad status jumps
   const [pendingDrag, setPendingDrag] = useState<{ taskId: string; newStatus: string } | null>(null);
   const [dragWarning, setDragWarning] = useState<string | null>(null);
+  const suppressTimeoutRef = useRef<number | null>(null);
 
   const selectedTask =
     controlledSelectedTask !== undefined ? controlledSelectedTask : internalSelectedTask;
@@ -280,12 +289,22 @@ export function TaskBoard({
   }, [tasks]);
 
   function handleDragStart(event: DragStartEvent) {
+    if (suppressTimeoutRef.current !== null) {
+      window.clearTimeout(suppressTimeoutRef.current);
+      suppressTimeoutRef.current = null;
+    }
+    setSuppressSelection(false);
     const task = event.active.data.current?.task as Task | undefined;
     if (task) setActiveTask(task);
   }
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveTask(null);
+    setSuppressSelection(true);
+    suppressTimeoutRef.current = window.setTimeout(() => {
+      setSuppressSelection(false);
+      suppressTimeoutRef.current = null;
+    }, 150);
     const { active, over } = event;
     if (!over || !onStatusChange) return;
 
@@ -320,6 +339,14 @@ export function TaskBoard({
     setPendingDrag(null);
     setDragWarning(null);
   }
+
+  useEffect(() => {
+    return () => {
+      if (suppressTimeoutRef.current !== null) {
+        window.clearTimeout(suppressTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const selectedTaskUpToDate = useMemo(() => {
     if (!selectedTask) return null;
@@ -476,6 +503,7 @@ export function TaskBoard({
                               task={task}
                               onSelect={setSelectedTask}
                               entityNames={entityNames}
+                              suppressSelection={suppressSelection}
                             />
                           ))}
                         </div>
