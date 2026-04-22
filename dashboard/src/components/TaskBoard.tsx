@@ -60,17 +60,25 @@ function DraggableTaskCard({
   task,
   onSelect,
   entityNames,
-  suppressSelection,
+  shouldSuppressSelection,
 }: {
   task: Task;
   onSelect: (t: Task) => void;
   entityNames: Record<string, string>;
-  suppressSelection: boolean;
+  shouldSuppressSelection: () => boolean;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: task.id,
     data: { task },
   });
+
+  const handleSelect = React.useCallback(
+    (nextTask: Task) => {
+      if (shouldSuppressSelection()) return;
+      onSelect(nextTask);
+    },
+    [onSelect, shouldSuppressSelection]
+  );
 
   return (
     <div
@@ -78,7 +86,17 @@ function DraggableTaskCard({
       {...listeners}
       {...attributes}
       onClickCapture={(event) => {
-        if (!suppressSelection) return;
+        if (!shouldSuppressSelection()) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerUpCapture={(event) => {
+        if (!shouldSuppressSelection()) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onMouseUpCapture={(event) => {
+        if (!shouldSuppressSelection()) return;
         event.preventDefault();
         event.stopPropagation();
       }}
@@ -88,7 +106,7 @@ function DraggableTaskCard({
         outline: "none",
       }}
     >
-      <TaskCard task={task} onSelect={onSelect} entityNames={entityNames} />
+      <TaskCard task={task} onSelect={handleSelect} entityNames={entityNames} />
     </div>
   );
 }
@@ -189,6 +207,7 @@ export function TaskBoard({
   const [pendingDrag, setPendingDrag] = useState<{ taskId: string; newStatus: string } | null>(null);
   const [dragWarning, setDragWarning] = useState<string | null>(null);
   const suppressTimeoutRef = useRef<number | null>(null);
+  const suppressSelectionUntilRef = useRef(0);
 
   const selectedTask =
     controlledSelectedTask !== undefined ? controlledSelectedTask : internalSelectedTask;
@@ -203,6 +222,25 @@ export function TaskBoard({
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   );
+
+  const armSelectionSuppression = React.useCallback((durationMs = 450) => {
+    const until = Date.now() + durationMs;
+    suppressSelectionUntilRef.current = until;
+    setSuppressSelection(true);
+    if (suppressTimeoutRef.current !== null) {
+      window.clearTimeout(suppressTimeoutRef.current);
+    }
+    suppressTimeoutRef.current = window.setTimeout(() => {
+      if (Date.now() >= suppressSelectionUntilRef.current) {
+        setSuppressSelection(false);
+      }
+      suppressTimeoutRef.current = null;
+    }, durationMs);
+  }, []);
+
+  const shouldSuppressSelection = React.useCallback(() => {
+    return suppressSelection || Date.now() < suppressSelectionUntilRef.current;
+  }, [suppressSelection]);
 
   const activeColumns = useMemo(() => {
     if (visibleStatuses.length > 0) {
@@ -300,11 +338,7 @@ export function TaskBoard({
 
   function handleDragEnd(event: DragEndEvent) {
     setActiveTask(null);
-    setSuppressSelection(true);
-    suppressTimeoutRef.current = window.setTimeout(() => {
-      setSuppressSelection(false);
-      suppressTimeoutRef.current = null;
-    }, 150);
+    armSelectionSuppression();
     const { active, over } = event;
     if (!over || !onStatusChange) return;
 
@@ -503,7 +537,7 @@ export function TaskBoard({
                               task={task}
                               onSelect={setSelectedTask}
                               entityNames={entityNames}
-                              suppressSelection={suppressSelection}
+                              shouldSuppressSelection={shouldSuppressSelection}
                             />
                           ))}
                         </div>
