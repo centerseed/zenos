@@ -167,6 +167,36 @@ describe("ProjectRecapRail", () => {
     expect(onAssistantUpdate).toHaveBeenCalledWith("這是整理後的 recap");
   });
 
+  it("does not re-emit the same assistant recap across identical rerenders", () => {
+    const onAssistantUpdate = vi.fn();
+
+    const { rerender } = render(
+      <ProjectRecapRail
+        open
+        onOpenChange={() => {}}
+        progress={makeProgress()}
+        preset="claude_code"
+        nextStep="Review current progress"
+        onRecapChange={() => {}}
+        onAssistantUpdate={onAssistantUpdate}
+      />
+    );
+
+    rerender(
+      <ProjectRecapRail
+        open
+        onOpenChange={() => {}}
+        progress={makeProgress()}
+        preset="claude_code"
+        nextStep="Review current progress"
+        onRecapChange={() => {}}
+        onAssistantUpdate={onAssistantUpdate}
+      />
+    );
+
+    expect(onAssistantUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it("opens helper setup dialog in-place when helper is unavailable", () => {
     chatState.connectorStatus = "disconnected";
 

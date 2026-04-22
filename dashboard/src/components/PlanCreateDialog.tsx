@@ -109,7 +109,7 @@ export function PlanCreateDialog({
             id="plan-goal"
             value={goal}
             onChange={setGoal}
-            placeholder="例如：完成 Product Progress Console"
+            placeholder="例如：完成工作台進度盤點"
             autoFocus
           />
         </FormField>

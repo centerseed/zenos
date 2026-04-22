@@ -15,6 +15,7 @@ import { TaskCreateDialog } from "@/components/TaskCreateDialog";
 import { PlanCreateDialog } from "@/components/PlanCreateDialog";
 import { MilestoneCreateDialog } from "@/components/MilestoneCreateDialog";
 import { ProjectProgressConsole } from "@/features/projects/ProjectProgressConsole";
+import { ROOT_SURFACE_LABEL_EN, ROOT_SURFACE_LABEL_ZH } from "@/features/projects/rootLabels";
 import type { TaskHubFocus } from "@/features/tasks/taskHub";
 import { useAuth } from "@/lib/auth";
 import {
@@ -309,10 +310,10 @@ function HomeWorkspaceBootstrapBanner({
             marginBottom: 8,
           }}
         >
-          可匯入的起始產品
+          可匯入的起始工作台
         </div>
         <div style={{ fontSize: 13, color: c.inkMuted, lineHeight: 1.7 }}>
-          這些 product 目前只在共享工作區可見。按下匯入後，會在你的 home workspace 建立自己的 copy。
+          這些 root 目前只在共享工作區可見。按下匯入後，會在你的 home workspace 建立自己的 copy。
         </div>
         <div
           style={{
@@ -341,7 +342,7 @@ function HomeWorkspaceBootstrapBanner({
   );
 }
 
-// ─── Products List ────────────────────────────────────────────────────────────
+// ─── Root Workspace List ─────────────────────────────────────────────────────
 
 interface ProjectWithProgress {
   entity: Entity;
@@ -396,7 +397,7 @@ function InkProjectsList({
       : "…";
 
   const kpiItems = [
-    { k: "進行中", v: String(activeCount), sub: `${projects.length} 產品` },
+    { k: "進行中", v: String(activeCount), sub: `${projects.length} ${ROOT_SURFACE_LABEL_ZH}` },
     { k: "本週到期", v: String(dueThisWeekCount), sub: "open tasks" },
     { k: "整體進度", v: overallPct, sub: `${totalDone}/${totalTasks} tasks` },
     { k: "待分派任務", v: String(unassignedCount), sub: "open tasks" },
@@ -406,10 +407,10 @@ function InkProjectsList({
     <div style={{ padding: "40px 48px 60px", maxWidth: 1600 }}>
       <Section
         t={t}
-        eyebrow="WORK · 產品"
-        title="產品"
-        en="Products"
-        subtitle="所有進行中的產品主軸與其推進狀態。這一頁對應的是 L1 product，不是 L3 project。"
+        eyebrow={`WORK · ${ROOT_SURFACE_LABEL_ZH}`}
+        title={ROOT_SURFACE_LABEL_ZH}
+        en={ROOT_SURFACE_LABEL_EN}
+        subtitle="所有進行中的 L1 協作根節點與其推進狀態。這一頁不在 UI 區分 company / product。"
         right={
           <div style={{ display: "flex", gap: 10 }}>
             <Btn t={t} variant="ghost" icon={ICONS.filter} onClick={onToggleDormantProducts}>
@@ -419,7 +420,7 @@ function InkProjectsList({
               Agent 盤點
             </Btn>
             <Btn t={t} variant="seal" icon={ICONS.plus} onClick={onOpenCreateProductGuide}>
-              建產品指引
+              建工作台指引
             </Btn>
           </div>
         }
@@ -486,7 +487,7 @@ function InkProjectsList({
             letterSpacing: "0.08em",
           }}
         >
-          目前沒有產品
+          目前沒有工作台
         </div>
       )}
 
@@ -1013,7 +1014,7 @@ function InkProjectDetail({
   );
 
   if (loading) {
-    return <InkSpinner message="載入產品資料…" />;
+    return <InkSpinner message="載入工作台資料…" />;
   }
 
   if (error) {
@@ -1044,7 +1045,7 @@ function InkProjectDetail({
             marginBottom: 18,
           }}
         >
-          <Icon d="M19 12H5M12 19l-7-7 7-7" size={14} /> 返回產品
+          <Icon d="M19 12H5M12 19l-7-7 7-7" size={14} /> 返回工作台
         </button>
 
         <div
@@ -1073,7 +1074,7 @@ function InkProjectDetail({
                   letterSpacing: "0.2em",
                 }}
               >
-                PROJECT · {code}
+                ROOT · {code}
               </span>
               <Chip t={t} tone={h.tone} dot>
                 {h.zh}
@@ -1357,7 +1358,7 @@ function InkProjectDetail({
                 letterSpacing: "0.08em",
               }}
             >
-              這個產品目前沒有任務
+              這個工作台目前沒有任務
             </div>
           ) : (
             <TaskBoard
@@ -1730,7 +1731,7 @@ export default function ProjectsPage() {
   }, [syncOpenIdFromUrl]);
 
   if (loading) {
-    return <InkSpinner message="載入產品…" />;
+    return <InkSpinner message="載入工作台…" />;
   }
 
   if (error) {
@@ -1814,7 +1815,7 @@ export default function ProjectsPage() {
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {ownerRows.length === 0 ? (
-            <p style={{ margin: 0 }}>目前沒有可盤點的產品。</p>
+            <p style={{ margin: 0 }}>目前沒有可盤點的工作台。</p>
           ) : (
             ownerRows.map((row) => (
               <div
@@ -1831,7 +1832,7 @@ export default function ProjectsPage() {
               >
                 <span>{row.owner}</span>
                 <span style={{ color: t.c.inkMuted }}>
-                  {row.projects} 產品 · {row.openTasks} open
+                  {row.projects} 工作台 · {row.openTasks} open
                 </span>
               </div>
             ))
@@ -1842,7 +1843,7 @@ export default function ProjectsPage() {
         t={t}
         open={showCreateProductGuide}
         onOpenChange={setShowCreateProductGuide}
-        title="從知識地圖建立產品"
+        title="從知識地圖建立工作台"
         size="sm"
         footer={
           <Btn t={t} variant="seal" onClick={() => {
@@ -1854,7 +1855,7 @@ export default function ProjectsPage() {
         }
       >
         <p style={{ margin: 0 }}>
-          目前 L1 product 仍從 Knowledge Map 建立。這裡提供的是建立指引，不是 inline create flow。
+          目前 L1 root 仍從 Knowledge Map 建立。這裡提供的是建立指引，不是 inline create flow。
         </p>
       </Dialog>
     </>

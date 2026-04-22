@@ -287,7 +287,7 @@ export function TaskCreateDialog({
             value={productId}
             onChange={setProductId}
             options={productOptions}
-            placeholder="選擇產品或客戶"
+            placeholder="選擇工作台"
             aria-label="Task collaboration root"
             invalid={!productId && Boolean(error)}
           />
@@ -328,13 +328,13 @@ export function TaskCreateDialog({
             />
           </FormField>
 
-          <FormField t={t} label="產品" htmlFor="task-product">
+          <FormField t={t} label="工作台名稱" htmlFor="task-product">
             <Input
               t={t}
               id="task-product"
               value={project}
               onChange={setProject}
-              placeholder="產品名稱"
+              placeholder="工作台名稱"
             />
           </FormField>
         </div>

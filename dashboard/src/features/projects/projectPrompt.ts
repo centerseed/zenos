@@ -1,9 +1,10 @@
 import type { ProjectProgressResponse } from "@/lib/api";
 import type { ProjectAgentPreset, ProjectNextStepOption } from "@/features/projects/types";
+import { formatRootFallbackReview } from "@/features/projects/rootLabels";
 
 const PRESET_HEADERS: Record<ProjectAgentPreset, string> = {
-  claude_code: "Continue this product slice in Claude Code. Treat the project context below as source-of-truth.",
-  codex: "Continue this product slice in Codex. Use the project context below directly and preserve the stated next step.",
+  claude_code: "Continue this root workspace slice in Claude Code. Treat the root context below as source-of-truth.",
+  codex: "Continue this root workspace slice in Codex. Use the root context below directly and preserve the stated next step.",
 };
 
 function collectBlockers(progress: ProjectProgressResponse): string[] {
@@ -42,7 +43,7 @@ export function deriveProjectNextStepOptions(
 
   if (options.length === 0) {
     options.push({
-      value: `Review current progress for ${progress.project.name}`,
+      value: formatRootFallbackReview(progress.project.name),
       label: "Review current progress",
     });
   }
@@ -89,8 +90,8 @@ export function buildProjectContinuationPrompt(
   return [
     PRESET_HEADERS[options.preset],
     "",
-    `Project: ${progress.project.name}`,
-    `Summary: ${progress.project.summary || "No product summary provided."}`,
+    `Root: ${progress.project.name}`,
+    `Summary: ${progress.project.summary || "No root summary provided."}`,
     "",
     "[Active Plans]",
     activePlans,

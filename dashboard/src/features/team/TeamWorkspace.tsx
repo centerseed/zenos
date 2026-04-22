@@ -15,6 +15,7 @@ import {
   WORKSPACE_ROLE_OPTIONS,
   useTeamWorkspace,
 } from "@/features/team/useTeamWorkspace";
+import { formatRootEntityLabel } from "@/features/projects/rootLabels";
 import { Input } from "@/components/zen/Input";
 import { Select } from "@/components/zen/Select";
 import { Chip } from "@/components/zen/Chip";
@@ -109,7 +110,7 @@ function StatusChip({ status, t }: { status: Partner["status"]; t: ReturnType<ty
 }
 
 function l1EntityLabel(entity: { name: string; type: string }) {
-  return `${entity.name} · ${entity.type === "company" ? "公司" : "產品"}`;
+  return formatRootEntityLabel(entity.name);
 }
 
 // ─── ScopeDialog ─────────────────────────────────────────────────────────────

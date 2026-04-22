@@ -2,6 +2,7 @@ import type { CopilotEntryConfig } from "@/lib/copilot/types";
 import type { ProjectProgressResponse } from "@/lib/api";
 import type { ProjectAgentPreset } from "@/features/projects/types";
 import { buildFallbackRecap } from "@/features/projects/projectPrompt";
+import { formatRootScopeLabel } from "@/features/projects/rootLabels";
 
 function serializePlans(progress: ProjectProgressResponse) {
   return progress.active_plans.map((plan) => ({
@@ -57,7 +58,7 @@ export function buildProjectRecapEntry(options: {
   return {
     intent_id: `project-progress-${preset}`,
     title: "Task Copilot",
-    description: "Discuss this product's milestones, plans, tasks, blockers, and next actions.",
+    description: "Discuss this root workspace's milestones, plans, tasks, blockers, and next actions.",
     mode: "artifact",
     launch_behavior: "manual",
     session_policy: "scoped_resume",
@@ -86,7 +87,7 @@ export function buildProjectRecapEntry(options: {
       product_id: progress.project.id,
       project: progress.project.name,
       entity_ids: [progress.project.id],
-      scope_label: `${progress.project.name} / Product Progress Console`,
+      scope_label: formatRootScopeLabel(progress.project.name),
     },
     context_pack: {
       project: {
@@ -107,7 +108,7 @@ export function buildProjectRecapEntry(options: {
     build_prompt: () =>
       [
         `You are acting as the task copilot for ${progress.project.name} in ${preset === "claude_code" ? "Claude Code" : "Codex"}.`,
-        "Treat the provided context as the current milestone / plan / task snapshot for this product.",
+        "Treat the provided context as the current milestone / plan / task snapshot for this root workspace.",
         "Your output must cover these sections in order:",
         "1. 目前所在 milestone / 階段",
         "2. 正在進行的 plans 與 task 結構",
@@ -118,7 +119,7 @@ export function buildProjectRecapEntry(options: {
         "If you need task governance detail or task-level evidence, use ZenOS MCP to fetch it and follow ZenOS task governance rules when reasoning about mutations.",
         "If the user asks to create or update work items, place them at the correct layer: plan vs task vs subtask, instead of flattening everything into tasks.",
         `Use this selected next step as the default recommendation unless the context clearly points to a better one: ${nextStep}.`,
-        `If the project context is sparse, still explain the current state and give a concrete next step. Fallback context: ${fallback}`,
+        `If the root context is sparse, still explain the current state and give a concrete next step. Fallback context: ${fallback}`,
       ].join("\n"),
   };
 }

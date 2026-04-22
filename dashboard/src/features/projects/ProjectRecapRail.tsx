@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
 import { HelperSetupDialog } from "@/components/ai/HelperSetupDialog";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
@@ -30,6 +30,7 @@ export function ProjectRecapRail({
   onAssistantUpdate?: (recap: string) => void;
 }) {
   const [helperDialogOpen, setHelperDialogOpen] = useState(false);
+  const deliveredAssistantRef = useRef<string | null>(null);
   const { partner } = useAuth();
   const workspaceId = resolveCopilotWorkspaceId(partner);
   const entry = useMemo(
@@ -83,6 +84,8 @@ export function ProjectRecapRail({
 
   useEffect(() => {
     if (!latestAssistant) return;
+    if (deliveredAssistantRef.current === latestAssistant) return;
+    deliveredAssistantRef.current = latestAssistant;
     onAssistantUpdate?.(latestAssistant);
   }, [latestAssistant, onAssistantUpdate]);
 
@@ -123,7 +126,7 @@ export function ProjectRecapRail({
           hasStructuredResult={false}
           canSendEmpty
           sendLabel={messages.length === 0 ? "開始討論" : "送出"}
-          placeholder="直接問這個 product 的 milestone、plan、task、subtask、blocker 或下一步"
+          placeholder="直接問這個工作台的 milestone、plan、task、subtask、blocker 或下一步"
         />
       }
     >

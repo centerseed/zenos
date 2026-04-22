@@ -143,7 +143,7 @@ export function isShareableRootEntity(entity: Entity): boolean {
   );
 }
 
-/** Fetch project entities or shareable L1 roots used by Team sharing. */
+/** Fetch /projects roots or shareable L1 roots used by Team sharing. */
 export async function getProjectEntities(
   token: string,
   options?: { scope?: "projects" | "shareableRoots" }
@@ -153,6 +153,7 @@ export async function getProjectEntities(
     return (res.entities ?? []).filter(isShareableRootEntity);
   }
 
+  // The non-sharing /projects list still comes from the dedicated product endpoint.
   const res = await apiFetch<{ entities: Entity[] }>("/api/data/entities?type=product", token);
   return res.entities;
 }

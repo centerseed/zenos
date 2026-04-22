@@ -318,7 +318,7 @@ describe("ProjectsPage", () => {
     const { default: ProjectsPage } = await import("./page");
     render(<ProjectsPage />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "建產品指引" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "建工作台指引" })).toBeInTheDocument());
     expect(screen.getByText("本週到期")).toBeInTheDocument();
     expect(screen.getByText("待分派任務")).toBeInTheDocument();
 
@@ -329,11 +329,89 @@ describe("ProjectsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Agent 盤點" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     expect(screen.getByText("Owner")).toBeInTheDocument();
-    expect(screen.getByText(/產品 · .* open/)).toBeInTheDocument();
+    expect(screen.getByText(/工作台 · .* open/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "建產品指引" }));
-    expect(await screen.findByText("從知識地圖建立產品")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "建工作台指引" }));
+    expect(await screen.findByText("從知識地圖建立工作台")).toBeInTheDocument();
     expect(screen.getByText(/Knowledge Map/)).toBeInTheDocument();
+  });
+
+  it("renders company roots in the same workspace surface without exposing type split", async () => {
+    getProjectEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-1",
+        name: "原心生技",
+        type: "company",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    getTasksByEntityMock.mockResolvedValue([]);
+    getProjectProgressMock.mockResolvedValue({
+      project: {
+        id: "entity-1",
+        name: "原心生技",
+        type: "company",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      active_plans: [],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [],
+    });
+    getEntityContextMock.mockResolvedValue({
+      entity: {
+        id: "entity-1",
+        name: "原心生技",
+        type: "company",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      impact_chain: [],
+      reverse_impact_chain: [],
+    });
+    getChildEntitiesMock.mockResolvedValue([]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+
+    const { default: ProjectsPage } = await import("./page");
+    render(<ProjectsPage />);
+
+    expect(await screen.findByText("工作台")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: /原心生技/ }));
+    expect(await screen.findByText("返回工作台")).toBeInTheDocument();
+    expect(screen.getByText("ROOT · ENTITY-1")).toBeInTheDocument();
+    expect(screen.getByText("project-copilot-inline")).toBeInTheDocument();
   });
 
   it("shows focused plan banner when deep-linked from task hub", async () => {
@@ -514,7 +592,7 @@ describe("ProjectsPage", () => {
     const { default: ProjectsPage } = await import("./page");
     render(<ProjectsPage />);
 
-    expect(await screen.findByText("可匯入的起始產品")).toBeInTheDocument();
+    expect(await screen.findByText("可匯入的起始工作台")).toBeInTheDocument();
     expect(screen.getByText("合作案 A")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "匯入到 Home Workspace" }));

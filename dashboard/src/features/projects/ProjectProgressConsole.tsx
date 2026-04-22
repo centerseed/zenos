@@ -7,6 +7,7 @@ import { ProjectPlansOverview } from "@/features/projects/ProjectPlansOverview";
 import { ProjectRecentProgress } from "@/features/projects/ProjectRecentProgress";
 import { ProjectRecapRail } from "@/features/projects/ProjectRecapRail";
 import { deriveProjectNextStepOptions } from "@/features/projects/projectPrompt";
+import { formatRootFallbackReview } from "@/features/projects/rootLabels";
 import type { TaskHubFocus } from "@/features/tasks/taskHub";
 import type { ProjectProgressResponse } from "@/lib/api";
 
@@ -27,7 +28,7 @@ export function ProjectProgressConsole({
 }) {
   const [internalRailOpen, setInternalRailOpen] = useState(false);
   const nextStepOptions = useMemo(() => deriveProjectNextStepOptions(progress), [progress]);
-  const selectedNextStep = nextStepOptions[0]?.value || `Review ${progress.project.name}`;
+  const selectedNextStep = nextStepOptions[0]?.value || formatRootFallbackReview(progress.project.name);
   const focusedMilestoneId = focus?.startsWith("milestone:") ? focus.slice("milestone:".length) : null;
   const focusedPlanId = focus?.startsWith("plan:") ? focus.slice("plan:".length) : null;
 
