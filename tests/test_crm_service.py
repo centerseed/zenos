@@ -268,6 +268,32 @@ class TestCreateDeal:
         assert relationship.target_id == "company-entity-1"
         assert relationship.type == "part_of"
 
+
+class TestUpdateDeal:
+    @pytest.mark.asyncio
+    async def test_updates_expected_close_date_and_syncs_projection(
+        self, svc, mock_crm_repo, mock_entity_repo
+    ):
+        deal = _make_deal(expected_close_date=None, zenos_entity_id="deal-entity-1")
+        mock_crm_repo.get_deal.return_value = deal
+        updated_deal = _make_deal(
+            expected_close_date=datetime(2026, 5, 15, tzinfo=timezone.utc).date(),
+            zenos_entity_id="deal-entity-1",
+        )
+        mock_crm_repo.update_deal.return_value = updated_deal
+        mock_entity_repo.get_by_id.return_value = _make_entity()
+        mock_entity_repo.upsert.return_value = _make_entity()
+        mock_crm_repo.list_activities.return_value = []
+        mock_crm_repo.list_ai_insights_by_deal.return_value = []
+
+        result = await svc.update_deal("p1", "d1", {"expected_close_date": "2026-05-15"})
+
+        assert result.expected_close_date.isoformat() == "2026-05-15"
+        saved_deal = mock_crm_repo.update_deal.call_args[0][0]
+        assert saved_deal.expected_close_date.isoformat() == "2026-05-15"
+        mock_crm_repo.update_deal.assert_called_once()
+        assert mock_entity_repo.upsert.await_count >= 1
+
     @pytest.mark.asyncio
     async def test_no_relationship_when_company_has_no_entity(
         self, svc, mock_crm_repo, mock_entity_repo, mock_rel_repo

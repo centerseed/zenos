@@ -10,6 +10,7 @@ const mockGetCompany = vi.fn();
 const mockGetCompanyContacts = vi.fn();
 const mockCreateDeal = vi.fn();
 const mockCreateCompany = vi.fn();
+const mockUpdateDeal = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -47,6 +48,7 @@ vi.mock("@/lib/crm-api", async () => {
     getCompanyContacts: (...args: unknown[]) => mockGetCompanyContacts(...args),
     createDeal: (...args: unknown[]) => mockCreateDeal(...args),
     createCompany: (...args: unknown[]) => mockCreateCompany(...args),
+    updateDeal: (...args: unknown[]) => mockUpdateDeal(...args),
     patchDealStage: vi.fn(),
     createActivity: vi.fn(),
     createAiInsight: vi.fn(),
@@ -117,6 +119,7 @@ describe("ZenInkClientsWorkspace", () => {
     mockGetCompanyContacts.mockResolvedValue([]);
     mockCreateDeal.mockReset();
     mockCreateCompany.mockReset();
+    mockUpdateDeal.mockReset();
   });
 
   afterEach(() => {
@@ -182,14 +185,99 @@ describe("ZenInkClientsWorkspace", () => {
     expect(screen.getByRole("button", { name: "建立商機" })).toBeInTheDocument();
   });
 
-  it("disables placeholder CTA buttons that are not implemented yet", async () => {
+  it("toggles inactive deals from 篩選 CTA", async () => {
+    mockGetDeals.mockImplementation(async (_token: string, includeInactive?: boolean) => {
+      const base = [
+        {
+          id: "deal-1",
+          partnerId: "partner-1",
+          title: "企業流程導入",
+          companyId: "company-1",
+          ownerPartnerId: "owner-1",
+          funnelStage: "需求訪談",
+          amountTwd: 120000,
+          deliverables: [],
+          isClosedLost: false,
+          isOnHold: false,
+          createdAt: new Date("2026-04-01T00:00:00Z"),
+          updatedAt: new Date("2026-04-01T00:00:00Z"),
+        },
+      ];
+      if (!includeInactive) return base;
+      return [
+        ...base,
+        {
+          id: "deal-2",
+          partnerId: "partner-1",
+          title: "封存商機",
+          companyId: "company-1",
+          ownerPartnerId: "owner-1",
+          funnelStage: "提案報價",
+          amountTwd: 80000,
+          deliverables: [],
+          isClosedLost: true,
+          isOnHold: false,
+          createdAt: new Date("2026-04-02T00:00:00Z"),
+          updatedAt: new Date("2026-04-02T00:00:00Z"),
+        },
+      ];
+    });
+
     render(<ZenInkClientsWorkspace />);
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "篩選" })).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "篩選" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByRole("button", { name: "顯示封存" })).toBeInTheDocument());
+    expect(screen.queryByText("封存商機")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "顯示封存" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "只看進行中" })).toBeInTheDocument());
+    expect(await screen.findByText("封存商機")).toBeInTheDocument();
+  });
+
+  it("saves expected close date from 排程 CTA", async () => {
+    mockUpdateDeal.mockResolvedValue({
+      id: "deal-1",
+      partnerId: "partner-1",
+      title: "企業流程導入",
+      companyId: "company-1",
+      ownerPartnerId: "owner-1",
+      funnelStage: "需求訪談",
+      amountTwd: 120000,
+      deliverables: [],
+      isClosedLost: false,
+      isOnHold: false,
+      expectedCloseDate: new Date("2026-05-15T00:00:00Z"),
+      createdAt: new Date("2026-04-01T00:00:00Z"),
+      updatedAt: new Date("2026-04-03T00:00:00Z"),
+    });
+
+    render(<ZenInkClientsWorkspace />);
+
+    await waitFor(() => expect(screen.getByText("企業流程導入")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("企業流程導入"));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "排程" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "排程" }));
+
+    const input = await screen.findByLabelText("預計結案日");
+    fireEvent.change(input, { target: { value: "2026-05-15" } });
+    fireEvent.click(screen.getByRole("button", { name: "儲存" }));
+
+    await waitFor(() =>
+      expect(mockUpdateDeal).toHaveBeenCalledWith("token", "deal-1", {
+        expectedCloseDate: "2026-05-15",
+      })
+    );
+  });
+
+  it("opens real CTA buttons instead of keeping placeholders disabled", async () => {
+    render(<ZenInkClientsWorkspace />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "顯示封存" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "顯示封存" })).not.toBeDisabled();
 
     fireEvent.click(screen.getByText("企業流程導入"));
     await waitFor(() => expect(screen.getByRole("button", { name: "排程" })).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "排程" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "排程" })).not.toBeDisabled();
   });
 });

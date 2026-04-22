@@ -9,6 +9,7 @@ import { Icon, ICONS } from "@/components/zen/Icons";
 import { Section } from "@/components/zen/Section";
 import { Btn } from "@/components/zen/Btn";
 import { Chip } from "@/components/zen/Chip";
+import { Dialog } from "@/components/zen/Dialog";
 import { TaskBoard } from "@/components/TaskBoard";
 import { TaskCreateDialog } from "@/components/TaskCreateDialog";
 import { PlanCreateDialog } from "@/components/PlanCreateDialog";
@@ -315,10 +316,18 @@ function InkProjectsList({
   projects,
   bootstrapBanner,
   onOpen,
+  showDormantProducts,
+  onToggleDormantProducts,
+  onOpenAgentInventory,
+  onOpenCreateProductGuide,
 }: {
   projects: ProjectWithProgress[];
   bootstrapBanner?: ReactNode;
   onOpen: (id: string) => void;
+  showDormantProducts: boolean;
+  onToggleDormantProducts: () => void;
+  onOpenAgentInventory: () => void;
+  onOpenCreateProductGuide: () => void;
 }) {
   const t = useInk("light");
   const { c, fontHead, fontMono, fontBody } = t;
@@ -364,13 +373,13 @@ function InkProjectsList({
         subtitle="所有進行中的產品主軸與其推進狀態。這一頁對應的是 L1 product，不是 L3 project。"
         right={
           <div style={{ display: "flex", gap: 10 }}>
-            <Btn t={t} variant="ghost" icon={ICONS.filter} disabled>
-              篩選
+            <Btn t={t} variant="ghost" icon={ICONS.filter} onClick={onToggleDormantProducts}>
+              {showDormantProducts ? "只看進行中" : "顯示暫停"}
             </Btn>
-            <Btn t={t} variant="outline" icon={ICONS.spark} disabled>
+            <Btn t={t} variant="outline" icon={ICONS.spark} onClick={onOpenAgentInventory}>
               Agent 盤點
             </Btn>
-            <Btn t={t} variant="seal" icon={ICONS.plus} disabled>
+            <Btn t={t} variant="seal" icon={ICONS.plus} onClick={onOpenCreateProductGuide}>
               新產品
             </Btn>
           </div>
@@ -1495,6 +1504,7 @@ function InkProjectDetail({
 export default function ProjectsPage() {
   const { user, partner, refetchPartner } = useAuth();
   const activeWorkspace = resolveActiveWorkspace(partner);
+  const t = useInk("light");
 
   const [entities, setEntities] = useState<Entity[]>([]);
   // Map from entityId to TaskProgress (null = not yet loaded)
@@ -1508,6 +1518,9 @@ export default function ProjectsPage() {
   const [bootstrapNames, setBootstrapNames] = useState<string[]>([]);
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [showDormantProducts, setShowDormantProducts] = useState(false);
+  const [showAgentInventory, setShowAgentInventory] = useState(false);
+  const [showCreateProductGuide, setShowCreateProductGuide] = useState(false);
 
   const bootstrapPref = partner?.preferences?.homeWorkspaceBootstrap;
   const pendingBootstrapSourceIds = useMemo(
@@ -1678,6 +1691,21 @@ export default function ProjectsPage() {
     entity: e,
     progress: progressMap.get(e.id) ?? null,
   }));
+  const visibleProjects = showDormantProducts
+    ? projects
+    : projects.filter(({ entity }) => entity.status === "active" || entity.status === "current");
+  const ownerRows = Array.from(
+    visibleProjects.reduce((acc, project) => {
+      const owner = project.entity.owner?.trim() || "未指派";
+      const current = acc.get(owner) ?? { owner, projects: 0, openTasks: 0 };
+      current.projects += 1;
+      current.openTasks += Math.max((project.progress?.total ?? 0) - (project.progress?.done ?? 0), 0);
+      acc.set(owner, current);
+      return acc;
+    }, new Map<string, { owner: string; projects: number; openTasks: number }>()),
+  )
+    .map(([, row]) => row)
+    .sort((a, b) => b.openTasks - a.openTasks || a.owner.localeCompare(b.owner));
 
   const handleApplyBootstrap = async () => {
     if (!user) return;
@@ -1697,19 +1725,77 @@ export default function ProjectsPage() {
   };
 
   return (
-    <InkProjectsList
-      projects={projects}
-      bootstrapBanner={
-        showBootstrapBanner ? (
-          <HomeWorkspaceBootstrapBanner
-            productNames={bootstrapNames.length > 0 ? bootstrapNames : pendingBootstrapSourceIds}
-            loading={bootstrapLoading}
-            error={bootstrapError}
-            onApply={handleApplyBootstrap}
-          />
-        ) : undefined
-      }
-      onOpen={updateOpenId}
-    />
+    <>
+      <InkProjectsList
+        projects={visibleProjects}
+        bootstrapBanner={
+          showBootstrapBanner ? (
+            <HomeWorkspaceBootstrapBanner
+              productNames={bootstrapNames.length > 0 ? bootstrapNames : pendingBootstrapSourceIds}
+              loading={bootstrapLoading}
+              error={bootstrapError}
+              onApply={handleApplyBootstrap}
+            />
+          ) : undefined
+        }
+        onOpen={updateOpenId}
+        showDormantProducts={showDormantProducts}
+        onToggleDormantProducts={() => setShowDormantProducts((prev) => !prev)}
+        onOpenAgentInventory={() => setShowAgentInventory(true)}
+        onOpenCreateProductGuide={() => setShowCreateProductGuide(true)}
+      />
+      <Dialog
+        t={t}
+        open={showAgentInventory}
+        onOpenChange={setShowAgentInventory}
+        title="Agent 盤點"
+        size="sm"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {ownerRows.length === 0 ? (
+            <p style={{ margin: 0 }}>目前沒有可盤點的產品。</p>
+          ) : (
+            ownerRows.map((row) => (
+              <div
+                key={row.owner}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "10px 12px",
+                  border: `1px solid ${t.c.inkHair}`,
+                  borderRadius: t.radius,
+                }}
+              >
+                <span>{row.owner}</span>
+                <span style={{ color: t.c.inkMuted }}>
+                  {row.projects} 產品 · {row.openTasks} open
+                </span>
+              </div>
+            ))
+          )}
+        </div>
+      </Dialog>
+      <Dialog
+        t={t}
+        open={showCreateProductGuide}
+        onOpenChange={setShowCreateProductGuide}
+        title="新增產品"
+        size="sm"
+        footer={
+          <Btn t={t} variant="seal" onClick={() => {
+            setShowCreateProductGuide(false);
+            window.location.href = "/knowledge-map";
+          }}>
+            前往知識地圖
+          </Btn>
+        }
+      >
+        <p style={{ margin: 0 }}>
+          目前 L1 product 仍從 Knowledge Map 建立。先進入知識地圖建立產品節點，再回這頁管理任務。
+        </p>
+      </Dialog>
+    </>
   );
 }

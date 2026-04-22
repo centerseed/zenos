@@ -438,6 +438,62 @@ class CrmService:
         await self._safe_sync_deal_projection(partner_id, deal_id)
         return deal
 
+    async def update_deal(self, partner_id: str, deal_id: str, data: dict) -> Deal:
+        """Update mutable deal fields and re-sync the linked ZenOS projection."""
+        from datetime import date
+        from zenos.domain.crm_models import DealType, DealSource
+
+        deal = await self._crm.get_deal(partner_id, deal_id)
+        if deal is None:
+            raise ValueError(f"Deal {deal_id} not found")
+
+        if "title" in data and data["title"] is not None:
+            deal.title = str(data["title"]).strip() or deal.title
+        if "company_id" in data and data["company_id"] is not None:
+            deal.company_id = str(data["company_id"]).strip() or deal.company_id
+        if "owner_partner_id" in data and data["owner_partner_id"] is not None:
+            deal.owner_partner_id = str(data["owner_partner_id"]).strip() or deal.owner_partner_id
+        if "funnel_stage" in data and data["funnel_stage"] is not None:
+            deal.funnel_stage = FunnelStage(str(data["funnel_stage"]))
+        if "amount_twd" in data:
+            deal.amount_twd = data["amount_twd"]
+        if "deal_type" in data:
+            raw_type = data["deal_type"]
+            deal.deal_type = DealType(raw_type) if raw_type else None
+        if "source_type" in data:
+            raw_source = data["source_type"]
+            deal.source_type = DealSource(raw_source) if raw_source else None
+        if "referrer" in data:
+            deal.referrer = data["referrer"]
+        if "scope_description" in data:
+            deal.scope_description = data["scope_description"]
+        if "deliverables" in data and data["deliverables"] is not None:
+            deal.deliverables = data["deliverables"]
+        if "notes" in data:
+            deal.notes = data["notes"]
+        if "is_closed_lost" in data:
+            deal.is_closed_lost = bool(data["is_closed_lost"])
+        if "is_on_hold" in data:
+            deal.is_on_hold = bool(data["is_on_hold"])
+        if "expected_close_date" in data:
+            val = data["expected_close_date"]
+            deal.expected_close_date = (
+                None
+                if val in (None, "", "null")
+                else val if isinstance(val, date) else date.fromisoformat(str(val))
+            )
+        if "signed_date" in data:
+            val = data["signed_date"]
+            deal.signed_date = (
+                None
+                if val in (None, "", "null")
+                else val if isinstance(val, date) else date.fromisoformat(str(val))
+            )
+
+        updated = await self._crm.update_deal(deal)
+        await self._safe_sync_deal_projection(partner_id, deal_id)
+        return updated
+
     async def get_deal(self, partner_id: str, deal_id: str) -> Deal | None:
         return await self._crm.get_deal(partner_id, deal_id)
 

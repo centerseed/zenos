@@ -271,7 +271,7 @@ describe("ProjectsPage", () => {
     });
   });
 
-  it("disables placeholder CTA buttons on the projects list shell", async () => {
+  it("wires the projects list CTA buttons to real flows", async () => {
     getProjectEntitiesMock.mockResolvedValue([
       {
         id: "entity-1",
@@ -280,6 +280,23 @@ describe("ProjectsPage", () => {
         summary: "summary",
         tags: { what: [], why: "", how: "", who: [] },
         status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      {
+        id: "entity-2",
+        name: "Paused Product",
+        type: "product",
+        summary: "paused",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "paused",
         parentId: null,
         details: null,
         confirmedByUser: true,
@@ -302,9 +319,19 @@ describe("ProjectsPage", () => {
     render(<ProjectsPage />);
 
     await waitFor(() => expect(screen.getByRole("button", { name: "新產品" })).toBeInTheDocument());
-    expect(screen.getByRole("button", { name: "篩選" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Agent 盤點" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "新產品" })).toBeDisabled();
+
+    expect(screen.queryByText("Paused Product")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "顯示暫停" }));
+    expect(await screen.findByText("Paused Product")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Agent 盤點" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Owner")).toBeInTheDocument();
+    expect(screen.getByText(/產品 · .* open/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "新產品" }));
+    expect(await screen.findByText("新增產品")).toBeInTheDocument();
+    expect(screen.getByText(/Knowledge Map/)).toBeInTheDocument();
   });
 
   it("shows focused plan banner when deep-linked from task hub", async () => {

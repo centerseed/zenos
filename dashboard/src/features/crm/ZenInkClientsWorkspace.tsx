@@ -20,6 +20,7 @@ import { Icon, ICONS } from "@/components/zen/Icons";
 import { Section } from "@/components/zen/Section";
 import { Btn } from "@/components/zen/Btn";
 import { Chip } from "@/components/zen/Chip";
+import { Dialog } from "@/components/zen/Dialog";
 import {
   getDeals,
   getCompanies,
@@ -31,6 +32,7 @@ import {
   createAiInsight,
   fetchDealAiEntries,
   patchDealStage,
+  updateDeal,
 } from "@/lib/crm-api";
 import type {
   Deal,
@@ -290,6 +292,7 @@ interface DealDetailProps {
   onBack: () => void;
   userToken: () => Promise<string>;
   recordedBy: string | null;
+  onDealUpdated: (deal: Deal) => void;
 }
 
 function InkDealDetail({
@@ -298,6 +301,7 @@ function InkDealDetail({
   onBack,
   userToken,
   recordedBy,
+  onDealUpdated,
 }: DealDetailProps) {
   const t = useInk("light");
   const { c, fontHead, fontMono, fontBody } = t;
@@ -328,6 +332,10 @@ function InkDealDetail({
   const [showBriefing, setShowBriefing] = useState(false);
   const [selectedBriefing, setSelectedBriefing] = useState<AiInsight | null>(null);
   const [debriefActivity, setDebriefActivity] = useState<Activity | null>(null);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleDate, setScheduleDate] = useState("");
+  const [scheduleSaving, setScheduleSaving] = useState(false);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -343,6 +351,11 @@ function InkDealDetail({
         getCompanyContacts(token, fetchedDeal.companyId),
       ]);
       setDeal(fetchedDeal);
+      setScheduleDate(
+        fetchedDeal.expectedCloseDate
+          ? fetchedDeal.expectedCloseDate.toISOString().slice(0, 10)
+          : ""
+      );
       setActivities(fetchedActivities);
       setAiEntries(fetchedAi);
       setCompany(fetchedCompany);
@@ -387,6 +400,7 @@ function InkDealDetail({
       const token = await userToken();
       const updated = await patchDealStage(token, deal.id, next);
       setDeal(updated);
+      onDealUpdated(updated);
     } catch {
       // rollback
       setDeal((d) => (d ? { ...d, funnelStage: prev } : d));
@@ -466,8 +480,92 @@ function InkDealDetail({
     setSelectedBriefing((prev) => (!prev || prev.id !== saved.id ? saved : prev));
   }
 
+  async function handleScheduleSave() {
+    if (!deal) return;
+    setScheduleSaving(true);
+    setScheduleError(null);
+    try {
+      const token = await userToken();
+      const updated = await updateDeal(token, deal.id, {
+        expectedCloseDate: scheduleDate || null,
+      });
+      setDeal(updated);
+      onDealUpdated(updated);
+      setShowSchedule(false);
+    } catch (err) {
+      setScheduleError(err instanceof Error ? err.message : "排程更新失敗");
+    } finally {
+      setScheduleSaving(false);
+    }
+  }
+
   return (
     <div style={{ padding: "32px 48px 60px", maxWidth: 1600, ...lightFieldVars }}>
+      <Dialog
+        t={t}
+        open={showSchedule}
+        onOpenChange={(open) => {
+          setShowSchedule(open);
+          if (open) {
+            setScheduleDate(deal.expectedCloseDate ? deal.expectedCloseDate.toISOString().slice(0, 10) : "");
+            setScheduleError(null);
+          }
+        }}
+        title="設定預計結案日"
+        size="sm"
+        footer={
+          <>
+            <Btn t={t} variant="ghost" onClick={() => setShowSchedule(false)} disabled={scheduleSaving}>
+              取消
+            </Btn>
+            <Btn t={t} variant="seal" onClick={handleScheduleSave} disabled={scheduleSaving}>
+              儲存
+            </Btn>
+          </>
+        }
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <label
+            htmlFor="deal-schedule-date"
+            style={{
+              fontFamily: fontMono,
+              fontSize: 10,
+              color: c.inkMuted,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+            }}
+          >
+            預計結案日
+          </label>
+          <input
+            id="deal-schedule-date"
+            type="date"
+            value={scheduleDate}
+            onChange={(event) => {
+              setScheduleDate(event.target.value);
+              if (scheduleError) setScheduleError(null);
+            }}
+            style={{
+              width: "100%",
+              border: `1px solid ${scheduleError ? c.vermillion : c.inkHair}`,
+              borderRadius: t.radius,
+              padding: "10px 12px",
+              fontFamily: fontBody,
+              fontSize: 13,
+              color: c.ink,
+              background: c.paper,
+            }}
+          />
+          <p style={{ margin: 0, fontFamily: fontBody, fontSize: 12, lineHeight: 1.6, color: c.inkMuted }}>
+            留空代表先移除預計結案日。
+          </p>
+          {scheduleError ? (
+            <p style={{ margin: 0, fontFamily: fontBody, fontSize: 12, color: c.vermillion }}>
+              {scheduleError}
+            </p>
+          ) : null}
+        </div>
+      </Dialog>
       {showBriefing && deal && (
         <CrmAiPanel
           mode="briefing"
@@ -600,7 +698,7 @@ function InkDealDetail({
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-            <Btn t={t} variant="ghost" size="sm" icon={ICONS.clock} disabled>
+            <Btn t={t} variant="ghost" size="sm" icon={ICONS.clock} onClick={() => setShowSchedule(true)}>
               排程
             </Btn>
           <Btn
@@ -1464,7 +1562,9 @@ function InkClientsList({
   companiesMap,
   onOpen,
   onCreateDeal,
-}: ClientsListProps & { onCreateDeal: () => void }) {
+  showInactive,
+  onToggleShowInactive,
+}: ClientsListProps & { onCreateDeal: () => void; showInactive: boolean; onToggleShowInactive: () => void }) {
   const t = useInk("light");
   const { c, fontHead, fontMono, fontBody } = t;
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
@@ -1505,7 +1605,11 @@ function InkClientsList({
 
   // Deals by stage (only active stages in pipeline view)
   function dealsByStage(stage: FunnelStage): Deal[] {
-    return deals.filter((d) => d.funnelStage === stage && !d.isClosedLost && !d.isOnHold);
+    return deals.filter(
+      (d) =>
+        d.funnelStage === stage &&
+        (showInactive || (!d.isClosedLost && !d.isOnHold))
+    );
   }
 
   // Stage chip tone
@@ -1560,8 +1664,13 @@ function InkClientsList({
                 </button>
               ))}
             </div>
-            <Btn t={t} variant="ghost" icon={ICONS.filter} disabled>
-              篩選
+            <Btn
+              t={t}
+              variant="ghost"
+              icon={ICONS.filter}
+              onClick={onToggleShowInactive}
+            >
+              {showInactive ? "只看進行中" : "顯示封存"}
             </Btn>
             <Btn t={t} variant="seal" icon={ICONS.plus} onClick={onCreateDeal}>
               新機會
@@ -1815,7 +1924,7 @@ function InkClientsList({
             <span>預計結案</span>
           </div>
           {deals
-            .filter((d) => !d.isClosedLost && !d.isOnHold)
+            .filter((d) => showInactive || (!d.isClosedLost && !d.isOnHold))
             .map((d) => {
               const company = companiesMap[d.companyId] ?? "—";
               return (
@@ -1875,7 +1984,7 @@ function InkClientsList({
                 </button>
               );
             })}
-          {deals.filter((d) => !d.isClosedLost && !d.isOnHold).length === 0 && (
+          {deals.filter((d) => showInactive || (!d.isClosedLost && !d.isOnHold)).length === 0 && (
             <div
               style={{
                 padding: 24,
@@ -1906,6 +2015,7 @@ export default function ZenInkClientsWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showInactive, setShowInactive] = useState(false);
 
   // Route guard — same as ClientsWorkspace
   useEffect(() => {
@@ -1926,7 +2036,7 @@ export default function ZenInkClientsWorkspace() {
     try {
       const token = await user.getIdToken();
       const [fetchedDeals, fetchedCompanies] = await Promise.all([
-        getDeals(token),
+        getDeals(token, true),
         getCompanies(token),
       ]);
       setDeals(fetchedDeals);
@@ -1949,6 +2059,10 @@ export default function ZenInkClientsWorkspace() {
     setDeals((prev) => [newDeal, ...prev]);
   }, []);
 
+  const handleDealUpdated = useCallback((updatedDeal: Deal) => {
+    setDeals((prev) => prev.map((deal) => (deal.id === updatedDeal.id ? updatedDeal : deal)));
+  }, []);
+
   // Render nothing while redirecting shared-workspace users
   if (partner && !isHomeWorkspace) return null;
 
@@ -1967,13 +2081,21 @@ export default function ZenInkClientsWorkspace() {
         onBack={() => setOpenId(null)}
         userToken={userToken}
         recordedBy={partner?.id ?? null}
+        onDealUpdated={handleDealUpdated}
       />
     );
   }
 
   return (
     <>
-      <InkClientsList deals={deals} companiesMap={companiesMap} onOpen={setOpenId} onCreateDeal={() => setIsModalOpen(true)} />
+      <InkClientsList
+        deals={deals}
+        companiesMap={companiesMap}
+        onOpen={setOpenId}
+        onCreateDeal={() => setIsModalOpen(true)}
+        showInactive={showInactive}
+        onToggleShowInactive={() => setShowInactive((prev) => !prev)}
+      />
       <NewDealModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}

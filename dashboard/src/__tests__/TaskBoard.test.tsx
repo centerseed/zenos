@@ -99,18 +99,18 @@ describe("TaskBoard drag selection guard", () => {
   it("does not open drawer when clicking immediately after a drag-end status change", () => {
     const onStatusChange = vi.fn().mockResolvedValue(undefined);
 
-    render(<TaskBoard tasks={[makeTask()]} onStatusChange={onStatusChange} />);
+    render(<TaskBoard tasks={[makeTask({ status: "todo" })]} onStatusChange={onStatusChange} />);
 
     act(() => {
       dndHandlers.onDragEnd?.({
         active: { id: "task-1" },
-        over: { id: "done" },
+        over: { id: "in_progress" },
       });
     });
 
     fireEvent.click(screen.getByText("委託稅理士"));
 
-    expect(onStatusChange).toHaveBeenCalledWith("task-1", "done");
+    expect(onStatusChange).toHaveBeenCalledWith("task-1", "in_progress");
     expect(screen.queryByTestId("task-drawer")).toBeNull();
 
     act(() => {
@@ -161,5 +161,53 @@ describe("TaskBoard drag selection guard", () => {
     });
     expect(onStatusChange).not.toHaveBeenCalled();
     expect(screen.queryByText("送審前補上成果")).toBeNull();
+  });
+
+  it("confirms the task when dragging from review into done", () => {
+    const onConfirmTask = vi.fn().mockResolvedValue(undefined);
+    const onStatusChange = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TaskBoard
+        tasks={[makeTask({ status: "review", result: "ready for approval" })]}
+        onStatusChange={onStatusChange}
+        onConfirmTask={onConfirmTask}
+      />
+    );
+
+    act(() => {
+      dndHandlers.onDragEnd?.({
+        active: { id: "task-1" },
+        over: { id: "done" },
+      });
+    });
+
+    expect(onConfirmTask).toHaveBeenCalledWith("task-1", { action: "approve" });
+    expect(onStatusChange).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("task-drawer")).toBeNull();
+  });
+
+  it("blocks dragging directly into done before review", () => {
+    const onConfirmTask = vi.fn().mockResolvedValue(undefined);
+    const onStatusChange = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TaskBoard
+        tasks={[makeTask({ status: "in_progress", result: "not reviewed yet" })]}
+        onStatusChange={onStatusChange}
+        onConfirmTask={onConfirmTask}
+      />
+    );
+
+    act(() => {
+      dndHandlers.onDragEnd?.({
+        active: { id: "task-1" },
+        over: { id: "done" },
+      });
+    });
+
+    expect(screen.getByText("任務完成必須先進入審查中，再由驗收流程完成。")).toBeInTheDocument();
+    expect(onConfirmTask).not.toHaveBeenCalled();
+    expect(onStatusChange).not.toHaveBeenCalled();
   });
 });

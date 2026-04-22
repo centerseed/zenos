@@ -206,6 +206,7 @@ export function TaskBoard({
   // B3-02: warn dialog state for bad status jumps
   const [pendingDrag, setPendingDrag] = useState<{ taskId: string; newStatus: string } | null>(null);
   const [dragWarning, setDragWarning] = useState<string | null>(null);
+  const [dragWarningConfirmLabel, setDragWarningConfirmLabel] = useState("強制執行");
   const [pendingReviewTask, setPendingReviewTask] = useState<Task | null>(null);
   const [pendingReviewResult, setPendingReviewResult] = useState("");
   const [pendingReviewError, setPendingReviewError] = useState<string | null>(null);
@@ -351,10 +352,15 @@ export function TaskBoard({
     const task = tasks.find((t) => t.id === taskId);
     if (!task || task.status === newStatus) return;
 
-    // Warning: todo → done (skipping stages)
-    if (task.status === "todo" && newStatus === "done") {
-      setDragWarning("建議先經過 in_progress 和 review，確定要直接完成？");
-      setPendingDrag({ taskId, newStatus });
+    if (newStatus === "done") {
+      if (task.status === "review") {
+        if (!onConfirmTask) return;
+        void onConfirmTask(taskId, { action: "approve" });
+        return;
+      }
+      setDragWarning("任務完成必須先進入審查中，再由驗收流程完成。");
+      setDragWarningConfirmLabel("知道了");
+      setPendingDrag(null);
       return;
     }
     // review requires a result; collect it inline instead of kicking users into the drawer
@@ -369,15 +375,20 @@ export function TaskBoard({
   }
 
   function confirmDrag() {
-    if (!pendingDrag || !onStatusChange) return;
+    if (!pendingDrag || !onStatusChange) {
+      cancelDrag();
+      return;
+    }
     onStatusChange(pendingDrag.taskId, pendingDrag.newStatus);
     setPendingDrag(null);
     setDragWarning(null);
+    setDragWarningConfirmLabel("強制執行");
   }
 
   function cancelDrag() {
     setPendingDrag(null);
     setDragWarning(null);
+    setDragWarningConfirmLabel("強制執行");
   }
 
   async function submitPendingReview() {
@@ -617,7 +628,7 @@ export function TaskBoard({
               取消
             </Btn>
             <Btn t={t} variant="seal" onClick={confirmDrag}>
-              強制執行
+              {dragWarningConfirmLabel}
             </Btn>
           </>
         }

@@ -483,6 +483,34 @@ async def get_deal(request: Request):
         current_partner_id.reset(token)
 
 
+async def update_deal(request: Request):
+    if request.method == "OPTIONS":
+        return _handle_options(request)
+
+    effective_id, actor_id = await _crm_auth(request)
+    if not effective_id:
+        return _error_response("UNAUTHORIZED", "Invalid token", 401, request=request)
+
+    token = current_partner_id.set(effective_id)
+    try:
+        deal_id = request.path_params["id"]
+        body = await request.json()
+        if not isinstance(body, dict):
+            return _error_response("BAD_REQUEST", "Request body must be a JSON object", 400, request=request)
+        svc = await _ensure_crm_service()
+        deal = await svc.update_deal(effective_id, deal_id, body)
+        return _json_response(_deal_to_dict(deal), request=request)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg.lower():
+            return _error_response("NOT_FOUND", msg, 404, request=request)
+        return _error_response("BAD_REQUEST", msg, 400, request=request)
+    except Exception as exc:
+        return _internal_error_response(request, "update_deal", exc)
+    finally:
+        current_partner_id.reset(token)
+
+
 async def patch_deal_stage(request: Request):
     if request.method == "OPTIONS":
         return _handle_options(request)
@@ -859,6 +887,7 @@ crm_dashboard_routes = [
     Route("/api/crm/contacts/{id}",               contact_detail,             methods=["GET", "PUT", "OPTIONS"]),
     Route("/api/crm/deals",                       deals_collection,           methods=["GET", "POST", "OPTIONS"]),
     Route("/api/crm/deals/{id}",                  get_deal,                   methods=["GET", "OPTIONS"]),
+    Route("/api/crm/deals/{id}",                  update_deal,                methods=["PUT", "OPTIONS"]),
     Route("/api/crm/deals/{id}/stage",            patch_deal_stage,           methods=["PATCH", "OPTIONS"]),
     Route("/api/crm/deals/{id}/activities",       deal_activities_collection, methods=["GET", "POST", "OPTIONS"]),
     Route("/api/crm/deals/{id}/ai-entries",       get_deal_ai_entries,        methods=["GET", "OPTIONS"]),

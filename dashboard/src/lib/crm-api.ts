@@ -171,6 +171,22 @@ export interface Activity {
   createdAt: Date;
 }
 
+type DealUpdateInput = Partial<
+  Omit<
+    Deal,
+    | "id"
+    | "partnerId"
+    | "createdAt"
+    | "updatedAt"
+    | "lastActivityAt"
+    | "expectedCloseDate"
+    | "signedDate"
+  >
+> & {
+  expectedCloseDate?: Date | string | null;
+  signedDate?: Date | string | null;
+};
+
 // ─── Company ─────────────────────────────────────────────────────────────────
 
 export async function getCompanies(token: string): Promise<Company[]> {
@@ -284,6 +300,17 @@ export async function createDeal(
 
 export async function getDeal(token: string, id: string): Promise<Deal> {
   return apiFetch<Deal>(`/api/crm/deals/${id}`, token);
+}
+
+export async function updateDeal(
+  token: string,
+  id: string,
+  data: DealUpdateInput
+): Promise<Deal> {
+  return apiFetch<Deal>(`/api/crm/deals/${id}`, token, {
+    method: "PUT",
+    body: serializeBody(normalizeDealInput(data as Record<string, unknown>)),
+  });
 }
 
 export async function patchDealStage(
