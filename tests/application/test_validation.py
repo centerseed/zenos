@@ -1074,6 +1074,12 @@ class TestTaskPriorityValidation:
 
     async def test_invalid_priority(self):
         repos = _mock_repos()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1", name="ZenOS", type="product",
+                summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
         task_repo = AsyncMock()
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)
         svc = TaskService(
@@ -1085,11 +1091,18 @@ class TestTaskPriorityValidation:
             await svc.create_task({
                 "title": "Fix bug",
                 "created_by": "architect",
+                "product_id": "prod-1",
                 "priority": "ultra",
             })
 
     async def test_valid_priority_passes(self):
         repos = _mock_repos()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1", name="ZenOS", type="product",
+                summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
         task_repo = AsyncMock()
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)
         svc = TaskService(
@@ -1100,6 +1113,7 @@ class TestTaskPriorityValidation:
         result = await svc.create_task({
             "title": "Fix bug",
             "created_by": "architect",
+            "product_id": "prod-1",
             "priority": "high",
         })
         assert result.task.priority == "high"
@@ -1107,6 +1121,12 @@ class TestTaskPriorityValidation:
     async def test_none_priority_uses_recommendation(self):
         """When priority is None, AI recommendation is used (no error)."""
         repos = _mock_repos()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1", name="ZenOS", type="product",
+                summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
         task_repo = AsyncMock()
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)
         svc = TaskService(
@@ -1117,6 +1137,7 @@ class TestTaskPriorityValidation:
         result = await svc.create_task({
             "title": "Fix bug",
             "created_by": "architect",
+            "product_id": "prod-1",
         })
         # Should not raise, priority comes from recommend_priority
         assert result.task.priority is not None
@@ -1126,6 +1147,12 @@ class TestTaskSchemaAlignedValidation:
 
     async def test_create_with_blocked_by_and_todo_requires_blocked_reason(self):
         repos = _mock_repos()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1", name="ZenOS", type="product",
+                summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
         task_repo = AsyncMock()
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)
         svc = TaskService(
@@ -1137,12 +1164,19 @@ class TestTaskSchemaAlignedValidation:
             await svc.create_task({
                 "title": "Wait on API contract",
                 "created_by": "architect",
+                "product_id": "prod-1",
                 "status": "todo",
                 "blocked_by": ["task-123"],
             })
 
     async def test_create_with_blocked_by_and_reason_persists_blocked_reason(self):
         repos = _mock_repos()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1", name="ZenOS", type="product",
+                summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
         task_repo = AsyncMock()
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)
         svc = TaskService(
@@ -1153,6 +1187,7 @@ class TestTaskSchemaAlignedValidation:
         result = await svc.create_task({
             "title": "Wait on API contract",
             "created_by": "architect",
+            "product_id": "prod-1",
             "status": "todo",
             "blocked_by": ["task-123"],
             "blocked_reason": "Waiting for upstream API decision",
@@ -1162,6 +1197,12 @@ class TestTaskSchemaAlignedValidation:
 
     async def test_update_to_review_requires_result(self):
         repos = _mock_repos()
+        repos["entity_repo"].get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1", name="ZenOS", type="product",
+                summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
         task_repo = AsyncMock()
         task_repo.get_by_id = AsyncMock(return_value=Task(
             id="task-1",
@@ -1169,6 +1210,7 @@ class TestTaskSchemaAlignedValidation:
             status="in_progress",
             priority="high",
             created_by="architect",
+            product_id="prod-1",
         ))
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)
         task_repo.list_blocked_by = AsyncMock(return_value=[])
@@ -2460,6 +2502,12 @@ class TestGuestWriteGuard:
         task_repo.upsert = AsyncMock(side_effect=lambda t: t)
         task_repo.list_all = AsyncMock(return_value=[])
         entity_repo = AsyncMock()
+        entity_repo.get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1", name="ZenOS", type="product",
+                summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
+            )
+        )
         entity_repo.list_all = AsyncMock(return_value=[])
         blindspot_repo = AsyncMock()
         blindspot_repo.list_all = AsyncMock(return_value=[])
@@ -2469,6 +2517,7 @@ class TestGuestWriteGuard:
             "title": "My guest task",
             "created_by": "guest-partner-id",
             "priority": "medium",
+            "product_id": "prod-1",
         })
         assert result.task.title == "My guest task"
 

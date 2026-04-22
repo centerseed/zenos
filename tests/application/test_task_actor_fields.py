@@ -6,6 +6,7 @@ import pytest
 
 from zenos.application.action.task_service import TaskService
 from zenos.domain.action import Task
+from zenos.domain.knowledge import Entity, Tags
 
 
 def _make_uow_factory():
@@ -15,6 +16,17 @@ def _make_uow_factory():
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock(return_value=False)
     return lambda: uow
+
+
+def _make_product() -> Entity:
+    return Entity(
+        id="prod-1",
+        name="ZenOS",
+        type="product",
+        summary="Product",
+        tags=Tags(what="x", why="x", how="x", who="x"),
+        status="active",
+    )
 
 
 def _make_review_task(**overrides) -> Task:
@@ -34,8 +46,9 @@ def _make_review_task(**overrides) -> Task:
 async def test_create_sets_updated_by_from_input_or_created_by():
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    product = _make_product()
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(return_value=product)
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -45,6 +58,7 @@ async def test_create_sets_updated_by_from_input_or_created_by():
             "title": "Implement X",
             "created_by": "owner-1",
             "updated_by": "actor-2",
+            "product_id": "prod-1",
         }
     )
     assert explicit.task.created_by == "owner-1"
@@ -54,6 +68,7 @@ async def test_create_sets_updated_by_from_input_or_created_by():
         {
             "title": "Implement Y",
             "created_by": "owner-3",
+            "product_id": "prod-1",
         }
     )
     assert implicit.task.created_by == "owner-3"
@@ -69,12 +84,15 @@ async def test_update_and_confirm_set_updated_by():
         priority="medium",
         created_by="owner-1",
         updated_by="owner-1",
+        product_id="prod-1",
     )
     task_repo = AsyncMock()
     task_repo.get_by_id = AsyncMock(return_value=existing)
     task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.list_blocked_by = AsyncMock(return_value=[])
+    product = _make_product()
     entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=product)
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo, uow_factory=_make_uow_factory())
@@ -94,7 +112,9 @@ async def test_confirm_task_accepts_entity_entries_param_without_error():
     task_repo.get_by_id = AsyncMock(return_value=existing)
     task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.list_blocked_by = AsyncMock(return_value=[])
+    product = _make_product()
     entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=product)
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo, uow_factory=_make_uow_factory())
@@ -121,7 +141,9 @@ async def test_confirm_task_entity_entries_ignored_when_rejected():
     task_repo = AsyncMock()
     task_repo.get_by_id = AsyncMock(return_value=existing)
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    product = _make_product()
     entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=product)
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -145,7 +167,9 @@ async def test_confirm_task_entity_entries_none_is_backward_compatible():
     task_repo.get_by_id = AsyncMock(return_value=existing)
     task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.list_blocked_by = AsyncMock(return_value=[])
+    product = _make_product()
     entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=product)
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo, uow_factory=_make_uow_factory())

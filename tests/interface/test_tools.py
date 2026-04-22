@@ -1642,6 +1642,7 @@ class TestTaskTool:
                 created_by="architect",
                 assignee="developer",
                 priority="high",
+                product_id="prod-1",
             )
 
             assert result["status"] == "ok"
@@ -1661,6 +1662,7 @@ class TestTaskTool:
                 created_by="architect",
                 linked_entities='["ent-1","ent-2"]',
                 acceptance_criteria='["a","b"]',
+                product_id="prod-1",
             )
             payload = mock_ts.create_task.call_args.args[0]
             assert payload["linked_entities"] == ["ent-1", "ent-2"]
@@ -1732,6 +1734,7 @@ class TestTaskTool:
             title="Fix login",
             created_by="architect",
             due_date="not-a-date",
+            product_id="prod-1",
         )
 
         assert result["status"] == "rejected"
@@ -1753,6 +1756,7 @@ class TestTaskTool:
                 title="整理母親節素材需求",
                 created_by="amy",
                 description=raw,
+                product_id="prod-1",
             )
 
             payload = mock_ts.create_task.call_args.args[0]
@@ -1776,6 +1780,7 @@ class TestTaskTool:
                 title="整理母親節素材需求",
                 created_by="amy",
                 description=markdown,
+                product_id="prod-1",
             )
 
             payload = mock_ts.create_task.call_args.args[0]
@@ -1800,6 +1805,7 @@ class TestTaskTool:
                 title="整理來源追溯資料",
                 created_by="amy",
                 source_metadata=metadata,
+                product_id="prod-1",
             )
 
             payload = mock_ts.create_task.call_args.args[0]
@@ -1823,6 +1829,7 @@ class TestTaskTool:
                 created_by="amy",
                 created_via_agent=True,
                 agent_name="architect-agent",
+                product_id="prod-1",
             )
 
             payload = mock_ts.create_task.call_args.args[0]
@@ -1893,6 +1900,7 @@ class TestTaskTool:
                 action="create",
                 title="Fix login",
                 created_by="architect",
+                product_id="prod-1",
             )
 
             assert result["status"] == "ok"
@@ -1920,6 +1928,7 @@ class TestTaskTool:
                 title="Fix login",
                 created_by="architect",
                 linked_entities=[entity_id],
+                product_id="prod-1",
             )
 
             assert result["status"] == "ok"
@@ -1947,6 +1956,7 @@ class TestTaskTool:
                 title="Fix login",
                 created_by="architect",
                 linked_entities=[entity_id],
+                product_id="prod-1",
             )
 
             assert result["status"] == "ok"

@@ -74,6 +74,8 @@ async def test_ac_tosc_03_zero_null_after_backfill():
     assert "where t.product_id is null" in sql
     assert "governance:review_product_assignment" in sql
     assert "insert into zenos.audit_events" in sql
+    assert "insert into zenos.entities" in sql
+    assert "recovered product" in sql
 
 
 @pytest.mark.spec("AC-TOSC-04")
@@ -342,6 +344,7 @@ async def test_ac_tosc_11_default_project_fallback_resolves():
     service = TaskService(task_repo, entity_repo, blindspot_repo)
 
     with patch("zenos.interface.mcp._ensure_services", new=AsyncMock(return_value=None)), \
+         patch("zenos.interface.mcp.entity_repo", entity_repo), \
          patch("zenos.interface.mcp.task_service", service), \
          patch("zenos.interface.mcp.task._current_partner") as mock_partner, \
          patch("zenos.interface.mcp.task._enrich_task_result", new=AsyncMock(side_effect=lambda task: {"id": task.id, "product_id": task.product_id})):

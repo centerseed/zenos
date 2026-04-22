@@ -107,6 +107,7 @@ class TestTaskCreatedByAutoFill:
                 result = await _task_handler(
                     action="create",
                     title="Test task",
+                    product_id="prod-1",
                     # created_by intentionally omitted
                 )
 
@@ -135,6 +136,7 @@ class TestTaskCreatedByAutoFill:
                     action="create",
                     title="Test task",
                     created_by="Barry",  # explicitly provided
+                    product_id="prod-1",
                 )
 
                 assert "error" not in result
@@ -174,6 +176,7 @@ class TestTaskCreatedByAutoFill:
                 result = await _task_handler(
                     action="create",
                     title="Admin task",
+                    product_id="prod-1",
                 )
 
                 assert "error" not in result

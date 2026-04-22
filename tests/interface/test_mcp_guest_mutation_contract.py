@@ -48,6 +48,7 @@ def _make_task(tid: str) -> Task:
         priority="medium",
         created_by="guest-home-1",
         updated_by="guest-home-1",
+        product_id="l1-a",
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
     )
@@ -114,7 +115,7 @@ async def test_guest_can_create_task_in_shared_workspace():
         mcp.task_service.create_task = AsyncMock(return_value=TaskResult(task=_make_task("task-guest"), cascade_updates=[]))
         mcp.task_service.enrich_task = AsyncMock(return_value={"expanded_entities": []})
 
-        result = await mcp.task(action="create", title="Create guest task")
+        result = await mcp.task(action="create", title="Create guest task", product_id="l1-a")
 
     assert result["status"] == "ok"
     assert result["data"]["id"] == "task-guest"

@@ -685,12 +685,11 @@ export async function createPlan(
   token: string,
   data: {
     goal: string;
+    product_id: string;
     owner?: string | null;
     entry_criteria?: string | null;
     exit_criteria?: string | null;
     project?: string | null;
-    project_id?: string | null;
-    product_id?: string | null;
     status?: "draft" | "active";
   },
 ): Promise<PlanSummary> {
@@ -707,7 +706,7 @@ export async function createMilestone(
   data: {
     name: string;
     summary?: string;
-    project_id: string;
+    product_id: string;
     status?: "planned" | "active";
     owner?: string | null;
   },

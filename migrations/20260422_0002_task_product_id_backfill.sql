@@ -96,6 +96,70 @@ WHERE t.partner_id = src.partner_id
   AND t.id = src.task_id
   AND t.product_id IS DISTINCT FROM src.product_id;
 
+-- Step 2c-1: create a deterministic placeholder product for partners that still
+-- have unresolved tasks/plans but no product entity at all.
+WITH partners_missing_any_product AS (
+  SELECT DISTINCT unresolved.partner_id
+  FROM (
+    SELECT t.partner_id
+    FROM zenos.tasks t
+    LEFT JOIN zenos.entities current_product
+      ON current_product.partner_id = t.partner_id
+     AND current_product.id = t.product_id
+     AND current_product.type = 'product'
+    WHERE t.product_id IS NULL OR current_product.id IS NULL
+    UNION
+    SELECT p.partner_id
+    FROM zenos.plans p
+    LEFT JOIN zenos.entities current_product
+      ON current_product.partner_id = p.partner_id
+     AND current_product.id = p.product_id
+     AND current_product.type = 'product'
+    WHERE p.product_id IS NULL OR current_product.id IS NULL
+  ) unresolved
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM zenos.entities e
+    WHERE e.partner_id = unresolved.partner_id
+      AND e.type = 'product'
+  )
+)
+INSERT INTO zenos.entities (
+  id, partner_id, name, type, level, parent_id, status, summary,
+  tags_json, details_json, confirmed_by_user, owner, sources_json,
+  visibility, visible_to_roles, visible_to_members, visible_to_departments,
+  last_reviewed_at, created_at, updated_at,
+  doc_role, bundle_highlights_json, highlights_updated_at, change_summary, summary_updated_at
+)
+SELECT
+  md5(pm.partner_id || ':task-ownership-placeholder-product'),
+  pm.partner_id,
+  'Recovered Product',
+  'product',
+  1,
+  NULL,
+  'active',
+  'Auto-generated during task ownership backfill because this workspace had tasks/plans but no product entity.',
+  '{"what":[],"why":"","how":"","who":[]}'::jsonb,
+  NULL,
+  false,
+  'system',
+  '[]'::jsonb,
+  'public',
+  ARRAY[]::text[],
+  ARRAY[]::text[],
+  ARRAY[]::text[],
+  NULL,
+  NOW(),
+  NOW(),
+  NULL,
+  '[]'::jsonb,
+  NULL,
+  'Auto-generated placeholder product for ownership backfill',
+  NULL
+FROM partners_missing_any_product pm
+ON CONFLICT (id) DO NOTHING;
+
 -- Step 2d: fallback to first product entity per partner and mark for governance review.
 WITH first_product_per_partner AS (
   SELECT DISTINCT ON (e.partner_id)

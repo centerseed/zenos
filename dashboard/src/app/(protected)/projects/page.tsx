@@ -84,7 +84,7 @@ function isPlaceholderCompletedProject(entity: Entity): boolean {
 
 type CreateTaskInput = {
   title: string;
-  product_id?: string;
+  product_id: string;
   description?: string;
   priority?: string;
   assignee?: string;
@@ -904,7 +904,7 @@ function InkProjectDetail({
       const token = await user.getIdToken();
       await createMilestone(token, {
         ...data,
-        project_id: entity.id,
+        product_id: entity.id,
         owner: entity.owner ?? null,
       });
       setCreateKind(null);

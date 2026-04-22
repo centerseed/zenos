@@ -21,6 +21,12 @@ def _make_service(entities=None, relationships=None):
     entity_repo.get_by_id = AsyncMock(
         side_effect=lambda eid: entities.get(eid) if entities else None
     )
+    entity_repo.get_by_name = AsyncMock(
+        side_effect=lambda name: next(
+            (entity for entity in (entities or {}).values() if getattr(entity, "name", None) == name),
+            None,
+        )
+    )
     entity_repo.upsert = AsyncMock(side_effect=lambda e, **kw: e)
     entity_repo.list_all = AsyncMock(
         return_value=list(entities.values()) if entities else []
@@ -59,21 +65,30 @@ def _mock_relationship(rel_type, target_id):
 
 @pytest.mark.asyncio
 async def test_create_task_rejects_missing_linked_entities():
-    svc = _make_service(entities={"e1": _mock_entity("e1")})
+    svc = _make_service(entities={
+        "prod-1": _mock_entity("prod-1", "ZenOS", "product"),
+        "e1": _mock_entity("e1"),
+    })
     with pytest.raises(ValueError, match="不存在的 entity ID"):
         await svc.create_task({
             "title": "修復登入流程問題",
             "created_by": "agent",
+            "product_id": "prod-1",
             "linked_entities": ["e1", "e999"],
         })
 
 
 @pytest.mark.asyncio
 async def test_create_task_accepts_valid_linked_entities():
-    svc = _make_service(entities={"e1": _mock_entity("e1"), "e2": _mock_entity("e2")})
+    svc = _make_service(entities={
+        "prod-1": _mock_entity("prod-1", "ZenOS", "product"),
+        "e1": _mock_entity("e1"),
+        "e2": _mock_entity("e2"),
+    })
     result = await svc.create_task({
         "title": "修復登入流程問題",
         "created_by": "agent",
+        "product_id": "prod-1",
         "linked_entities": ["e1", "e2"],
     })
     assert result.task.title == "修復登入流程問題"
@@ -81,10 +96,11 @@ async def test_create_task_accepts_valid_linked_entities():
 
 @pytest.mark.asyncio
 async def test_create_task_accepts_empty_linked_entities():
-    svc = _make_service(entities={})
+    svc = _make_service(entities={"prod-1": _mock_entity("prod-1", "ZenOS", "product")})
     result = await svc.create_task({
         "title": "修復登入流程問題",
         "created_by": "agent",
+        "product_id": "prod-1",
         "linked_entities": [],
     })
     assert result.task is not None

@@ -13,6 +13,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from zenos.domain.knowledge import Entity, Tags
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -22,6 +24,17 @@ def _make_uow_factory():
     uow.__aenter__ = AsyncMock(return_value=uow)
     uow.__aexit__ = AsyncMock(return_value=False)
     return lambda: uow
+
+
+def _make_product(product_id: str = "prod-1", name: str = "ZenOS") -> Entity:
+    return Entity(
+        id=product_id,
+        name=name,
+        type="product",
+        summary="Product",
+        tags=Tags(what="x", why="x", how="x", who="x"),
+        status="active",
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -98,7 +111,7 @@ async def test_ac_task_upg_02_cross_plan_subtask_reject():
     task_repo.get_by_id = AsyncMock(return_value=parent_task)
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(return_value=_make_product())
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -108,6 +121,7 @@ async def test_ac_task_upg_02_cross_plan_subtask_reject():
         await svc.create_task({
             "title": "實作跨計畫的 subtask 驗證",
             "created_by": "dev",
+            "product_id": "prod-1",
             "parent_task_id": "parent-task-1",
             "plan_id": "plan-P2",  # different from parent's plan-P1
         })
@@ -135,6 +149,7 @@ async def test_ac_task_upg_02_cross_plan_subtask_reject():
         result = await _task_handler(
             action="create",
             title="實作跨計畫 subtask",
+            product_id="prod-1",
             parent_task_id="parent-task-1",
             plan_id="plan-P2",
         )
@@ -151,7 +166,7 @@ async def test_ac_task_upg_02_cross_plan_subtask_reject():
     task_repo2.get_by_id = AsyncMock(return_value=None)  # parent not found
     task_repo2.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo2 = AsyncMock()
-    entity_repo2.get_by_id = AsyncMock(return_value=None)
+    entity_repo2.get_by_id = AsyncMock(return_value=_make_product())
     blindspot_repo2 = AsyncMock()
     svc2 = TaskService(task_repo2, entity_repo2, blindspot_repo2)
 
@@ -159,6 +174,7 @@ async def test_ac_task_upg_02_cross_plan_subtask_reject():
         await svc2.create_task({
             "title": "實作不存在父 task 的驗證",
             "created_by": "dev",
+            "product_id": "prod-1",
             "parent_task_id": "nonexistent-parent",
             "plan_id": "plan-P1",
         })
@@ -193,7 +209,7 @@ async def test_ac_task_upg_03_invalid_dispatcher_reject():
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(return_value=_make_product())
     blindspot_repo = AsyncMock()
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
 
@@ -211,12 +227,13 @@ async def test_ac_task_upg_03_invalid_dispatcher_reject():
     task_repo2 = AsyncMock()
     task_repo2.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo2 = AsyncMock()
-    entity_repo2.get_by_id = AsyncMock(return_value=None)
+    entity_repo2.get_by_id = AsyncMock(return_value=_make_product())
     blindspot_repo2 = AsyncMock()
     svc2 = TaskService(task_repo2, entity_repo2, blindspot_repo2)
     result = await svc2.create_task({
         "title": "實作有效 dispatcher 任務",
         "created_by": "pm",
+        "product_id": "prod-1",
         "dispatcher": "agent:pm",
     })
     assert result.task.dispatcher == "agent:pm"
@@ -252,6 +269,7 @@ async def test_ac_task_upg_03_invalid_dispatcher_reject():
         result = await _task_handler(
             action="create",
             title="建立無效 dispatcher 任務",
+            product_id="prod-1",
             dispatcher="AGENT:PM",
         )
 

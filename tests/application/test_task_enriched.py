@@ -259,16 +259,27 @@ async def test_get_task_enriched_expands_blindspot():
 
 @pytest.mark.asyncio
 async def test_create_task_auto_context_summary():
-    entity = _entity(id="ent-1", name="Paceriz", summary="A running coach for athletes")
-    svc = _make_service(entity=entity)
+    product = _entity(id="prod-1", name="Paceriz", summary="A running coach for athletes")
+    module = Entity(
+        id="ent-1",
+        name="Auth Module",
+        type="module",
+        summary="Handles auth flow",
+        tags=Tags(what="module", why="auth", how="rules", who="users"),
+        status="active",
+    )
+    svc = _make_service(
+        entity_side_effect=lambda eid: {"prod-1": product, "ent-1": module}.get(eid)
+    )
 
     data = {
         "title": "Fix login",
         "created_by": "architect",
+        "product_id": "prod-1",
         "linked_entities": ["ent-1"],
     }
     task_result = await svc.create_task(data)
-    assert "Paceriz" in task_result.task.context_summary
+    assert "Auth Module" in task_result.task.context_summary
     assert "任務關聯節點" in task_result.task.context_summary
 
 
@@ -285,6 +296,7 @@ async def test_create_task_manual_context_summary_preserved():
     data = {
         "title": "Fix login",
         "created_by": "architect",
+        "product_id": "ent-1",
         "linked_entities": ["ent-1"],
         "context_summary": "手動填的",
     }
@@ -299,11 +311,12 @@ async def test_create_task_manual_context_summary_preserved():
 
 @pytest.mark.asyncio
 async def test_create_task_no_linked_no_context():
-    svc = _make_service(entity=None)
+    svc = _make_service(entity=_entity(id="prod-1", name="ZenOS", summary="Product"))
 
     data = {
         "title": "Fix login",
         "created_by": "architect",
+        "product_id": "prod-1",
     }
     task_result = await svc.create_task(data)
     assert task_result.task.context_summary == ""

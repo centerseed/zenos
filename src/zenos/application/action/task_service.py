@@ -192,6 +192,11 @@ class TaskService:
         )
         effective_product_id = product_entity.id if product_entity else None
         effective_project_name = product_entity.name if product_entity else None
+        if effective_product_id is None:
+            raise TaskValidationError(
+                "product_id is required when project/defaultProject cannot be resolved to a product entity.",
+                error_code="MISSING_PRODUCT_ID",
+            )
 
         # Cross-plan subtask validation
         parent_task_id = data.get("parent_task_id")
@@ -386,6 +391,11 @@ class TaskService:
         )
         effective_product_id = product_entity.id if product_entity else None
         effective_project_name = product_entity.name if product_entity else None
+        if effective_product_id is None:
+            raise TaskValidationError(
+                "product_id is required when project/defaultProject cannot be resolved to a product entity.",
+                error_code="MISSING_PRODUCT_ID",
+            )
 
         if parent is None and (updates.get("parent_task_id") or task.parent_task_id):
             parent = await self._tasks.get_by_id(updates.get("parent_task_id") or task.parent_task_id)

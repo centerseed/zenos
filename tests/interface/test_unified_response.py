@@ -229,6 +229,7 @@ class TestTaskUnifiedFormat:
                 action="create",
                 title="Fix login",
                 created_by="architect",
+                product_id="prod-1",
             )
 
         assert result["status"] == "ok"

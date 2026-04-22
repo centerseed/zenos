@@ -34,7 +34,7 @@ async def test_create_rejects_plan_order_without_plan_id():
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("prod-1", "ZenOS", "product"))
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -44,6 +44,7 @@ async def test_create_rejects_plan_order_without_plan_id():
             {
                 "title": "Implement X",
                 "created_by": "pm",
+                "product_id": "prod-1",
                 "plan_order": 1,
             }
         )
@@ -54,7 +55,7 @@ async def test_create_accepts_plan_fields_when_valid():
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("prod-1", "ZenOS", "product"))
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -63,6 +64,7 @@ async def test_create_accepts_plan_fields_when_valid():
         {
             "title": "Implement X",
             "created_by": "pm",
+            "product_id": "prod-1",
             "plan_id": "plan-review-v1",
             "plan_order": 2,
             "depends_on_task_ids": ["task-1"],
@@ -94,6 +96,26 @@ async def test_create_accepts_product_id_when_provided():
 
     assert result.task.product_id == "prod-1"
     assert result.task.product_id == "prod-1"
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_missing_product_id_when_unresolved():
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_name = AsyncMock(return_value=None)
+    blindspot_repo = AsyncMock()
+
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    with pytest.raises(ValueError, match="MISSING_PRODUCT_ID|product_id is required"):
+        await svc.create_task(
+            {
+                "title": "Implement ownership SSOT",
+                "created_by": "pm",
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -168,7 +190,7 @@ async def test_create_accepts_due_date_string_without_datetime_timezone_error():
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("prod-1", "ZenOS", "product"))
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -177,6 +199,7 @@ async def test_create_accepts_due_date_string_without_datetime_timezone_error():
         {
             "title": "Implement analytics tracking",
             "created_by": "pm",
+            "product_id": "prod-1",
             "due_date": "2026-05-15",
         }
     )
@@ -193,11 +216,13 @@ async def test_update_rejects_plan_order_without_plan_id():
         status="todo",
         priority="medium",
         created_by="pm",
+        product_id="prod-1",
     )
     task_repo = AsyncMock()
     task_repo.get_by_id = AsyncMock(return_value=existing)
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("prod-1", "ZenOS", "product"))
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)
@@ -215,11 +240,13 @@ async def test_update_accepts_plan_fields_when_valid():
         priority="medium",
         created_by="pm",
         plan_id="plan-a",
+        product_id="prod-1",
     )
     task_repo = AsyncMock()
     task_repo.get_by_id = AsyncMock(return_value=existing)
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("prod-1", "ZenOS", "product"))
     blindspot_repo = AsyncMock()
 
     svc = TaskService(task_repo, entity_repo, blindspot_repo)

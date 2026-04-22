@@ -233,6 +233,7 @@ class TestTaskWithAttachments:
                     action="create",
                     title="Task with links",
                     created_by="partner-1",
+                    product_id="prod-1",
                     attachments=[{"type": "link", "url": "https://example.com"}],
                 )
 
@@ -253,6 +254,7 @@ class TestTaskWithAttachments:
                     action="create",
                     title="Bad task",
                     created_by="partner-1",
+                    product_id="prod-1",
                     attachments=[{"type": "video"}],
                 )
             assert _non_ok_data(result, "rejected")["error"] == "INVALID_INPUT"

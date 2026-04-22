@@ -20,7 +20,16 @@ def _make_task_service() -> TaskService:
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t: t)
     entity_repo = AsyncMock()
-    entity_repo.get_by_id = AsyncMock(return_value=None)
+    entity_repo.get_by_id = AsyncMock(
+        return_value=Entity(
+            id="prod-1",
+            name="ZenOS",
+            type=EntityType.PRODUCT,
+            summary="test",
+            tags=Tags(what=[], why="", how="", who=[]),
+            status="active",
+        )
+    )
     entity_repo.list_all = AsyncMock(return_value=[])
     blindspot_repo = AsyncMock()
     return TaskService(task_repo, entity_repo, blindspot_repo)
@@ -43,7 +52,7 @@ async def test_create_task_rejects_title_starting_with_stopword():
 @pytest.mark.asyncio
 async def test_create_task_accepts_valid_title():
     svc = _make_task_service()
-    result = await svc.create_task({"title": "Implement OAuth login flow", "created_by": "u1"})
+    result = await svc.create_task({"title": "Implement OAuth login flow", "created_by": "u1", "product_id": "prod-1"})
     assert result.task.title == "Implement OAuth login flow"
 
 

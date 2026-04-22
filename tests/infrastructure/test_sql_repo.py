@@ -1023,6 +1023,7 @@ class TestSqlTaskRepository:
         """
         from zenos.application.action.task_service import TaskService
         from zenos.domain.action import Task
+        from zenos.domain.knowledge import Entity, Tags
         from unittest.mock import AsyncMock
         import asyncio
 
@@ -1037,7 +1038,16 @@ class TestSqlTaskRepository:
 
         entity_repo_mock = AsyncMock()
         entity_repo_mock.list_all = AsyncMock(return_value=[])
-        entity_repo_mock.get_by_id = AsyncMock(return_value=None)
+        entity_repo_mock.get_by_id = AsyncMock(
+            return_value=Entity(
+                id="prod-1",
+                name="ZenOS",
+                type="product",
+                summary="Product",
+                tags=Tags(what=[], why="", how="", who=[]),
+                status="active",
+            )
+        )
 
         blindspot_repo_mock = AsyncMock()
         blindspot_repo_mock.get_by_id = AsyncMock(return_value=None)
@@ -1054,6 +1064,7 @@ class TestSqlTaskRepository:
             "description": None,   # body.get("description") when not in JSON
             "project": None,        # body.get("project") when not in JSON
             "created_by": PARTNER_ID,
+            "product_id": "prod-1",
         }
         asyncio.get_event_loop().run_until_complete(svc.create_task(data))
 
@@ -1063,15 +1074,15 @@ class TestSqlTaskRepository:
             f"description should be '' but got {task.description!r} — "
             "None would cause NOT NULL violation in PostgreSQL"
         )
-        assert task.project == "", (
-            f"project should be '' but got {task.project!r} — "
-            "None would cause NOT NULL violation in PostgreSQL"
+        assert task.project == "ZenOS", (
+            f"project should be canonical product name but got {task.project!r}"
         )
 
     def test_task_service_create_task_normalizes_project_scope(self):
         """create_task() should store partner project scope as trimmed lowercase slug."""
         from zenos.application.action.task_service import TaskService
         from zenos.domain.action import Task
+        from zenos.domain.knowledge import Entity, Tags
         from unittest.mock import AsyncMock
         import asyncio
 
@@ -1087,6 +1098,16 @@ class TestSqlTaskRepository:
         entity_repo_mock = AsyncMock()
         entity_repo_mock.list_all = AsyncMock(return_value=[])
         entity_repo_mock.get_by_id = AsyncMock(return_value=None)
+        entity_repo_mock.get_by_name = AsyncMock(
+            return_value=Entity(
+                id="prod-1",
+                name="Paceriz",
+                type="product",
+                summary="Product",
+                tags=Tags(what=[], why="", how="", who=[]),
+                status="active",
+            )
+        )
 
         blindspot_repo_mock = AsyncMock()
         blindspot_repo_mock.get_by_id = AsyncMock(return_value=None)
@@ -1108,7 +1129,7 @@ class TestSqlTaskRepository:
         )
 
         assert len(captured) == 1
-        assert captured[0].project == "paceriz"
+        assert captured[0].project == "Paceriz"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

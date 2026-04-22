@@ -752,7 +752,7 @@ describe("ProjectsPage", () => {
         "token-1",
         expect.objectContaining({
           name: "P0 上線",
-          project_id: "entity-1",
+          product_id: "entity-1",
           owner: "Owner",
           status: "active",
         }),
