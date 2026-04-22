@@ -129,13 +129,16 @@ task(action="handoff", id="...", data={
 
 | 規則 | 強制等級 |
 |------|---------|
-| subtask 必須繼承 parent 的 `plan_id`（不能跨 plan） | **Server reject** |
-| subtask 可無 parent（parent_task_id = null） | 允許 |
+| **subtask 必須有 `parent_task_id`（parent 必為現存 task）** | **Server reject `PARENT_NOT_FOUND`**（2026-04-22 起） |
+| subtask 必須繼承 parent 的 `plan_id`（不能跨 plan） | **Server reject `CROSS_PLAN_SUBTASK`** |
+| subtask 必須繼承 parent 的 `product_id`（不能跨 product） | **Server reject `CROSS_PRODUCT_SUBTASK`**（2026-04-22 起） |
 | subtask 可任意深度（A → B → C → ...） | 允許，但建議 ≤ 2 層 |
-| subtask 的 `linked_entities` 可獨立於 parent | 允許 |
+| subtask 的 `linked_entities` 可獨立於 parent | 允許，但仍不可含 product entity |
 | subtask 完成 ≠ parent 完成 | Parent 完成需自行 confirm（不自動 cascade） |
 
-**粒度原則繼續適用**：subtask 仍必須單一 outcome、2-5 條 AC、單一 assignee。subtask 不是「parent 的 checklist」——是「同 plan 下獨立可驗收的子單位」。
+**「subtask」是 derived concept**：同一張 tasks 表，`parent_task_id ≠ null` 的 task 就是 subtask。要建 subtask 就必須給 parent_task_id——給不出來就不是 subtask，是獨立 task。
+
+**粒度原則繼續適用**：subtask 仍必須單一 outcome、2-5 條 AC、單一 assignee。subtask 不是「parent 的 checklist」——是「同 plan 同 product 下獨立可驗收的子單位」。
 
 ### Milestone（= Goal entity）掛法
 
@@ -256,6 +259,180 @@ Action-Layer 升級不是只改 schema 就完——MCP tool docstring、governan
 | Plan 升格 entity | 另走 ADR-028 Draft，不在本升級範圍 |
 | Task template / recipe | 獨立討論 |
 | Handoff 反向 rollback / revert 履歷 | 若需修正派工錯誤，append 新事件（reason="revert"），不刪除 |
+
+---
+
+## 2026-04-22 Task Ownership SSOT 收斂（最新覆寫）
+
+> Decision source：ADR-044。本節是治理規則的人讀權威；runtime SSOT 在 `src/zenos/interface/governance_rules.py["task"]`。
+
+### 層級結構（嚴格四層）
+
+```
+Milestone (= Goal entity, L3)     ← outcome anchor，type=goal 的 L3 entity
+    ↑ linked_entities（選填）
+Plan                              ← action layer primitive（grouping + sequencing + completion boundary）
+    ↑ plan_id（選填）
+Task                              ← action layer primitive
+    ↑ parent_task_id（必填 for subtask）
+Subtask                           ← Task with parent_task_id ≠ null
+```
+
+- **Milestone** = `type=goal, level=3` 的 L3 entity，透過 task.linked_entities 引用（不新增 entity type）
+- **Plan** 是 action layer primitive，不是 entity
+- **Task** 可以有 plan（屬於 plan 內的有序單位）或無 plan（ad-hoc task），但都必須有 product
+- **Subtask** 必須有 parent task——不是孤兒，不能自行存在
+
+### 三條繩子原則
+
+Task 對外有且只有三條關聯繩子，各管各的，不可混用：
+
+| 繩子 | 欄位 | Cardinality | 必填 | 語意 | 變更來源 |
+|------|------|-------------|------|------|----------|
+| **歸屬繩** | `product_id` (FK to L1 product entity) | 1:1 | ✅ **必填** | 「這 task 屬於哪個 **產品**」唯一 SSOT | caller 顯式傳入或 server 從 partner default 解析 |
+| **編組繩** | `plan_id` + `parent_task_id` | 1:1 | 選填 | 「這 task 在哪個 plan / 是誰的 subtask」 | caller 傳入，subtask 必須繼承 parent.plan_id 與 parent.product_id |
+| **知識繩** | `linked_entities` (N:N) | 0..3 | 建議 | 「這 task 跟哪些 L2 module / L3 milestone 有 ontology 關聯」純 context | caller 傳入，**禁止包含 type=product 的 entity** |
+
+`product_id` 取代既有 `project_id` 欄位（schema rename，非新增）。Plans 表對齊改名為 `plans.product_id`。
+
+### Schema 變更
+
+| 欄位 | 型別 | 必填 | 變更 |
+|------|------|------|------|
+| `tasks.product_id` | text | ✅ NOT NULL | 從 `tasks.project_id` 改名而來；FK 指向 `entities(partner_id, id)` |
+| `plans.product_id` | text | ✅ NOT NULL | 從 `plans.project_id` 改名而來；FK + 同樣 type 約束 |
+| `tasks.project` | text | deprecated | 過渡期由 server 從 product entity.name 派生；caller 寫入會被 ignore + warning |
+| `plans.project` | text | deprecated | 同上 |
+
+### Server-side 寫入驗證（write / task action=create/update / handoff）
+
+| 違規 | 處置 | error_code |
+|------|------|------------|
+| 沒傳 `product_id` 也無 `partner.defaultProject` 可解析 | reject | `MISSING_PRODUCT_ID` |
+| `product_id` 指向不存在 entity | reject | `INVALID_PRODUCT_ID` |
+| `product_id` 指向 type ≠ product 的 entity | reject | `INVALID_PRODUCT_ID` |
+| `linked_entities` 包含 type=product 的 entity | strip + warning | `LINKED_ENTITIES_PRODUCT_STRIPPED` |
+| 同時傳 `project` 字串和 `product_id` 但對不上 | 以 `product_id` 為準 + warning | `PROJECT_STRING_IGNORED` |
+| subtask.product_id ≠ parent.product_id | reject | `CROSS_PRODUCT_SUBTASK` |
+| task.product_id ≠ plan.product_id（若 task 有 plan_id） | reject | `CROSS_PRODUCT_PLAN_TASK` |
+| subtask 的 parent_task_id 指向不存在 task | reject | `PARENT_NOT_FOUND` |
+
+### Fallback 解析鏈（caller 沒傳 product_id 時）
+
+按順序，全部失敗才 reject `MISSING_PRODUCT_ID`：
+
+1. **partner.defaultProject 字串解析**：在當前 partner 範圍內找 `type='product'` 且 `LOWER(name) = LOWER(defaultProject)` 的 entity；取第一筆
+2. **失敗** → reject。**不再 fallback first product entity**——猜錯比 reject 更危險
+
+### linked_entities 的正確掛法（語意收緊）
+
+`linked_entities` 僅放 **L2 module entity** 或 **L3 entity**（goal=milestone / document / role）：
+
+- 1-3 個，不可超過
+- 至少包含一個最相關的 L2 module（最強建議）
+- Milestone 沿用 `Milestone (= Goal entity)` 規則，掛在這裡
+- **不可包含 type=product entity**——歸屬已由 product_id 表達，重複放會被 server strip
+
+### 查詢 Pattern（取代 linked_entities join）
+
+| 場景 | Query |
+|------|-------|
+| 某 product 底下所有 task | `search(tasks, product_id=<product_id>)` 或 SQL `WHERE product_id = $1` |
+| 某 milestone 下的所有 task | `search(tasks, linked_entity=<goal_id>)`（goal 在 linked_entities 內） |
+| 某 plan 下的所有 task | `search(tasks, plan_id=<plan_id>)` |
+| 某 task 的 subtask | `search(tasks, parent_task_id=<task_id>)` |
+| 某 product 下的某 milestone 進度 | `search(tasks, product_id=X, linked_entity=<goal_id>)` |
+
+`/projects/[id]` 產品頁的「任務」分頁 → 走 `product_id = entity_id`，**不再用 linked_entities join**。
+
+### Migration（一次性 cut-over）
+
+詳見 ADR-044 D8。要點：
+
+1. Schema rename `project_id → product_id`
+2. Backfill 順序：task_entities 中的 product entity → project 字串 entity name lookup → partner.defaultProject 解析 → first product entity 兜底（標 governance review）
+3. 從 task_entities 移除已升格為 product_id 的 product entity（解除誤掛）
+4. 加 NOT NULL constraint
+5. 加 server-side validation
+6. Deploy code changes
+
+Backfill 兜底的 task 會 insert 一筆 `governance:review_product_assignment` tag，後台撈出來人工 review。
+
+### 驗收條件（給 Developer / QA）
+
+每條 AC 帶唯一 ID `AC-TOSC-NN`，對應 test stub 於：
+- `tests/spec_compliance/test_task_ownership_ssot_ac.py`（backend）
+- `dashboard/src/__tests__/task_ownership_ssot_ac.test.tsx`（frontend）
+
+共 25 條 AC（AC-TOSC-01..25），涵蓋 Schema/Migration、Server Validation、Write Path、Read Path、Frontend、Deprecation、文件同步。
+
+#### Schema / Migration（P0）
+
+- **AC-TOSC-01**：migration 完成後，`tasks.product_id` 欄位存在（取代 `project_id`），有 `idx_tasks_partner_product_id` index 與 FK to `entities(partner_id, id)`。
+- **AC-TOSC-02**：`plans.product_id` 同 AC-TOSC-01 完成改名，FK 與 index 對齊。
+- **AC-TOSC-03**：migration 完成後，`SELECT COUNT(*) FROM tasks WHERE product_id IS NULL = 0`，且所有兜底 task 有 `governance:review_product_assignment` tag。
+- **AC-TOSC-04**：`tasks.product_id` 與 `plans.product_id` 加上 `NOT NULL` constraint，違反時 DB 直接 reject。
+
+#### Server Validation（P0）
+
+- **AC-TOSC-05**：`task(action="create")` / `write(collection="tasks")` 沒傳 `product_id`，且 `partner.defaultProject` 解析無結果時，reject `MISSING_PRODUCT_ID`。
+- **AC-TOSC-06**：`product_id` 指向不存在 entity 或 type ≠ product 的 entity 時，reject `INVALID_PRODUCT_ID`。
+- **AC-TOSC-07**：`linked_entities` 含 type=product entity 時，server strip 並回傳 warning `LINKED_ENTITIES_PRODUCT_STRIPPED`，DB 不會寫入該關聯。
+- **AC-TOSC-08**：同時傳 `project` 字串與 `product_id` 且 product entity.name ≠ project 字串時，以 `product_id` 為準並回傳 warning `PROJECT_STRING_IGNORED`。
+- **AC-TOSC-09**：subtask 的 `product_id` ≠ parent task `product_id` 時，reject `CROSS_PRODUCT_SUBTASK`。
+- **AC-TOSC-10**：task 有 `plan_id` 且 `task.product_id` ≠ `plan.product_id` 時，reject `CROSS_PRODUCT_PLAN_TASK`。
+- **AC-TOSC-11**：caller 沒傳 `product_id` 但 `partner.defaultProject` 解析成功時，server 自動填入並回傳 task；audit log 記錄 `auto_resolved_product_id`。
+
+#### Write Path 接通（P0）
+
+- **AC-TOSC-12**：MCP `task(action="create", product_id=...)` 接受參數並寫入 DB；`task(action="update", id=..., product_id=...)` 同樣可用。
+- **AC-TOSC-13**：MCP `plan(action="create", product_id=...)` 已存在，verify 改名後仍可用，且加上 type validation。
+- **AC-TOSC-14**：Dashboard `POST /api/data/tasks` 接受 body 內 `product_id` 並寫入；`PATCH /api/data/tasks/{id}` 同樣可用。
+- **AC-TOSC-15**：`ext_ingestion_api` 的 task 寫入路徑接受並驗證 `product_id`。
+
+#### Read Path 改造（P0）
+
+- **AC-TOSC-16**：`GET /api/data/tasks/by-entity/{entityId}` 當 entity.type=product 時走 `WHERE product_id = $entityId`；當 entity.type 為其他（goal / module）時走 task_entities join。
+- **AC-TOSC-17**：MCP `search(tasks, product_id=X)` 純走 `product_id` 欄位，不再 fallback `project` 字串 match。
+- **AC-TOSC-18**：Frontend 全域 `/tasks` 的 product filter 改用 `product_id`，顯示 product entity name。
+
+#### Frontend（P0）
+
+- **AC-TOSC-19**：UI 從產品頁 `/projects/[id]` 建 task 時，傳遞 `product_id = entity.id`，**不再** 偷塞 entity.id 進 `linked_entities`。
+- **AC-TOSC-20**：`createTask` client 型別定義 `product_id: string` 為必填欄位（TypeScript 強制）。
+
+#### Deprecation（P1）
+
+- **AC-TOSC-21**：caller 寫入 `project` 字串欄位被 server ignore 並回傳 warning `PROJECT_STRING_IGNORED`；DB 內 project 字串由 server 從 product entity.name 自動派生。
+- **AC-TOSC-22**：`src/zenos/interface/governance_rules.py["task"]` runtime SSOT 同步加上三條繩子原則 + 七條 server validation 規則（AC-TOSC-05..11）的 level 2 內容。
+
+#### 文件 / 治理（P0）
+
+- **AC-TOSC-23**：本節（2026-04-22 Task Ownership SSOT 收斂）已落入 `SPEC-task-governance.md`，且 `governance_guide(topic="task", level=2)` 回傳內容包含三條繩子原則與七條 validation 規則。
+- **AC-TOSC-24**：`skills/governance/task-governance.md`、`skills/governance/shared-rules.md` 同步加註對齊本節（reference-only）。
+- **AC-TOSC-25**：`SPEC-task-surface-reset`、`SPEC-project-progress-console` 加註腳對齊 product_id query contract，無語意衝突。
+
+### 下游 SSOT 同步清單
+
+| # | 位置 | 變更 |
+|---|------|------|
+| 1 | `src/zenos/infrastructure/action/sql_task_repo.py` | UPSERT / SELECT / search 改 `product_id` 命名；加 type validation 步驟（透過 service 層） |
+| 2 | `src/zenos/infrastructure/action/sql_plan_repo.py` | 同上 |
+| 3 | `src/zenos/domain/action/models.py` | `Task.project_id` → `Task.product_id`；`Plan.project_id` → `Plan.product_id` |
+| 4 | `src/zenos/application/action/task_service.py` | create/update 處理 product_id；加 server validation 全集 |
+| 5 | `src/zenos/application/action/plan_service.py` | 同上 |
+| 6 | `src/zenos/interface/mcp/task.py` | `_task_handler` signature 加 `product_id` 參數；docstring 更新 |
+| 7 | `src/zenos/interface/mcp/plan.py` | 改名 `project_id` 參數為 `product_id`，docstring 更新 |
+| 8 | `src/zenos/interface/mcp/search.py` | tasks search 的 product/product_id 過濾純走 `product_id` |
+| 9 | `src/zenos/interface/dashboard_api.py` | create_task / update_task 白名單加 `product_id`；`list_tasks_by_entity` 改造 |
+| 10 | `src/zenos/interface/ext_ingestion_api.py` | 接受並驗證 `product_id` |
+| 11 | `src/zenos/interface/governance_rules.py["task"]` | 加三條繩子原則 + 七條 validation level 2 內容 |
+| 12 | `dashboard/src/lib/api.ts` | createTask / updateTask 型別加 `product_id` 必填 |
+| 13 | `dashboard/src/app/(protected)/projects/page.tsx` | 建 task 改傳 `product_id`，移除 linked_entities 偷塞 hack |
+| 14 | `dashboard/src/app/(protected)/tasks/page.tsx` | filter 改 `product_id` |
+| 15 | `dashboard/src/features/tasks/taskHub.ts` | `plan.project_id` 引用改 `plan.product_id` |
+| 16 | `skills/governance/task-governance.md` | 同步治理規則 v2.2（reference-only） |
+| 17 | `skills/governance/shared-rules.md` | 同上 |
 
 ---
 

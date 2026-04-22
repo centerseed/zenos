@@ -115,6 +115,7 @@ PM 將完整 Spec 呈給用戶逐章確認。
 ```python
 plan = mcp__zenos__plan(action="create",
     goal="{一句話 feature 目標}",
+    product_id="{product_entity_id}",   # 必填（ADR-044）— plan/task 歸屬 SSOT
     entry_criteria="Spec Approved + linked_entities ready",
     exit_criteria="所有 P0 AC green + 部署驗證通過")
 # plan["data"]["id"] 是 32-char UUID，下面所有 task 的 plan_id 都用這個 id
@@ -125,8 +126,9 @@ plan = mcp__zenos__plan(action="create",
 ```python
 mcp__zenos__task(action="create",
     title="實作 {feature_slug}", dispatcher="agent:pm",
-    linked_entities=[...],
-    plan_id="{plan.id}",          # ← Plan UUID，非 slug
+    product_id="{product_entity_id}",   # 必填，必須等於 plan.product_id
+    linked_entities=[...],              # 只放 L2 module / L3 goal(milestone)，禁止放 product entity
+    plan_id="{plan.id}",                 # ← Plan UUID，非 slug
     acceptance_criteria=[...])
 mcp__zenos__task(action="handoff", id="{task_id}",
     to_dispatcher="agent:architect", reason="spec ready",
@@ -137,7 +139,7 @@ mcp__zenos__task(action="handoff", id="{task_id}",
 
 - 讀 task + `handoff_events` 取完整脈絡
 - 技術設計
-- 必要時拆 subtask（`parent_task_id=<parent>` + 繼承 `parent.plan_id` UUID，不能跨 plan）
+- 必要時拆 subtask（`parent_task_id=<parent>` 必填 + `product_id=parent.product_id` + `plan_id=parent.plan_id`；server 強制跨 product/plan reject）
 - 每張 task ready → handoff to `agent:developer`
 
 ---

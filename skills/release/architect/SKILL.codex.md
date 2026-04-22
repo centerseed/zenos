@@ -454,9 +454,10 @@ mcp__zenos__task(
     action="create",
     title="{subtask 單一 outcome}",
     dispatcher="agent:architect",
-    parent_task_id="{parent_task_id}",
-    plan_id="{parent.plan_id}",          # Plan UUID，必須與 parent 一致，否則 CROSS_PLAN_SUBTASK reject
-    linked_entities=[...],
+    parent_task_id="{parent_task_id}",   # subtask 必填——subtask 不能是孤兒
+    product_id="{parent.product_id}",     # 必填，必須 = parent.product_id 否則 CROSS_PRODUCT_SUBTASK reject
+    plan_id="{parent.plan_id}",           # Plan UUID，必須 = parent.plan_id 否則 CROSS_PLAN_SUBTASK reject
+    linked_entities=[...],                # 只放 L2 module / L3 goal(milestone)，禁止放 product entity
     acceptance_criteria=[...],
 )
 ```
@@ -469,6 +470,7 @@ mcp__zenos__task(
 plan = mcp__zenos__plan(
     action="create",
     goal="{refactor/incident 目標，一句話}",
+    product_id="{product_entity_id}",    # 必填，ADR-044 後為 plan/task 歸屬 SSOT
     entry_criteria="{觸發條件，如 'ADR-NNN accepted' 或 'incident post-mortem signed'}",
     exit_criteria="{收口條件，如 '舊 API 下線 + 呼叫方全部遷移 + 驗收通過'}",
 )
