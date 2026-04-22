@@ -276,6 +276,46 @@ describe("TaskDetailDrawer — B4 Zen migration", () => {
     });
   });
 
+  it("blocks direct done outside review with the same governance warning", async () => {
+    const onUpdateTask = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TaskDetailDrawer
+        task={makeTask({ status: "todo", result: "已整理資料" })}
+        onUpdateTask={onUpdateTask}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "todo" }));
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+
+    expect(
+      screen.getByText("任務完成必須先進入審查中，再由驗收流程完成。")
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "知道了" })).toBeDefined();
+    expect(onUpdateTask).not.toHaveBeenCalled();
+  });
+
+  it("uses confirmTask when marking a review task as done from the drawer", async () => {
+    const onConfirmTask = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <TaskDetailDrawer
+        task={makeTask({ status: "review", result: "ready for approval" })}
+        onConfirmTask={onConfirmTask}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "review" }));
+    fireEvent.click(screen.getByRole("button", { name: "done" }));
+
+    await waitFor(() => {
+      expect(onConfirmTask).toHaveBeenCalledWith("task-b4-test", { action: "approve" });
+    });
+  });
+
   it("closes via onClose when close button is clicked", () => {
     const onClose = vi.fn();
     render(<TaskDetailDrawer task={makeTask()} onClose={onClose} />);

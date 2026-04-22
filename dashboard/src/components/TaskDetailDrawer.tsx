@@ -116,15 +116,7 @@ const priorityIcons: Record<string, React.ReactNode> = {
   low: <ArrowDown style={{ width: 12, height: 12 }} />,
 };
 
-/** Valid status transitions: from -> to[] */
-const STATUS_TRANSITIONS: Record<string, string[]> = {
-  todo: ["in_progress"],
-  in_progress: ["todo", "review"],
-  review: ["in_progress", "done"],
-  done: ["todo"],
-  cancelled: [],
-  blocked: ["todo", "in_progress"],
-};
+const STATUS_OPTIONS: Task["status"][] = ["todo", "in_progress", "review", "done"];
 
 function formatDate(date: Date | null): string {
   if (!date) return "No date set";
@@ -383,6 +375,7 @@ export function TaskDetailDrawer({
   // Warning dialog state
   const [pendingStatusChange, setPendingStatusChange] = useState<string | null>(null);
   const [warningMessage, setWarningMessage] = useState<string | null>(null);
+  const [warningConfirmLabel, setWarningConfirmLabel] = useState("強制執行");
   // Comments state
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [commentsError, setCommentsError] = useState<string | null>(null);
@@ -424,6 +417,7 @@ export function TaskDetailDrawer({
     setShowStatusDropdown(false);
     setPendingStatusChange(null);
     setWarningMessage(null);
+    setWarningConfirmLabel("強制執行");
     setComments([]);
     setCommentsError(null);
     setNewComment("");
@@ -636,9 +630,19 @@ export function TaskDetailDrawer({
     if (!localTask) return;
     setShowStatusDropdown(false);
 
-    if (localTask.status === "todo" && newStatus === "done") {
-      setWarningMessage("建議先經過 in_progress 和 review，確定要直接完成？");
-      setPendingStatusChange(newStatus);
+    if (newStatus === "done" && localTask.status !== "review") {
+      setWarningMessage("任務完成必須先進入審查中，再由驗收流程完成。");
+      setPendingStatusChange(null);
+      setWarningConfirmLabel("知道了");
+      return;
+    }
+    if (newStatus === "done" && localTask.status === "review") {
+      if (!onConfirmTask) return;
+      try {
+        await onConfirmTask(localTask.id, { action: "approve" });
+      } catch {
+        // parent handles error surface
+      }
       return;
     }
     if (newStatus === "review" && !localTask.result?.trim()) {
@@ -795,7 +799,11 @@ export function TaskDetailDrawer({
 
   if (!displayTask) return null;
 
-  const availableTransitions = STATUS_TRANSITIONS[displayTask.status] ?? [];
+  const availableTransitions = STATUS_OPTIONS.filter((status) => {
+    if (status === displayTask.status) return false;
+    if (status === "done") return Boolean(onUpdateTask || onConfirmTask);
+    return Boolean(onUpdateTask);
+  });
 
   // ── Section label style (shared) ─────────────────────────────────────────
   const sectionLabel = (label: string) => (
@@ -2250,7 +2258,13 @@ export function TaskDetailDrawer({
       <Dialog
         t={t}
         open={!!warningMessage}
-        onOpenChange={(open) => { if (!open) { setPendingStatusChange(null); setWarningMessage(null); } }}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingStatusChange(null);
+            setWarningMessage(null);
+            setWarningConfirmLabel("強制執行");
+          }
+        }}
         title={
           <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <AlertTriangle style={{ width: 16, height: 16, color: c.ocher }} />
@@ -2260,17 +2274,33 @@ export function TaskDetailDrawer({
         size="sm"
         footer={
           <>
-            <Btn t={t} variant="ghost" size="sm" onClick={() => { setPendingStatusChange(null); setWarningMessage(null); }}>
+            <Btn
+              t={t}
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setPendingStatusChange(null);
+                setWarningMessage(null);
+                setWarningConfirmLabel("強制執行");
+              }}
+            >
               取消
             </Btn>
             <Btn
               t={t}
               variant="outline"
               size="sm"
-              onClick={() => pendingStatusChange && applyStatusChange(pendingStatusChange)}
+              onClick={() => {
+                if (pendingStatusChange) {
+                  applyStatusChange(pendingStatusChange);
+                } else {
+                  setWarningMessage(null);
+                }
+                setWarningConfirmLabel("強制執行");
+              }}
               style={{ color: c.ocher, borderColor: c.ocher }}
             >
-              強制執行
+              {warningConfirmLabel}
             </Btn>
           </>
         }
