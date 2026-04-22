@@ -1956,7 +1956,7 @@ async def get_project_progress(request: Request) -> Response:
                 for plan in listed_plans
                 if plan.id
                 and (
-                    plan.product_id == project_id
+                    getattr(plan, "product_id", getattr(plan, "project_id", None)) == project_id
                     or str(plan.project or "").strip().lower() == normalized_project_name
                 )
             }
