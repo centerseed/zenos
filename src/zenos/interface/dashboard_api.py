@@ -277,7 +277,6 @@ def _graph_context_is_visible(entity: Entity, partner: dict) -> bool:
 def _graph_context_tags(entity: Entity) -> dict:
     what = entity.tags.what if isinstance(entity.tags.what, list) else [entity.tags.what] if entity.tags.what else []
     who = entity.tags.who if isinstance(entity.tags.who, list) else [entity.tags.who] if entity.tags.who else []
-    product_id = getattr(t, "product_id", getattr(t, "project_id", None))
     return {
         "what": [str(item).strip() for item in what if str(item).strip()],
         "why": str(entity.tags.why or "").strip(),
