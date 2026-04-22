@@ -364,13 +364,13 @@ function InkProjectsList({
         subtitle="所有進行中的產品主軸與其推進狀態。這一頁對應的是 L1 product，不是 L3 project。"
         right={
           <div style={{ display: "flex", gap: 10 }}>
-            <Btn t={t} variant="ghost" icon={ICONS.filter}>
+            <Btn t={t} variant="ghost" icon={ICONS.filter} disabled>
               篩選
             </Btn>
-            <Btn t={t} variant="outline" icon={ICONS.spark}>
+            <Btn t={t} variant="outline" icon={ICONS.spark} disabled>
               Agent 盤點
             </Btn>
-            <Btn t={t} variant="seal" icon={ICONS.plus}>
+            <Btn t={t} variant="seal" icon={ICONS.plus} disabled>
               新產品
             </Btn>
           </div>

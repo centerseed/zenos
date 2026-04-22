@@ -8,6 +8,8 @@ const mockGetDealActivities = vi.fn();
 const mockFetchDealAiEntries = vi.fn();
 const mockGetCompany = vi.fn();
 const mockGetCompanyContacts = vi.fn();
+const mockCreateDeal = vi.fn();
+const mockCreateCompany = vi.fn();
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
@@ -43,6 +45,8 @@ vi.mock("@/lib/crm-api", async () => {
     fetchDealAiEntries: (...args: unknown[]) => mockFetchDealAiEntries(...args),
     getCompany: (...args: unknown[]) => mockGetCompany(...args),
     getCompanyContacts: (...args: unknown[]) => mockGetCompanyContacts(...args),
+    createDeal: (...args: unknown[]) => mockCreateDeal(...args),
+    createCompany: (...args: unknown[]) => mockCreateCompany(...args),
     patchDealStage: vi.fn(),
     createActivity: vi.fn(),
     createAiInsight: vi.fn(),
@@ -111,6 +115,8 @@ describe("ZenInkClientsWorkspace", () => {
       updatedAt: new Date("2026-04-01T00:00:00Z"),
     });
     mockGetCompanyContacts.mockResolvedValue([]);
+    mockCreateDeal.mockReset();
+    mockCreateCompany.mockReset();
   });
 
   afterEach(() => {
@@ -164,5 +170,26 @@ describe("ZenInkClientsWorkspace", () => {
 
     await waitFor(() => expect(screen.getByText("AI 會議準備")).toBeInTheDocument());
     expect(screen.getByRole("button", { name: "開始 AI 討論" })).toBeInTheDocument();
+  });
+
+  it("opens new deal modal from 新機會 CTA", async () => {
+    render(<ZenInkClientsWorkspace />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "新機會" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "新機會" }));
+
+    expect(await screen.findByText("新增商機")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "建立商機" })).toBeInTheDocument();
+  });
+
+  it("disables placeholder CTA buttons that are not implemented yet", async () => {
+    render(<ZenInkClientsWorkspace />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "篩選" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "篩選" })).toBeDisabled();
+
+    fireEvent.click(screen.getByText("企業流程導入"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "排程" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "排程" })).toBeDisabled();
   });
 });

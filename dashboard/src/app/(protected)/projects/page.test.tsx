@@ -271,6 +271,42 @@ describe("ProjectsPage", () => {
     });
   });
 
+  it("disables placeholder CTA buttons on the projects list shell", async () => {
+    getProjectEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    getProjectEntitiesInWorkspaceMock.mockResolvedValue([]);
+    getProjectProgressMock.mockResolvedValue(null);
+    getTasksByEntityMock.mockResolvedValue([]);
+    getEntityContextMock.mockResolvedValue({ entity: null, impact_chain: [], reverse_impact_chain: [] });
+    getChildEntitiesMock.mockResolvedValue([]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+
+    const { default: ProjectsPage } = await import("./page");
+    render(<ProjectsPage />);
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "新產品" })).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "篩選" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Agent 盤點" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "新產品" })).toBeDisabled();
+  });
+
   it("shows focused plan banner when deep-linked from task hub", async () => {
     window.history.replaceState({}, "", "/projects?id=entity-1&focus=plan:plan-1");
     getProjectEntitiesMock.mockResolvedValue([

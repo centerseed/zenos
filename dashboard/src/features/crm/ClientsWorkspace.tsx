@@ -372,7 +372,7 @@ interface NewDealModalProps {
   userId: string;
 }
 
-function NewDealModal({
+export function NewDealModal({
   isOpen,
   onClose,
   companies,

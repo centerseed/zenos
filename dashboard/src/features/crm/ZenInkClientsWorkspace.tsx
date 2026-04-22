@@ -43,6 +43,7 @@ import type {
   AiInsight,
 } from "@/lib/crm-api";
 import { CrmAiPanel } from "@/features/crm/CrmAiPanel";
+import { NewDealModal } from "@/features/crm/ClientsWorkspace";
 
 // ─── Stage definitions ────────────────────────────────────────────────────────
 
@@ -599,9 +600,9 @@ function InkDealDetail({
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Btn t={t} variant="ghost" size="sm" icon={ICONS.clock}>
-            排程
-          </Btn>
+            <Btn t={t} variant="ghost" size="sm" icon={ICONS.clock} disabled>
+              排程
+            </Btn>
           <Btn
             t={t}
             variant="outline"
@@ -1458,7 +1459,12 @@ function InkNewActivityForm({
   );
 }
 
-function InkClientsList({ deals, companiesMap, onOpen }: ClientsListProps) {
+function InkClientsList({
+  deals,
+  companiesMap,
+  onOpen,
+  onCreateDeal,
+}: ClientsListProps & { onCreateDeal: () => void }) {
   const t = useInk("light");
   const { c, fontHead, fontMono, fontBody } = t;
   const [view, setView] = useState<"pipeline" | "list">("pipeline");
@@ -1554,10 +1560,10 @@ function InkClientsList({ deals, companiesMap, onOpen }: ClientsListProps) {
                 </button>
               ))}
             </div>
-            <Btn t={t} variant="ghost" icon={ICONS.filter}>
+            <Btn t={t} variant="ghost" icon={ICONS.filter} disabled>
               篩選
             </Btn>
-            <Btn t={t} variant="seal" icon={ICONS.plus}>
+            <Btn t={t} variant="seal" icon={ICONS.plus} onClick={onCreateDeal}>
               新機會
             </Btn>
           </div>
@@ -1899,6 +1905,7 @@ export default function ZenInkClientsWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Route guard — same as ClientsWorkspace
   useEffect(() => {
@@ -1935,6 +1942,13 @@ export default function ZenInkClientsWorkspace() {
     void load();
   }, [load]);
 
+  const handleDealCreated = useCallback((newDeal: Deal, newCompany?: Company) => {
+    if (newCompany) {
+      setCompanies((prev) => [...prev, newCompany]);
+    }
+    setDeals((prev) => [newDeal, ...prev]);
+  }, []);
+
   // Render nothing while redirecting shared-workspace users
   if (partner && !isHomeWorkspace) return null;
 
@@ -1958,10 +1972,16 @@ export default function ZenInkClientsWorkspace() {
   }
 
   return (
-    <InkClientsList
-      deals={deals}
-      companiesMap={companiesMap}
-      onOpen={setOpenId}
-    />
+    <>
+      <InkClientsList deals={deals} companiesMap={companiesMap} onOpen={setOpenId} onCreateDeal={() => setIsModalOpen(true)} />
+      <NewDealModal
+        isOpen={isModalOpen}
+        onClose={() => setIsModalOpen(false)}
+        companies={companies}
+        onCreated={handleDealCreated}
+        user={user}
+        userId={partner?.id ?? ""}
+      />
+    </>
   );
 }
