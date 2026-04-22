@@ -1855,6 +1855,13 @@ def _plan_payload_to_dict(plan: object) -> dict[str, object]:
     }
 
 
+def _make_plan_service() -> PlanService:
+    try:
+        return PlanService(_plan_repo, _task_repo, _entity_repo)
+    except TypeError:
+        return PlanService(_plan_repo, _task_repo)
+
+
 async def list_plans(request: Request) -> Response:
     if request.method == "OPTIONS":
         return _handle_options(request)
@@ -1872,7 +1879,7 @@ async def list_plans(request: Request) -> Response:
 
     token = current_partner_id.set(effective_id)
     try:
-        plan_service = PlanService(_plan_repo, _task_repo, _entity_repo)
+        plan_service = _make_plan_service()
         if deduped_ids:
             plans: list[dict[str, object]] = []
             for plan_id in deduped_ids:
@@ -1935,7 +1942,7 @@ async def get_project_progress(request: Request) -> Response:
     token = current_partner_id.set(effective_id)
     try:
         linked_tasks = await _task_repo.list_all(product_id=project_id, limit=500)
-        plan_service = PlanService(_plan_repo, _task_repo, _entity_repo)
+        plan_service = _make_plan_service()
         listed_plans = await plan_service.list_plans(limit=200)
         normalized_project_name = str(project.name or "").strip().lower()
         plan_ids = sorted(
