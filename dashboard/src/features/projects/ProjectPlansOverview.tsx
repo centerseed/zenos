@@ -288,9 +288,13 @@ function PlanTaskRow({
 function PlanCard({
   plan,
   taskGroup,
+  focusedPlanId,
+  focusedMilestoneId,
 }: {
   plan: ProjectProgressPlanSummary;
   taskGroup?: ProjectProgressOpenWorkGroup;
+  focusedPlanId?: string | null;
+  focusedMilestoneId?: string | null;
 }) {
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
@@ -300,8 +304,8 @@ function PlanCard({
     <article
       data-testid="plan-card"
       style={{
-        border: `1px solid ${plan.blocked_count > 0 ? c.vermLine : c.inkHair}`,
-        background: plan.blocked_count > 0 ? c.vermSoft : c.paperWarm,
+        border: `1px solid ${plan.id === focusedPlanId ? c.vermillion : plan.blocked_count > 0 ? c.vermLine : c.inkHair}`,
+        background: plan.id === focusedPlanId ? c.surface : plan.blocked_count > 0 ? c.vermSoft : c.paperWarm,
         padding: 16,
       }}
     >
@@ -344,9 +348,9 @@ function PlanCard({
             <span
               key={milestone.id}
               style={{
-                border: `1px solid ${c.inkHairBold}`,
-                background: c.surface,
-                color: c.inkMuted,
+                border: `1px solid ${milestone.id === focusedMilestoneId ? c.vermillion : c.inkHairBold}`,
+                background: milestone.id === focusedMilestoneId ? c.vermSoft : c.surface,
+                color: milestone.id === focusedMilestoneId ? c.ink : c.inkMuted,
                 padding: "4px 8px",
                 fontSize: 10,
                 letterSpacing: "0.08em",
@@ -410,10 +414,14 @@ export function ProjectPlansOverview({
   plans,
   milestones,
   groups,
+  focusedPlanId,
+  focusedMilestoneId,
 }: {
   plans: ProjectProgressPlanSummary[];
   milestones: ProjectProgressMilestone[];
   groups: ProjectProgressOpenWorkGroup[];
+  focusedPlanId?: string | null;
+  focusedMilestoneId?: string | null;
 }) {
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
@@ -495,7 +503,13 @@ export function ProjectPlansOverview({
 
               <div style={{ display: "grid", gap: 12 }}>
                 {bucket.plans.map((plan) => (
-                  <PlanCard key={plan.id} plan={plan} taskGroup={groupsByPlan.get(plan.id)} />
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    taskGroup={groupsByPlan.get(plan.id)}
+                    focusedPlanId={focusedPlanId}
+                    focusedMilestoneId={focusedMilestoneId}
+                  />
                 ))}
               </div>
             </section>
@@ -534,7 +548,13 @@ export function ProjectPlansOverview({
               </div>
               <div style={{ display: "grid", gap: 12 }}>
                 {unassignedPlans.map((plan) => (
-                  <PlanCard key={plan.id} plan={plan} taskGroup={groupsByPlan.get(plan.id)} />
+                  <PlanCard
+                    key={plan.id}
+                    plan={plan}
+                    taskGroup={groupsByPlan.get(plan.id)}
+                    focusedPlanId={focusedPlanId}
+                    focusedMilestoneId={focusedMilestoneId}
+                  />
                 ))}
               </div>
             </section>

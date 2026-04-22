@@ -14,6 +14,7 @@ import { TaskCreateDialog } from "@/components/TaskCreateDialog";
 import { PlanCreateDialog } from "@/components/PlanCreateDialog";
 import { MilestoneCreateDialog } from "@/components/MilestoneCreateDialog";
 import { ProjectProgressConsole } from "@/features/projects/ProjectProgressConsole";
+import type { TaskHubFocus } from "@/features/tasks/taskHub";
 import { useAuth } from "@/lib/auth";
 import {
   applyHomeWorkspaceBootstrap,
@@ -121,6 +122,14 @@ function scrollPageToTop(): void {
   }
 
   window.scrollTo({ top: 0, behavior: "auto" });
+}
+
+function parseProjectFocus(raw: string | null): TaskHubFocus | null {
+  if (!raw) return null;
+  if (raw.startsWith("milestone:") || raw.startsWith("plan:")) {
+    return raw as TaskHubFocus;
+  }
+  return null;
 }
 
 // ─── Loading state ────────────────────────────────────────────────────────────
@@ -675,9 +684,11 @@ interface DetailData {
 
 function InkProjectDetail({
   entityId,
+  focus,
   onBack,
 }: {
   entityId: string;
+  focus: TaskHubFocus | null;
   onBack: () => void;
 }) {
   const t = useInk("light");
@@ -722,7 +733,7 @@ function InkProjectDetail({
     setCreateKind(null);
     setMutationError(null);
     setProjectRecapOpen(false);
-  }, [entityId]);
+  }, [entityId, focus]);
 
   const replaceTask = useCallback((nextTask: Task) => {
     setDetail((prev) => {
@@ -814,6 +825,29 @@ function InkProjectDetail({
       .filter((task) => task.status !== "done" && task.dueDate)
       .sort((a, b) => (a.dueDate?.getTime() ?? Number.MAX_SAFE_INTEGER) - (b.dueDate?.getTime() ?? Number.MAX_SAFE_INTEGER))[0] ?? null;
   }, [tasks]);
+  const focusCard = useMemo(() => {
+    if (!focus || !progressDetail) return null;
+
+    if (focus.startsWith("milestone:")) {
+      const milestoneId = focus.slice("milestone:".length);
+      const milestone = progressDetail.milestones.find((item) => item.id === milestoneId);
+      if (!milestone) return null;
+      return {
+        label: "Focused Milestone",
+        title: milestone.name,
+        detail: `${milestone.open_count} open item(s)`,
+      };
+    }
+
+    const planId = focus.slice("plan:".length);
+    const plan = progressDetail.active_plans.find((item) => item.id === planId);
+    if (!plan) return null;
+    return {
+      label: "Focused Plan",
+      title: plan.goal,
+      detail: `${plan.open_count} open · ${plan.blocked_count} blocked · ${plan.review_count} review · ${plan.overdue_count} overdue`,
+    };
+  }, [focus, progressDetail]);
 
   const handleCreateTask = useCallback(async (data: CreateTaskInput) => {
     if (!user || !entity) return;
@@ -1063,6 +1097,33 @@ function InkProjectDetail({
           </div>
         ) : null}
 
+        {focusCard ? (
+          <div
+            data-testid="project-focus-banner"
+            style={{
+              background: c.paperWarm,
+              border: `1px solid ${c.vermLine}`,
+              padding: "14px 16px",
+              marginBottom: 16,
+            }}
+          >
+            <div
+              style={{
+                fontFamily: fontMono,
+                fontSize: 10,
+                color: c.vermillion,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}
+            >
+              {focusCard.label}
+            </div>
+            <div style={{ fontSize: 15, color: c.ink, fontWeight: 600 }}>{focusCard.title}</div>
+            <div style={{ fontSize: 12, color: c.inkMuted, marginTop: 4 }}>{focusCard.detail}</div>
+          </div>
+        ) : null}
+
         <div
           style={{
             display: "grid",
@@ -1223,6 +1284,7 @@ function InkProjectDetail({
           progressDetail ? (
             <ProjectProgressConsole
               progress={progressDetail}
+              focus={focus}
               onOpenTasks={() => setTab("tasks")}
               recapRailOpen={projectRecapOpen}
               onRecapRailOpenChange={setProjectRecapOpen}
@@ -1441,6 +1503,7 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [focus, setFocus] = useState<TaskHubFocus | null>(null);
   const [bootstrapNames, setBootstrapNames] = useState<string[]>([]);
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -1464,12 +1527,21 @@ export default function ProjectsPage() {
     return value && value.trim() ? value : null;
   }, []);
 
+  const readFocusFromUrl = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    return parseProjectFocus(new URLSearchParams(window.location.search).get("focus"));
+  }, []);
+
   const syncOpenIdFromUrl = useCallback(() => {
     setOpenId(readOpenIdFromUrl());
-  }, [readOpenIdFromUrl]);
+    setFocus(readFocusFromUrl());
+  }, [readFocusFromUrl, readOpenIdFromUrl]);
 
   const updateOpenId = useCallback((nextId: string | null) => {
     setOpenId(nextId);
+    if (!nextId) {
+      setFocus(null);
+    }
     if (typeof window === "undefined") return;
 
     const url = new URL(window.location.href);
@@ -1481,6 +1553,7 @@ export default function ProjectsPage() {
     }
 
     url.searchParams.delete("id");
+    url.searchParams.delete("focus");
     window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
     scrollPageToTop();
   }, []);
@@ -1594,6 +1667,7 @@ export default function ProjectsPage() {
     return (
       <InkProjectDetail
         entityId={openId}
+        focus={focus}
         onBack={() => updateOpenId(null)}
       />
     );

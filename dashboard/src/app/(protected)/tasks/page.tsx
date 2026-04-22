@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useInk } from "@/lib/zen-ink/tokens";
 import { Section } from "@/components/zen/Section";
@@ -10,6 +11,19 @@ import { ICONS } from "@/components/zen/Icons";
 import { TaskBoard } from "@/components/TaskBoard";
 import { TaskFilters } from "@/components/TaskFilters";
 import { TaskCreateDialog } from "@/components/TaskCreateDialog";
+import { TaskHubRecap } from "@/features/tasks/TaskHubRecap";
+import { ProductHealthList } from "@/features/tasks/ProductHealthList";
+import { MilestonePlanRadar } from "@/features/tasks/MilestonePlanRadar";
+import { TaskHubRail } from "@/features/tasks/TaskHubRail";
+import {
+  buildProjectFocusHref,
+  buildTaskHubSnapshot,
+  clearTaskHubNavigationState,
+  readTaskHubNavigationState,
+  storeTaskHubNavigationState,
+  type TaskHubFocus,
+  type TaskHubNavigationState,
+} from "@/features/tasks/taskHub";
 import {
   confirmTask,
   createTask,
@@ -221,6 +235,7 @@ function isEmptyScopedGuest(
 
 export function TasksPage() {
   const { user, partner } = useAuth();
+  const router = useRouter();
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
 
@@ -236,6 +251,11 @@ export function TasksPage() {
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [selectedDispatcher, setSelectedDispatcher] = useState<string | null>(null);
   const [selectedBlockedMode, setSelectedBlockedMode] = useState<"all" | "blocked" | "unblocked">("all");
+  const [hubRailOpen, setHubRailOpen] = useState(false);
+  const [pendingNavRestore, setPendingNavRestore] = useState<TaskHubNavigationState | null>(() =>
+    readTaskHubNavigationState(),
+  );
+  const boardSectionRef = useRef<HTMLDivElement | null>(null);
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -325,6 +345,10 @@ export function TasksPage() {
     () => selectedStatuses.filter((status) => status !== "cancelled"),
     [selectedStatuses],
   );
+  const taskHubSnapshot = useMemo(
+    () => buildTaskHubSnapshot({ entities, tasks, plans }),
+    [entities, plans, tasks],
+  );
 
   const totalTasks = filteredTasks.length;
   const reviewCount = filteredTasks.filter((task) => task.status === "review").length;
@@ -381,6 +405,42 @@ export function TasksPage() {
     [replaceTask, user],
   );
 
+  useEffect(() => {
+    if (loading || !pendingNavRestore) return;
+
+    setSelectedStatuses(pendingNavRestore.selectedStatuses);
+    setSelectedPriority(pendingNavRestore.selectedPriority);
+    setSelectedProject(pendingNavRestore.selectedProject);
+    setSelectedDispatcher(pendingNavRestore.selectedDispatcher);
+    setSelectedBlockedMode(pendingNavRestore.selectedBlockedMode);
+    window.requestAnimationFrame(() => {
+      if (typeof window.scrollTo === "function") {
+        window.scrollTo({ top: pendingNavRestore.scrollY, behavior: "auto" });
+      }
+      clearTaskHubNavigationState();
+      setPendingNavRestore(null);
+    });
+  }, [loading, pendingNavRestore]);
+
+  const openExecutionBoard = useCallback(() => {
+    boardSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  const navigateToProject = useCallback(
+    (productId: string, focus?: TaskHubFocus) => {
+      storeTaskHubNavigationState({
+        selectedStatuses,
+        selectedPriority,
+        selectedProject,
+        selectedDispatcher,
+        selectedBlockedMode,
+        scrollY: typeof window !== "undefined" ? window.scrollY : 0,
+      });
+      router.push(buildProjectFocusHref(productId, focus));
+    },
+    [router, selectedBlockedMode, selectedDispatcher, selectedPriority, selectedProject, selectedStatuses],
+  );
+
   if (isEmptyScopedGuest(partner?.workspaceRole, partner?.accessMode, partner?.authorizedEntityIds)) {
     return <EmptyScopePrompt />;
   }
@@ -399,11 +459,19 @@ export function TasksPage() {
         <Section
           t={t}
           eyebrow="WORK · 任務"
-          title="任務"
-          en="Tasks"
-          subtitle="這裡直接接真實 task flow。拖拉、送審、驗收與留言都走正式 API。"
+          title="任務中樞"
+          en="Task Hub"
+          subtitle="先看所有產品的 milestone / plan / risk recap，再往下進到單一產品與執行板。"
           right={
             <div style={{ display: "flex", gap: 10 }}>
+              <Btn
+                t={t}
+                variant="outline"
+                icon={ICONS.spark}
+                onClick={() => setHubRailOpen(true)}
+              >
+                Task Copilot
+              </Btn>
               <Btn
                 t={t}
                 variant="ghost"
@@ -431,6 +499,37 @@ export function TasksPage() {
         />
 
         <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1.45fr) minmax(320px, 0.8fr)",
+            gap: 20,
+            alignItems: "start",
+            marginBottom: 28,
+          }}
+        >
+          <div style={{ display: "grid", gap: 16 }}>
+            <TaskHubRecap snapshot={taskHubSnapshot} onOpenBoard={openExecutionBoard} />
+            <ProductHealthList
+              snapshot={taskHubSnapshot}
+              onOpenProduct={(productId) => navigateToProject(productId)}
+              onOpenFocus={navigateToProject}
+            />
+            <MilestonePlanRadar snapshot={taskHubSnapshot} onOpenFocus={navigateToProject} />
+          </div>
+
+          <div
+            style={{
+              position: "sticky",
+              top: 20,
+              alignSelf: "start",
+            }}
+          >
+            <TaskHubRail snapshot={taskHubSnapshot} open={hubRailOpen} onOpenChange={setHubRailOpen} />
+          </div>
+        </div>
+
+        <div
+          ref={boardSectionRef}
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
@@ -483,6 +582,17 @@ export function TasksPage() {
             flexWrap: "wrap",
           }}
         >
+          <div
+            style={{
+              fontFamily: fontMono,
+              fontSize: 10,
+              color: c.inkFaint,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+            }}
+          >
+            Execution Board
+          </div>
           <TaskFilters
             selectedStatuses={selectedStatuses}
             selectedPriority={selectedPriority}

@@ -6,6 +6,7 @@ const getTasksMock = vi.hoisted(() => vi.fn());
 const getAllEntitiesMock = vi.hoisted(() => vi.fn());
 const getAllBlindspotsMock = vi.hoisted(() => vi.fn());
 const getPlansMock = vi.hoisted(() => vi.fn());
+const mockRouterPush = vi.hoisted(() => vi.fn());
 const mockUser = { email: "owner@test.com", getIdToken: vi.fn().mockResolvedValue("token-1") };
 const mockPartner = {
   id: "partner-1",
@@ -19,6 +20,12 @@ vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
     user: mockUser,
     partner: mockPartner,
+  }),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: mockRouterPush,
   }),
 }));
 
@@ -48,12 +55,17 @@ vi.mock("@/components/TaskCreateDialog", () => ({
     isOpen ? <div data-testid="task-create-dialog">task-create-dialog</div> : null,
 }));
 
+vi.mock("@/features/tasks/TaskHubRail", () => ({
+  TaskHubRail: () => <div data-testid="task-hub-rail">task-hub-rail</div>,
+}));
+
 describe("TasksPage", () => {
   beforeEach(() => {
     getTasksMock.mockReset();
     getAllEntitiesMock.mockReset();
     getAllBlindspotsMock.mockReset();
     getPlansMock.mockReset();
+    mockRouterPush.mockReset();
     getPlansMock.mockResolvedValue([]);
   });
 
@@ -282,6 +294,95 @@ describe("TasksPage", () => {
 
     await waitFor(() => {
       expect(getPlansMock).toHaveBeenCalledWith("token-1", ["plan-1"]);
+    });
+  });
+
+  it("drills into focused project context from task hub", async () => {
+    getTasksMock.mockResolvedValue([
+      {
+        id: "task-1",
+        title: "接回真實任務流",
+        description: "",
+        status: "review",
+        priority: "high",
+        project: "ZenOS",
+        priorityReason: "",
+        assignee: null,
+        createdBy: "partner-1",
+        linkedEntities: ["goal-1"],
+        linkedProtocol: null,
+        linkedBlindspot: null,
+        sourceType: "manual",
+        contextSummary: "",
+        dueDate: new Date("2026-04-18T00:00:00Z"),
+        blockedBy: ["task-blocker"],
+        blockedReason: "Waiting for API",
+        acceptanceCriteria: [],
+        confirmedByCreator: false,
+        rejectionReason: null,
+        result: null,
+        completedBy: null,
+        planId: "plan-1",
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-20T00:00:00Z"),
+        completedAt: null,
+      },
+    ]);
+    getAllEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      {
+        id: "goal-1",
+        name: "Console IA",
+        type: "goal",
+        summary: "milestone summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: "entity-1",
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+    getPlansMock.mockResolvedValue([
+      {
+        id: "plan-1",
+        goal: "Ship project progress console",
+        status: "active",
+        owner: "Barry",
+        project: "ZenOS",
+        project_id: "entity-1",
+      },
+    ]);
+
+    const { TasksPage } = await import("./page");
+    render(<TasksPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /Plan · Ship project progress console/i }));
+
+    await waitFor(() => {
+      expect(mockRouterPush).toHaveBeenCalledWith("/projects?id=entity-1&focus=plan%3Aplan-1");
     });
   });
 });

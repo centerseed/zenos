@@ -269,6 +269,97 @@ describe("ProjectsPage", () => {
     });
   });
 
+  it("shows focused plan banner when deep-linked from task hub", async () => {
+    window.history.replaceState({}, "", "/projects?id=entity-1&focus=plan:plan-1");
+    getProjectEntitiesMock.mockResolvedValue([
+      {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+    ]);
+    getTasksByEntityMock.mockResolvedValue([]);
+    getProjectProgressMock.mockResolvedValue({
+      project: {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      active_plans: [
+        {
+          id: "plan-1",
+          goal: "Launch project progress console",
+          status: "active",
+          owner: "Barry",
+          milestones: [],
+          tasks_summary: { total: 3, by_status: { todo: 2 } },
+          open_count: 2,
+          blocked_count: 1,
+          review_count: 0,
+          overdue_count: 0,
+          updated_at: new Date("2026-04-19T00:00:00Z"),
+          next_tasks: [],
+        },
+      ],
+      open_work_groups: [],
+      milestones: [],
+      recent_progress: [],
+    });
+    getEntityContextMock.mockResolvedValue({
+      entity: {
+        id: "entity-1",
+        name: "ZenOS",
+        type: "product",
+        summary: "summary",
+        tags: { what: [], why: "", how: "", who: [] },
+        status: "active",
+        parentId: null,
+        details: null,
+        confirmedByUser: true,
+        owner: "Owner",
+        sources: [],
+        visibility: "public",
+        lastReviewedAt: null,
+        createdAt: new Date("2026-04-19T00:00:00Z"),
+        updatedAt: new Date("2026-04-19T00:00:00Z"),
+      },
+      impact_chain: [],
+      reverse_impact_chain: [],
+    });
+    getChildEntitiesMock.mockResolvedValue([]);
+    getAllBlindspotsMock.mockResolvedValue([]);
+
+    const { default: ProjectsPage } = await import("./page");
+    render(<ProjectsPage />);
+
+    expect(await screen.findByTestId("project-focus-banner")).toHaveTextContent("Focused Plan");
+    expect(screen.getByTestId("project-focus-banner")).toHaveTextContent("Launch project progress console");
+  });
+
   it("hides completed placeholder products from the projects list", async () => {
     getProjectEntitiesMock.mockResolvedValue([
       {

@@ -39,6 +39,9 @@ import { Select } from "./zen/Select";
 import { Btn } from "./zen/Btn";
 import { Chip } from "./zen/Chip";
 import { Dialog } from "./zen/Dialog";
+import { TaskDetailOverview } from "./TaskDetailOverview";
+import { TaskStructurePanel } from "./TaskStructurePanel";
+import { TaskHistoryPanel } from "./TaskHistoryPanel";
 
 interface TaskDetailDrawerProps {
   task: Task | null;
@@ -387,6 +390,7 @@ export function TaskDetailDrawer({
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   // Handoff form state
   const [showHandoffForm, setShowHandoffForm] = useState(false);
+  const [detailMode, setDetailMode] = useState<"overview" | "structure" | "context" | "history">("overview");
   const [handoffTarget, setHandoffTarget] = useState<string>("agent:developer");
   const [handoffCustom, setHandoffCustom] = useState("");
   const [handoffReason, setHandoffReason] = useState("");
@@ -420,6 +424,7 @@ export function TaskDetailDrawer({
     setComments([]);
     setCommentsError(null);
     setNewComment("");
+    setDetailMode("overview");
     setShowHandoffForm(false);
     setHandoffReason("");
     setHandoffNotes("");
@@ -1109,7 +1114,7 @@ export function TaskDetailDrawer({
   ) : null;
 
   // ── Drawer body ───────────────────────────────────────────────────────────
-  const drawerBody = (
+  const legacyContextBody = (
     <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
 
       {/* Hierarchy */}
@@ -1876,6 +1881,195 @@ export function TaskDetailDrawer({
           </Btn>
         </div>
       </div>
+    </div>
+  );
+
+  const isOverdue = Boolean(
+    displayTask.dueDate && displayTask.dueDate.getTime() < Date.now() && displayTask.status !== "done",
+  );
+  const structureSummary = [
+    displayTask.planId ? `plan ${entityNames[displayTask.planId] || displayTask.planId}` : null,
+    parentTask ? "has parent" : null,
+    siblingTasks.length > 0 ? `${siblingTasks.length} sibling` : null,
+    childSubtasks.length > 0 ? `${childSubtasks.length} subtasks` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const nextActionLabel =
+    displayTask.status === "review"
+      ? "確認成果是否完整，決定通過或退回。"
+      : displayTask.status === "in_progress"
+        ? "完成目前手上的 blocker 或主要交付，再送 review。"
+        : displayTask.status === "done"
+          ? "已完成；若有後續工作，建立新的下游 task 或更新 outcome。"
+          : displayTask.status === "cancelled"
+            ? "此任務已取消；若仍需執行，應重新建立或重新開啟。"
+            : "先開始第一個可執行步驟，必要時再 handoff。";
+  const acceptanceCriteriaNode =
+    displayTask.acceptanceCriteria && displayTask.acceptanceCriteria.length > 0 ? (
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {displayTask.acceptanceCriteria.map((item, idx) => (
+          <div
+            key={`${displayTask.id}-criteria-${idx}`}
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 12,
+              background: c.paperWarm,
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: t.radius,
+              padding: 12,
+            }}
+          >
+            <div
+              style={{
+                flexShrink: 0,
+                width: 18,
+                height: 18,
+                borderRadius: "50%",
+                border: `1px solid ${c.inkHairBold}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontFamily: t.fontMono,
+                fontSize: 10,
+                fontWeight: 700,
+                color: c.inkMuted,
+                marginTop: 1,
+              }}
+            >
+              {idx + 1}
+            </div>
+            <p style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink, lineHeight: 1.6, margin: 0 }}>{item}</p>
+          </div>
+        ))}
+      </div>
+    ) : null;
+  const descriptionNode = (
+    <div
+      style={{
+        background: c.paperWarm,
+        border: `1px solid ${c.inkHair}`,
+        borderRadius: t.radius,
+        padding: 20,
+        fontFamily: t.fontBody,
+        fontSize: 13,
+        lineHeight: 1.7,
+        color: c.ink,
+      }}
+    >
+      <MarkdownRenderer content={displayTask.description || "_No description provided._"} />
+    </div>
+  );
+  const resultNode = displayTask.result ? (
+    <div
+      style={{
+        background: c.paperWarm,
+        border: `1px solid ${c.inkHair}`,
+        borderRadius: t.radius,
+        padding: 20,
+        fontFamily: t.fontBody,
+        fontSize: 13,
+        lineHeight: 1.7,
+        color: c.jade,
+        fontStyle: "italic",
+      }}
+    >
+      <MarkdownRenderer content={displayTask.result} />
+    </div>
+  ) : null;
+  const attachmentsNode =
+    localTask && authToken ? (
+      <TaskAttachments task={localTask} token={authToken} onAttachmentsChanged={handleAttachmentsChanged} />
+    ) : null;
+  const canDeleteComment = (comment: TaskComment) => Boolean(partner?.isAdmin || (partner && partner.id === comment.partnerId));
+  const drawerBody = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 8,
+          flexWrap: "wrap",
+          paddingBottom: 12,
+          borderBottom: `1px solid ${c.inkHair}`,
+        }}
+      >
+        {([
+          ["overview", "Overview"],
+          ["structure", "Structure"],
+          ["context", "Context"],
+          ["history", "History"],
+        ] as const).map(([mode, label]) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => setDetailMode(mode)}
+            style={{
+              border: `1px solid ${detailMode === mode ? c.vermillion : c.inkHair}`,
+              background: detailMode === mode ? c.vermSoft : c.surface,
+              color: detailMode === mode ? c.ink : c.inkMuted,
+              padding: "6px 10px",
+              fontFamily: t.fontMono,
+              fontSize: 10,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              cursor: "pointer",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {detailMode === "overview" ? (
+        <TaskDetailOverview
+          task={displayTask}
+          ownerField={<span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>{displayTask.assigneeName || displayTask.assignee || "Unassigned"}</span>}
+          dueField={<span style={{ fontFamily: t.fontBody, fontSize: 13, color: c.ink }}>{formatDate(displayTask.dueDate)}</span>}
+          projectField={<span style={{ fontFamily: t.fontMono, fontSize: 12, color: c.ocher }}>{displayTask.project || "N/A"}</span>}
+          priorityField={<Chip t={t} tone={priorityChipTone(displayTask.priority)} dot>{priorityIcons[displayTask.priority]}{displayTask.priority}</Chip>}
+          nextActionLabel={nextActionLabel}
+          blockedReason={displayTask.blockedReason}
+          isOverdue={isOverdue}
+          structureSummary={structureSummary || null}
+          onOpenStructure={() => setDetailMode("structure")}
+          description={descriptionNode}
+          acceptanceCriteria={acceptanceCriteriaNode}
+          result={resultNode}
+          attachments={attachmentsNode}
+        />
+      ) : null}
+
+      {detailMode === "structure" ? (
+        <TaskStructurePanel
+          currentTask={displayTask}
+          planName={displayTask.planId ? entityNames[displayTask.planId] || displayTask.planId : null}
+          parentTask={parentTask}
+          siblingTasks={siblingTasks}
+          childSubtasks={childSubtasks}
+          topLevelPlanTasks={topLevelPlanTasks}
+          planTasks={planTasks}
+          onSelectRelatedTask={onSelectRelatedTask}
+        />
+      ) : null}
+
+      {detailMode === "context" ? legacyContextBody : null}
+
+      {detailMode === "history" ? (
+        <TaskHistoryPanel
+          handoffEvents={displayTask.handoffEvents}
+          dispatcherLabel={dispatcherLabel}
+          dispatcherChipTone={dispatcherChipTone}
+          comments={comments}
+          commentsError={commentsError}
+          newComment={newComment}
+          onNewCommentChange={setNewComment}
+          onSubmitComment={handleCommentSubmit}
+          commentSubmitting={commentSubmitting}
+          canDeleteComment={canDeleteComment}
+          onDeleteComment={handleCommentDelete}
+        />
+      ) : null}
     </div>
   );
 

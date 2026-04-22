@@ -5,8 +5,10 @@ import type { ProjectProgressMilestone } from "@/features/projects/types";
 
 export function ProjectMilestoneStrip({
   milestones,
+  focusedMilestoneId,
 }: {
   milestones: ProjectProgressMilestone[];
+  focusedMilestoneId?: string | null;
 }) {
   const t = useInk("light");
   const { c, fontMono } = t;
@@ -40,12 +42,15 @@ export function ProjectMilestoneStrip({
             <div
               key={milestone.id}
               style={{
-                border: `1px solid ${c.vermLine}`,
-                background: c.vermSoft,
+                border: `1px solid ${milestone.id === focusedMilestoneId ? c.vermillion : c.vermLine}`,
+                background: milestone.id === focusedMilestoneId ? c.surface : c.vermSoft,
                 padding: "8px 12px",
               }}
             >
-              <div style={{ fontSize: 12, color: c.ink, fontWeight: 500 }}>{milestone.name}</div>
+              <div style={{ fontSize: 12, color: c.ink, fontWeight: 500 }}>
+                {milestone.name}
+                {milestone.id === focusedMilestoneId ? " · current focus" : ""}
+              </div>
               <div style={{ fontSize: 10, color: c.inkMuted, marginTop: 3 }}>{milestone.open_count} open item(s)</div>
             </div>
           ))}
@@ -54,4 +59,3 @@ export function ProjectMilestoneStrip({
     </section>
   );
 }
-

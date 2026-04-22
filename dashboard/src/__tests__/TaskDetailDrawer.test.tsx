@@ -2,7 +2,7 @@
 // Verifies that the Drawer's headerExtras slot receives React nodes and renders them.
 import React from "react";
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TaskDetailDrawer } from "@/components/TaskDetailDrawer";
 import { Drawer } from "@/components/zen/Drawer";
 import { useInk } from "@/lib/zen-ink/tokens";
@@ -177,7 +177,8 @@ describe("TaskDetailDrawer — B4 Zen migration", () => {
       />
     );
 
-    expect(screen.getByText("Hierarchy")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Structure" }));
+    expect(screen.getByTestId("task-structure-panel")).toBeDefined();
     expect(screen.getByText("Plan Outline")).toBeDefined();
     expect(screen.getAllByText("Current Subtask").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Sibling Subtask").length).toBeGreaterThan(0);
@@ -214,6 +215,7 @@ describe("TaskDetailDrawer — B4 Zen migration", () => {
       />
     );
 
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const link = screen.getByRole("link", { name: /個人/i });
     expect(link.getAttribute("target")).toBe("_blank");
   });

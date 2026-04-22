@@ -1,90 +1,40 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { CopilotChatViewport } from "@/components/ai/CopilotChatViewport";
 import { HelperSetupDialog } from "@/components/ai/HelperSetupDialog";
 import { CopilotInputBar } from "@/components/ai/CopilotInputBar";
 import { CopilotRailShell } from "@/components/ai/CopilotRailShell";
-import { buildProjectRecapEntry } from "@/features/projects/projectCopilot";
+import { buildTaskHubCopilotEntry } from "@/features/tasks/taskHubCopilot";
+import type { TaskHubSnapshot } from "@/features/tasks/taskHub";
 import { useAuth } from "@/lib/auth";
 import { resolveCopilotWorkspaceId } from "@/lib/copilot/scope";
-import type { ProjectAgentPreset } from "@/features/projects/types";
-import type { ProjectProgressResponse } from "@/lib/api";
 import { useCopilotChat } from "@/lib/copilot/useCopilotChat";
 
-export function ProjectRecapRail({
+export function TaskHubRail({
+  snapshot,
   open,
   onOpenChange,
-  progress,
-  preset,
-  nextStep,
-  onRecapChange,
-  onAssistantUpdate,
 }: {
+  snapshot: TaskHubSnapshot;
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  progress: ProjectProgressResponse;
-  preset: ProjectAgentPreset;
-  nextStep: string;
-  onRecapChange: (recap: string | null) => void;
-  onAssistantUpdate?: (recap: string) => void;
 }) {
   const [helperDialogOpen, setHelperDialogOpen] = useState(false);
   const { partner } = useAuth();
   const workspaceId = resolveCopilotWorkspaceId(partner);
-  const entry = useMemo(
-    () =>
-      buildProjectRecapEntry({
-        progress,
-        preset,
-        nextStep,
-        workspaceId,
-      }),
-    [nextStep, preset, progress, workspaceId]
-  );
-  const {
-    status,
-    connectorStatus,
-    messages,
-    streamingText,
-    capability,
-    lastError,
-    send,
-    cancel,
-    retry,
-  } = useCopilotChat(entry);
-
-  const latestAssistant = useMemo(
-    () =>
-      [...messages]
-        .reverse()
-        .find((message) => message.role === "assistant" && message.content.trim())
-        ?.content ?? null,
-    [messages]
-  );
-  const visibleMessages = useMemo(
-    () => messages.filter((message) => message.role !== "system"),
-    [messages]
-  );
+  const entry = useMemo(() => buildTaskHubCopilotEntry({ snapshot, workspaceId }), [snapshot, workspaceId]);
+  const { status, connectorStatus, messages, streamingText, capability, lastError, send, cancel, retry } =
+    useCopilotChat(entry);
+  const visibleMessages = useMemo(() => messages.filter((message) => message.role !== "system"), [messages]);
   const helperIssue = useMemo(() => {
     if (connectorStatus === "checking") return "正在檢查 helper";
     if (connectorStatus === "disconnected") return "helper 未連線";
-    if (capability?.missingSkills?.length) {
-      return `缺 skill：${capability.missingSkills.join("、")}`;
-    }
+    if (capability?.missingSkills?.length) return `缺 skill：${capability.missingSkills.join("、")}`;
     if (lastError) return lastError;
     return null;
   }, [capability?.missingSkills, connectorStatus, lastError]);
   const helperHealthy = connectorStatus === "connected" && !helperIssue;
-
-  useEffect(() => {
-    onRecapChange(latestAssistant);
-  }, [latestAssistant, onRecapChange]);
-
-  useEffect(() => {
-    if (!latestAssistant) return;
-    onAssistantUpdate?.(latestAssistant);
-  }, [latestAssistant, onAssistantUpdate]);
 
   return (
     <CopilotRailShell
@@ -123,17 +73,17 @@ export function ProjectRecapRail({
           hasStructuredResult={false}
           canSendEmpty
           sendLabel={messages.length === 0 ? "開始討論" : "送出"}
-          placeholder="直接問這個 product 的 milestone、plan、task、subtask、blocker 或下一步"
+          placeholder="直接問全產品 milestone、plan、risk、blocker 或下一步"
         />
       }
     >
-      <div data-testid="project-recap-panel">
+      <div data-testid="task-hub-recap-panel">
         <CopilotChatViewport
           messages={visibleMessages}
           streamingText={streamingText}
           isStreaming={status === "loading" || status === "streaming"}
           emptyStateTitle="Task Copilot"
-          emptyStateDescription="直接開始問。"
+          emptyStateDescription="先問哪個產品、哪個 milestone 或哪個 plan 最值得往下看。"
         />
       </div>
       <HelperSetupDialog
