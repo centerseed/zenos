@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-mcp-id-ergonomics
 status: Draft
-ontology_entity: zenos-mcp
+ontology_entity: mcp-interface
 created: 2026-04-20
-updated: 2026-04-20
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract
 ---
 
 # SPEC: MCP ID Ergonomics & Dogfood Reject-Rate Metric

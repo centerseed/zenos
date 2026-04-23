@@ -1,12 +1,11 @@
 ---
-doc_id: SPEC-agent-context-summary
-title: 功能規格：Agent Session 啟動 Context 摘要
 type: SPEC
-ontology_entity: action-layer
-status: under_review
-version: "0.1"
-date: 2026-04-06
-supersedes: null
+id: SPEC-agent-context-summary
+status: Under Review
+ontology_entity: l3-action
+created: 2026-04-06
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-task-governance
 ---
 
 # Feature Spec: Agent Session 啟動 Context 摘要

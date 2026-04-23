@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-agent-setup
 status: Draft
-ontology_entity: TBD
+ontology_entity: agent-runtime
 created: 2026-03-29
-updated: 2026-03-29
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-agent-integration-contract
 ---
 
 # Feature Spec: Agent 自助安裝

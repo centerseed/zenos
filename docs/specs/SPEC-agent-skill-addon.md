@@ -2,10 +2,10 @@
 type: SPEC
 id: SPEC-agent-skill-addon
 status: Under Review
-ontology_entity: TBD
+ontology_entity: agent-runtime
 created: 2026-04-04
-updated: 2026-04-04
-supersedes: null
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-agent-integration-contract, SPEC-agent-setup
 ---
 
 # Feature Spec: Agent Skill Addon 架構

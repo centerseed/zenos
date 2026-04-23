@@ -59,11 +59,11 @@ created: 2026-04-23
 
 | # | Spec | Action |
 |---|------|--------|
-| 18 | `SPEC-governance-feedback-loop` | **REVISE** 跨新 subclass 的 feedback 路徑 |
-| 19 | `SPEC-governance-guide-contract` | **REVISE** governance_guide topic 對齊新 subclass 集合 |
-| 20 | `SPEC-governance-observability` | **REVISE** |
-| 21 | `SPEC-governance-audit-log` | **KEEP** |
-| 22 | `SPEC-progressive-trust` | **KEEP** |
+| 18 | `SPEC-governance-feedback-loop` | ✅ **REVISED** | frontmatter 對齊（ontology_entity: TBD → governance-framework, depends_on）；`SPEC-l2-entity-redefinition` 引用改指主 SPEC v2 §7.1 |
+| 19 | `SPEC-governance-guide-contract` | ✅ **REVISED** | frontmatter 對齊 + runtime_canonical；topic 對照表加 runtime `_VALID_TOPICS` 與 `mcp/governance.py:71-79` 版本映射；`entity` 改指主 SPEC §7，`bundle` 改指 SPEC-doc-governance §3；P0-4 gate 描述同步 |
+| 20 | `SPEC-governance-observability` | ✅ **REVISED** | 補 frontmatter（原檔無）；`SPEC-document-bundle` 兩處引用改指 SPEC-doc-governance §3/§3.4 |
+| 21 | `SPEC-governance-audit-log` | ✅ **KEPT + aligned** | 原檔無 frontmatter，補齊；depends_on 補 governance-framework / observability |
+| 22 | `SPEC-progressive-trust` | ✅ **KEPT + aligned** | frontmatter ontology_entity: TBD → governance-framework；depends_on 補 IAM |
 
 ---
 
@@ -71,10 +71,10 @@ created: 2026-04-23
 
 | # | Spec | Action | 核心動作 |
 |---|------|--------|---------|
-| 23 | `SPEC-mcp-tool-contract` | **REWRITE** | 新 tool shape：`write(entity)` / `get(id)` / `search(...)` polymorphic；task / plan MCP tool 合併為 `write(entity, type=task)`；參數從 36+23 減到個位數 |
-| 24 | `SPEC-mcp-tool-contract-fixes` | **MERGE** → SPEC-mcp-tool-contract |
-| 25 | `SPEC-mcp-opt-in-include` | **KEEP** include 參數設計保留 |
-| 26 | `SPEC-mcp-id-ergonomics` | **KEEP** id_prefix 設計保留 |
+| 23 | `SPEC-mcp-tool-contract` | ✅ **UPGRADED** | 重新定位為 runtime-verified SSOT：frontmatter 加 runtime_canonical；§4 tool roster 升級為 `file:line` 對照表（19 tools）；§8 補齊 `search / get / task / confirm` 完整 contract + 新增 §8.9 `plan` / §8.10 `batch_update_sources` / §8.11 `recent_updates` / §8.12 共通約束；新增 §13 `AC-MCP-01..32` 32 條 AC，每條附 runtime file:line；`SPEC-document-bundle` 引用全改 SPEC-doc-governance。未按原計畫做 polymorphic 合併（runtime 仍是分開 tool，那是未來 breaking change） |
+| 24 | `SPEC-mcp-tool-contract-fixes` | ✅ **MERGED** → redirect stub | 保留 Issue → 新位置對照表；指向 SPEC-mcp-tool-contract canonical |
+| 25 | `SPEC-mcp-opt-in-include` | ✅ **KEPT + aligned** | frontmatter 對齊；depends_on 補主 SPEC §10.4 + mcp-tool-contract |
+| 26 | `SPEC-mcp-id-ergonomics` | ✅ **KEPT + aligned** | frontmatter ontology_entity: zenos-mcp → mcp-interface；depends_on 補 mcp-tool-contract |
 
 ---
 
@@ -82,10 +82,10 @@ created: 2026-04-23
 
 | # | Spec | Action |
 |---|------|--------|
-| 27 | `SPEC-agent-integration-contract` | **REVISE** 新 MCP tool shape |
-| 28 | `SPEC-agent-context-summary` | **KEEP** |
-| 29 | `SPEC-agent-setup` | **KEEP** |
-| 30 | `SPEC-agent-skill-addon` | **KEEP** |
+| 27 | `SPEC-agent-integration-contract` | ✅ **REVISED** | frontmatter 對齊（ontology_entity: agent-integration → agent-runtime），depends_on 補齊 MCP + governance + doc + task + auth-federation |
+| 28 | `SPEC-agent-context-summary` | ✅ **KEPT + aligned** | 舊 frontmatter 格式修正（doc_id / version / date / lowercase status → 標準格式） |
+| 29 | `SPEC-agent-setup` | ✅ **KEPT + aligned** | frontmatter ontology_entity: TBD → agent-runtime；depends_on 補 MCP + agent-integration |
+| 30 | `SPEC-agent-skill-addon` | ✅ **KEPT + aligned** | frontmatter ontology_entity: TBD → agent-runtime；depends_on 補齊 |
 
 ---
 

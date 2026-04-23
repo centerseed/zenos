@@ -1,6 +1,16 @@
+---
+type: SPEC
+id: SPEC-governance-audit-log
+status: Draft
+ontology_entity: governance-framework
+created: 2026-03-25
+updated: 2026-04-23
+depends_on: SPEC-governance-framework, SPEC-governance-observability
+---
+
 # SPEC: Ontology 治理審計日誌（Governance Audit Log）
 
-> PM: Claude (PM role) | Date: 2026-03-25 | Status: Draft
+> PM: Claude (PM role) | Status: Draft（frontmatter 標準化於 2026-04-23）
 
 ## 問題
 

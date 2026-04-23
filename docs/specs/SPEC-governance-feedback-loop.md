@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-governance-feedback-loop
 status: Draft
-ontology_entity: TBD
+ontology_entity: governance-framework
 created: 2026-03-28
-updated: 2026-03-29
+updated: 2026-04-23
+depends_on: SPEC-ontology-architecture v2 §7, SPEC-task-governance, SPEC-doc-governance, SPEC-governance-framework, SPEC-governance-guide-contract
 ---
 
 # Feature Spec: 治理品質回饋迴路
@@ -270,7 +271,7 @@ agent 承認：如果用戶只說「把這份 ERP 整合研究報告更新到 Ze
 
 ## 第四章：明確不包含
 
-- **不重新定義 L2 三問標準** — 三問定義已在 `SPEC-l2-entity-redefinition` 中，本 spec 只要求 capture 流程強制觸發三問判斷
+- **不重新定義 L2 三問標準** — 三問 + impacts gate canonical 在 `SPEC-ontology-architecture v2 §7.1`（舊 `SPEC-l2-entity-redefinition` 已於 2026-04-23 併入主 SPEC）；本 SPEC 只要求 capture 流程強制觸發三問判斷
 - **不定義 analyze 的技術實作方式** — 新增的偵測能力（impacts 斷鏈、過時文件標記）由 Architect 決定是擴展現有 check_type 還是新增 tool
 - **不定義 agent 端的行為追蹤機制** — P2-1 的 search_unused 信號如何從 agent 端收集，由 Architect 決定
 - **不取代 SPEC-governance-observability** — 該 spec 聚焦 LLM 推斷歷史的可觀測性（audit log、eval dataset）；本 spec 聚焦治理品質的回饋迴路。兩者互補，不重疊
@@ -311,7 +312,7 @@ agent 承認：如果用戶只說「把這份 ERP 整合研究報告更新到 Ze
 
 | 文件 | 關係 |
 |------|------|
-| `SPEC-l2-entity-redefinition` | 本 spec 要求 capture 強制觸發該 spec 定義的三問 + impacts gate |
+| `SPEC-ontology-architecture v2 §7.1` | 本 SPEC 要求 capture 強制觸發主 SPEC 定義的三問 + impacts gate（舊 `SPEC-l2-entity-redefinition` 已併入）|
 | `SPEC-doc-governance` | 本 spec 的 P1-3（過時文件標記）產出進入該 spec 定義的 archive/supersede 流程 |
 | `SPEC-task-governance` | 本 spec 的 P1-1 讀取 task 歷史作為品質信號來源 |
 | `SPEC-governance-framework` | 本 spec 是該框架 Phase 0 → Phase 1 演進的具體實作需求 |

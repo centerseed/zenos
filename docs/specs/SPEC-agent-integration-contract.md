@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-agent-integration-contract
 status: Approved
-ontology_entity: agent-integration
+ontology_entity: agent-runtime
 created: 2026-03-26
-updated: 2026-04-22
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-task-governance, SPEC-doc-governance, SPEC-governance-guide-contract, SPEC-zenos-auth-federation
 ---
 
 # SPEC: ZenOS Agent Integration Contract

@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-progressive-trust
 status: Approved
-ontology_entity: TBD
+ontology_entity: governance-framework
 created: 2026-03-21
-updated: 2026-03-27
+updated: 2026-04-23
+depends_on: SPEC-identity-and-access, SPEC-governance-framework
 ---
 
 # ZenOS 漸進式信任模型（Progressive Trust）

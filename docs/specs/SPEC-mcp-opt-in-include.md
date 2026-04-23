@@ -3,9 +3,10 @@ type: SPEC
 id: SPEC-mcp-opt-in-include
 status: Draft
 related_adr: ADR-040
-ontology_entity: MCP 介面設計
+ontology_entity: mcp-interface
 created: 2026-04-18
-updated: 2026-04-18
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-ontology-architecture v2 §10.4
 ---
 
 # Feature Spec: MCP get/search opt-in include（Phase A）
