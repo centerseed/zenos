@@ -20,7 +20,7 @@ from zenos.application.knowledge.ontology_service import (
 )
 from zenos.domain.governance import TagConfidence
 from zenos.domain.action import Task
-from zenos.domain.knowledge import Blindspot, Document, DocumentTags, Entity, EntityEntry, Gap, Protocol, Relationship, Source, Tags
+from zenos.domain.knowledge import Blindspot, Document, Entity, EntityEntry, Gap, Protocol, Relationship, Source, Tags
 from zenos.domain.shared import QualityCheckItem, QualityReport, StalenessWarning
 from zenos.infrastructure.context import current_partner_department, current_partner_roles
 
@@ -99,7 +99,7 @@ def _make_document(**overrides) -> Document:
         id="doc-1",
         title="API Spec",
         source=Source(type="github", uri="https://github.com/...", adapter="github"),
-        tags=DocumentTags(what=["api"], why="reference", how="REST", who=["developer"]),
+        tags=Tags(what=["api"], why="reference", how="REST", who=["developer"]),
         summary="API specification document",
         linked_entity_ids=["ent-1"],
         status="current",
@@ -2270,8 +2270,6 @@ class TestAnalyzeTool:
             mock_gs.compute_health_signal = AsyncMock(return_value=health_signal)
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(return_value=entities)
-            mock_os._documents = AsyncMock()
-            mock_os._documents.list_all = AsyncMock(return_value=[])
             mock_os._protocols = AsyncMock()
             mock_os._protocols.get_by_entity = AsyncMock(return_value=None)
             mock_br.list_all = AsyncMock(return_value=[])

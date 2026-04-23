@@ -2,14 +2,17 @@
 type: SPEC
 id: SPEC-document-delivery-layer
 status: Draft
-ontology_entity: L3 文件治理
+ontology_entity: l3-document
 created: 2026-04-11
-updated: 2026-04-17
+updated: 2026-04-23
+depends_on: SPEC-doc-governance, SPEC-ontology-architecture v2 §8.1
 ---
 
 # Feature Spec: ZenOS Document Delivery Layer (Lightweight Doc System)
 
 > Layering note: 本 spec 定義 ZenOS 的「文件發布與閱讀層」，不取代 Google Drive/Git 的重編輯能力。文件編輯面以外部系統為主，ZenOS 提供穩定 permalink、權限控管、跨專案分享與 Markdown 閱讀體驗。
+>
+> **Sidecar 定位（2026-04-23）**：本 SPEC 定義的 `document_revisions` / `document_share_tokens` 是 `entity_l3_document` 的 **sidecar tables**，不改變 L3-Document 的 canonical schema（主 SPEC v2 §8.1）。治理規則以 `SPEC-doc-governance` 為權威；本 SPEC 只管 delivery / share / snapshot 的實作細節。
 
 ## 1. 背景與問題
 
@@ -342,9 +345,9 @@ AC:
 
 ## 10. 與既有 Spec 關係
 
-- `SPEC-document-bundle`: 本 spec 延伸其 multi-source 架構，補上 delivery/reader/sharing contract。
-- `SPEC-identity-and-access`: 文件 ACL 語義與 workspace role 邊界以該 spec 為準。
-- `SPEC-doc-governance`: 文件分類、狀態、supersede 流程仍沿用，不被本 spec 覆寫。
+- `SPEC-doc-governance`: L3-Document 治理（含 2026-04-23 併入的 bundle / source platform / rollout 能力）canonical；本 SPEC 延伸其 multi-source 架構，補上 delivery/reader/sharing sidecar。文件分類、狀態、supersede 流程沿用，不被本 SPEC 覆寫。
+- `SPEC-ontology-architecture v2 §8.1`: `entity_l3_document` schema canonical；本 SPEC 定義的 `document_revisions` / `document_share_tokens` 是 sidecar tables，不動 main schema。
+- `SPEC-identity-and-access`: 文件 ACL 語義與 workspace role 邊界以該 SPEC 為準。
 
 ## 11. 風險與緩解
 

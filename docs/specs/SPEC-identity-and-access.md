@@ -4,7 +4,7 @@ id: SPEC-identity-and-access
 status: Under Review
 ontology_entity: 身份與權限管理
 created: 2026-04-08
-updated: 2026-04-21
+updated: 2026-04-23
 supersedes:
   - SPEC-permission-model
   - SPEC-partner-access-scope
@@ -12,6 +12,7 @@ supersedes:
   - SPEC-prosumer-workspace-permission
   - SPEC-prosumer-onboarding-flow
   - SPEC-client-portal
+canonical_schema_from: SPEC-ontology-architecture v2 §4 (BaseEntity) + §13 (Visibility)
 ---
 
 # Feature Spec: Identity, Workspace & Access Management (SSOT)
@@ -31,7 +32,11 @@ ZenOS 採用 `Prosumer-First` 的多 Workspace 協作模型：
 Layering note：
 
 - 本 spec 定義 `ZenOS Core` 的 Identity & Access Layer
-- 跨 workspace 共享邊界，以 `ZenOS Core` contract 為準
+- **Entity permission schema 的 canonical 位置是 `SPEC-ontology-architecture v2`**：
+  - BaseEntity 的 `visibility / visible_to_roles / visible_to_members / visible_to_departments / owner` 欄位定義見主 SPEC §4
+  - Visibility enum 與授權解析規則見主 SPEC §13
+  - 本 SPEC 不重複 schema 定義，僅補身份 / workspace / federation 的治理細則與 runtime 對齊
+- 跨 workspace 共享邊界以 `SPEC-ontology-architecture v2 §6 L1 Entity` 為準（L1 subtree 分享 = guest 獲得整棵子樹讀權限，受每節點 visibility 限制）
 - application-specific surface 是否共享，必須由各 application spec 額外定義
 - external app 若要接入 ZenOS，auth federation contract 以 `SPEC-zenos-auth-federation` 為準
 
@@ -109,8 +114,8 @@ Layering note：
 - `L2` 是 L1 底下的持久知識節點
 - `project` 不是獨立主軸，而是一種 `L3 entity`
 - `project(L3)` 用於聚合 task / doc / delivery context
-- `task` 不是 L3 entity；task 屬於 `ZenOS Core Action Layer`，但可直接連結到 L1/L2/L3 context，不必先包在 project 下
-- `doc` 可直接掛在 L2，或掛在某個 L3 doc entity，不必先掛在 project 下
+- `task / plan / milestone / subtask` 是 **L3-Action subclass**（2026-04-23 grand refactor 起併入 Knowledge Layer，見 `SPEC-ontology-architecture v2 §9`）。它們是 entity，走同一套 permission / parent / relationships
+- `doc` 是 **L3-Document subclass**（L3-Semantic），可直接掛在 L2 或掛在某個 L3-Document 之下
 - `project(L3)` 可同時隸屬多個 L1，但這是例外情境，不可反向改寫 L1 主軸模型
 
 ### 3.3 應用層邊界
@@ -121,25 +126,30 @@ Layering note：
 
 ## 4. 可見性與授權規則
 
-### 4.1 Visibility
+### 4.1 Visibility（canonical 見主 SPEC §13）
 
-正規 visibility 僅保留三層：
+正規 visibility 欄位（`BaseEntity.visibility`）enum 值：`public / restricted / confidential`。Canonical 定義在 `SPEC-ontology-architecture v2 §13`，本節只補 runtime 評估規則。
 
-- `public`
-- `restricted`
-- `confidential`
+**Runtime 授權裁切**（結合 workspace role 與 entity visibility + 白名單）：
 
-規則：
+| 角色 | 預設可見 entity | 白名單疊加 |
+|------|----------------|-----------|
+| `owner` | 全部（不論 visibility）| — |
+| `member` | `visibility ∈ {public, restricted}` | 若被 `visible_to_members / visible_to_roles / visible_to_departments` 命中，可額外讀 `confidential` |
+| `guest` | 授權 L1 子樹中 `visibility = public` 的節點 | 白名單不適用於 guest（guest 不能被白名單提權到 confidential）|
 
-- `owner`：可見全部
-- `member`：可見 `public + restricted`
-- `guest`：只可見授權 L1 子樹中的 `public`
-- `confidential`：僅 owner 可見
+`confidential` 的 canonical 語意（主 SPEC §13）：**owner + 明確授權**。
+- owner 必見
+- member 僅在被白名單命中時可見
+- guest 永不可見
+
+`restricted` 語意：member 預設可見；guest 必須被白名單命中才可見（仍受「限定於授權 L1 子樹」約束）。
 
 補充：
 
 - 這三層是目前的正式模型
 - 未來允許擴充至部門、白名單、企業策略，但不得污染當前 SSOT 的基礎語意
+- 若本節與主 SPEC §13 有出入，以主 SPEC 為準
 
 ### 4.2 Guest 子樹裁切
 
@@ -262,15 +272,16 @@ route guard 必須遵循以下順序：
 
 - `owner/member/guest` 與 `public/restricted/confidential` 是目前唯一正式 P0 權限語意
 - `guest` 只可見被授權 L1 子樹中的 `public`
-- `member` 可見 `public + restricted`
-- `confidential` 僅 `owner` 可見
+- `member` 預設可見 `public + restricted`；`confidential` 僅在白名單命中時可見
+- `confidential` 預設僅 `owner` 可見，`visible_to_members / visible_to_roles / visible_to_departments` 命中的 member 可提權讀取
+- `guest` 不受白名單提權影響，永遠不可見 `confidential`
 - 未授權範圍必須直接隱藏，不顯示灰階、占位提示或 existence leak
 
 **Acceptance Criteria**
 
 - `AC-IAM-04` Given guest 被授權某 L1 子樹，When 進入 shared workspace，Then 只可見該子樹中的 `public` entity / doc / task context
-- `AC-IAM-05` Given 同一子樹下同時存在 `public`、`restricted`、`confidential` 節點，When guest 查詢，Then `restricted/confidential` 完全不可見
-- `AC-IAM-06` Given member 進入 shared workspace，When 查詢資料，Then 可見 workspace 內 `public + restricted`，但不可見 `confidential`
+- `AC-IAM-05` Given 同一子樹下同時存在 `public`、`restricted`、`confidential` 節點，When guest 查詢，Then `restricted/confidential` 完全不可見（白名單對 guest 無效）
+- `AC-IAM-06` Given member 進入 shared workspace，When 查詢資料，Then 預設可見 workspace 內 `public + restricted`；`confidential` 僅在白名單（`visible_to_members / visible_to_roles / visible_to_departments`）命中時可見
 
 ### P0-3: Connector Scope 邊界
 

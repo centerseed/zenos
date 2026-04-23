@@ -30,7 +30,7 @@ updated: 2026-03-26
 | 神經層（Neural Layer） | ZenOS Ontology 架構 | 📋 設計完成未實作 | 文件級 ontology entry，CRUD 自動觸發，高頻變動 |
 | Meta-Ontology | ZenOS Ontology 架構 | ✅ 設計完成 | Schema 層：定義「ontology 應該長什麼樣」，全客戶共用 |
 | 四維標籤體系 | Meta-Ontology 核心機制 | ✅ 設計完成 | What/Why/How/Who，源自 Ranganathan PMEST |
-| Context Protocol | ZenOS 核心產出物 | ✅ 模板驗證中 | Ontology 的 view — 從 ontology 自動生成，人微調確認 |
+| Context Protocol | ZenOS 核心產出物 | ✅ 模板驗證中 | Derived collection — 從 ontology 自動生成，人微調確認後凍結 |
 | 全景圖 | ZenOS 導入入口 | ✅ 原型完成 | 30 分鐘對話 → 公司全貌 + 盲點推斷 |
 | 盲點推斷 | ZenOS 差異化能力 | ✅ 原型驗證 | 從跨實體關係圖推斷未顯性化的問題 |
 | 漸進式信任 | ZenOS 導入策略 | ✅ 機制設計完成 | 三階段：對話 → 選擇性開放 → BYOS |
@@ -99,7 +99,7 @@ ZenOS（產品）
   │   │       └── 四維標籤 ← 理論基礎：Ranganathan PMEST
   │   │
   │   ├── 產出物
-  │   │   ├── Context Protocol ← Ontology 的 view，實例：paceriz.md, zenos.md
+  │   │   ├── Context Protocol ← Derived collection，實例：paceriz.md, zenos.md
   │   │   └── 全景圖 ← 骨架層的視覺展示，含盲點推斷
   │   │
   │   ├── 核心機制
@@ -117,7 +117,7 @@ ZenOS（產品）
   │   ├── ZenOS Dashboard（唯一自建 UI）
   │   │   ├── 全景圖展示 ← 骨架層視覺化 + 盲點
   │   │   ├── 確認佇列 ← confirmedByUser 介面
-  │   │   ├── Protocol Viewer ← 給非技術成員的可讀 view
+  │   │   ├── Protocol Reader ← 給非技術成員的可讀介面
   │   │   └── Drop Zone ← 文件讀完即丟，不儲存（Stage 1 用）
   │   │
   │   └── 部署

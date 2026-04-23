@@ -32,7 +32,6 @@ from zenos.application.action.task_service import TaskService
 from zenos.infrastructure.llm_client import LLMClient, create_llm_client
 from zenos.infrastructure.firestore_repo import (
     FirestoreBlindspotRepository,
-    FirestoreDocumentRepository,
     FirestoreEntityRepository,
     FirestoreProtocolRepository,
     FirestoreRelationshipRepository,
@@ -182,7 +181,6 @@ async def test_p0_3():
 
     entity_repo = FirestoreEntityRepository()
     relationship_repo = FirestoreRelationshipRepository()
-    document_repo = FirestoreDocumentRepository()
     protocol_repo = FirestoreProtocolRepository()
     blindspot_repo = FirestoreBlindspotRepository()
     task_repo = FirestoreTaskRepository()
@@ -193,7 +191,6 @@ async def test_p0_3():
     svc = OntologyService(
         entity_repo=entity_repo,
         relationship_repo=relationship_repo,
-        document_repo=document_repo,
         protocol_repo=protocol_repo,
         blindspot_repo=blindspot_repo,
         governance_ai=gov_ai,
@@ -203,7 +200,6 @@ async def test_p0_3():
         task_repo=task_repo,
         entity_repo=entity_repo,
         blindspot_repo=blindspot_repo,
-        document_repo=document_repo,
         governance_ai=gov_ai,
     )
 

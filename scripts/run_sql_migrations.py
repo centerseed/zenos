@@ -14,6 +14,16 @@ import asyncpg
 from asyncpg import exceptions as pg_exceptions
 
 
+KNOWN_CHECKSUM_ALIASES: dict[str, set[str]] = {
+    # 2026-04-22: migration was applied in production before a follow-up commit
+    # added the deterministic placeholder-product fallback. Treat the original
+    # applied checksum as equivalent so later migrations are not blocked.
+    "20260422_0002_task_product_id_backfill": {
+        "32d6052aeea27b96e4053d5bab32c3fa6b2adc6fdbb21b31e0660fb05a89d118",  # pragma: allowlist secret
+    },
+}
+
+
 @dataclass(frozen=True)
 class Migration:
     version: str
@@ -56,6 +66,13 @@ def load_migrations(migrations_dir: Path) -> list[Migration]:
             )
         )
     return migrations
+
+
+def checksum_matches_applied(version: str, applied_checksum: str, current_checksum: str) -> bool:
+    if applied_checksum == current_checksum:
+        return True
+    aliases = KNOWN_CHECKSUM_ALIASES.get(version, set())
+    return applied_checksum in aliases
 
 
 async def ensure_migration_table(conn: asyncpg.Connection) -> None:
@@ -137,7 +154,7 @@ async def main() -> int:
         for migration in migrations:
             if migration.version in applied:
                 old_checksum = applied[migration.version]["checksum"]
-                if old_checksum != migration.checksum:
+                if not checksum_matches_applied(migration.version, old_checksum, migration.checksum):
                     print(
                         "ERROR: checksum mismatch for applied migration "
                         f"{migration.filename}"

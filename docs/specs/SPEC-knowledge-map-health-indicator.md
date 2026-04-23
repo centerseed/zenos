@@ -2,12 +2,15 @@
 type: SPEC
 id: SPEC-knowledge-map-health-indicator
 status: Draft
-ontology_entity: 語意治理-pipeline
+ontology_entity: governance-observability
 created: 2026-04-09
-updated: 2026-04-09
+updated: 2026-04-23
+depends_on: SPEC-governance-feedback-loop, SPEC-governance-observability
 ---
 
 # Feature Spec: 知識地圖治理健康提示
+
+> **Layering note（2026-04-23）**：本 SPEC 是 Dashboard UI 層的 health indicator 視覺化；health signal 計算 canonical 在 `SPEC-governance-feedback-loop`（ADR-020）+ `SPEC-governance-observability`；拓撲偵測邊界在主 SPEC §10.5。本 SPEC 不定義計算邏輯或 schema。
 
 ## 第一章：背景與動機
 

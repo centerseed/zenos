@@ -30,9 +30,9 @@ from zenos.domain.doc_types import (
     is_known_doc_type,
 )
 from zenos.infrastructure.github_adapter import parse_github_url, GitHubAdapter
-from zenos.domain.knowledge import Blindspot, Document, DocumentStatus, DocumentTags, Entity, EntityStatus, EntityType, Protocol, Relationship, RelationshipType, Severity, Source, SourceType, Tags
+from zenos.domain.knowledge import Blindspot, Document, DocumentStatus, Entity, EntityStatus, EntityType, Protocol, Relationship, RelationshipType, Severity, Source, SourceType, Tags
 from zenos.domain.shared import SplitRecommendation, TagConfidence
-from zenos.domain.knowledge import BlindspotRepository, DocumentRepository, EntityRepository, ProtocolRepository, RelationshipRepository
+from zenos.domain.knowledge import BlindspotRepository, EntityRepository, ProtocolRepository, RelationshipRepository
 from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS, default_level_for_type
 from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.domain.search import SearchResult, search_ontology
@@ -303,16 +303,15 @@ class OntologyService:
         self,
         entity_repo: EntityRepository,
         relationship_repo: RelationshipRepository,
-        document_repo: DocumentRepository,
-        protocol_repo: ProtocolRepository,
-        blindspot_repo: BlindspotRepository,
+        document_repo: object | None = None,  # deprecated, ignored; docs are entity-backed
+        protocol_repo: ProtocolRepository | None = None,
+        blindspot_repo: BlindspotRepository | None = None,
         governance_ai: object | None = None,
         source_adapter: GitHubAdapter | None = None,
         embedding_service: object | None = None,
     ) -> None:
         self._entities = entity_repo
         self._relationships = relationship_repo
-        self._documents = document_repo
         self._protocols = protocol_repo
         self._blindspots = blindspot_repo
         self._governance_ai = governance_ai
@@ -1032,8 +1031,7 @@ class OntologyService:
         entity = await self._entities.get_by_id(doc_id)
         if entity is not None and entity.type == EntityType.DOCUMENT:
             return entity
-        # Fallback: try legacy documents collection
-        return await self._documents.get_by_id(doc_id)
+        return None
 
     async def search(
         self,
@@ -1068,9 +1066,8 @@ class OntologyService:
             product_ids = _collect_subtree_ids(product_id, full_entity_map)
             entities = [e for e in entities if e.id in product_ids]
 
-        # Document entities are included in entities list (type="document")
-        # Also fetch legacy documents for backward compat
-        documents = await self._documents.list_all()
+        # Document entities are already included in entities list (type="document")
+        documents: list[Document] = []
         protocols: list[Protocol] = []
         # Collect protocols for all entities that have one
         for entity in entities:
@@ -2358,7 +2355,7 @@ class OntologyService:
           - title → name
           - source → sources[0]
           - linked_entity_ids[0] → parent_id (primary), rest → relationships
-          - tags (DocumentTags format) → Tags (unified list format)
+          - tags (legacy document tag format) → Tags (unified list format)
         """
         # --- Guest write guard ---
         # document is an L3 type; guests may create it under an authorized parent.
@@ -2827,7 +2824,7 @@ class OntologyService:
             else:
                 suggestions.append("index document 建議補上 bundle_highlights")
 
-        # Build unified Tags from legacy DocumentTags format
+        # Build unified Tags from legacy document tag format
         tags_data = data.get("tags")
         existing_tags = existing.tags if existing else Tags(what=[], why="", how="", who=[])
         if isinstance(tags_data, dict):
@@ -3167,6 +3164,9 @@ class OntologyService:
             entity_name=data["entity_name"],
             content=data["content"],
             gaps=gaps,
+            # ADR-045 S02: version is a caller-visible revision label for the
+            # generated protocol artifact. We store/echo it, but do not branch
+            # application behavior on specific version values.
             version=data.get("version", "1.0"),
             id=data.get("id"),
             confirmed_by_user=data.get("confirmed_by_user", False),
@@ -3294,19 +3294,12 @@ class OntologyService:
             await self._entities.upsert(entity)
 
         elif collection == "documents":
-            # Try entity(type=document) first, fallback to legacy documents
             entity = await self._entities.get_by_id(item_id)
-            if entity is not None and entity.type == EntityType.DOCUMENT:
-                entity.confirmed_by_user = True
-                entity.updated_at = now
-                await self._entities.upsert(entity)
-            else:
-                doc = await self._documents.get_by_id(item_id)
-                if doc is None:
-                    raise ValueError(f"Document '{item_id}' not found")
-                doc.confirmed_by_user = True
-                doc.updated_at = now
-                await self._documents.upsert(doc)
+            if entity is None or entity.type != EntityType.DOCUMENT:
+                raise ValueError(f"Document '{item_id}' not found")
+            entity.confirmed_by_user = True
+            entity.updated_at = now
+            await self._entities.upsert(entity)
 
         elif collection == "protocols":
             # Backward compatibility:
@@ -3359,13 +3352,10 @@ class OntologyService:
             if col == "entities":
                 result["entities"] = await self._entities.list_unconfirmed()
             elif col == "documents":
-                # Include both document entities and legacy documents
-                doc_entities = [
+                result["documents"] = [
                     e for e in await self._entities.list_unconfirmed()
                     if e.type == EntityType.DOCUMENT
                 ]
-                legacy_docs = await self._documents.list_unconfirmed()
-                result["documents"] = doc_entities + legacy_docs
             elif col == "protocols":
                 result["protocols"] = await self._protocols.list_unconfirmed()
             elif col == "blindspots":

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from zenos.domain.knowledge import Document, DocumentTags, Entity, EntityStatus, EntityType, Gap, Protocol, Severity, Source, SourceType, Tags
+from zenos.domain.knowledge import Document, Entity, EntityStatus, EntityType, Gap, Protocol, Severity, Source, SourceType, Tags
 from zenos.domain.search import SearchResult, search_ontology, _tokenize, _score_match
 from zenos.application.knowledge.ontology_service import _collect_subtree_ids, _build_ancestors
 
@@ -31,7 +31,7 @@ def _document(title: str, what: list[str] | None = None, who: list[str] | None =
         id=f"d-{title}",
         title=title,
         source=Source(type=SourceType.GITHUB, uri=f"docs/{title}", adapter="git"),
-        tags=DocumentTags(
+        tags=Tags(
             what=what or [title],
             why="docs",
             how="written",
@@ -43,13 +43,14 @@ def _document(title: str, what: list[str] | None = None, who: list[str] | None =
     )
 
 
-def _protocol(entity_name: str, content: dict | None = None) -> Protocol:
+def _protocol(entity_name: str, content: dict | None = None, version: str = "1.0") -> Protocol:
     return Protocol(
         id=f"p-{entity_name}",
         entity_id=f"e-{entity_name}",
         entity_name=entity_name,
         content=content or {"what": "test module", "why": "test", "how": "impl", "who": "dev"},
         gaps=[Gap(description="missing docs", priority=Severity.YELLOW)],
+        version=version,
         generated_at=datetime(2026, 3, 1),
         updated_at=datetime(2026, 3, 1),
     )
@@ -222,6 +223,12 @@ class TestSearchOntology:
         results = search_ontology("Paceriz", [], [], [proto])
         assert len(results) >= 1
         assert results[0].type == "protocol"
+
+    def test_protocol_summary_surfaces_revision_label(self):
+        proto = _protocol("Paceriz", version="2.3")
+        results = search_ontology("Paceriz", [], [], [proto])
+        assert len(results) >= 1
+        assert results[0].summary == "Protocol v2.3"
 
     def test_mixed_results_sorted_by_score(self):
         entity = _entity("Training Plan", summary="The training plan module")

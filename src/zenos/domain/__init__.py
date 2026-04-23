@@ -3,7 +3,7 @@
 Import from sub-packages directly for new code:
   from zenos.domain.knowledge import Entity, EntityRepository
   from zenos.domain.action import Task, TaskRepository
-  from zenos.domain.identity import UserPrincipal, PartnerRepository
+  from zenos.domain.identity import PartnerRepository
   from zenos.domain.document_platform import DocRole, SourceStatus
   from zenos.domain.shared import SplitRecommendation, QualityReport
 
@@ -24,13 +24,9 @@ from .document_platform import (  # noqa: F401
 from .identity import (  # noqa: F401
     CLASSIFICATION_ORDER,
     VISIBILITY_ORDER,
-    AccessPolicy,
-    AgentPrincipal,
-    AgentScope,
     Classification,
     InheritanceMode,
     PartnerRepository,
-    UserPrincipal,
     Visibility,
 )
 from .knowledge import (  # noqa: F401
@@ -38,9 +34,7 @@ from .knowledge import (  # noqa: F401
     BlindspotRepository,
     BlindspotStatus,
     Document,
-    DocumentRepository,
     DocumentStatus,
-    DocumentTags,
     Entity,
     EntityEntry,
     EntityRepository,

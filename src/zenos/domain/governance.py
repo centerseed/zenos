@@ -13,7 +13,6 @@ from .knowledge import (
     Blindspot,
     Document,
     DocumentStatus,
-    DocumentTags,
     Entity,
     EntityStatus,
     EntityType,
@@ -148,7 +147,7 @@ def check_split_criteria(
 # 2. 4D Tag confidence (標籤信心度)
 # ──────────────────────────────────────────────
 
-def apply_tag_confidence(tags: Tags | DocumentTags) -> TagConfidence:
+def apply_tag_confidence(tags: Tags) -> TagConfidence:
     """Classify tag dimensions by AI confidence level.
 
     From REF-ontology-methodology.md:

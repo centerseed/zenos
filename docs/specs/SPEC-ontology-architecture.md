@@ -2,617 +2,796 @@
 type: SPEC
 id: SPEC-ontology-architecture
 status: Approved
-ontology_entity: TBD
+version: "2.0"
+ontology_entity: ontology-core
 created: 2026-03-21
 updated: 2026-04-23
-superseded_sections:
-  - "L1 = product 單一 type（2026-04-23 由 ADR-047 改為 level-based 判定）"
+supersedes:
+  - "v1 (2026-03-21 → 2026-04-09 的所有版本)"
+merges:
+  - SPEC-l2-entity-redefinition (合併為 §5 L2 章節)
+  - SPEC-impact-chain-enhancement (合併為 §8 Relationship 章節)
+  - SPEC-knowledge-graph-semantic (合併為 §3 分層模型)
+supersede_adrs:
+  - ADR-006-entity-project-separation
+  - ADR-007-entity-architecture
+  - ADR-010-entity-entries
+  - ADR-022-document-bundle-architecture
+  - ADR-025-zenos-core-layering (部分)
+  - ADR-027-layer-contract (部分)
+  - ADR-028-plan-primitive (Action Layer 獨立性)
+  - ADR-041-pillar-a-semantic-retrieval (embedding 位置)
+  - ADR-044-task-ownership-ssot-convergence (task product_id 語意)
+  - ADR-046-document-entity-boundary (Document → Entity 收斂規則)
+  - ADR-047-l1-level-ssot (L1 level 判定納入本 SPEC)
 ---
 
-# ZenOS Knowledge Ontology 架構
+# SPEC: Ontology Architecture v2
 
-> Layering note: 本 spec 只定義 `ZenOS Core` 中的 Knowledge Layer。
-> `Task` / `Plan` 屬於 `SPEC-zenos-core` 定義的 Action Layer，不屬於 ontology entity。
+**ZenOS 的單一知識圖 canonical 定義。** 所有 entity / relationship / permission / lifecycle / extension 規則以本 SPEC 為 SSOT。
 
-> 從 `docs/spec.md` Part 4 搬出。包含 Entity 分層模型、雙層治理架構、四維標籤、演化路線等。
+---
 
+## 1. 第一性原理（Axioms）
 
-### 業界做法研究
+這 6 條是整個 ontology 的公理。任何後續 SPEC / ADR / 實作若與本節衝突，以本節為準。
 
-| 做法 | 代表 | Ontology 誰建 | 資料來源 | 精確度 | 導入成本 | 治理能力 |
-|------|------|-------------|---------|--------|---------|---------|
-| 由上而下定義 | Palantir | 人工定義 Object Type / Property / Link | 結構化資料庫 | 極高 | 極高 | 強（人工維護） |
-| 由下而上推斷 | Glean | ML 自動推斷實體和關係 | 所有工具的內容 + metadata | 中等 | 極低 | 無 |
-| LLM 自動建構 | OntoEKG（學術） | LLM 提取 + 人審核 | 非結構化文件 | 中高 | 中等 | 理論上有，未產品化 |
+1. **Entity = graph node**。Ontology 是圖，entity 是節點，relationship 是邊。不是 dataclass 視覺模型。
+2. **Base Entity 只含四件事**：identity（id + name + type_label + level + parent_id）、permission、owner、timestamps。其他任何欄位都屬於 subclass 擴充。
+3. **無 ad-hoc unschemed JSON blob**。禁止 `details: dict` 這類無 schema 的 catch-all 欄位（Axiom 3 違反的典型）。**允許** typed JSON column — 前提是 JSON 內結構有明確 domain type（`Tags` / `Source` / `BundleHighlight` / `list[str] acceptance_criteria` / `HandoffEvent` 等），server 反序列化時強制 schema。遇到 extra metadata 需求，要定 subclass table 或擴充既有 typed schema，不要塞 free-form dict。
+4. **繼承由內而外擴充**。L1 / L2 / L3 從 BaseEntity 繼承；L3-semantic / L3-action 再從共通 mixin 分叉。每層只加自己該有的欄位。
+5. **Schema 結構強制**。DDL（DB 層）拒絕錯放欄位；Python dataclass 繼承強制 type；任何「看條件塞某些 level」的動態邏輯不准存在於 schema 層。
+6. **MCP tool shape 以 agent 語意最小化為第一指標**。任何「為了向後相容」增加的 tool 參數一律 reject；tool 合約由本 SPEC 系列（#23 SPEC-mcp-tool-contract）規範。
 
-**Palantir 的做法**：人工定義 Object Type → Data Pipeline 從資料庫灌入 → AI（AIP）在 Ontology 之上查詢和行動。極度精確但極度昂貴，且要求資料已在結構化資料庫中。
+---
 
-**Glean 的做法**：100+ Connector 爬所有工具 → ML 自動識別實體 → 從信號推斷關係。零人工但無業務語意治理，推斷不準也不會告訴你。
+## 2. 範圍
 
-**學術前沿（OntoEKG, 2025）**：LLM 從非結構化文件中提取 class 和 property → 組織成階層 → 序列化為標準格式。有潛力但仍需人工審核，未產品化。
+**本 SPEC 定義**：
+- BaseEntity / Relationship 的 canonical shape
+- L1 / L2 / L3-semantic / L3-action 的分層與各自 subclass schema
+- Entity 生命週期狀態機
+- 權限模型與 visibility 規則（與 SPEC-identity-and-access 對齊）
+- Relationship 語意與 impacts 傳播規則
+- Embedding 如何 sidecar 掛載
 
-### Ontology 的形式與治理架構
+**本 SPEC 不定義**：
+- 治理抽象六維結構（在 SPEC-governance-framework）
+- 具體文件 / 任務 / 權限的治理流程（各 subclass SPEC：SPEC-doc-governance / SPEC-task-governance / SPEC-identity-and-access）
+- MCP tool 的 I/O 格式（在 SPEC-mcp-tool-contract）
+- 實作用的 DDL migration 順序（在 PLAN-ontology-grand-refactor）
 
-#### 三種可能方向（及 ZenOS 的選擇）
+---
 
-| 方向 | 做法 | 優點 | 缺點 |
-|------|------|------|------|
-| **專案導向** | 開案時建 ontology，文件圍繞 ontology 組織，ontology 本身就是文件 | 高品質、高內聚 | 難維護、建構成本高 |
-| **標籤索引** | Ontology 是持續更新的標籤系統，文件 CRUD 觸發標籤治理 | 低摩擦、不改習慣 | 治理深度低、標籤漂移 |
-| **DB Schema + 動作** | Ontology 是資料庫定義 + 受控操作（Palantir 模式） | 最嚴謹、可擴展 | 導入成本 SMB 負擔不起 |
+## 3. 分層模型
 
-**ZenOS 的選擇：結合方向 1 和方向 2。**
-
-方向 1 提供骨架（高品質的實體關係圖），方向 2 提供神經（持續更新的文件級標籤）。兩者在文件 CRUD 事件中融合——標籤治理發生的當下也產生或更新 ontology entry，並找尋關聯的 ontology 實體。
-
-#### Ontology 的本質：文件的語意代理（Semantic Proxy）
-
-Ontology 不是文件本身，不是文件的索引，不是資料庫 schema。Ontology 是每份文件（或一組相關文件）的**語意代理**。
+整個 ZenOS 是 **單一知識圖**。任何實體都是圖上的節點，包括任務 / 計畫 / 里程碑（從舊架構的 Action Layer 併入）。
 
 ```
-傳統做法：人 → 翻遍 Google Drive / Notion / Slack → 找到文件 → 讀完 → 判斷有沒有用
-ZenOS 做法：人或 AI → 讀 ontology entry → 知道這份文件講什麼、為什麼存在、給誰用 → 需要時才讀原始文件
+BaseEntity                                             level = 1 / 2 / 3
+  ├── L1Entity（共享根）                                  level=1, parent_id=null
+  │
+  ├── L2Entity（知識節點）                                 level=2, parent 指向 L1
+  │     + SemanticMixin（summary, tags, confirmed_by_user, last_reviewed_at）
+  │     + L2 專有：consolidation_mode, 三問 metadata, impacts_gate_passed_at
+  │
+  ├── L3Semantic（語意知識物件）                           level=3
+  │     │  + SemanticMixin
+  │     ├── L3DocumentEntity（文件語意代理）
+  │     ├── L3RoleEntity（角色）
+  │     └── L3ProjectEntity（工作容器）
+  │
+  └── L3Action（工作項目，舊 Action Layer 併入）            level=3
+        + L3TaskBaseEntity（共用 action 欄位）
+        ├── L3MilestoneEntity（里程碑 — Goal 合併於此）
+        ├── L3PlanEntity（任務群組）
+        ├── L3TaskEntity（可執行工作）
+        └── L3SubtaskEntity（agent 派工單位）
 ```
 
-每個 ontology entry 承載：
+- **L1** = 共享邊界（可整棵子樹分享給 guest）
+- **L2** = 跨角色知識節點（三問 + impacts gate 確保品質）
+- **L3-Semantic** = 具體語意物件（文件 / 角色 / 專案容器）
+- **L3-Action** = 可執行工作（任務系列）
 
-| 欄位 | 內容 | 來源 |
+**關鍵設計決策**：
+- L1 pure base（不需要獨立 L1 subclass table，DB 用 `level=1` 區分即可）
+- L2 與 L3-Semantic 共用 SemanticMixin，但 lifecycle 不同（L2 有 impacts gate，L3-Semantic 有 supersede / archive 流程）
+- L3-Action 自己的 L3TaskBaseEntity 不帶 SemanticMixin（任務不需要 tags / confirmed_by_user）
+
+---
+
+## 4. BaseEntity Schema
+
+### Python
+```python
+@dataclass
+class BaseEntity:
+    # Identity
+    id: str
+    name: str
+    type_label: str          # 顯示 label（product / module / document / milestone / task / ...），不做業務分支
+    level: int               # 1 / 2 / 3
+    parent_id: str | None    # 圖的樹結構；L1 必為 None
+
+    # Lifecycle
+    status: EntityStatus     # 見 §9
+    created_at: datetime
+    updated_at: datetime
+
+    # Permissions（與 SPEC-identity-and-access 對齊）
+    visibility: Visibility                 # public / restricted / confidential
+    visible_to_roles: list[str]
+    visible_to_members: list[str]
+    visible_to_departments: list[str]
+
+    # Ownership
+    owner: str | None
+```
+
+### DB — `entities_base` 表
+```sql
+CREATE TABLE entities_base (
+    id             text PRIMARY KEY,
+    partner_id     text NOT NULL REFERENCES partners(id),
+    name           text NOT NULL,
+    type_label     text NOT NULL,
+    level          integer NOT NULL CHECK (level IN (1, 2, 3)),
+    parent_id      text REFERENCES entities_base(id) ON DELETE SET NULL,
+    status         text NOT NULL,                -- see §9
+    visibility     text NOT NULL DEFAULT 'public',
+    visible_to_roles        text[] NOT NULL DEFAULT '{}',
+    visible_to_members      text[] NOT NULL DEFAULT '{}',
+    visible_to_departments  text[] NOT NULL DEFAULT '{}',
+    owner          text,
+    created_at     timestamptz NOT NULL DEFAULT now(),
+    updated_at     timestamptz NOT NULL DEFAULT now(),
+
+    UNIQUE (partner_id, id),
+    CHECK (level != 1 OR parent_id IS NULL)      -- L1 必無 parent
+);
+```
+
+**禁用欄位**（結構強制）：
+- 無 `details jsonb`（Axiom 3）
+- 無 `tags_json`（進 SemanticMixin）
+- 無 `summary`（進 SemanticMixin）
+- 無 `confirmed_by_user`（進 SemanticMixin）
+- 無 type-specific 欄位（由 subclass table 各自擁有）
+
+### L1 判定
+```
+is_l1(entity) ⟺ entity.level == 1 AND entity.parent_id IS NULL
+```
+此判定放在 `zenos.domain.knowledge.collaboration_roots.is_collaboration_root_entity`，是 L1 的 SSOT。
+
+---
+
+## 5. SemanticMixin（L2 + L3-Semantic 共用）
+
+```python
+@dataclass
+class SemanticMixin:
+    summary: str
+    tags: Tags                    # {what: list[str], why: str, how: str, who: list[str]}
+    confirmed_by_user: bool       # draft → confirmed 閘
+    last_reviewed_at: datetime | None
+```
+
+DB 層：每個 L2 / L3-Semantic subclass table 都有這四欄位（重複 acceptable，因為 sidecar JOIN 粒度自然對齊）。
+
+---
+
+## 6. L1 Entity（共享根）
+
+**用途**：作為知識圖的根節點，代表一個「可分享單位」（a shareable root），L2 / L3 的子樹都掛在底下。
+
+**典型 label**：
+- `product`（自己的產品）
+- `company`（CRM 客戶公司）
+- `person`（CRM 聯絡人）
+- `deal`（CRM 交易）
+- 未來新 L1 label 加進 `DEFAULT_TYPE_LEVELS` 即可
+
+**Schema**：BaseEntity，無其他欄位。DB 層 level=1 的 row 就是 L1，不開獨立 subclass table。
+
+**規則**：
+- 必 `level=1 AND parent_id=null`
+- task/plan/milestone 等 L3-Action 透過 `parent_id` 指向 L1（歸屬）或 L2/L3 內嵌結構（排序）
+- L1 的 sharing 邊界：對 guest 分享 = guest 獲得整棵 L1 子樹讀權限（結合 visibility 規則）
+
+---
+
+## 7. L2 Entity（知識節點）
+
+**用途**：跨角色公司共識概念。改了會影響多個下游。
+
+**Schema**：
+```python
+@dataclass
+class L2Entity(BaseEntity, SemanticMixin):
+    consolidation_mode: ConsolidationMode       # global | incremental
+    q1_cross_role: bool | None                  # 三問 metadata
+    q2_downstream_impact: bool | None
+    q3_company_consensus: bool | None
+    impacts_gate_passed_at: datetime | None     # 三問 + impacts 皆過的時間戳
+```
+
+```sql
+CREATE TABLE entity_l2 (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    summary text NOT NULL,
+    tags_json jsonb NOT NULL DEFAULT '{}',
+    confirmed_by_user boolean NOT NULL DEFAULT false,
+    last_reviewed_at timestamptz,
+    consolidation_mode text NOT NULL DEFAULT 'incremental' CHECK (consolidation_mode IN ('global', 'incremental')),
+    q1_cross_role boolean,
+    q2_downstream_impact boolean,
+    q3_company_consensus boolean,
+    impacts_gate_passed_at timestamptz
+);
+```
+
+### 7.1 三問 + impacts gate
+
+L2 新建一律 `status='active'` + `confirmed_by_user=false`（即 §7.2 的 Draft 態）。升為 Confirmed（`confirmed_by_user=true`）必經 `confirm` 流程，server 強制三條：
+
+1. 三問全過（q1/q2/q3 為 `true`）
+2. ≥1 條 `impacts` relationship 指向其他 entity，且描述具體（含 `→` 或等效語意）
+3. summary 跨角色可讀（LLM 評分 ≥ threshold；軟規則）
+
+Violation → reject；`force=true` 走過需要 `manual_override_reason` 並標記。
+
+### 7.2 L2 Lifecycle
+
+L2 有 **兩個正交 state**：
+
+1. `confirmed_by_user: bool`（gate 維度）— 是否通過三問 + impacts gate
+2. `BaseEntity.status: EntityStatus`（業務 lifecycle 維度）— `active` 或 `stale`
+
+組合語意：
+
+| confirmed_by_user | status | 意義 |
+|---|---|---|
+| `false` | `active` | **Draft** 態（新建預設）|
+| `true` | `active` | **Confirmed** 態（穩定運作）|
+| `true` | `stale` | **Stale** 態（impacts 斷鏈 / 久未 review，待 re-confirm 或降級）|
+
+```
+(false, active)  ─── 三問+impacts 過 ──► (true, active)
+                                              │
+                                              ▼（impacts 斷鏈 / review 逾期）
+(true, active) ◄── re-review confirm ─── (true, stale)
+```
+
+- Draft 是唯一合法初始態；server 強制新建 L2 時 `confirmed_by_user=false, status='active'`
+- **L2 沒有 `archived` 終態**。要收掉 L2 只有三條路：降為 `sources` 掛在別的 entity / 降為 `L3-Document` / 物理刪除（admin script，非 MCP）
+- `status` 的 `paused / completed / planned / draft / current / conflict / archived` 不適用 L2
+
+### 7.3 Entity Entries（L2 的結構化記憶）
+
+L2 可掛載 **EntityEntry**（時間軸知識條目），記錄 decision / insight / limitation / change / context。
+
+- **Entry 專屬於 L2**：L3 entity 不掛 entry（有其他機制，例如 task.result / document.content）
+- 飽和機制：單一 L2 active entries ≥ 20 觸發 consolidation proposal
+- Schema / 治理：獨立 `entity_entries` 表，規範在 **SPEC-entry-consolidation-skill** + **SPEC-entry-distillation-quality**
+
+---
+
+## 8. L3-Semantic Entities
+
+### 8.1 L3DocumentEntity（文件語意代理）
+
+舊 `Document` collection 於 ADR-046 起併入 entity。本 SPEC 固化為 L3 subclass，`documents` 表已於 ADR-047 後繼 migration 刪除。
+
+```python
+@dataclass
+class L3DocumentEntity(BaseEntity, SemanticMixin):
+    sources: list[Source]                       # primary file + additional refs
+    doc_role: DocRole                           # single | index
+    bundle_highlights: list[BundleHighlight]
+    highlights_updated_at: datetime | None
+    change_summary: str | None
+    summary_updated_at: datetime | None
+```
+
+```sql
+CREATE TABLE entity_l3_document (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    summary text NOT NULL,
+    tags_json jsonb NOT NULL DEFAULT '{}',
+    confirmed_by_user boolean NOT NULL DEFAULT false,
+    last_reviewed_at timestamptz,
+    sources_json jsonb NOT NULL DEFAULT '[]',
+    doc_role text NOT NULL DEFAULT 'single' CHECK (doc_role IN ('single', 'index')),
+    bundle_highlights_json jsonb NOT NULL DEFAULT '[]',
+    highlights_updated_at timestamptz,
+    change_summary text,
+    summary_updated_at timestamptz,
+    CHECK (doc_role = 'single' OR bundle_highlights_json != '[]')   -- index 必須有 highlights
+);
+```
+
+**Lifecycle**（合法 status：`draft / current / stale / archived / conflict`，見 §11.2）：
+```
+draft → current ↔ stale → archived
+          │         ▲        ▲
+          ├─ conflict ─┘      │
+          └───── supersede ───┘
+```
+
+治理規則：`SPEC-doc-governance §6`。
+
+### 8.2 L3RoleEntity（角色）
+
+```python
+@dataclass
+class L3RoleEntity(BaseEntity, SemanticMixin):
+    pass   # role 目前不加欄位；language/title 放在 name，責任描述在 summary
+```
+
+```sql
+CREATE TABLE entity_l3_role (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    summary text NOT NULL,
+    tags_json jsonb NOT NULL DEFAULT '{}',
+    confirmed_by_user boolean NOT NULL DEFAULT false,
+    last_reviewed_at timestamptz
+);
+```
+
+### 8.3 L3ProjectEntity（工作容器）
+
+```python
+@dataclass
+class L3ProjectEntity(BaseEntity, SemanticMixin):
+    project_kind: str | None          # initiative | campaign | engagement | custom
+    started_at: datetime | None
+    ended_at: datetime | None
+```
+
+```sql
+CREATE TABLE entity_l3_project (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    summary text NOT NULL,
+    tags_json jsonb NOT NULL DEFAULT '{}',
+    confirmed_by_user boolean NOT NULL DEFAULT false,
+    last_reviewed_at timestamptz,
+    project_kind text,
+    started_at timestamptz,
+    ended_at timestamptz
+);
+```
+
+---
+
+## 9. L3-Action Entities（舊 Action Layer 併入）
+
+舊的 `zenos.tasks` / `zenos.plans` 獨立 table + `task_entities` junction 於本 SPEC 起廢止。**所有任務類物件都是 entity**，透過 `entities_base` + L3-Action subclass 表表達。`parent_id`（圖的邊）取代 `product_id`；`relationships` 表取代 `task_entities`。
+
+### 9.1 L3TaskBaseEntity（abstract 基底）
+
+```python
+@dataclass
+class L3TaskBaseEntity(BaseEntity):
+    # 注意：L3-Action 不帶 SemanticMixin — 任務不需要 tags / confirmed_by_user
+    description: str
+    task_status: TaskStatus                     # todo | in_progress | review | done | cancelled
+    assignee: str | None
+    dispatcher: str                             # agent:xxx | human[:id]
+    acceptance_criteria: list[str]
+    priority: Priority
+    result: str | None
+    handoff_events: list[HandoffEvent]          # 獨立 append-only log（見 §9.6）
+```
+
+**規則**：
+- Task 系列的 `status`（BaseEntity 的 lifecycle enum）設為 `active`；業務語意的 status 在 `task_status`
+- `parent_id` 指向上級（Milestone / Plan / Task）或 L1/L2（根歸屬）
+- `linked_entities` 透過 `relationships` 表（知識關聯），禁止自 L1 root
+
+### 9.2 L3MilestoneEntity（里程碑；Goal 合併於此）
+
+舊的「goal entity」（抽象目標）已於本 SPEC supersede，合併進 Milestone。所有帶目標語意的 L3 物件都是 Milestone。
+
+```python
+@dataclass
+class L3MilestoneEntity(L3TaskBaseEntity):
+    target_date: date | None
+    completion_criteria: str | None             # 里程碑達成判定
+```
+
+```sql
+CREATE TABLE entity_l3_milestone (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    description text NOT NULL,
+    task_status text NOT NULL CHECK (task_status IN ('planned','active','completed','cancelled')),
+    assignee text,
+    dispatcher text NOT NULL,
+    acceptance_criteria_json jsonb NOT NULL DEFAULT '[]',
+    priority text NOT NULL DEFAULT 'medium' CHECK (priority IN ('critical','high','medium','low')),
+    result text,
+    target_date date,
+    completion_criteria text
+);
+```
+
+### 9.3 L3PlanEntity（任務群組）
+
+```python
+@dataclass
+class L3PlanEntity(L3TaskBaseEntity):
+    goal_statement: str
+    entry_criteria: str
+    exit_criteria: str
+```
+
+```sql
+CREATE TABLE entity_l3_plan (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    description text NOT NULL,
+    task_status text NOT NULL CHECK (task_status IN ('draft','active','completed','cancelled')),
+    assignee text,
+    dispatcher text NOT NULL,
+    acceptance_criteria_json jsonb NOT NULL DEFAULT '[]',
+    priority text NOT NULL DEFAULT 'medium',
+    result text,
+    goal_statement text NOT NULL,
+    entry_criteria text NOT NULL,
+    exit_criteria text NOT NULL
+);
+```
+
+### 9.4 L3TaskEntity（可執行工作）
+
+```python
+@dataclass
+class L3TaskEntity(L3TaskBaseEntity):
+    plan_order: int | None          # 在 parent plan 內的順序
+    depends_on: list[str]           # 阻塞此 task 的其他 task ids
+    blocked_reason: str | None
+    due_date: date | None
+```
+
+```sql
+CREATE TABLE entity_l3_task (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    description text NOT NULL,
+    task_status text NOT NULL CHECK (task_status IN ('todo','in_progress','review','done','cancelled')),
+    assignee text,
+    dispatcher text NOT NULL,
+    acceptance_criteria_json jsonb NOT NULL DEFAULT '[]',
+    priority text NOT NULL CHECK (priority IN ('critical','high','medium','low')),
+    result text,
+    plan_order integer,
+    depends_on_json jsonb NOT NULL DEFAULT '[]',
+    blocked_reason text,
+    due_date date,
+    CHECK (task_status != 'review' OR result IS NOT NULL)   -- review 必附 result
+);
+```
+
+### 9.5 L3SubtaskEntity（agent 派工單位）
+
+Subtask 是 Task 的 subclass，語意為 **agent 內部派工用**（非用戶常用）。
+
+```python
+@dataclass
+class L3SubtaskEntity(L3TaskEntity):
+    dispatched_by_agent: str                    # 派工的 agent id
+    auto_created: bool = True                   # 多為 agent 自動拆分
+```
+
+```sql
+CREATE TABLE entity_l3_subtask (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    description text NOT NULL,
+    task_status text NOT NULL,
+    assignee text,
+    dispatcher text NOT NULL,
+    acceptance_criteria_json jsonb NOT NULL DEFAULT '[]',
+    priority text NOT NULL DEFAULT 'medium',
+    result text,
+    plan_order integer,
+    depends_on_json jsonb NOT NULL DEFAULT '[]',
+    blocked_reason text,
+    due_date date,
+    dispatched_by_agent text NOT NULL,
+    auto_created boolean NOT NULL DEFAULT true
+);
+```
+
+**Subtask vs Task 的語意區別**：
+- Task：人類可見的工作項目
+- Subtask：agent 為了完成一個 Task，自動拆出的執行子步驟（例如 Developer agent 拆出「寫 X 函式」「補 Y test」）
+- Parent 關係：Subtask 的 `parent_id` 必指向一個 L3TaskEntity
+
+### 9.6 HandoffEvent（append-only log）
+
+任務的派工歷史獨立 table（不是 JSON 欄位）：
+
+```sql
+CREATE TABLE task_handoff_events (
+    id bigserial PRIMARY KEY,
+    partner_id text NOT NULL REFERENCES partners(id),
+    task_entity_id text NOT NULL REFERENCES entities_base(id) ON DELETE CASCADE,
+    from_dispatcher text,
+    to_dispatcher text NOT NULL,
+    reason text NOT NULL,
+    notes text,
+    output_ref text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX idx_handoff_events_task ON task_handoff_events(task_entity_id, created_at);
+```
+
+append-only：沒有 UPDATE / DELETE API。MCP `write` 對此 collection 僅支援 `create`。
+
+### 9.7 Task 治理
+
+具體治理規則（建票標準、驗收、反饋閉環）在 **SPEC-task-governance**。本 SPEC 只定 schema。
+
+---
+
+## 10. Relationship（圖的邊）
+
+Relationship 是唯一的邊表，**所有 linked_entities 關聯都走這裡**。舊的 `task_entities` / `document_entities` junction 已廢止。
+
+```python
+@dataclass
+class Relationship:
+    id: str
+    source_entity_id: str
+    target_entity_id: str
+    relationship_type: RelationshipType
+    description: str
+    confirmed_by_user: bool
+    verb: str | None            # 語意動詞補充（例如 "governs" / "consumes"）
+    created_at: datetime
+    updated_at: datetime
+```
+
+```sql
+CREATE TABLE relationships (
+    id text PRIMARY KEY,
+    partner_id text NOT NULL REFERENCES partners(id),
+    source_entity_id text NOT NULL REFERENCES entities_base(id) ON DELETE CASCADE,
+    target_entity_id text NOT NULL REFERENCES entities_base(id) ON DELETE CASCADE,
+    type text NOT NULL CHECK (type IN ('depends_on','serves','owned_by','part_of','blocks','related_to','impacts','enables')),
+    description text NOT NULL,
+    confirmed_by_user boolean NOT NULL DEFAULT false,
+    verb text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    UNIQUE (partner_id, source_entity_id, target_entity_id, type),
+    CHECK (source_entity_id != target_entity_id)
+);
+```
+
+### 10.1 RelationshipType 語意
+
+| Type | 語意 | 典型用例 |
+|------|------|---------|
+| `depends_on` | A 需要 B 先存在 | L3-Task A depends_on L3-Task B |
+| `serves` | A 為 B 服務 | L2 module serves L1 product |
+| `owned_by` | A 由 B 擁有 | L3-Project owned_by L3-Role |
+| `part_of` | A 是 B 的一部分 | L2 governance concept part_of L1 product |
+| `blocks` | A 阻塞 B | L3-Task blocks L3-Task |
+| `related_to` | 弱關聯 | L3-Document related_to L2 |
+| `impacts` | A 變更需檢查 B | L2 modulesimpacts L2 module |
+| `enables` | A 的存在讓 B 成為可能 | L2 foundation enables L2 feature |
+
+### 10.2 impacts 路徑規範
+
+- **L2 的 impacts gate** 強制 ≥1 條具體 `impacts` relationship
+- 「具體」定義：description 需含傳播語意，例：`A 改變閾值 → B 的計算要跟著更新`
+- `impacts` 不限 L2 間，也可跨 L3（例：L3-Document impacts L3-Task）
+
+### 10.3 linked_entities 禁止清單
+
+`relationships.source_entity_id` 為任務系列（L3-Action）時，`target_entity_id` 不可指向：
+- 自己所屬的 L1（歸屬已由 parent_id 表達，重複會被 server strip）
+- 自己（`CHECK source != target`）
+
+### 10.4 圖遍歷（Impact Chain）
+
+Impact chain 是從 relationship 邊沿 BFS 產生的結構化推理。canonical 由 `compute_impact_chain` 實作，MCP `get(collection="entities", include=["impact_chain"])` 回傳。
+
+**雙向能力**：
+
+| 欄位 | 方向 | 語意 |
 |------|------|------|
-| What | 這份文件跟什麼實體有關 | AI 自動標注（高準確） |
-| Why | 為什麼這份文件存在 | AI 推斷 + 人確認 |
-| How | 怎麼用、什麼階段 | AI 推斷 + 人確認 |
-| Who | 誰寫的、給誰看 | AI 自動標注（高準確） |
-| 關聯實體 | 連結到骨架層的哪些實體 | AI 推斷 + 人確認 |
-| 原始位置 | 文件在哪個平台、哪個路徑 | 系統記錄 |
-| 狀態 | 現行 / 過時 / 草稿 / 衝突 | AI 推斷 + 人確認 |
-| confirmedByUser | 這個 entry 有沒有被人確認 | 系統記錄 |
+| `impact_chain` | forward（outgoing edges）| 從此節點出發，「我改了會影響誰」|
+| `reverse_impact_chain` | backward（incoming edges）| 「誰改了會影響我」|
 
-**ontology entry 跟「好的摘要」的差別：關係。** 摘要只描述一份文件，ontology entry 描述一份文件在公司知識網路中的位置——它跟哪些實體有關、在哪個業務流程中被使用、跟哪些其他文件矛盾或互補。
+**硬規則**：
+- 最大深度 **5 跳**（server hardcoded；防大圖效能與廣播風暴）；超過回傳 `truncated=true`
+- 遍歷**必防循環**（訪問集合追蹤）；循環節點不重複展開
+- 兩個欄位作為 **additive** 補入 get response；現有 caller 未帶 include 時行為向後相容
+- `top_k_per_hop` 與 intent ranking 由 `SPEC-semantic-retrieval` 定義
 
-#### Entity 分層模型（2026-03-23 確立；2026-04-23 由 ADR-047 更新 L1 定義）
+**節點對遍歷相對位置的標註**：
+- 每筆 chain item 包含 `edge.type`、`edge.description`、`hop`、是否 truncated
+- consumer 應以結構化 edge chain 展開 UI / context，不得只讀 neighbor list
 
-所有知識都是 entity。Entity 分三層，**由 `level` 欄位判定，不由 `type` 判定**：
+### 10.5 圖拓撲分析的保留邊界
 
-```
-第一層（level=1，共享根）  任何 type，預設 label=product
-                           ← 共享邊界（collaboration root）；可整棵子樹分享給別的用戶
-                           ← CRM 擴充：company / person / deal 也是合法 L1 label
-第二層（level=2，治理概念）module + governance concepts
-                           ← L1 底下的長期共識概念；module 是常見 label，不是唯一型態
-第三層（level=3，應用）    document, goal, role, project
-                           ← 按需生長，不是每間公司都需要全部
-```
-
-**判定 SSOT（ADR-047）：**
-- L1 = `level == 1 AND parent_id IS NULL`
-- type 是 UI label，**不是**業務邏輯的 gate
-- 所有 L1 entity 在 API 層一律用 `product_id` 作為欄位名稱，無論 type
-
-**全部都在同一個 `entities/` collection**，透過 `level` 區分層級、`parent_id` 串成樹、`type` 決定 UI 顯示。知識地圖上每個節點都是一個 entity。
-
-**Task 不是 entity。** Task 是 `ZenOS Core Action Layer` 的標準 action primitive，不是知識。它有自己的生命週期、指派人、驗收條件；Task 透過 `linkedEntities` 連到 ontology，是 ontology 的消費者，不是 ontology 的一部分。
-
-**分層路由規則（摘要）：**
-- 治理原則/跨角色共識且具 impacts -> L2
-- 正式受治理文件 -> L3 document entity
-- 可指派可驗收工作 -> task
-- 一次性參考材料 -> entity.sources
-
-#### Entity 的邊界定義
-
-**一個東西該不該成為 entity？三個判斷標準：**
-
-1. **它會跨專案/跨時間存活嗎？**
-   - 「訓練計畫系統」→ 會，產品換了十個版本它還在 → entity ✓
-   - 「修復 ACWR bug #123」→ 不會，做完就結束 → task ✗
-
-2. **它有 What/Why/How/Who 可以描述嗎？**
-   - 「ACWR 安全機制」→ What: 訓練負荷比、Why: 防受傷、How: 計算公式、Who: 跑者 → entity ✓
-   - 「下週三前完成」→ 沒有四維可描述 → task ✗
-
-3. **它能成為其他知識的錨點嗎？**
-   - 「Paceriz API Service」→ 文件、任務、盲點都掛在它下面 → entity ✓
-   - 隨手記的會議筆記 → 不能當錨點，最多是某個 entity 的 source → 不是 entity
-
-**最精簡的判斷規則：如果這個東西消失了，AI agent 在回答問題時會不會少了一塊重要的 context？會 → entity。不會 → 不是 entity。**
-
-#### Entity.sources — 非 entity 級文件的連結
-
-不是所有文件都值得成為 entity(type="document")。會議筆記、零散的 todo、草稿——這些只需要掛在相關 entity 底下作為參考連結：
-
-```
-entities/{id}
-  sources: [
-    { uri: "github://owner/repo/path", label: "週課表規格", type: "github" },
-    { uri: "gdrive://fileId/報價單", label: "Q1 報價", type: "gdrive" },
-  ]
-```
-
-sources 不出現在知識地圖上，只在右側詳情面板裡列出。
-
-#### Entity Entries — L2 的結構化知識條目
-
-L2 entity 不只是 summary + 指向外部文件的指標。每個 L2 可承載**時間軸上的結構化知識條目**（entity entries），記錄 code 裡不存在的決策脈絡、已知限制、重要變更等。
-
-```
-entity_entries:
-  entity_id → entities/{id}（一對一，一條 entry 只屬於一個 entity）
-  type: decision | insight | limitation | change | context
-  content: "選 VDOT 不選心率區間，因為 Garmin 心率前幾分鐘不穩"（必填，上限 200 字元）
-  context: "在評估了三種方案後做出的決定"（可選，上限 200 字元）
-  author: "barry"（誰/哪個 agent 產出）
-  source_task_id → tasks/{id}（從哪個 task 產出，可選）
-  status: active | superseded | archived（預設 active，沒有 confirmed_by_user）
-  superseded_by → entity_entries/{id}（被哪條 entry 取代，superseded 時必填）
-  created_at: 時間戳
-```
-
-**治理約束**：content 上限 200 字元（~100 中文字），一個知識點用 100 字一定能表達完。表達不完代表要拆成多條 entry 或粒度太大。沒有 confirmed_by_user — entry 是低成本記錄，品質治理靠 server 端的 Internal API（重複偵測、矛盾偵測、壓縮、summary 漂移警告）。
-
-**Entry 的定位**：Ontology 從「文件的語意代理」升級為「公司的經驗記憶體」。Entity 不只告訴你「這個概念是什麼」，還告訴你「為什麼這樣設計、踩過什麼坑、做過什麼決定」——這些是 agent 靠讀 code 絕對拿不到的知識。
-
-**與其他結構的分工**：
-- **Entry vs Summary**：summary 是搜尋索引（靜態），entry 是時間軸記憶（累積）
-- **Entry vs Document**：entry 是內嵌知識（code 裡沒有的），document 是外部文件指標
-- **Entry vs Blindspot**：entry 是事實記錄（永久），blindspot 是待處理問題（有生命週期）
-- **Entry vs Sources**：entry 有結構化的 type 和 content，sources 只是 URI 連結
-
-**Entry 解決的願景**：
-1. 跨 agent 開發 — 所有 agent 讀同一組 entries，context 跨 session 存活
-2. 非同步對齊 — 重要決策記在 entity 裡，不需要開會傳達
-3. PM↔工程師 — 決策脈絡在 entries 裡，不用反覆確認
-4. 跨部門知識 — 會後決定寫成 entry，可搜尋、可發現
-5. ERP 理解 — ERP 欄位的業務含義可作為 context entry 記錄
-
-詳細設計見 `SPEC-l2-entity-redefinition`「Entity Entries」章節與 `ADR-010-entity-entries`。
-
-#### 治理規則抽象框架
-
-所有治理規則（L2 知識節點、L3 文件、Task）都遵循同一套六維結構與變更傳播契約。
-
-完整定義見：[`SPEC-governance-framework`](../specs/SPEC-governance-framework.md)
+- **孤立節點** / **槓桿點（high out-degree）** / **循環依賴** / **目標斷鏈** 等拓撲偵測，屬 governance analyze 範疇（`SPEC-governance-feedback-loop` + `SPEC-governance-observability`），不進 core schema
+- Relationship 的 `verb` 欄位保留在 DDL 避免 migration risk，但已於 2026-04-18 停止做為 governance 評分依據（填寫率 8.8%，`description` 已承擔語意）。新 caller 可留空。
 
 ---
 
-#### 雙層治理架構
+## 11. Entity Lifecycle
 
-分層模型和雙層治理是互補的：
+### 11.1 Status enum（統一）
 
-```
-骨架層（Skeleton Layer）
-  涵蓋：第一層（product）+ 第二層（L2 治理概念）+ 第三層的 goal / role / project
-  怎麼建：30 分鐘對話 → 全景圖 → 迭代收斂 2~3 輪
-  變動頻率：低（一季一次）
-  治理方式：人確認（confirmedByUser）
-
-神經層（Neural Layer）
-  涵蓋：第三層的 document entity + entity.sources
-  怎麼建：文件 CRUD 事件自動觸發（Adapter 掃描 GitHub / Google Drive / Notion）
-  變動頻率：高（每天）
-  治理方式：AI 自動標注，人可覆寫
-```
-
-兩層在同一個 `entities/` collection 裡，只是建構方式和治理方式不同。
-
-**兩層互動：**
-
-神經層的異常反推骨架層更新：
-
-```
-觸發情境                                       骨架層建議
-──────                                       ────────
-連續多份新 document entity 無法關聯到任何 module 「看起來有一個新模組還沒進 ontology，要不要加？」
-某 module 三個月沒有任何新 document 關聯         「這個模組是不是已經停了？」
-兩個原本無關的 module 突然共享 document          「這兩個模組是不是在整合？」
-同一主題出現兩份互相矛盾的 document              「這兩份文件哪份是正確的？」
+```python
+class EntityStatus(str, Enum):
+    ACTIVE    = "active"       # 預設穩定狀態
+    PAUSED    = "paused"       # 暫停但可能回來
+    COMPLETED = "completed"    # 完成（專案 / 里程碑等）
+    PLANNED   = "planned"      # 規劃中但尚未啟動
+    ARCHIVED  = "archived"     # 收掉但保留歷史
+    # 以下僅對特定 subclass 有效：
+    CURRENT   = "current"      # L3-document only
+    STALE     = "stale"        # L2 / L3-document
+    DRAFT     = "draft"        # L2 only（confirm gate）
+    CONFLICT  = "conflict"     # L3-document only
 ```
 
-所有骨架層建議都是 draft，需要 confirmedByUser 才生效。
+**舊 `DocumentStatus` 已廢止**；document status 併入 `EntityStatus`。
 
-#### AI Agent 的工作流程
+### 11.2 每 subclass 合法 status
 
-公司的 AI agents 讀取 ontology 的方式，跟 Claude 讀取 SKILL.md 的方式一樣：
+| Subclass | 合法 status | 狀態機 |
+|----------|-----------|--------|
+| Subclass | 業務 status 欄位 | 合法值 | 狀態機 |
+|----------|-----------------|-------|--------|
+| L1 | `BaseEntity.status` | `active / paused / archived` | active ↔ paused → archived |
+| L2 | `BaseEntity.status` + `confirmed_by_user` 二維（見 §7.2） | status: `active / stale`；confirmed: bool | (false,active) draft → (true,active) confirmed → (true,stale) → (true,active) |
+| L3-Document | `BaseEntity.status` | `draft / current / stale / archived / conflict` | draft → current → stale → archived（supersede 可 fork） |
+| L3-Role | `BaseEntity.status` | `active / archived` | active → archived |
+| L3-Project | `BaseEntity.status` | `planned / active / paused / completed / archived` | planned → active → paused / completed → archived |
+| L3-Milestone | `task_status`（BaseEntity.status 恆 active） | `planned / active / completed / cancelled` | planned → active → completed / cancelled |
+| L3-Plan | `task_status`（BaseEntity.status 恆 active） | `draft / active / completed / cancelled` | draft → active → completed / cancelled |
+| L3-Task | `task_status`（BaseEntity.status 恆 active） | `todo / in_progress / review / done / cancelled` | todo → in_progress → review → done / cancelled |
+| L3-Subtask | 同 Task | 同 Task | 同 Task |
 
-```
-Step 1 — 讀 ontology（骨架層：product + module）
-  「這間公司有 4 個產品、每個產品有哪些 L2 概念（模組/治理節點）、它們之間的關係」
-  → 建立公司全局理解
+> **規則**：L3-Action 系列（Milestone / Plan / Task / Subtask）的 `BaseEntity.status` **恆為 `active`**。業務 lifecycle 由專屬 `task_status` 表達。Base status 用於 entity graph 存在與否（active / archived）。
 
-Step 2 — 根據任務需求，從 ontology 找相關 entity
-  「這個任務需要 Paceriz 的定價策略」
-  → 找到相關 L2 entity → 讀 summary（判斷相關性）
-  → 讀 entries（拿到決策脈絡、已知限制、重要變更）
-  → 讀 impacts（知道改這裡會影響什麼）
-  → 讀 blindspots（知道哪裡有雷）
+---
 
-Step 3 — 需要深入時，透過 sources 或 document entity 去讀實際文件
-  → 拿到完整細節，執行任務
+## 12. Embedding（sidecar）
 
-Step 4 — 工作完成後，產出新的 entry 回饋到 ontology
-  → 做了什麼決定、發現了什麼限制、改了什麼
-  → 知識沉澱為下一個 agent/人 的 context
-```
+embedding metadata 不放 BaseEntity，**獨立 sidecar table**。任何 L2 / L3-Semantic entity 都可選擇性 embed（L1 / L3-Action 通常不 embed）。
 
-Entity 不只是公司知識的 SKILL.md，更是**公司的經驗記憶體**——不只告訴 AI「這塊知識是什麼」，還告訴它「為什麼這樣設計、踩過什麼坑、做過什麼決定」。
-
-#### Ontology 架構演化路線
-
-```
-Phase 0（現在）— MCP Server + Firestore
-  骨架層：entities collection（product + module），手動 /zenos-capture 建構
-  神經層：entities collection（document type），手動 /zenos-capture 掃目錄建構
-  Context Protocol：手寫的 .md 文件
-  → 驗證概念正確性
-
-Phase 1 — Adapter 自動化
-  骨架層：對話驅動建構 + Dashboard UI 建構
-  神經層：GitHub/Google Drive/Notion Adapter 自動偵測文件 CRUD → 建 document entity
-  Context Protocol：從 ontology 自動生成的 derived collection（人微調確認）
-  → 驗證自動治理的準確率
-
-Phase 2+ — 全自動治理
-  骨架層：Governance Daemon 主動推斷結構變化
-  神經層：即時同步 + 跨 entity 關聯推斷
-  Context Protocol：動態生成，但作為 derived collection 可在確認後凍結版本
-  → 支援盲點推斷、過時偵測等高階分析
+```sql
+CREATE TABLE entity_embeddings (
+    entity_id text PRIMARY KEY REFERENCES entities_base(id) ON DELETE CASCADE,
+    summary_embedding vector(768),
+    embedded_summary_hash text,
+    embedding_model text,
+    embedded_at timestamptz
+);
+CREATE INDEX idx_entity_embeddings_hnsw ON entity_embeddings USING hnsw (summary_embedding vector_cosine_ops);
 ```
 
-**關鍵設計原則：Context Protocol 不是 ontology 本身，它是從 ontology 推導出的 derived collection。** 它不是即時 projection，因為除了自動生成之外，還有 `generated_at / updated_at / confirmed_by_user` 這種獨立 lifecycle；一旦被人確認，就可以凍結成當下可供他人消費的版本。現在手寫 paceriz.md 是因為 Phase 0 沒有系統，未來這份文件應該是從 ontology 自動生成、人微調確認的。
+**設計原因**：
+- 不是每個 entity 都 embed（Axiom 2：base 不扛）
+- Embedding 更新頻率 ≠ entity 更新頻率
+- pgvector HNSW index 的 VACUUM 成本隔離
 
-#### Ontology 的層次結構
+---
 
-```
-Meta-Ontology（1 份，ZenOS 產品定義）
-  定義：四維標籤體系、confirmedByUser 機制、治理規則
-  性質：Schema — 「一間公司的 ontology 應該長什麼樣」
-  變動：極少（除非發現四維不夠用）
+## 13. 權限模型（對齊 SPEC-identity-and-access）
 
-  └── Company Ontology（每客戶 1 份）
-        定義：某間公司的骨架層 + 神經層
-        性質：Instance — 某間公司實際填完的 ontology
-        變動：骨架低頻、神經高頻
+- `visibility`：`public`（任何有權限的 partner 都能看）/ `restricted`（需 explicit grant）/ `confidential`（owner + 明確授權）
+- `visible_to_roles / members / departments`：白名單（與 visibility 同時 evaluate）
+- **L1 的 sharing 語意**：對 guest 分享 L1 entity，guest 獲得整棵 L1 子樹的讀權限（受每個節點自己的 visibility 限制）
+- 完整規則在 SPEC-identity-and-access
 
-        ├── Entity Protocol: 產品 A（Context Protocol）
-        ├── Entity Protocol: 產品 B
-        ├── Entity Protocol: 目標 X
-        └── ...按需展開
-```
+---
 
-Schema 只需要一套（Meta-Ontology），Instance 每間公司一份。增長的是 Instance 的數量和每個 Instance 的領域深度，不是 Schema 本身。
+## 14. Governance 對照（引用 SPEC-governance-framework）
 
-#### 已知風險與驗證計畫
+每個 subclass 都依 SPEC-governance-framework 六維結構定治理：
 
-**市場現況：** 碎片存在，完整產品不存在。Microsoft Semantic Index（最接近但鎖死微軟生態）、Glean（實體中心非文件中心）、Collibra Unstructured AI（面向大企業）、GraphRAG（基礎設施層非產品）都做了拼圖的一塊，但沒有面向 SMB 的整合產品。
+| Subclass | Quality Gate | Lifecycle | Relation | Feedback | 衝突仲裁 |
+|----------|-------------|-----------|----------|---------|---------|
+| L1 | — (base) | §11.2 | 無 parent | — | 本 SPEC |
+| L2 | 三問+impacts (§7.1) | §11.2 | ≥1 impacts | Entry saturation | SPEC-l2 ⊂ 本 SPEC |
+| L3-Document | Frontmatter + source | §11.2 | parent_id | supersede chain | SPEC-doc-governance |
+| L3-Role | — | §11.2 | 無 | — | 本 SPEC |
+| L3-Project | — | §11.2 | parent_id | 完成通知 | 本 SPEC |
+| L3-Milestone | completion_criteria | §11.2 | parent_id / depends_on | 完成通知 | SPEC-task-governance |
+| L3-Plan | entry/exit criteria | §11.2 | children tasks | 完成彙總 | SPEC-task-governance |
+| L3-Task | title + AC + acceptance | §11.2 (task_status) | parent_id | knowledge writeback | SPEC-task-governance |
+| L3-Subtask | 同 Task | 同 Task | parent task | 同 Task | SPEC-task-governance |
 
-| 風險 | 說明 | 驗證方式 | Phase 0 能驗？ |
-|------|------|---------|--------------|
-| **AI 標籤幻覺** | LLM 自動建知識圖譜時高比例節點捏造。What/Who 準確但 Why/How 可能幻覺。confirmedByUser 對沖但若大部分都要改則自動治理破產 | What/Who 自動標準確率 >90%？ | ✅ 用 Naruvia 文件測 |
-| **過時偵測** | 最危險的是「文件沒動但內容已過時」。所有現有產品都沒有可靠方案 | 跨實體更新頻率推斷能否抓到過時？ | ⚠️ 小規模可測 |
-| **跨平台權限** | ontology entry 包含太多 context 可能繞過原始權限。BYOS 解決跨客戶但不解決公司內部角色權限 | Who 維度能否當過濾器？ | ✅ 定義規則即可 |
-| **部門存取授權** | SMB 沒有 IT team 打通 API。實際可能是老闆手動上傳，覆蓋率低影響全景性 | 手動上傳 vs API 的 ontology 覆蓋率差異 | ❌ 需真實客戶 |
-| **語意代理 vs 摘要** | 如果骨架層品質差，entry 退化成 tag 較多的摘要，價值有限 | 有關係 entry vs 純摘要，AI 任務完成率差異 | ✅ 可設計 A/B 測試 |
-| **Demo vs Production gap** | 知識工具常在 demo 很強但 production 失敗，根因是底層資料品質差 | 持續 dogfooding + 真實客戶驗證 | ⚠️ dogfooding 部分可驗 |
+---
 
-### ZenOS 的路線：confirmedByUser 混合模式
+## 15. 禁止模式（Axiom 5 的具體化）
 
-ZenOS 不走 Palantir（太貴）、不走 Glean（不治理）、不走純學術路線（未產品化）。
+以下寫入一律被 DDL 或 service 層 reject：
 
-關鍵洞察：**ZenOS 資料層已有的 `confirmedByUser` 模式，直接延伸到知識層。**
+1. `level=1 AND parent_id != NULL`
+2. BaseEntity row 含非 schema 欄位（DB 本身阻擋）
+3. L1 row 試圖寫入 `entity_l2` / `entity_l3_*` 子表
+4. Relationship.source / target 指向不存在 entity_id（FK 保證）
+5. L2 entity 首次寫入 `status != 'draft'`（service 強制）
+6. L2 升 `active` 未過三問 + impacts gate（service 強制）
+7. L3-Task.status='review' 無 result（CHECK constraint）
+8. MCP tool 傳入 `project_id` / `details` / 任何不在本 SPEC 列出的欄位（全面 reject）
 
-```
-confirmedByUser 在資料層：
-  員工說「王大明訂了 100 個」→ AI 解析為結構化資料（draft）→ 員工確認 → 正式寫入
+---
 
-confirmedByUser 在知識層：
-  開發寫了一份 BDD → AI 自動標注 What/Why/How/Who（draft）→ 負責人確認 → 標籤生效
-```
+## 16. Migration 策略
 
-同一套設計哲學、同一個信任機制，從結構化資料延伸到非結構化知識。
+**現在是 ZenOS 在 pre-customer 階段唯一的 destructive 窗口**。執行策略：
 
-### 建構流程（五步驟，Step 2 為核心）
+1. **Phase A — Backup**：dump 現行 `zenos.entities / tasks / plans / documents / relationships / entity_entries / task_entities / blindspot_entities` 成 JSON + snapshot_id
+2. **Phase B — Drop**：drop 舊表（含 ADR-046 尚未 drop 的 documents table、舊 task_entities / zenos.tasks / zenos.plans）
+3. **Phase C — Create**：依本 SPEC DDL create new tables（entities_base + 5 subclass + relationships + embedding sidecar + handoff_events）
+4. **Phase D — Restore**：依下表 mapping 把 backup JSON 分派到 new tables
 
-```
-Step 1 — 輕量骨架（人定義，一次性）
-  四個維度是固定的：What / Why / How / Who
-  Context Protocol 模板是固定的
-  → Palantir 的極簡版：不定義幾百種 object type，只定義四個維度
+| 舊 row | 新表 |
+|--------|------|
+| `entities WHERE type='product' AND parent_id IS NULL` | `entities_base` (level=1) |
+| `entities WHERE type='company' / 'person' / 'deal' AND parent_id IS NULL` | `entities_base` (level=1) |
+| `entities WHERE type='module'` | `entities_base` + `entity_l2` |
+| `entities WHERE type='document'` | `entities_base` + `entity_l3_document` |
+| `entities WHERE type='goal'` | `entities_base` + `entity_l3_milestone`（**Goal 合併**）|
+| `entities WHERE type='role'` | `entities_base` + `entity_l3_role` |
+| `entities WHERE type='project'` | `entities_base` + `entity_l3_project` |
+| `tasks` rows | `entities_base` (level=3, type_label='task') + `entity_l3_task`；`parent_id = (original product_id 或 plan_id)` |
+| `plans` rows | `entities_base` (level=3, type_label='plan') + `entity_l3_plan` |
+| `task_entities` rows | `relationships` (type='related_to' 或繼承自原 linked_entities 的語意) |
+| `document_entities` rows | `relationships` (type='related_to') |
+| `entity_entries` | 不動（仍掛 L2 entity） |
 
-Step 2 — 導入啟動（AI 主導，業主驗證）→ 詳見下方完整流程
-  2a. AI 掃描既有文件（非程式碼）→ 產出公司全景圖
-  2b. 老闆看全景圖 → 建立信任 + 發現盲點 → 指派高管補資料
-  2c. 迭代收斂 2~3 輪 → 鎖定 v1 Ontology
-  2d. 為每個產品產出 Context Protocol → 各部門可用
+5. **Phase E — Validate**：
+   - 每個舊 row 都有對應新 row
+   - FK 完整
+   - CHECK 全通過
+   - 試跑 MCP search / get / write 全 smoke
 
-Step 3 — 日常治理（AI 自動，人確認）→ 詳見下方「Ontology 觸發規則」
-  何時新建 ontology entry？何時更新？何時歸檔？
-  不同階段（設計期 vs 營運期）的觸發源不同
-  → confirmedByUser 從資料層延伸到知識層
+具體 DDL / SQL / rollback snapshot 在 **PLAN-ontology-grand-refactor**（master PLAN）。
 
-Step 4 — AI 持續治理（監控 Agent 的延伸）
-  完整性：Protocol 四個維度有缺嗎？
-  一致性：部門文件跟 Protocol 矛盾嗎？
-  新鮮度：超過 X 天沒更新？
-  衍生同步：Protocol 更新 → 通知相關部門文件需連動
-  過時推斷：跨實體更新頻率異常 → 建議 review
-  → Palantir AIP Logic 的簡化版
+---
 
-Step 5 — Ontology 演化
-  新產品上線 / 目標調整 / 組織變動 → 觸發 ontology 更新
-  回到 Step 2c 的迭代收斂，不需要從頭開始
-```
+## 17. 明確不包含
 
-### Step 2 完整流程：導入啟動
+- 不定義 `EntityType` enum 的 full list（那是 label 清單，屬配置，不是 canonical spec 範圍）
+- 不定義 MCP `write(entity)` 的 I/O schema 細節（在 SPEC-mcp-tool-contract）
+- 不定義 CRM bridge（L1 CRM label + `zenos.companies` sidecar）的實作細節（在 SPEC-crm-core）
+- 不定義 Dashboard UI 對 subclass 的渲染（在 SPEC-dashboard-*）
+- 不定義 governance LLM 的 prompt（屬 internal，見 SPEC-governance-framework 的 Agent-Powered Internal 分類）
 
-Step 2 是 ZenOS 能否成功導入的關鍵。它不是「填表」，是「展示能力 → 建立信任 → 逐步收斂」。
+---
 
-設計原則：**老闆是 top-down 思維。不要先問他要什麼，先讓他看到 AI 已經理解了什麼。**
+## 18. 完成定義
 
-#### Step 2a — AI 產出公司全景圖（信任 Stage 0：只需對話）
+1. 本 SPEC 列入 `REF-active-spec-surface`
+2. `SPEC-l2-entity-redefinition` / `SPEC-impact-chain-enhancement` / `SPEC-knowledge-graph-semantic` 三份合併後刪除或加 supersede marker 指向本 SPEC
+3. 上節列出的 11 份 ADR 全數加 `superseded_by: SPEC-ontology-architecture v2` 標記
+4. ADR-048-grand-ontology-refactor 建立，引用本 SPEC 為 canonical
+5. PLAN-ontology-grand-refactor 建立，含 Phase A-E migration + Wave 化實作順序
+6. 各 subclass SPEC（task-governance / doc-governance / identity-and-access / governance-framework / mcp-tool-contract）依本 SPEC 改寫完成
 
-**資訊來源：只有對話。** 不讀文件、不掃程式碼、不進資料庫。老闆只需要回答「可以寫在官網上」的問題：你有幾個產品？叫什麼？現在最重要的目標？誰在做什麼？
+---
 
-AI 從對話中自動產出「公司全景圖」：
+## 19. 相關文件
 
-```
-全景圖包含：
-  ① 公司在做什麼 — 所有產品線、基礎架構、行銷資產
-  ② 現在為什麼而戰 — 活躍目標（由老闆口述，AI 結構化）
-  ③ 事情之間怎麼連 — 產品間的依賴和關聯
-  ④ 誰在做什麼 — 角色和職責分佈
-  ⑤ AI 發現的盲點 — 跨產品推斷出的風險和矛盾（關鍵差異化）
-  ⑥ 每個盲點的 Ontology 解法 — 不只看到問題，還看到怎麼解
-
-→ 全景圖 = ZenOS 的免費增值入口
-→ 零機密風險（全部來自對話，不含任何文件內容）
-→ 30 分鐘見效
-```
-
-如果老闆在 Stage 1 選擇開放部分文件，AI 會用文件佐證來提高全景圖的準確度。但全景圖不依賴文件——純對話也能產出有價值的結果。
-
-**AI 標注準確度因維度而異**（2026-03-21 驗證）：
-
-| 維度 | AI 準確度 | 原因 |
-|------|----------|------|
-| **What**（產品） | 高 | 文件中有明確錨點（產品名、功能描述） |
-| **Who**（角色） | 高 | 文件內容和組織結構能推斷 |
-| **Why**（目標） | 低 | AI 分不清技術里程碑和商業目標 |
-| **How**（專案狀態） | 低 | AI 無法判斷已完成、進行中、尚未開始 |
-
-**核心發現：What/Who 是事實性維度，Why/How 是意圖性維度。AI 能讀事實但讀不了意圖。全景圖的 What/Who 可信，Why/How 標為 draft 待確認。**
-
-#### Step 2b — 老闆看全景圖，建立信任
-
-全景圖的目的不是完美，是讓老闆產生兩個反應：
-
-1. **「對，大致上是這樣」** → 信任建立。AI 看了我的文件就能拼出公司八成的樣子。
-2. **「但你漏了 X / 搞錯了 Y / 其實 Z 是這樣」** → 修正啟動。老闆開始主動補充。
-
-更重要的是**盲點區塊**——AI 從跨產品關係中推斷出老闆可能沒注意到的問題。這是價值展示的核心：
-
-```
-盲點推斷邏輯：
-  依賴瓶頸：多個產品都依賴某個實體，但該實體沒有明確負責人或時程
-  資源衝突：同一人同時是多個活躍目標的唯一負責人
-  定位模糊：某個產品在運作但沒有對應的目標
-  斷裂連結：行銷需要的資訊在技術文件裡，但沒有翻譯成行銷語言
-  隱藏依賴：某個專案是另一個產品的關鍵前置，但沒被顯性管理
-```
-
-老闆看完後的自然反應：**叫高管來補資料**。這正是我們要的——從 top-down 驅動組織把知識補完。
-
-#### Step 2c — 迭代收斂（2~3 輪）
-
-```
-Round 1 — 全景圖 + 老闆初步反應
-  AI 產出全景圖（含盲點）→ 老闆看 → 修正 + 補充
-  老闆指派高管補充各產品的 Why / How 細節
-  → 產出：v0.5 ontology（結構正確，細節待校準）
-
-Round 2 — AI 追問 + 高管補充
-  AI 根據 v0.5 產生追問清單（針對缺漏和矛盾）
-  高管補充 → AI 更新 ontology
-  → 產出：v0.8 ontology（接近完整）
-
-Round 3 — 校準 + 鎖定
-  AI 展示完整 ontology → 老闆最終確認
-  確認邊界規則（什麼該進、什麼不該進）
-  → 產出：v1.0 ontology（可進入日常治理）
-
-收斂判斷：當一輪新發現 ≤ 1 個實體時，建議鎖定
-```
-
-#### Step 2d — 產出 Context Protocol
-
-Ontology 鎖定後，AI 為每個產品自動產出 Context Protocol：
-
-```
-Context Protocol = 全公司共享的產品真相
-  結構：What / Why / How / Who 四個區塊
-  語言：非技術人員能讀懂
-  來源：ontology + 既有文件，AI 翻譯成共通語言
-  缺漏：明確標記，附帶 AI 建議的追問問題
-
-  行銷夥伴拿到 Protocol 就能開工，不用再去問開發
-  新人拿到 Protocol 就能理解產品，不用讀技術文件
-```
-
-#### Step 3 展開：Ontology 觸發規則（何時新建、何時更新、何時歸檔）
-
-Ontology 不是建完就放著的產物，它需要持續治理。但「持續」不等於「隨時」——需要明確的觸發規則，否則要嘛治理過度（每個 typo 都觸發），要嘛治理不足（重大變更被忽略）。
-
-##### 新建 Ontology Entry 的觸發
-
-```
-觸發事件                          Ontology 動作                         誰負責
-──────                          ──────────                           ────────
-新建文件                          → 神經層：自動建 ontology entry（draft）   AI 自動
-                                → 嘗試關聯到骨架層已知實體                  AI 自動
-                                → 關聯不上 = 標記 unlinked（本身是訊號）     AI 自動
-
-對話產生新概念                     → 骨架層：新增實體 entry（draft）          AI 建議
-（新產品、新目標、新角色）           → 更新關係圖                              AI 建議 + 人確認
-
-文件大幅修改後 AI 偵測到新實體      → 骨架層：建議新增                         AI 建議 + 人確認
-（spec 裡突然出現五個新概念名詞）
-```
-
-##### 更新既有 Ontology Entry 的觸發
-
-```
-觸發事件                          Ontology 動作                         誰負責
-──────                          ──────────                           ────────
-文件被大幅修改                     → 神經層：重新檢查 4D 標籤是否還準確       AI 自動
-                                → 骨架層：檢查有沒有新實體出現              AI 建議
-
-骨架層實體變更                     → 級聯更新：所有關聯的 ontology entry       AI 自動
-（產品改名、目標調整）              → 級聯更新：相關 Context Protocol          AI 自動（draft）
-
-兩份文件出現矛盾內容                → 神經層：兩個 entry 都標記 conflict       AI 自動
-                                → 推給相關人確認哪份是正確的                AI 通知
-
-文件小幅修改（typo、格式）          → 不觸發                                  —
-```
-
-##### 歸檔 / 休眠的觸發
-
-```
-觸發事件                          Ontology 動作                         誰負責
-──────                          ──────────                           ────────
-文件被刪除                        → 神經層：entry 標記 archived             AI 自動
-
-定期掃描：實體 N 個月              → 骨架層：建議「這個產品是不是停了？」       AI 建議
-沒有新文件關聯                                                              + 人確認
-
-定期掃描：文件 N 個月沒修改         → 神經層：entry 標記 possibly-stale        AI 自動
-但關聯實體有高活動度                → 推給相關人確認是否過時                    AI 通知
-```
-
-##### 過時推斷邏輯（Step 4 的核心）
-
-純粹看「文件有沒有更新」不夠。最危險的過時是「文件沒動但世界變了」。ZenOS 用跨實體活動度推斷：
-
-```
-推斷情境                                         推斷邏輯
-────────                                       ────────
-「產品功能」更新了 5 次，但「定價」0 次            → 定價可能需要 review
-某產品的 ontology entry 標記「Phase 1」           → 但其他文件暗示已進 Phase 2
-  已超過預期時間                                  → 狀態可能需要更新
-某目標下的所有專案都已 completed                   → 但目標本身還標記 active
-                                                → 目標可能需要關閉或更新
-兩個產品開始出現在同一份文件的 entry 中            → 可能正在整合，骨架層關係需要更新
-```
-
-這些推斷不是確定性判斷，是「建議 review」。全部走 confirmedByUser。
-
-##### 設計期 vs 營運期的觸發差異（從 ZenOS dogfooding 提煉）
-
-```
-                    設計期（Phase 0）              營運期（Phase 1+）
-                    ──────────────              ──────────────
-主要觸發源          對話（概念迭代）               文件 CRUD 事件
-骨架層更新頻率      高（每次重大討論）              低（一季一次）
-神經層更新頻率      低（文件少）                    高（每天）
-治理方式           手動更新 REF-ontology-current-state.md            AI 自動 + confirmedByUser
-觸發機制           session 結束前人工觸發          CRUD webhook + 定期掃描
-```
-
-**設計期的觸發規則（現在 ZenOS 適用）：** 每次討論產生了新概念、修正了架構、或改變了方向時，session 結束前更新 ontology。這是手動版的「對話觸發」。
-
-**營運期的觸發規則（未來客戶適用）：** 文件 CRUD 事件驅動 + 定期掃描。骨架層變更需要 confirmedByUser，神經層標籤可以 AI 自動打但可以人覆寫。
-
-#### Ontology 邊界規則
-
-不是所有東西都該進 ontology。實體進入的條件：
-
-| 規則 | 說明 | 範例 |
+| 類型 | 文件 | 關係 |
 |------|------|------|
-| **多部門關注** | 至少兩個部門需要知道它的存在 | Paceriz（開發 + 行銷都需要） |
-| **正在產生文件** | 有活躍的文件產出圍繞這個實體 | v2 課表流程（BDD、spec 持續產出中） |
-| **目標關鍵路徑** | 在某個商業目標的關鍵路徑上 | naru_agent（Paceriz Agent 導入的前置） |
-
-不該進 ontology 的：純內部工具、已完成且不再參考的歷史專案、個人筆記。
-
-### 實戰驗證：Naruvia 導入前 vs 導入後（2026-03-21）
-
-以 Naruvia（4 個產品線、2 人團隊）為對象，實際走完 Step 2a~2c，以下是導入前後的對比：
-
-#### 導入前：老闆腦中的公司
-
-```
-老闆（Barry）知道的：
-  ✓ 自己在做 4 個產品
-  ✓ 每個產品大致在什麼階段
-  ✓ 行銷夥伴需要素材
-
-老闆沒有顯性化的：
-  ✗ 4 個產品之間的依賴關係（naru_agent → Paceriz → 官網）
-  ✗ 官網是 3 條產品線的交匯瓶頸，但沒人負責
-  ✗ 1 人扛 4 條線的資源衝突在哪裡
-  ✗ 行銷夥伴拿到的「行銷文件」其實是技術文件
-  ✗ 4 個產品都跟 AI 有關，但沒有統一的對外故事線
-  ✗ Zentropy 在運作但沒有目標——是繼續還是暫停？
-
-行銷夥伴的狀態：
-  - 想做素材，但不知道產品現在能說什麼
-  - 有一份 marketing/paceriz.md，打開全是 Webhook 和 OAuth
-  - 不確定什麼功能已上線、什麼還在開發
-  - 要等 Barry 有空才能問到答案
-```
-
-#### 導入後：Ontology 讓公司知識顯性化
-
-```
-全景圖展示的（AI 自動產生）：
-  ✓ 4 產品 + 2 基礎設施 + 相互依賴圖
-  ✓ 3 個活躍目標 + 各自的關聯產品
-  ✓ 6 個盲點（含官網瓶頸、資源衝突、定位模糊）
-  ✓ 2 個機會（naru_agent 品牌化、Paceriz 作為 dogfooding 案例）
-  ✓ 6 項老闆需要決策的事項（優先級、商業模式、時程...）
-
-Context Protocol 提供的（以 Paceriz 為例）：
-  ✓ 行銷夥伴可讀的產品描述（零技術術語）
-  ✓ 明確標記已上線 vs 開發中的功能
-  ✓ 目標用戶畫像 + 地區策略
-  ✓ 跟其他產品的關係（行銷需要知道的部分）
-  ✓ 可用的數據能力（用戶分群 → 精準行銷）
-  ✓ 缺漏清單（AI 建議的下一步追問）
-
-具體效益量化：
-  ① 行銷夥伴不用等 Barry 有空：Protocol 就是隨時可查的答案
-  ② 盲點可視化：官網瓶頸、資源衝突等問題浮出水面
-  ③ 決策加速：老闆看到全景圖就知道該先解決什麼
-  ④ 新人 onboarding：從數天降到數小時（讀 Protocol 而非散落文件）
-  ⑤ 文件品質監控：AI 發現「marketing 資料夾裡放的是技術文件」
-```
-
-#### 導入成本
-
-```
-老闆投入時間：~30 分鐘對話（確認 + 補充）
-高管投入時間：每人 ~15 分鐘（補充各自負責的 Why/How）
-AI 處理時間：全自動（掃描 + 產圖 + 產 Protocol）
-導入週期：1 天內可完成 v1
-持續成本：趨近於零（AI 自動標注 + 治理）
-```
-
-### 架構延伸：從資料層到知識層
-
-現有三層架構直接延伸，不是蓋新系統：
-
-```
-               資料層（現有）              知識層（新增：語意代理架構）
-               ─────────────              ─────────────────────────
-存什麼         contacts / orders / ...    骨架層（實體關係圖）+ 神經層（文件 ontology entry）
-本質           結構化業務資料              非結構化知識的語意代理
-儲存           Firestore                  Phase 1: SQLite → Phase 2: PostgreSQL + Graph
-產出           業務報表                    Context Protocol（= ontology 的 derived collection）
-
-               Agent 層（現有）            Knowledge Agent（新增）
-               ─────────────              ─────────────
-寫入           輸入 Agent → 自然語言寫資料  標注 Agent → 文件 CRUD 觸發 ontology entry 建立/更新
-查詢           查詢 Agent → 自然語言問資料  Context Agent → 讀 ontology → 找文件 → 組裝 context
-監控           監控 Agent → 資料異常偵測    治理 Agent → 知識品質 + 神經層異常推骨架層更新
-確認           簽核 Agent → 業務流程審核    確認 Agent → confirmedByUser 知識版
-```
-
----
+| 索引 | `docs/refactor-index.md` | 整體 refactor 範圍與執行順序 |
+| SPEC | SPEC-task-governance | L3-Action subclass 治理細則 |
+| SPEC | SPEC-doc-governance | L3-Document subclass 治理細則 |
+| SPEC | SPEC-identity-and-access | 權限模型細則 |
+| SPEC | SPEC-governance-framework | 六維治理抽象 |
+| SPEC | SPEC-mcp-tool-contract | MCP tool shape（Axiom 6 落地）|
+| SPEC | SPEC-entry-consolidation-skill | L2 entry 飽和管理 |
+| SPEC | SPEC-semantic-retrieval | embedding sidecar 使用 |
+| SPEC | SPEC-document-delivery-layer | L3-Document delivery sidecar（revisions / share_tokens）|
+| ADR | ADR-048-grand-ontology-refactor | 本次 refactor 的總決策文件（引用本 SPEC）|
+| PLAN | PLAN-ontology-grand-refactor | 執行 wave + migration 步驟 |

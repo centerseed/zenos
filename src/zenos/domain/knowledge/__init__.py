@@ -14,7 +14,6 @@ from .enums import (  # noqa: F401
 from .models import (  # noqa: F401
     Blindspot,
     Document,
-    DocumentTags,
     Entity,
     EntityEntry,
     Gap,
@@ -25,7 +24,6 @@ from .models import (  # noqa: F401
 )
 from .repositories import (  # noqa: F401
     BlindspotRepository,
-    DocumentRepository,
     EntityEntryRepository,
     EntityRepository,
     ProtocolRepository,
@@ -47,7 +45,6 @@ __all__ = [
     # models
     "Blindspot",
     "Document",
-    "DocumentTags",
     "Entity",
     "EntityEntry",
     "Gap",
@@ -57,7 +54,6 @@ __all__ = [
     "Tags",
     # repositories
     "BlindspotRepository",
-    "DocumentRepository",
     "EntityEntryRepository",
     "EntityRepository",
     "ProtocolRepository",

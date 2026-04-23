@@ -42,6 +42,14 @@ HOST_VARIANT_FILES = {
         "claude_code": "SKILL.md",
         "codex": "SKILL.codex.md",
     },
+    "developer": {
+        "claude_code": "SKILL.md",
+        "codex": "SKILL.codex.md",
+    },
+    "qa": {
+        "claude_code": "SKILL.md",
+        "codex": "SKILL.codex.md",
+    },
 }
 
 

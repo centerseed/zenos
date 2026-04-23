@@ -2,14 +2,17 @@
 type: SPEC
 id: SPEC-semantic-retrieval
 status: Draft
-ontology_entity: MCP 介面設計
+ontology_entity: mcp-interface
 related_adr: ADR-041
 related_prerequisite: ADR-040
 created: 2026-04-18
-updated: 2026-04-18
+updated: 2026-04-23
+depends_on: SPEC-ontology-architecture v2 §10.4 (impact_chain traversal), SPEC-ontology-architecture v2 §12 (entity_embeddings sidecar)
 ---
 
 # SPEC: Semantic Retrieval（Pillar A, Phase 1）
+
+> **Layering note（2026-04-23）**：`entity_embeddings` canonical schema 已於主 SPEC v2 §12 落地（sidecar table，不污染 BaseEntity）。本 SPEC 定義 embedding pipeline、neighbor ranking、search hybrid mode 等**行為層**；不再重新定義 DDL / 欄位。`impact_chain` 遍歷雙向語意在主 SPEC §10.4。
 
 ## 背景與動機
 

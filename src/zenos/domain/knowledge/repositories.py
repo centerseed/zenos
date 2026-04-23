@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Protocol as TypingProtocol
 
-from .models import Blindspot, Document, Entity, EntityEntry, Protocol, Relationship
+from .models import Blindspot, Entity, EntityEntry, Protocol, Relationship
 
 
 class EntityRepository(TypingProtocol):
@@ -57,24 +57,6 @@ class RelationshipRepository(TypingProtocol):
     async def remove(self, source_entity_id: str, target_id: str, rel_type: str) -> int: ...
 
     async def remove_by_id(self, rel_id: str) -> int: ...
-
-
-class DocumentRepository(TypingProtocol):
-    """Persistence interface for neural-layer documents."""
-
-    async def get_by_id(self, doc_id: str) -> Document | None: ...
-
-    async def list_all(self) -> list[Document]: ...
-
-    async def upsert(self, doc: Document) -> Document: ...
-
-    async def list_by_entity(self, entity_id: str) -> list[Document]: ...
-
-    async def list_unconfirmed(self) -> list[Document]: ...
-
-    async def find_by_id_prefix(self, prefix: str, partner_id: str, limit: int = 11) -> list[Document]:
-        """Return documents whose id starts with prefix, scoped to partner_id."""
-        ...
 
 
 class ProtocolRepository(TypingProtocol):

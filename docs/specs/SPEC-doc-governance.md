@@ -1,613 +1,494 @@
 ---
 type: SPEC
 id: SPEC-doc-governance
-status: Approved
-ontology_entity: documentation-governance
+status: Under Review
+ontology_entity: l3-document
 created: 2026-03-26
-updated: 2026-04-17
-amended: 2026-04-17-linked-entity-required
+updated: 2026-04-23
+depends_on: SPEC-ontology-architecture v2 §8.1, SPEC-identity-and-access, SPEC-governance-framework
+canonical_schema_from: SPEC-ontology-architecture v2 §8.1
+absorbs:
+  - SPEC-document-bundle (doc_role, sources[], bundle_highlights, change_summary, source platform contract, rollout matrix)
+  - SPEC-doc-source-governance (已為 redirect stub)
 ---
 
-# Feature Spec: ZenOS-Enabled 專案文件治理規則
+# Feature Spec: ZenOS L3-Document Governance
 
-> **治理定位：External（Doc 治理模組）**
-> 本 spec 定義 agent 和用戶在管理文件時必須遵循的規則。屬於可疊加的 Doc 治理模組，可獨立於 Task 治理模組啟用。
-> 規則內容透過 `governance_guide("document")` 提供給任何 MCP client。
+> **Layering note**：本 SPEC 只管 L3-Document subclass 的**治理規則**。
+> schema（`entity_l3_document` DDL、Python dataclass、CHECK constraint）canonical 在 `SPEC-ontology-architecture v2 §8.1`。
+> 權限 / visibility canonical 在 `SPEC-identity-and-access`。六維治理表 canonical 在 `SPEC-governance-framework`。
 >
-> **SSOT note（ADR-038）：** Agent runtime 取得治理規則的 SSOT 是 `governance_guide(topic="document", level=2)` MCP tool。本 spec 是人讀權威；`skills/governance/document-governance.md` 已降為 reference-only。Spec 修訂必須同步更新 `src/zenos/interface/governance_rules.py["document"]`，否則不得轉 `Approved`（見 `SPEC-governance-guide-contract`）。
-> 內部智慧邏輯（過時偵測演算法、關聯推斷、去重匹配）不在本 spec 範圍，見 `SPEC-governance-feedback-loop`。
-> 框架歸屬見 `SPEC-governance-framework` 治理功能索引。
->
-> **分散治理模型（ADR-013）：** 本 spec 的規則分兩層執行——Agent 端負責撰寫內容、填 frontmatter、判斷新建 vs 更新；Server 端負責 frontmatter 格式驗證（reject）、查重（回傳 similar）、ontology_entity 存在性（reject）、supersede 原子操作、狀態轉換合法性（reject）、Approved 品質閘（強制）。Server 端執法無法被 Agent 繞過。
+> **SSOT 傳遞（ADR-038）**：Agent runtime 透過 `governance_guide(topic="document", level=2)` 取得治理規則。本 SPEC 是人讀權威；`skills/governance/document-governance.md` 為 reference-only。SPEC 修訂必須同步 `src/zenos/interface/governance_rules.py["document"]`，否則不得轉 `Approved`。
 
-## 背景與動機
+## 1. 定位與範圍
 
-任何導入 ZenOS 的專案，最終都需要讓文件同時服務三件事：
+L3-Document 是**文件的語意代理**（不是檔案本體），一張 `entity_l3_document` row = 一個 bundle of sources。
 
-- 人類可以快速判斷文件是什麼、是否仍有效、應該去哪裡找
-- AI 可以穩定解析文件類型、狀態、與 ontology 的對應關係
-- 團隊可以知道何時建立新文件、何時更新舊文件、何時封存或刪除
+**本 SPEC 適用於**：
+- 專案內以 Markdown / 外部平台維護、需要被 ZenOS 納入知識治理的正式文件
+- 具有審核流程、版本邊界、跨團隊或跨角色約束力的文件
 
-若缺乏統一治理，常見問題包括：
+**不自動適用於**：
+- 程式碼註解 / docstring / README
+- 一次性輸出 / demo 素材 / 純工具層設定
+- 應用層自己的內部 checklist
 
-- 不同類型文件混放，難以分辨權威來源
-- 檔名與編號沒有一致規則，容易重複或失序
-- 暫存稿、handoff、備份檔長期留在主路徑，造成噪音
-- 文件與 ontology 無法穩定對應，AI 索引與追蹤失效
-- 團隊不知道哪些變更可直接更新、哪些應該另開新文件
+## 2. 核心原則
 
-本規則的目標是提供一套可跨專案重用的最小治理標準。專案可以在此基礎上增加細則，但不應削弱核心約束。
+1. 每份正式文件必須可被分類（`doc_type`）。
+2. 每份正式文件必須可被唯一識別（`entity_id` + `source_id`）。
+3. 每份正式文件必須有明確生命週期狀態（bundle 層 + source 層雙軌）。
+4. 每份正式文件必須對應到 ontology 主題或明確標 `TBD`。
+5. 文件穩定性 > 協作便利性；保留歷史寧可開新文件，不覆寫既有決策。
+6. 專案特例必須明文記錄為 local convention，不靠口頭共識。
+7. 任何影響分類 / 狀態 / 命名 / supersede / ontology 對應的修改，必須同步更新 ontology，否則視為未完成。
+8. 文件治理的完成定義包含「**可被找到**」：使用者與 agent 能從對應 L2 快速找到文件入口，不是只把 metadata 寫進 ontology。
 
----
+## 3. Bundle-first Document Entity
 
-## 適用範圍
+### 3.1 doc_role 語意
 
-本規則適用於：
+| doc_role | 語意 | source 數量 | 用途 |
+|----------|------|------------|------|
+| `index` | 某語意主題的文件索引（**預設**）| 1..N | 聚合同主題多份文件，作為 L2 的穩定文件入口 |
+| `single` | 單一文件的語意代理（例外）| 1 | 文件本身是獨立治理單位，不需要聚合 |
 
-- 專案內以 Markdown 維護、且需要被 ZenOS 納入知識治理的正式文件
-- 放置於 `docs/` 或專案明確宣告為「受治理文件區」的目錄
+**新建預設為 `index`**。CHECK constraint（主 SPEC §8.1）：
+```sql
+CHECK (doc_role = 'single' OR bundle_highlights_json != '[]')
+```
+→ `index` 必須有 `bundle_highlights`。
 
-本規則不自動適用於：
+**選 `single` 的前提**（三選一）：
+1. 文件有獨立生命週期，不希望與同主題文件聚合
+2. 產品明確要求單獨分享 / 授權 / supersede
+3. 文件不是任何 L2 的主文件入口
 
-- 程式碼註解、docstring、套件 README
-- 純工具層文件（例如 AI agent 本地設定）
-- Demo 素材、一次性輸出、暫存分析結果
+`single` entity 禁止新增第 2 個 source（reject with `SINGLE_CANNOT_HAVE_MULTIPLE_SOURCES`）。
 
-若專案需要治理上述文件，必須另外明文宣告納入。
+### 3.2 Source 結構
 
----
+每個 source 是 typed object（存在 `sources_json`）：
 
-## 治理原則
+| 欄位 | 必填 | 說明 |
+|------|------|------|
+| `source_id` | 系統生成 | 穩定識別碼，per-source CRUD 用 |
+| `uri` | 是 | 完整 URL |
+| `type` | 系統推斷 | `github / gdrive / notion / wiki / url` |
+| `label` | 是 | 人類可讀檔名 |
+| `doc_type` | 建議 | 見 §5 泛用類別 |
+| `doc_status` | index 建議 | `draft / approved / superseded / archived`（per-source lifecycle） |
+| `source_status` | 系統管理 | `valid / stale / unresolvable`（URI 可達性） |
+| `note` | 選填 | 用途說明 |
+| `is_primary` | 預設 false | primary source（`read_source` 未帶 source_id 時預設讀這份）|
 
-1. 每份正式文件都必須可被分類。
-2. 每份正式文件都必須可被唯一識別。
-3. 每份正式文件都必須有明確生命週期狀態。
-4. 每份正式文件都必須可對應到 ontology 概念或明確標示暫無對應。
-5. 文件正文的穩定性應高於協作便利性；需要保留歷史時，寧可開新文件，不覆寫既有決策。
-6. 專案特例可以存在，但必須明文記錄為 local convention，不可只靠口頭共識。
-7. 任何影響文件分類、狀態、命名、取代關係、或 ontology 對應的修改，都必須同步更新 ontology；否則視為未完成變更。
-8. 文件治理的完成定義必須包含「可被找到」：使用者與 agent 必須能從對應的 L2 主題快速找到正確文件入口，而不是只把 metadata 寫進 ontology。
+### 3.3 Mutation 操作
 
-### Amendment：bundle-first L3 document entity
+| 操作 | 語意 |
+|------|------|
+| `write(collection="documents", data={..., sources: [...]})` | 建立時帶完整 sources |
+| `write(..., data={doc_id, add_source: {...}})` | 追加 source |
+| `write(..., data={doc_id, update_source: {source_id, ...}})` | 更新特定 source |
+| `write(..., data={doc_id, remove_source: {source_id}})` | 移除 source（最後一份不可移除）|
+| `batch_update_sources(...)` | 批次更新 per source_id |
 
-本 spec 原本把 L3 document entity 視為單一正式文件的語意代理。自 `SPEC-document-bundle` 起，L3 文件治理補充以下硬規則：
+### 3.4 bundle_highlights & change_summary
 
-- 新建 doc entity 預設應採 `doc_role=index`
-- `index` 即使目前只有 1 份 source 也合法
-- `single` 保留，但僅作為例外模式，不再是新建預設
-- 同一個 L2 主題下的正式文件，原則上應收斂為同一個 doc bundle 的多個 source，而不是拆成多個平行 L3 作為主要入口
+**`bundle_highlights`**（index 必填，1..5 筆）：
+```
+[{source_id, headline, reason_to_read, priority: primary|important|supporting}]
+```
+- 必須至少一筆 `priority=primary`
+- 必須引用屬於該 bundle 的 `source_id`（不得游離）
 
-此 amendment 不改變本 spec 對 frontmatter、生命周期、supersede、archive、ontology sync 的要求；它只把 L3 的預設資料模型，從單檔代理升級為 bundle-first 索引。
+**`change_summary`**（選填，string）：一段人話，描述最近重要變化。
 
----
+**`highlights_updated_at` / `summary_updated_at`**：系統管理，write 時自動覆寫。
 
-## 文件類型定義
+## 4. Source Platform Contract
 
-| 類型前綴 | 名稱 | 主要用途 |
-|---------|------|----------|
-| `SPEC-` | Product Spec | 說明需求、範圍、目標與非目標 |
-| `ADR-` | Architecture Decision Record | 記錄技術或架構決策與理由 |
-| `TD-` | Technical Design | 記錄實作設計、資料結構、API、元件協作 |
-| `PB-` | Playbook | 記錄操作手冊、維運流程、部署與故障處置 |
-| `SC-` | Scenario | 記錄使用場景、Demo 腳本、服務流程 |
-| `REF-` | Reference | 記錄術語、背景知識、長期參考資料 |
-| `SKILL-` | Skill | Agent 行為規範，定義角色、治理操作、工作流程 |
+### 4.1 分層能力
 
-如專案需要新增類型，必須先補充到本治理規則或專案附屬規則，再開始使用。
+| 層次 | 問題 |
+|------|------|
+| `type normalization` | 這是什麼平台？由 URI pattern 推斷 |
+| `URI validation` | URI 格式合不合法？server-side 驗證 |
+| `status governance` | 這個 source 現在有效嗎？由 `source_status` + dead-link policy 表達 |
+| `reader adapter` | ZenOS 今天能不能真的讀到？由 `read_source(doc_id, source_id?)` 決定 |
 
----
+### 4.2 Rollout 能力矩陣
 
-## 建議目錄結構
+| source_type | URI contract | 可掛 doc entity | status 治理 | 內容讀取 | Rollout |
+|------------|-------------|---------------|-----------|---------|--------|
+| `github` | `https://github.com/{owner}/{repo}/blob/{branch}/{path}` | 是 | 正式 | 正式 | Phase 1 |
+| `gdrive` | `https://drive.google.com/file/d/{id}/...` 或 `https://docs.google.com/...`，含 file ID | 是 | 正式 | adapter 待補 | Phase 1.5 |
+| `notion` | `https://www.notion.so/...` 含 UUID | 是 | 基本 | adapter 待補 | Later |
+| `wiki` | 完整 `https://...`，禁 `/edit` | 是 | 基本 | adapter 待補 | Later |
+| `url` | 完整 `https://...` | 是 | 基本 | 預設 metadata only | Later |
 
-```text
-docs/
-  specs/        # SPEC-*.md
-  decisions/    # ADR-*.md
-  designs/      # TD-*.md
-  playbooks/    # PB-*.md
-  scenarios/    # SC-*.md
-  reference/    # REF-*.md
-  archive/      # 已封存文件
-skills/         # SKILL-*.md（Agent 行為規範，獨立於 docs/ 的 SSOT）
-  roles/        # SKILL-role-*.md
-  governance/   # SKILL-gov-*.md
-  workflows/    # SKILL-wf-*.md
+**規則**：
+1. multi-source contract 先定案，不必等所有 adapter 完成
+2. 未落地 adapter 的 `read_source` 必須回傳結構化 `unavailable` + `setup_hint`，不得偽造內容
+3. `source.type` 由 server 從 URI pattern 推斷，caller 不信任
+
+### 4.3 URI 嚴格驗證
+
+| Type | 拒絕範例 |
+|------|---------|
+| `github` | 相對路徑 / tree URL / raw URL（reject 400） |
+| `gdrive` | 資料夾連結 / 不含 file ID（reject 400） |
+| `notion` | 不含 UUID 段（reject 400） |
+| `wiki` | `/edit` 結尾（reject 400） |
+| `url` | 裸字串 / 相對路徑（reject 400） |
+
+### 4.4 read_source 合約
+
+```
+read_source(doc_id, source_id?) → {content, source_status, setup_hint?, alternative_sources?}
 ```
 
-這是建議結構，不是硬性要求。若專案已存在其他結構，至少必須保證：
+- 帶 `source_id` → 讀指定 source
+- 不帶 → 讀 `is_primary=true`；無 primary → 讀第一個 `source_status=valid`
+- 失敗時附 `setup_hint`（如 `"Google Drive MCP"`）+ `alternative_sources`（同 bundle 可用的其他 source）
 
-- 同類型文件有穩定聚集位置
-- archive 與 active 文件可被清楚分隔
-- 專案文件中有一處記錄「哪些路徑受治理、哪些不受治理」
+## 5. 泛用文件類別系統（`doc_type`）
 
-若專案有既有 canonical 文件可保留原名與原位，必須在專案層規則中明文列為例外。
+| 類別 | 名稱 | 範例 |
+|------|------|------|
+| `SPEC` | 規格 | 產品規格、功能需求、服務規格 |
+| `DECISION` | 決策 | ADR、策略決策、採購決策 |
+| `DESIGN` | 設計 | TD、視覺設計、流程設計 |
+| `PLAN` | 計畫 | 行銷企劃、專案計畫 |
+| `REPORT` | 報告 | 月報、事後檢討、競品分析 |
+| `CONTRACT` | 合約 | 客戶合約、SLA、合作協議 |
+| `GUIDE` | 指南 | Playbook、SOP、onboarding |
+| `MEETING` | 會議紀錄 | 週會、kickoff |
+| `REFERENCE` | 參考 | 術語表、市場研究 |
+| `TEST` | 測試 | TC、QA checklist |
+| `OTHER` | 其他 | 無法歸類 |
 
----
+**向後相容映射**（舊 → 新）：`ADR→DECISION`、`TD→DESIGN`、`TC→TEST`、`REF→REFERENCE`、`PB→GUIDE`、`SC→依用途`。Agent 兩種都可寫，搜尋時新舊都匹配。
 
-## Frontmatter 規格
+**治理原則**：
+- `doc_type` 只表達文件性質，**不表達部門歸屬**。跨部門區隔靠 `ontology_entity` / linked L2 / product，不靠 `doc_type` 分叉
+- 禁止建 `MARKETING_REPORT` / `CS_REPORT` 這類型別
+- Agent 不得因 `doc_type` 相同就自動追加到同一 index；必須先確認語意主題一致
 
-每份受治理文件都必須包含 frontmatter：
+## 6. Lifecycle State Machine
+
+> **Canonical**：`entity_l3_document` 的合法 status enum 為 `draft / current / stale / archived / conflict`（見主 SPEC v2 §11.2 + runtime `ontology_service._DOCUMENT_STATUSES`）。本節描述轉換語意。
+
+### 6.1 Bundle 層（`entities_base.status`，L3-Document 合法值）
+
+```
+draft ──► current ──► stale ──► archived
+           │            ▲          ▲
+           ├── conflict ──┘        │
+           └────── supersede ──────┘
+```
+
+| Status | 語意 |
+|--------|------|
+| `draft` | 剛建立、尚未通過品質閘（frontmatter 或 ontology 對應仍缺）|
+| `current` | 現行有效的 SSOT；任何該主題的查詢應先命中這個 bundle |
+| `stale` | 與 upstream 脫節（impacts 斷鏈 / 久未 review / sources 大量失效）；待 re-review 或降級 |
+| `conflict` | 同主題存在多個 current，待人工裁決 |
+| `archived` | 不再維護；靠 supersede 指向繼任者（terminal）|
+
+**合法轉換**：
+- `draft → current`：通過 §6.3 Approved 品質閘
+- `current ↔ stale`：re-review 復活 / impacts 斷鏈降級
+- `current → conflict`：同主題出現第二份 current → server 標 conflict，兩邊都進裁決待辦
+- `conflict → current`：人工裁決後留一份
+- `current | stale | conflict → archived`：supersede 或手動封存
+
+**禁止**：`archived → 任何狀態`（terminal）。
+
+> **Frontmatter status ↔ entity status 映射**：文件 frontmatter 用 `Draft / Under Review / Approved / Superseded / Archived`（§7）描述**文件審核狀態**；entity status 用 `draft / current / stale / archived / conflict` 描述**知識圖譜上的 bundle 狀態**。兩者語意不同——frontmatter 關心審核流程，entity status 關心知識可信度。映射關係：`Approved` frontmatter → `current` entity；`Superseded` → `archived`；`Draft` / `Under Review` → `draft`。
+
+### 6.2 Source 層（per-source `doc_status`，僅 index 使用）
+
+```
+draft ──► approved ──► superseded ──► archived
+```
+
+| 轉換 | 前提 |
+|------|------|
+| `draft → approved` | frontmatter 齊備 + ontology_entity 非 TBD + quality gate 通過 |
+| `approved → superseded` | 指向繼任 source（本 bundle 內或跨 bundle） |
+| `superseded → archived` | 保存歷史；不再顯示於主入口 |
+
+**禁止**：`approved → draft`、`archived → 任何狀態`（terminal）。
+
+### 6.3 Approved 品質閘（source frontmatter `status=Approved` + entity status `current` 前必過）
+
+- Frontmatter 必填欄位齊全（見 §7）
+- **`ontology_entity` 必須為 ontology 存在的 slug**，禁 `TBD`
+- 內容跨角色可讀（summary 通過 LLM 評分 ≥ threshold，軟規則）
+
+### 6.4 `ontology_entity: TBD` 治理
+
+`TBD` 僅合法於 frontmatter `status ∈ {Draft, Under Review}`；對應 entity status 停留於 `draft`。
+- `status=Approved` + `ontology_entity=TBD` → reject `ONTOLOGY_ENTITY_REQUIRED_ON_APPROVED`
+- entity status=`current` 需要 `ontology_entity` 為真實 slug；caller 將 draft entity 升 current 前必須先補 ontology 掛載
+- TBD 文件應同步建立 backlog task（dispatch `agent:architect`）以在限期內補 ontology 掛載
+
+## 7. Frontmatter 規格
+
+每份 Markdown 文件 header 必填：
 
 ```yaml
 ---
-type: SPEC | ADR | TD | PB | SC | REF
-id: {prefix}-{slug}
+type: SPEC | DECISION | DESIGN | PLAN | REPORT | CONTRACT | GUIDE | MEETING | REFERENCE | TEST | OTHER
+id: <stable-id>          # e.g. SPEC-doc-governance / ADR-048
 status: Draft | Under Review | Approved | Superseded | Archived
-ontology_entity: {entity-slug | TBD}
+ontology_entity: <slug>  # 或 TBD
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
-superseded_by: {id}   # 僅當 status: Superseded 時填寫
 ---
 ```
 
-欄位說明：
+選填：`depends_on / supersedes / superseded_by / amended / owner`。
 
-- `type`: 文件類型，必須與檔名前綴一致
-- `id`: 文件唯一識別碼，跨目錄不可重複
-- `status`: 文件生命週期狀態
-- `ontology_entity`: 對應的 ontology entity slug；若尚未建好，可暫填 `TBD`
-- `created`: 文件首次建立日期
-- `updated`: 最近一次合法更新日期
-- `superseded_by`: 指向取代它的新文件
+Server 端 frontmatter validator 拒絕：缺必填欄位、非法 enum 值、`status=Approved` 但 `ontology_entity=TBD`。
 
-`ontology_entity` 是文件與 ontology 的鬆耦合連結。entity 改版時，應優先更新 metadata，而不是搬移文件。
+## 8. 命名與編號規則
 
----
+| Type | 檔名格式 |
+|------|---------|
+| SPEC | `SPEC-{slug}.md` |
+| DECISION (ADR) | `ADR-{NNN}-{slug}.md` |
+| DESIGN (TD) | `TD-{slug}.md` |
+| PLAN | `PLAN-{slug}.md` |
+| REPORT | `REPORT-{YYYYMMDD}-{slug}.md` |
+| GUIDE (PB) | `PB-{slug}.md` |
+| REFERENCE (REF) | `REF-{slug}.md` |
+| TEST (TC) | `TC-{slug}.md` |
+| SKILL | `SKILL-{slug}.md` |
 
-## L3 文件生命週期（Lifecycle State Machine）
+- `{slug}` = kebab-case，不含空格 / 全形
+- ADR 編號遞增，不得重用
+- 重大更動開新版本或 amendment；不覆寫既有 Approved 決策正文
 
-### 狀態定義
+## 9. 何時開新 vs 更新既有
 
-| 狀態 | 意義 | 進入條件 | 可初始建立？ |
-|------|------|----------|------------|
-| `Draft` | 草稿，正在撰寫或尚未通過審查 | 新建文件的唯一合法初始狀態 | ✅ 唯一 |
-| `Under Review` | 內容完成，等待審查或確認 | 作者認為內容完整，提交審查 | ❌ |
-| `Approved` | 已核准，為正式有效文件 | 審查通過 + ontology sync 完成 | ❌ |
-| `Superseded` | 已被新文件取代，保留追溯價值 | 新版文件已就位且 `superseded_by` 已填寫 | ❌ |
-| `Archived` | 已退場，不再有效但保留歷史 | 文件使命完成或主題不再適用 | ❌ |
+### 9.1 開新文件
+- 新功能 / 新決策 / 新子主題
+- 需要獨立審核流程
+- 需要獨立 supersede chain
 
-### 合法轉換路徑
+### 9.2 可直接更新
+- Typo / 格式 / 補充細節，不改變 AC 或決策
+- Frontmatter `updated` 要跟著改
+
+### 9.3 必須開新版或 amendment
+- 推翻既有 AC / 決策結論
+- 擴充新 P0 需求
+- 任何影響外部依賴的 contract 改動
+
+### 9.4 不可直接改寫正文
+- `status=Approved` 文件的核心章節
+- 任何被其他文件 `depends_on` 引用的結論
+
+## 10. Capture / Sync 路由決策
 
 ```
-                    審查通過 + ontology sync
-  Draft ──────→ Under Review ──────→ Approved
-                     │                   │
-                     │ 撤回修改           │ 新版取代 or 退場
-                     ↓                   ↓
-                   Draft            Superseded
-                                        │
-                                   Archived（可選）
-                                        ↑
-                                   Approved ──→ Archived（直接退場，無新版取代）
+新文件
+  │
+  ├─ Step 1：search(collection="documents", query=<主題關鍵字>)
+  │
+  ├─ 找到 index entity？ → add_source 到該 index
+  │
+  ├─ 找到 single entity 且新文件高度相關？
+  │    → 提議升級 single → index（需 confirm）
+  │
+  ├─ 無相關 doc entity？
+  │    ├─ 屬 L2 正式產出？ → 建新 doc entity（預設 index）
+  │    └─ L2 輕量參考？ → 掛到 L2 的 sources[]（不建 L3）
+  │
+  └─ 不確定 → 停止，回報用戶
 ```
 
-### 轉換條件
+### 10.1 L2 sources[] vs L3 doc entity 邊界
 
-| 轉換 | 觸發條件 | 誰可觸發 |
-|------|---------|---------|
-| `Draft → Under Review` | 作者認為內容完整，所有必填欄位已填寫 | PM（SPEC）、Architect（ADR/TD）、作者 |
-| `Under Review → Approved` | 審查通過 + `ontology_entity` 不為 TBD（或已明確標記例外）+ L3 entity 已同步 | Architect（技術文件）、PM（需求文件） |
-| `Under Review → Draft` | 審查發現需要修改，撤回重寫 | 審查者 |
-| `Approved → Superseded` | 新版文件已建立、舊文件 `superseded_by` 已填寫、ontology 追溯關係已建立 | PM / Architect |
-| `Approved → Archived` | 文件使命完成且無新版取代（例如已驗收的一次性 TD） | PM / Architect |
-| `Superseded → Archived` | 舊文件搬入 `archive/` 目錄 | 任何人（清理操作） |
+| 層級 | 標準 | 正例 | 反例 |
+|------|------|------|------|
+| **L2 sources[]** | 輕量參考；移除不影響 L2 語意 | 原始碼路徑、外部 API doc、設定檔 | 客戶合約、產品規格 |
+| **L3 single** | 一份正式文件語意代理；獨立生命週期 | 單份 SPEC / ADR / 合約 | README |
+| **L3 index** | 多份正式文件的語意索引；聚合展示 | 「訂閱管理文件集」、「客戶 X 交付文件集」 | 只有一份且短期不會增加（應用 single）|
 
-### 禁止轉換
+### 10.2 正式產出定義
 
-- `Approved → Draft`：不可倒退。需要改方向時，開新文件 + supersede。
-- `Archived → 任何狀態`：已封存不可復活。若概念重新需要，建新文件。
-- `Superseded → Approved`：被取代後不可恢復為有效。
-- 跳過 `Under Review` 直接 `Draft → Approved`：所有文件都必須經過 review 階段。
+具以下任一特徵：
+1. 走審核流程（Draft → Under Review → Approved）
+2. 有版本邊界（v1 → v2）
+3. 有法律 / 商業 / 跨團隊約束力
+4. 被其他文件 / 任務引用為依據
 
-### 終態
-
-- `Superseded` 和 `Archived` 為終態，不可再轉換。
-- `Superseded` 文件仍可被引用（追溯歷史），但不視為有效文件。
-
-### Approved 前的品質閘
-
-文件從 `Under Review → Approved` 前，必須滿足：
-
-1. frontmatter 所有必填欄位已填寫
-2. `ontology_entity` 不為 `TBD`（或已在專案層明文列為允許例外，且有追蹤 task）
-3. 對應的 L3 document entity 已在 ontology 中建立或更新
-4. 若為 ADR，決策內容已明確記錄理由與替代方案
-5. 若為 SPEC，acceptance criteria 已定義
-
-### `ontology_entity: TBD` 治理
-
-- 新建文件時允許 `TBD`，但文件不得在 `TBD` 狀態下通過 `Under Review → Approved`。
-- 每個 `TBD` 應在建立時同步開一個追蹤 task（或在文件內標記 TODO）。
-- 治理 review 時，累積 TBD 文件數量為治理健康度指標之一。
-
----
-
-## 與 Ontology 的同步規則
-
-文件治理不是獨立系統。對 ZenOS 而言，文件分類的變更若沒有同步回 ontology，就會造成索引、推理、追溯與 routing 斷鏈。
-
-因此，以下變更都必須同步更新 ontology：
-
-- 文件從一種類型改到另一種類型
-- 文件 rename、搬移、封存、supersede、刪除
-- `ontology_entity` 改變
-- canonical 文件、reference 文件、playbook 文件等治理角色改變
-
-同步要求：
-
-- L2 entity 要反映新的治理概念或文件歸屬
-- L3 document entity 要反映新的文件 metadata、來源路徑、狀態與關聯
-- 若文件被取代，舊 L3 entity 與新 L3 entity 的關係必須可追溯
-
-同步 contract：
-
-- 文件治理的同步操作必須採用局部更新語意。當 caller 只更新 `source.uri`、`status`、frontmatter 或分類結果時，未明示修改的欄位不得被清空。
-- L3 document entity 的主要掛載點以 `parent_id` 為準；若系統另外物化 `part_of` 或其他 relationship 作為圖譜邊，必須保證與 `parent_id` 一致，不可一邊存在一邊脫落。
-- `linked_entity_ids` **為建立 document 時的必填欄位（required）**，型別為 `list[str]`，至少 1 個、至多 5 個合法 entity ID。第一個 ID 代表 primary parent（映射為 `parent_id`），其餘代表額外關聯。
-  - Server 端強制驗證：缺少 `linked_entity_ids` 或為空陣列 → `status="rejected"`，`data.error.code="LINKED_ENTITY_IDS_REQUIRED"`，錯誤訊息指引 caller 先 `search(collection="entities")` 找 ID
-  - 任一 ID 不存在 → `status="rejected"`，`data.error.code="LINKED_ENTITY_NOT_FOUND"`，列出哪些 ID 不存在
-  - 不得接受會造成逐字元解析的模糊字串格式（例如逗號分隔字串）
-  - 向後相容：既有未帶 `linked_entity_ids` 的 document 可讀取，但下次 update 時必須補上（update reject 相同規則）
-  - **Acceptance Criteria**：
-    - `AC-linked-1` Given agent 呼叫 `write(collection="documents")` 且缺少 `linked_entity_ids`，When server 處理，Then 回傳 `status="rejected"` + `LINKED_ENTITY_IDS_REQUIRED`
-    - `AC-linked-2` Given agent 傳入包含 1 個不存在的 entity ID，When server 處理，Then 回傳 `status="rejected"` + `LINKED_ENTITY_NOT_FOUND`，並列出該 ID
-    - `AC-linked-3` Given agent 傳入有效的 `linked_entity_ids=["e1", "e2"]`，When server 處理，Then document 寫入成功，`parent_id="e1"`，`"e2"` 建立為額外 relationship
-- 對 rename、reclassify、archive、supersede 這類批次治理操作，系統應提供專用 sync 模式或等價流程，一次處理路徑更新、掛載修復、狀態調整與追溯關係，而不是要求 caller 手動拆成多次危險 write。
-- 對 `doc_role=index` 的文件同步，除 `sources` 外還必須同步維護 `bundle_highlights`、primary source 與 L2 掛載入口。不得只更新 source 清單而忽略文件入口層。
-
-完成定義：
-
-- Git 內文件已更新
-- 對應 ontology 的 L2 / L3 entity 已更新
-- ZenOS ingest / capture / sync 流程重新可用，且不會指向過時 metadata
-- 若文件屬於某個 L2 主題的主要文件入口，則必須能從該 L2 直接看到 doc bundle、highlights 與主要連結
-
----
-
-## 命名與編號規則
-
-### SPEC
-- 格式：`SPEC-{feature-slug}.md`
-- slug 以功能或議題命名，全小寫連字號
-- 無流水號，slug 即唯一識別
-
-### ADR
-- 格式：`ADR-{3位數序號}-{decision-slug}.md`
-- 序號在專案內全域唯一
-- 不得重複使用既有序號，即使舊檔已封存也一樣
-
-### TD
-- 格式：`TD-{spec-slug}.md` 或 `TD-{spec-slug}-{layer}.md`
-- 建議與對應 SPEC slug 對齊
-
-### PB / SC / REF
-- 格式：`{PREFIX}-{topic-slug}.md`
-- 無編號，以主題命名
-
-### SKILL
-- 格式：`SKILL-{category}-{name}.md`
-- category：`role` / `gov` / `wf`（角色 / 治理 / 工作流程）
-- 存放路徑：`skills/{roles|governance|workflows}/`
-- 無編號，以功能命名
-
----
-
-## 何時開新文件 vs 更新既有文件
-
-本規則的核心不是「已核准文件不能改」，而是區分：
-
-- 實作對齊型更新：反映目前真實狀態，可直接更新
-- 決策改向型更新：改變原本承諾或判斷，必須保留版本邊界
-
-### 開新文件
-- 全新需求、議題或能力邊界
-- 新決策，即使與舊決策高度相關
-- 已核准文件出現實質方向改變
-- 需要保留獨立審核、討論或驗收歷史
-
-### 可直接更新
-- 狀態變更
-- 錯字修正、語意澄清、補充引用
-- 補寫驗收結果、實際連結、交叉參照
-- frontmatter metadata 更新，例如 `status`、`updated`、`ontology_entity`、`superseded_by`
-- 實作對齊型更新，例如：
-  - 補上最終 API、schema、路徑、元件名稱
-  - 記錄已完成、已棄用、已延後的實作細節
-  - 補充 rollout、限制、已知差異、驗證結果
-
-### 必須開新版本或 amendment
-- 需求範圍改變
-- 成功標準或驗收標準改變
-- 核心使用流程改變
-- 架構或技術決策改變
-- 責任邊界、依賴關係、對外承諾改變
-- 會影響下游文件、實作責任或跨團隊協作方式的變更
-
-### 不可直接改寫正文
-- ADR 的決策內容
-- 已 `Approved` 文件中的核心方向、需求邊界、決策結論
-
-判斷原則：
-
-- 如果變更是在說「實際怎麼落地」，通常可直接更新
-- 如果變更是在說「原本決定什麼、現在改成別的」，就必須開新版本
-
-若既有文件已 `Approved`，且需要改正文中的實質方向，應建立新文件，並將舊文件標為 `Superseded`。
-
----
-
-## 人工治理例外
-
-文件治理導入期，可能先需要建立一個暫時性的治理概念或掛載點，再逐步補齊 impacts、關聯或 supporting docs。對這類人工建模情境：
-
-- 系統應提供明確的一級語意，例如 `manual_override_reason`、`provisional=true`、或等價欄位，讓 caller 能表達「這是人工治理例外，不是一般自動推斷成功的 L2」。
-- 這類例外必須可審計，並能在後續治理 review 中被列出與補完。
-- `force=true` 可作為底層逃生閥，但不應是人工治理流程的唯一正式介面。
-
----
-
-## Archive 與刪除規則
-
-### 應封存到 `archive/`
-- 已完成使命，且保留歷史有價值的 handoff 文件
-- 被新版文件完整取代的舊文件
-- 已驗收完成、但仍需追溯的任務設計文件
-
-### 可直接刪除
-- 明確屬於暫存、備份、或中間產物的檔案，例如 `.bak`
-- 已被正式文件吸收、且無追溯價值的訪談草稿或一次性問答
-- 可由其他系統穩定重建的產出物
-
-### 封存前必須滿足
-- 若文件被取代，舊文件需標記 `status: Superseded` 與 `superseded_by`
-- 若文件單純退場但未被新文件取代，應標記 `status: Archived`
-- archive 目錄中的文件仍應保留 frontmatter 與原始識別
-
----
-
-## Agent 文件治理合規流程
-
-### 背景
-
-PM 和 Architect agent 是文件的主要建立者。治理規則寫在 spec 裡不夠——agent 必須在寫文件的流程中內建治理檢查點，而非依賴記憶。本節定義 agent 寫文件時的強制動作序列。
-
-### 適用角色
-
-| 角色 | 文件類型 | 合規義務 |
-|------|---------|---------|
-| PM | SPEC | 完整合規流程 |
-| Architect | ADR, TD, 補充 SPEC | 完整合規流程 |
-| Developer | 不建立文件 | 發現 spec 與實作不一致時回報，不自行修改 |
-| QA | 不建立文件 | 驗收時檢查文件是否合規，不自行修改 |
-| zenos-capture | L3 document entity | 合規流程中的 ontology 同步執行者 |
-| zenos-sync | L3 document entity | 增量同步時的 frontmatter 解析與狀態對齊 |
-
-### bundle-first 治理責任補充
-
-| 工具 / Workflow | 額外責任 |
-|----------------|---------|
-| `document-governance` | 判斷新文件應進既有 bundle、升級 single→index、或例外建立 single；同時自動判斷 `git only / git+gcs / gcs only` |
-| `zenos-capture` | 建立/更新 document 時補齊 `bundle_highlights`，避免只寫 metadata |
-| `zenos-sync` | 新增 source、rename、supersede 後，提醒或補做 bundle highlights / primary source 對齊；若啟用 auto-publish，僅能對 `current` + `github source` + 正式入口文件發布 snapshot |
-| Dashboard / Knowledge Map | 從 L2 直接呈現 doc bundle 入口，不得把文件入口藏在 documents 清單深處 |
-
-### 強制動作序列
-
-Agent 每次建立或修改受治理文件時，必須依序完成以下四個階段。不可跳過任何階段。
-
-#### 階段一：查重與現況確認（寫之前）
+## 11. Supersede 規則
 
 ```
-Agent 要寫/改文件
-     │
-     ├─ 1a. 搜尋 ontology：search(query="主題關鍵字", collection="documents")
-     │       → 是否已有同主題的 L3 document entity？
-     │
-     ├─ 1b. 搜尋檔案系統：glob docs/ 下同前綴同主題的檔案
-     │       → 是否已有同名或高度相似的文件？
-     │
-     └─ 1c. 若找到既有文件：讀取其 frontmatter，確認 status
-            → Draft / Under Review：可直接修改
-            → Approved：進入「更新 vs 開新」判斷（階段二）
-            → Superseded / Archived：不可修改，必須開新文件
+write(collection="documents", data={
+  id: <new-doc-id>,
+  supersedes: <old-doc-id>,        # bundle-level supersede
+  supersedes_reason: "..."
+})
 ```
 
-**禁止行為**：未搜尋就直接建新文件。
+Server 原子操作：
+1. 新 doc entity 建立
+2. 舊 doc entity status → `archived`
+3. 舊 entity 寫入 `superseded_by = <new-id>`
+4. 圖上建立 `relationships.type = "supersede"` edge
 
-**新增強制檢查：bundle-first 路由**
+Per-source supersede 則透過 `update_source` 設定 `doc_status=superseded` + `supersedes_source_id`。
 
-- 若找到同主題的 `doc_role=index`，應優先 `add_source` 到既有 bundle
-- 若找到同主題的 `doc_role=single`，且新文件與其屬於同一 L2 主題，應優先提議升級為 `index`
-- 若沒有找到同主題文件入口，應預設新建 `index`
-- 不得因為「目前只有一份文件」就直接建 `single`
+## 12. Archive 與刪除
 
-**新增強制檢查：authoring vs delivery 自動判斷**
+### 12.1 應 archive 到 `archive/`
+- `status=Superseded` 文件，等 supersede chain 穩定 ≥ 30 天
+- 專案方向轉變後的舊計畫
+- 歷史 decision（仍有回溯價值）
 
-- agent 必須先判斷該文件是：
-  - `git only`
-  - `git + gcs`
-  - `gcs only`
-- 不得把這個選擇預設丟回給用戶
-- 判斷基準至少包含：
-  - 是否為 `current`
-  - 是否為 formal-entry
-  - 是否需要分享 / 給其他 agent 直接閱讀
-  - 若 source.type=github，是否 remote 可見
-- 規則：
-  - `current + formal-entry` → 預設 `git + gcs`
-  - 非入口、以編輯協作為主 → 可 `git only`
-  - 用戶明確要求 direct delivery → 可 `gcs only`
+### 12.2 可直接刪除
+- 暫存分析結果（未轉 Approved）
+- handoff 摘要 / 備份 / 一次性輸出
+- 從未掛 ontology 的 draft
 
-#### 階段二：新建 / 更新 / Supersede 判斷
+### 12.3 封存前必須滿足
+- `status = Superseded` 或 `Archived`
+- supersede chain 明確（如有繼任者）
+- ontology 同步完成（`superseded_by` 寫回、`archived_at` timestamp）
 
-```
-                       既有文件？
-                      /          \
-                   否              是
-                   │               │
-              新建文件          讀取 status
-                               /    |     \
-                          Draft  Approved  Superseded/Archived
-                            │       │              │
-                       直接更新   判斷變更類型      必須開新文件
-                                /         \
-                      實作對齊型       決策改向型
-                           │               │
-                      直接更新         開新文件 + Supersede 舊文件
-```
+## 13. Agent 合規流程
 
-**判斷規則**（引用本 spec「何時開新文件 vs 更新既有文件」）：
+### 13.1 強制動作序列
 
-- **可直接更新**：狀態變更、錯字修正、補充引用、frontmatter 更新、實作對齊（補 API/schema/路徑）
-- **必須開新 + Supersede**：需求範圍改變、成功標準改變、核心流程改變、架構決策改變、責任邊界改變
-- **ADR 特殊規則**：ADR 正文不可改寫，新決策一律開新 ADR
+1. **capture 前 search**：
+   ```
+   search(collection="documents", query=<主題>, status="current")
+   ```
+2. **有 bundle → `add_source`**；無 bundle → 建 `index`（預設）
+3. **寫 frontmatter**：`type / id / status / ontology_entity / created / updated`
+4. **掛 ontology**：L2 or L3 `linked_entities`，不確定就標 `TBD` + 建 backlog task
+5. **寫 bundle_highlights**（若 doc_role=index）
+6. **sync journal**：`journal_write` 一行描述動作
 
-#### 階段三：執行寫入（原子完成）
+### 13.2 禁止
 
-根據階段二的判斷，執行對應的寫入操作。**Git 文件變更與 ontology 同步必須在同一輪操作中完成。**
+- 不做 search 直接建新 entity（導致重複）
+- `doc_role=single` 未說明例外理由
+- `status=Approved` 但 `ontology_entity=TBD`
+- 寫 frontmatter 但檔名與 `id` 不一致
 
-##### 新建文件
+## 14. 合規違規偵測
 
-1. 生成正確 frontmatter（`status: Draft`，`created: 今天`，`ontology_entity: {slug 或 TBD}`）
-2. 確認檔名符合命名規則（前綴 + slug）
-3. 確認目標目錄正確（type → directory 對應）
-4. 寫入檔案
-5. 呼叫 `mcp__zenos__write(collection="documents")` 建立 L3 document entity
-6. 若建立的是 `doc_role=index`，必須同輪補上 `bundle_highlights`；至少指出一份 primary source 與「為什麼先讀它」
-7. 若 `ontology_entity` 為 TBD，開一個追蹤 task 或在文件內標記 TODO
-8. 若文件屬於 `current formal-entry`，agent 不得停在 `git only`；必須同輪補齊 delivery snapshot，除非用戶明確要求暫緩
+| Signal | Detector（runtime canonical） |
+|--------|---------|
+| `index` 無 highlights | `analyze(check_type="health")` → `kpis.bundle_highlights_coverage`（`analyze.py:717`）|
+| primary source = stale / unresolvable | `analyze(check_type="document_consistency")` → `document_consistency_warnings`（`analyze.py:606-620`）+ `read_source` dead-link |
+| `change_summary` 超過 90 天未更新且 sources 有變動 | `analyze(check_type="staleness")` |
+| 孤立 doc entity（無 relationships / 無 parent 掛載）| `find_gaps(gap_type="orphan_entities")`（`governance.py:116`）|
+| doc entity 關聯薄弱（全是 `related_to`）| `find_gaps(gap_type="weak_semantics")`（`governance.py:118`）|
+| Frontmatter 欄位缺漏 / `status=Approved` + `ontology_entity=TBD` | write-time validator reject（`ONTOLOGY_ENTITY_REQUIRED_ON_APPROVED`）|
 
-##### 更新既有文件
+> 合法 `check_type`：`all / health / quality / staleness / blindspot / impacts / document_consistency / permission_risk / invalid_documents / orphaned_relationships / llm_health / consolidate`（`analyze.py:44-48`）。
+> 合法 `gap_type`：`all / orphan_entities / weak_semantics / underconnected`（`governance.py:129`）。
+> 「同主題拆多個 single entity」目前無 dedicated gap_type；沿用 `find_gaps(gap_type="weak_semantics")` + 人工 routing 判斷（§10 capture/sync 路由決策樹）。
 
-1. 更新 frontmatter 的 `updated` 日期
-2. 修改文件內容（僅限合法的更新範圍）
-3. 呼叫 `mcp__zenos__write(collection="documents")` 更新 L3 document entity
-4. 若本次更新改變了 bundle 中的 SSOT、閱讀優先序、或新增了關鍵 source，必須同步更新 `bundle_highlights`
-5. 若文件屬於 `current` 正式入口且專案/命令啟用了 auto-publish，必須同步發布或刷新 delivery snapshot；publish 失敗時標記 delivery 狀態，不得靜默略過
-6. 若 github source 對其他人仍不可見（未 push / remote 不可達），則不得把 GitHub URL 當完成交付；必須補 delivery snapshot 或明確標示未完成
+## 15. 反饋路徑 (Feedback Triggers)
 
-##### Supersede 舊文件
+Agent 偵測到以下情境必須建立 governance task（不得靜默）：
 
-1. 建立新文件（按「新建」流程）
-2. 更新舊文件 frontmatter：`status: Superseded`，`superseded_by: {新文件 id}`，`updated: 今天`
-3. 更新舊文件的 L3 document entity 狀態
-4. 在新文件中記錄「本文件取代 {舊文件 id}」
-5. 確認 ontology 中新舊文件的追溯關係已建立
+- `index` 缺 `bundle_highlights` → 建 task dispatch 到對應 owner
+- `source_status=unresolvable` 持續 14+ 天 → 建 task（修 URI 或 archive）
+- `doc_type=OTHER` 且被引用 3+ 次 → 建 task（分類升級）
+- 同一 L2 下出現 2+ 份 SPEC single entity → 建 task（評估升 index）
 
-**原子性要求**：步驟 1-5 必須在同一輪操作（同一個 commit 或同一次 agent 回應）中完成。不可只建新文件而遺忘更新舊文件。
+反饋完整性規則：若偵測到問題但無人員認領，必須 escalate 到 L1 workspace owner。
 
-#### 階段四：回填與驗證（寫之後）
+## 16. 衝突仲裁
 
-1. **TBD 回填**：若 `ontology_entity` 為 TBD，在 L2 entity 建立後回填文件 frontmatter 與 L3 entity
-2. **交叉驗證**：確認 Git 文件的 frontmatter status 與 ontology L3 entity status 一致
-3. **引用檢查**：若本次操作涉及 supersede 或 archive，檢查其他文件是否引用了被取代/封存的文件
+| 衝突類型 | 仲裁 |
+|---------|------|
+| 兩份文件宣稱同一 SSOT | 先到者為主；後到者必須 supersede 或合併為 source |
+| frontmatter 與檔名不一致 | frontmatter 勝；更新檔名 |
+| `doc_type` 與實際內容不符 | 內容勝；update `doc_type` |
+| L2 sources[] 與 L3 index 都掛同一 URI | L3 勝；從 L2 移除 |
+| 同 bundle 下兩份 source 都 `is_primary=true` | reject with `MULTIPLE_PRIMARY_SOURCES` |
 
-### 合規違規的偵測
+## 17. 專案層可覆寫
 
-| 違規類型 | 偵測方式 | 偵測時機 |
-|---------|---------|---------|
-| 重複文件（同主題多份 Draft） | analyze 比對 ontology 中相似 title 的 documents | 定期治理 review |
-| Frontmatter 缺失或不一致 | zenos-sync 解析 frontmatter + 比對 ontology | 每次 sync |
-| Git 與 ontology 狀態不同步 | zenos-sync 比對文件 status vs entity status | 每次 sync |
-| TBD 長期未解決 | analyze 列出 `ontology_entity: TBD` 的文件 | 定期治理 review |
-| Supersede 鏈斷裂（舊文件無 superseded_by） | analyze 檢查 Superseded 文件的 frontmatter | 定期治理 review |
-| Approved 文件被直接改寫（非合法更新） | git blame + analyze 比對核心段落變更 | Phase 2 自動 lint |
+- 命名前綴（如 `ADR-{NNN}-{slug}` 改為 `ADR-{slug}-{NNN}`）
+- Archive 目錄結構
+- `doc_type` 擴充（僅限用途互斥的新類別；不得新增部門變體）
+- Lifecycle 中的 `Under Review` 子階段（如 `Under Review → Peer Review → Approved`）
 
-### 與其他治理流程的關係
+**不可覆寫**：
+- `doc_role` enum、CHECK constraint
+- Frontmatter 必填清單
+- Supersede 原子語意
+- Source platform 合約
 
-- **L2 治理**：Agent 建立文件時填寫的 `ontology_entity` 連結 L3 到 L2。L2 狀態變更（confirmed → stale）時，應觸發掛載文件的 review（見 L2 反饋路徑）。
-- **Task 治理**：Task 完成後若產出文件（例如 SPEC、TD），該文件的建立必須走本合規流程。Task 的知識反饋閉環包含「產出文件已正確掛載到 ontology」。
-- **傳播契約**：本合規流程本身也是治理規則。修改本流程時，適用憲法的傳播契約——必須同步更新 PM/Architect skill 中的對應步驟。
+## 18. 驗收 Criteria
 
----
+**Bundle & Role**：
+- `AC-DOC-01` Given 建立新 doc entity 未傳 `doc_role`，When write，Then 建為 `index`
+- `AC-DOC-02` Given `doc_role=index` 只傳 1 個 source，When write，Then 成功
+- `AC-DOC-03` Given `doc_role=single` 未傳 reason，When write，Then warning / reject 引導改 `index`
+- `AC-DOC-04` Given `single` entity 加第 2 個 source，When write，Then reject with `SINGLE_CANNOT_HAVE_MULTIPLE_SOURCES`
 
-## 反饋路徑（Feedback Triggers）
+**Source CRUD**：
+- `AC-DOC-05` Given 追加 source 到 index，When write，Then 系統生成 source_id，其他 source 不動
+- `AC-DOC-06` Given 移除 index 的最後一個 source，When write，Then reject
+- `AC-DOC-07` Given 兩筆 source 同時 `is_primary=true`，When write，Then reject with `MULTIPLE_PRIMARY_SOURCES`
 
-文件治理的變更不是單向操作。以下事件必須觸發對應的反饋動作：
+**Bundle Highlights**：
+- `AC-DOC-08` Given `doc_role=index` 無 `bundle_highlights`，When write，Then reject（對應 §8.1 CHECK）
+- `AC-DOC-09` Given bundle_highlights 無 `priority=primary` 項，When write，Then reject
+- `AC-DOC-10` Given bundle_highlights 引用不屬於本 bundle 的 source_id，When write，Then reject
+- `AC-DOC-11` Given update bundle_highlights，When write，Then `highlights_updated_at` 自動覆寫
 
-| 觸發事件 | 反饋對象 | 反饋動作 | 自動/人工 |
-|---------|---------|---------|----------|
-| 文件狀態從 Approved → Superseded | 新文件（superseded_by 指向的文件） | 確認新文件已就位且可消費 | 人工確認 |
-| 文件狀態從 Approved → Superseded | 舊文件的 L3 document entity | 更新 entity 狀態 + 建立新舊文件追溯關係 | Phase 0 人工；Phase 1+ 自動 |
-| 文件被 rename 或搬移 | 對應的 L3 document entity | 更新 source.uri，確保 ingest 路徑不斷鏈 | 人工處理（應由治理 sync 工具輔助） |
-| 文件被 archive | 引用此文件的其他文件與 tasks | 通知 owner 檢查引用是否仍有效 | Phase 0 人工；Phase 1+ analyze 偵測 |
-| `ontology_entity` 欄位變更 | 對應的 L2 entity | 檢查 L2 掛載是否仍正確 | 人工確認 |
-| 文件類型（type）變更 | 原目錄與新目錄 | 搬移文件到正確目錄、更新索引 | 人工處理 |
-| 新文件建立（status: Draft） | 對應的 L2 entity（若 ontology_entity 有值） | 在 L2 下新增 L3 掛載 | Phase 0 人工；Phase 1+ capture 自動 |
+**URI Validation**：
+- `AC-DOC-12` Given GitHub tree URL，When write，Then reject 400 提示「請提供檔案連結而非目錄」
+- `AC-DOC-13` Given Google Drive 資料夾 URL，When write，Then reject 400
+- `AC-DOC-14` Given Notion URL 不含 UUID，When write，Then reject 400
 
-### 反饋完整性規則
+**read_source**：
+- `AC-DOC-15` Given `read_source(doc_id)` 且有 primary，When 執行，Then 讀 primary 內容
+- `AC-DOC-16` Given `read_source(doc_id)` 無 primary 有 3 個 source，When 執行，Then 讀第一個 valid
+- `AC-DOC-17` Given gdrive reader adapter 未落地，When `read_source`，Then 回傳 `unavailable` + `setup_hint: "Google Drive MCP"` + `alternative_sources`
 
-1. **Supersede 必須雙向可追溯**：舊文件有 `superseded_by`，新文件的 description 或 frontmatter 應記錄它取代了什麼。
-2. **路徑變更必須原子完成**：rename/搬移文件時，Git 變更與 ontology entity 更新必須在同一個 commit 或同一輪操作中完成，不得分批留斷鏈。
-3. **Archive 不是刪除**：封存後的文件仍保留 frontmatter 與 entity 關聯，ontology 中的 L3 entity 標為 archived 而非刪除。
-4. **Delivery 直寫不得無鎖覆蓋**：若文件採 ZenOS direct markdown write，更新請求必須帶 `base_revision_id`；與當前 primary revision 不一致時必須回 `409 REVISION_CONFLICT`。
+**Lifecycle & Supersede**：
+- `AC-DOC-18` Given frontmatter `status=Approved` 但 `ontology_entity=TBD`，When write，Then reject with `ONTOLOGY_ENTITY_REQUIRED_ON_APPROVED`
+- `AC-DOC-18b` Given entity status 由 `draft` 嘗試升 `current` 但 `ontology_entity=TBD`，When write，Then reject（同 error code）
+- `AC-DOC-19` Given supersede 新建 doc，When write，Then 舊 entity status → `archived` + `superseded_by` 寫回 + relationships 建 `supersede` edge
+- `AC-DOC-20` Given entity status=`archived`，When try update status → 任何值，Then reject (terminal)
+- `AC-DOC-20b` Given 同主題已存在 status=`current` 的 bundle，且新 bundle 設 status=`current`，When write，Then 兩者 status → `conflict` + 自動建 backlog task 交人工裁決
 
----
+**Routing & UX**：
+- `AC-DOC-21` Given agent capture 新文件且已有同主題 index，When 路由判斷，Then 選 `add_source` 而非建新 entity
+- `AC-DOC-22` Given L2 detail，When 顯示，Then 直接看到 bundle title + highlights + primary source
+- `AC-DOC-23` Given L2 掛 2 個 doc bundles，When detail 顯示，Then 分開呈現不合併
+- `AC-DOC-24` Given 知識地圖，When 顯示，Then L2 → doc bundle 有穩定 edge
 
-## 衝突仲裁（Conflict Resolution）
+**Governance Guide**：
+- `AC-DOC-25` Given `governance_guide(topic="document", level=2)`，When 執行，Then 回傳包含 §3 bundle-first、§5 類別表、§10 路由決策樹
 
-### 跨 Spec 衝突
+## 19. 明確不包含
 
-本 spec 治理 L3 文件層。當與其他治理 spec 發生衝突時：
+- 文件版本 diff 顯示 / 編輯器 UX（屬 `SPEC-document-delivery-layer`）
+- Revision snapshot 儲存（屬 `SPEC-document-delivery-layer`）
+- 批次治理流程細節（屬 `SPEC-batch-doc-governance`）
+- semantic retrieval / embedding（屬 `SPEC-semantic-retrieval`）
+- application-specific 內部 checklist
 
-1. 依憲法（`docs/spec.md`）第二節第⑥維度的通用仲裁順序處理。
-2. 本 spec 不得覆寫 L2 升降級規則（`SPEC-l2-entity-redefinition` 權威）。
-3. 本 spec 不得覆寫 Task 建票品質與驗收規則（`SPEC-task-governance` 權威）。
-4. 若文件治理規則與 L2 治理規則在同一 entity 上產生矛盾（例如文件說應 archive 但 L2 認為概念仍 confirmed），以 L2 狀態為準，文件治理配合調整。
+## 20. 相關文件
 
-### 專案層衝突
-
-專案層規則可補充但不得削弱核心約束（見下方「專案層可覆寫項目」）。專案層規則與本 spec 矛盾時，以本 spec 為準。
-
----
-
-## 專案導入流程
-
-### P0 — 建立治理邊界
-- 列出哪些目錄屬於受治理文件區
-- 列出哪些目錄或文件類型明確排除
-- 指定是否存在 canonical 文件例外
-
-### P1 — 建立一致 metadata
-- 為所有受治理文件補齊 frontmatter
-- 修正重複 ID、重複 ADR 編號、與不一致前綴
-- 將明確屬於備份或噪音的檔案移除
-
-### P2 — 結構整理
-- 將正式文件移到穩定類型目錄
-- 將 handoff、已完成任務文件、舊版本移入 archive
-- 將 reference 類長青文件集中管理
-
-### P3 — 與 ZenOS 對接
-- 確保 ZenOS ingest 流程可解析 frontmatter
-- 補齊 `ontology_entity`
-- 對尚未建好的 ontology 概念，先以 `TBD` 暫掛，後續補建並回填
-- 對每次 rename、reclassify、archive、supersede 操作，同步更新對應的 L2 / L3 entity
-
----
-
-## 專案層可覆寫項目
-
-以下項目可由各專案自行補充，但必須寫成明文規則：
-
-- 哪些目錄納入治理
-- 是否保留既有 canonical 文件與其例外命名
-- 是否新增文件類型
-- archive 的保留年限
-- 是否要求某些類型一定綁定特定 ontology 層級
-
-專案層規則不得覆寫以下核心約束：
-
-- 正式文件必須可分類、可識別、可追蹤狀態
-- 已核准決策不可被靜默改寫
-- 取代關係必須可追溯
-- ZenOS ingest 必須能穩定解析 metadata
-
----
-
-## 技術約束
-
-- frontmatter 格式必須與 ZenOS ingest / capture 流程相容
-- `ontology_entity` 若不是 `TBD`，應對應到 ontology 中實際存在的 entity
-- 文件治理相關變更不得只改 Git 文件而不改 ontology；L2 / L3 entity 必須與文件現況一致
-- 專案若需要更嚴格限制，例如禁止 `TBD` 進入 main branch，應在 CI 或 lint 規則中實作
+- `SPEC-ontology-architecture v2 §8.1` — L3-Document schema（canonical）
+- `SPEC-identity-and-access` — visibility / permission
+- `SPEC-governance-framework` — 六維治理表
+- `SPEC-mcp-tool-contract` — `write(documents) / read_source / batch_update_sources`
+- `SPEC-document-delivery-layer` — revision / share token sidecar
+- `SPEC-batch-doc-governance` — 批次治理（引用本 SPEC 為 canonical）
+- `SPEC-governance-guide-contract` — `governance_guide("document")` 契約

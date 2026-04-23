@@ -3,8 +3,8 @@ name: feature
 description: >
   從需求討論到任務建立的完整功能開發流程。PM 和 Architect 互相確認 Spec 後，才交付開發。
   當使用者說「我有新功能要做」「幫我規劃這個功能」「寫 spec 然後開任務」「/feature」時使用。
-  流程：PM 訪談 → PM ↔ Architect 交叉確認 → Spec Reviewer 審查 → 用戶確認 → Architect 建任務。
-version: 1.1.0
+  流程：PM 訪談 → PM ↔ Architect 交叉確認 → Spec Reviewer 審查 → 用戶確認 → Architect 建任務 → Developer → QA → Architect AC 最終確認。
+version: 1.1.1
 ---
 
 # /feature — 功能開發流程
@@ -188,7 +188,31 @@ Server 自動升 `status=review`。
   ```
   退回 Developer，重走 5.2。
 
-每張 task 走完 5.1→5.2→5.3 才進入下一張。整條履歷沉澱在 `task.handoff_events`，任何時刻 `get(task)` 都能看完整派工軌跡。
+### 5.4 Architect 最終 AC Closure（不可省略）
+
+QA PASS 後，**task 狀態雖然已 done，但 feature 的 user-facing closure 仍回到 Architect**。
+
+Architect 必須逐條檢查：
+- PM `SPEC` 裡的 AC 是否全部有證據
+- Architect `TD/DESIGN` 裡的 Done Criteria 是否全部收斂
+- QA Verdict 是否真的覆蓋 P0 場景，而不是只給 PASS 結論
+
+然後明文輸出：
+
+```markdown
+## Architect Final Sign-off
+
+| AC / Done Criteria | 證據 | 狀態 |
+|--------------------|------|------|
+| AC-XXX-01 | `tests/...` / `src/...:line` / QA Verdict | ✅/❌ |
+```
+
+規則：
+- QA 不取代 Architect closure；QA 是驗收節點，Architect 是最終交付責任人
+- 若 QA PASS 但有任一 AC / Done Criteria 證據不足，Architect 仍需重派 Developer
+- 只有 Architect 完成 final sign-off，才能對用戶宣稱此 feature 完成
+
+每張 task 走完 5.1→5.2→5.3，且整個 feature 經過 5.4，才算完整閉環。整條履歷沉澱在 `task.handoff_events`，任何時刻 `get(task)` 都能看完整派工軌跡。
 
 ---
 

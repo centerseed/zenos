@@ -384,93 +384,6 @@ class TestSqlRelationshipRepository:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SqlDocumentRepository
-# ─────────────────────────────────────────────────────────────────────────────
-
-class TestSqlDocumentRepository:
-
-    @pytest.fixture(autouse=True)
-    def patch_partner(self, monkeypatch):
-        _set_partner(monkeypatch)
-
-    def _doc_row(self, did: str = "doc1") -> dict:
-        return {
-            "id": did,
-            "title": "A Doc",
-            "source_json": json.dumps({"type": "github", "uri": "https://g.com/f", "adapter": "github"}),
-            "tags_json": json.dumps({"what": ["spec"], "why": "reasoning", "how": "usage", "who": ["dev"]}),
-            "summary": "Summary here",
-            "status": "current",
-            "confirmed_by_user": False,
-            "last_reviewed_at": None,
-            "created_at": NOW,
-            "updated_at": NOW,
-        }
-
-    def test_row_to_document_maps_source_correctly(self):
-        """_row_to_document maps source_json to Source domain model."""
-        from zenos.infrastructure.knowledge.sql_document_repo import _row_to_document
-
-        row = _make_row(**self._doc_row())
-        doc = _row_to_document(row, ["ent1", "ent2"])
-
-        assert doc.source.type == "github"
-        assert doc.source.uri == "https://g.com/f"
-        assert doc.source.adapter == "github"
-        assert doc.linked_entity_ids == ["ent1", "ent2"]
-
-    def test_upsert_syncs_document_entities_join_table(self):
-        """upsert() deletes old rows and inserts new rows in document_entities."""
-        from zenos.infrastructure.knowledge import SqlDocumentRepository
-        from zenos.domain.knowledge import Document, DocumentTags, Source
-        import asyncio
-
-        pool, conn = _make_pool()
-        repo = SqlDocumentRepository(pool)
-
-        doc = Document(
-            title="T", source=Source(type="github", uri="u", adapter="a"),
-            tags=DocumentTags(what=[], why="", how="", who=[]),
-            summary="s", linked_entity_ids=["e1", "e2"],
-        )
-        asyncio.get_event_loop().run_until_complete(repo.upsert(doc))
-
-        # DELETE and INSERT into document_entities should both be called
-        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
-        assert any("document_entities" in sql and "DELETE" in sql for sql in execute_calls)
-        assert conn.executemany.called
-
-    def test_update_linked_entities_replaces_rows(self):
-        """update_linked_entities() deletes then inserts in document_entities."""
-        from zenos.infrastructure.knowledge import SqlDocumentRepository
-        import asyncio
-
-        pool, conn = _make_pool()
-        repo = SqlDocumentRepository(pool)
-
-        asyncio.get_event_loop().run_until_complete(
-            repo.update_linked_entities("doc1", ["e1"])
-        )
-
-        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
-        assert any("document_entities" in sql and "DELETE" in sql for sql in execute_calls)
-        assert conn.executemany.called
-
-    def test_list_by_entity_joins_document_entities(self):
-        """list_by_entity uses JOIN document_entities in SQL."""
-        from zenos.infrastructure.knowledge import SqlDocumentRepository
-        import asyncio
-
-        pool, conn = _make_pool(fetch=[])
-        repo = SqlDocumentRepository(pool)
-        asyncio.get_event_loop().run_until_complete(repo.list_by_entity("ent1"))
-
-        sql = conn.fetch.call_args[0][0]
-        assert "document_entities" in sql
-        assert "JOIN" in sql.upper()
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # SqlProtocolRepository
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1233,25 +1146,6 @@ class TestCrossTenantAndTransaction:
 
         execute_sql = conn.execute.call_args[0][0]
         assert "partner_id = EXCLUDED.partner_id" in execute_sql
-
-    def test_document_upsert_uses_transaction(self):
-        """Document upsert acquires a transaction wrapping main table + join sync."""
-        from zenos.infrastructure.knowledge import SqlDocumentRepository
-        from zenos.domain.knowledge import Document, DocumentTags, Source
-        import asyncio
-
-        pool, conn = _make_pool()
-        conn.transaction = MagicMock(return_value=_FakeTransaction())
-        repo = SqlDocumentRepository(pool)
-
-        doc = Document(
-            title="T", source=Source(type="github", uri="u", adapter="a"),
-            tags=DocumentTags(what=[], why="", how="", who=[]),
-            summary="s", linked_entity_ids=["e1"],
-        )
-        asyncio.get_event_loop().run_until_complete(repo.upsert(doc))
-
-        conn.transaction.assert_called_once()
 
     def test_task_upsert_uses_transaction(self):
         """Task upsert acquires a transaction wrapping main table + join syncs."""

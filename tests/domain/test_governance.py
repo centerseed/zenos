@@ -17,7 +17,7 @@ from zenos.domain.governance import (
     run_quality_check,
 )
 from zenos.domain.action import Task, TaskPriority, TaskStatus
-from zenos.domain.knowledge import Blindspot, Document, DocumentStatus, DocumentTags, Entity, EntityStatus, EntityType, Gap, Protocol, Relationship, RelationshipType, Severity, Source, SourceType, Tags
+from zenos.domain.knowledge import Blindspot, Document, DocumentStatus, Entity, EntityStatus, EntityType, Gap, Protocol, Relationship, RelationshipType, Severity, Source, SourceType, Tags
 
 
 # ──────────────────────────────────────────────
@@ -69,7 +69,7 @@ def _make_doc(
         id=doc_id,
         title=title,
         source=Source(type=SourceType.GITHUB, uri=uri, adapter="git"),
-        tags=DocumentTags(
+        tags=Tags(
             what=what or ["test"],
             why="testing purpose",
             how=how,
@@ -193,7 +193,7 @@ class TestApplyTagConfidence:
         assert "how" in result.draft_fields
 
     def test_document_tags(self):
-        tags = DocumentTags(what=["api docs"], why="onboarding", how="REST", who=["developer"])
+        tags = Tags(what=["api docs"], why="onboarding", how="REST", who=["developer"])
         result = apply_tag_confidence(tags)
         assert "what" in result.confirmed_fields
         assert "who" in result.confirmed_fields
@@ -207,7 +207,7 @@ class TestApplyTagConfidence:
         assert "who" in result.confirmed_fields
 
     def test_empty_document_what_goes_to_draft(self):
-        tags = DocumentTags(what=[], why="", how="", who=["dev"])
+        tags = Tags(what=[], why="", how="", who=["dev"])
         result = apply_tag_confidence(tags)
         assert "what" in result.draft_fields
 
@@ -1484,7 +1484,7 @@ class TestBlindspotTypeSafety:
             id="d1",
             title="test.md",
             source=Source(type=SourceType.GITHUB, uri="docs/test.md", adapter="git"),
-            tags=DocumentTags(
+            tags=Tags(
                 what=["test"],
                 why="testing",
                 how=["step1", "已確認問題"],  # list with problem indicator
@@ -1506,7 +1506,7 @@ class TestBlindspotTypeSafety:
             id="d1",
             title="bug-report.md",
             source=Source(type=SourceType.GITHUB, uri="docs/bug-report.md", adapter="git"),
-            tags=DocumentTags(
+            tags=Tags(
                 what=["test"],
                 why="testing",
                 how=["已確認問題", "needs fix"],

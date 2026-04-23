@@ -69,7 +69,7 @@ from zenos.infrastructure.llm_client import create_llm_client
 from zenos.infrastructure.unit_of_work import UnitOfWork
 from zenos.infrastructure.action import SqlPlanRepository, SqlTaskRepository
 from zenos.infrastructure.agent import SqlToolEventRepository, SqlUsageLogRepository, SqlWorkJournalRepository
-from zenos.infrastructure.knowledge import SqlBlindspotRepository, SqlDocumentRepository, SqlEntityEntryRepository, SqlEntityRepository, SqlProtocolRepository, SqlRelationshipRepository
+from zenos.infrastructure.knowledge import SqlBlindspotRepository, SqlEntityEntryRepository, SqlEntityRepository, SqlProtocolRepository, SqlRelationshipRepository
 from zenos.infrastructure.sql_common import get_pool
 from zenos.infrastructure.github_adapter import GitHubAdapter
 
@@ -77,7 +77,6 @@ from zenos.infrastructure.github_adapter import GitHubAdapter
 _repos_ready: bool = False
 entity_repo: SqlEntityRepository | None = None
 relationship_repo: SqlRelationshipRepository | None = None
-document_repo: SqlDocumentRepository | None = None
 protocol_repo: SqlProtocolRepository | None = None
 blindspot_repo: SqlBlindspotRepository | None = None
 task_repo: SqlTaskRepository | None = None
@@ -87,14 +86,13 @@ plan_repo: SqlPlanRepository | None = None
 
 async def _ensure_repos() -> None:
     """Lazily initialise all SQL repositories on first tool invocation."""
-    global _repos_ready, entity_repo, relationship_repo, document_repo
+    global _repos_ready, entity_repo, relationship_repo
     global protocol_repo, blindspot_repo, task_repo, entry_repo, plan_repo
     if _repos_ready:
         return
     pool = await get_pool()
     entity_repo = SqlEntityRepository(pool)
     relationship_repo = SqlRelationshipRepository(pool)
-    document_repo = SqlDocumentRepository(pool)
     protocol_repo = SqlProtocolRepository(pool)
     blindspot_repo = SqlBlindspotRepository(pool)
     task_repo = SqlTaskRepository(pool)
@@ -272,7 +270,6 @@ async def _ensure_services() -> None:
         ontology_service = OntologyService(
             entity_repo=entity_repo,
             relationship_repo=relationship_repo,
-            document_repo=document_repo,
             protocol_repo=protocol_repo,
             blindspot_repo=blindspot_repo,
             governance_ai=_governance_ai,
@@ -402,7 +399,6 @@ __all__ = [
     # singletons
     "entity_repo",
     "relationship_repo",
-    "document_repo",
     "protocol_repo",
     "blindspot_repo",
     "task_repo",

@@ -4,10 +4,13 @@ id: SPEC-zenos-core
 status: Under Review
 ontology_entity: zenos-core
 created: 2026-04-09
-updated: 2026-04-10
+updated: 2026-04-23
+depends_on: SPEC-ontology-architecture v2
 ---
 
 # Feature Spec: ZenOS Core
+
+> **2026-04-23 update**：Action Layer（task / plan）已於 `SPEC-ontology-architecture v2` 併入 Knowledge Layer 成為 L3-Action subclass。本 SPEC 的「核心邊界」列表隨之簡化。
 
 ## 1. 目的
 
@@ -15,9 +18,8 @@ updated: 2026-04-10
 
 ZenOS 不是單一 application，而是提供以下共用能力的 platform layer：
 
-- 知識骨架與治理 runtime
-- action runtime（task / plan）
-- document platform contract（doc entity / source bundle / source rollout）
+- 單一知識圖（含 task/plan/milestone/subtask 作為 L3-Action subclass）與治理 runtime
+- document platform contract（L3-Document subclass / source bundle / source rollout）
 - identity / workspace / access runtime
 - agent / MCP runtime
 
@@ -40,32 +42,29 @@ ZenOS Core 由五個子層組成：
 
 職責：
 
-- 定義 L1-L3 entity 模型
-- 定義 relationship、entries、document proxy、source governance
-- 提供 knowledge graph 與 document bundle runtime
+- 定義 L1-L3 entity 模型（canonical：`SPEC-ontology-architecture v2`）
+- 定義 relationship、entries、L3-Document proxy、source governance
+- 定義 L3-Action subclass（task / plan / milestone / subtask）作為 action runtime
+- 提供 knowledge graph、document bundle、action runtime
 
 包含：
 
-- 可被獨立授權與分享的 L1 主軸（例如 `product`、`company`）
-- L2 持久知識節點
-- L3 document / role / goal / project 等 entity
-- entity entries
-- document entities 與 source bundle
+- 可被獨立授權與分享的 L1 主軸（例如 `product`、`company`、`person`、`deal`）
+- L2 持久知識節點（三問 + impacts gate）
+- **L3-Semantic**：document / role / project 等 entity
+- **L3-Action**：task / plan / milestone / subtask（原 Action Layer 併入，詳見 `SPEC-task-governance`）
+- entity entries（掛載於 L2）
+- document bundle（`doc_role` single/index、`bundle_highlights`）
 
-#### B. Action Layer
+> Goal entity 已於 2026-04-23 合併進 L3-Milestone（`SPEC-ontology-architecture v2 §9.2`）。
 
-職責：
+#### B. ~~Action Layer~~（已合併進 Knowledge Layer，2026-04-23）
 
-- 承接 knowledge layer 輸出的可執行行動
-- 提供可指派、可驗收、可回饋知識的標準 action primitive
-- 提供多 task 協作所需的最小 orchestration primitive
+~~承接 knowledge layer 輸出的可執行行動；task / plan orchestration primitive。~~
 
-包含：
+**本子層已於 `SPEC-ontology-architecture v2` 廢止為獨立子層。** Task / Plan / Milestone / Subtask 全部成為 Knowledge Layer 的 L3-Action subclass，共用 Entity graph、relationships、permission、parent_id 歸屬。治理細則見 `SPEC-task-governance`（改寫中）。
 
-- `Task`
-- `Plan`
-- task lifecycle / review / confirm
-- task-to-ontology linkage
+本子層的保留字母 `B` 僅為向後相容下游 spec 引用（`§3.1.C / D / E` 的識別不變）。
 
 #### C. Identity & Access Layer
 
@@ -154,81 +153,38 @@ Application Layer 不得：
 - 單一 application 專屬的 dashboard surface 與操作習慣
 - application 自己的 end-user authentication provider
 
-## 5. Action Layer 定義
+## 5. L3-Action Subclass（原 Action Layer，已併入 Knowledge Layer）
 
-### 5.1 Task
+> **2026-04-23 update**：舊 §5.1 Task / §5.2 Plan / §5.3 Subtask 的「不是 entity」語意已廢止。Task / Plan / Milestone / Subtask 全部成為 L3-Action subclass，屬於 Knowledge Layer 的一部分。Goal 合併進 Milestone。
+>
+> 本節僅保留邊界宣告，細節 canonical 定義在 `SPEC-ontology-architecture v2 §9` + 治理細則在 `SPEC-task-governance`。
 
-Task 是 ZenOS Core 的標準 action primitive。
+### 5.1 邊界宣告
 
-定位：
+- **Milestone / Plan / Task / Subtask** 皆為 L3-Action subclass
+- 它們是 `entities_base` row，`level=3`，各有自己的 subclass table（`entity_l3_milestone / entity_l3_plan / entity_l3_task / entity_l3_subtask`）
+- 繼承 `BaseEntity`（permission / parent_id / owner / timestamps）+ 共用 `L3TaskBaseEntity`（description / task_status / assignee / dispatcher / acceptance_criteria / priority / result / handoff_events）
+- `linked_entities` 透過 `relationships` 表，與 L1/L2/L3-Semantic 一致
+- `parent_id` 表達歸屬（例：task.parent_id 指向 plan 或直接 L1）
 
-- Task 不是 entity
-- Task 不是知識層的一部分
-- Task 是 knowledge layer 的 output path
-- Task 是最小可指派、可驗收、可回饋知識的工作單位
+### 5.2 廢止項目
 
-Task 必須滿足以下語意：
+以下舊敘述於本 SPEC 版次起廢止：
 
-1. 有單一主要 outcome
-2. 可被獨立指派或至少有明確責任落點
-3. 可被獨立驗收
-4. 可連回 knowledge context
-5. 完成後可留下 result 與必要的知識回饋
+- ~~「Task 不是 entity」~~ → Task 是 `entity_l3_task` row
+- ~~「Plan 不是 entity」~~ → Plan 是 `entity_l3_plan` row
+- ~~「Subtask 不屬於 ZenOS Core」~~ → Subtask 是 `entity_l3_subtask` row，屬 Core L3-Action subclass，語意為 agent 派工子單位
+- ~~`plan_id` / `plan_order` 欄位獨立於 entity~~ → `plan_order` 留在 `entity_l3_task`；「task 屬於哪個 plan」用 `parent_id` 表達
 
-Task 的 Core 欄位分組如下：
+### 5.3 細節指引
 
-- identity：`id`, `title`, `description`
-- lifecycle：`status`, `priority`, `created_at`, `updated_at`, `completed_at`
-- ownership：`created_by`, `assignee`, `assignee_role_id`
-- governance：`acceptance_criteria`, `result`, `rejection_reason`
-- ontology linkage：`linked_entities`, `linked_protocol`, `linked_blindspot`
-- orchestration：`plan_id`, `plan_order`, `depends_on_task_ids`, `blocked_by`, `blocked_reason`
-- portability：`source_type`, `source_metadata`, `attachments`
-
-### 5.2 Plan
-
-Plan 是 ZenOS Core 的標準 orchestration primitive。
-
-定位：
-
-- Plan 不是 entity
-- Plan 不是額外的 narrative-only 文件層
-- Plan 是一組 core tasks 的治理容器
-
-Plan 在 Core 的責任只有：
-
-1. grouping：把同一交付目標下的 tasks 綁成一組
-2. sequencing：定義 task 順序與依賴
-3. ownership：定義該計畫的責任人
-4. completion boundary：定義 entry / exit criteria
-
-Plan 在 Core 不承擔以下責任：
-
-- 不直接派工
-- 不取代 task 驗收
-- 不承擔 application-specific PM methodology
-- 不要求所有 app 都採同一種 milestone / sprint UX
-
-Plan 的最小欄位必須至少包含：
-
-- `plan_id`
-- `goal`
-- `owner`
-- `status`
-- `entry_criteria`
-- `exit_criteria`
-
-### 5.3 Subtask
-
-Subtask 不屬於 ZenOS Core。
-
-規則：
-
-1. app-specific subtask / checklist / execution step 預設留在 Application Layer。
-2. 若某 subtask 需要獨立指派、獨立驗收、或獨立知識回饋，必須升格為 Core Task。
-3. ZenOS Core 不維護 application-specific subtask schema。
-
-這條規則的目的，是避免 Core 的 action model 被 checklist 污染。
+| 主題 | 位置 |
+|------|------|
+| Canonical schema（DDL / Python dataclass） | `SPEC-ontology-architecture v2 §9` |
+| 業務 lifecycle（`task_status` state machine） | `SPEC-ontology-architecture v2 §11.2` |
+| 品質門檻 / handoff chain / 驗收流程 | `SPEC-task-governance`（改寫中）|
+| 與 L1/L2/L3-Semantic 的關聯規則 | `SPEC-ontology-architecture v2 §10 Relationship` |
+| MCP tool shape | `SPEC-mcp-tool-contract`（改寫中）|
 
 ## 6. Application Mapping Contract
 
@@ -265,8 +221,8 @@ Application-specific object 是否可共享，必須額外由各 app spec 明確
 
 對齊規則：
 
-1. `SPEC-ontology-architecture` 負責 Knowledge Layer，不得把 Task 視為 entity。
-2. `SPEC-task-governance` 負責 Core Action Layer 的治理規則。
+1. `SPEC-ontology-architecture v2` 為 Knowledge Layer canonical SSOT；Task / Plan / Milestone / Subtask 全部為 L3-Action subclass（`entity_l3_task / plan / milestone / subtask`），屬 Knowledge Layer 一部分。
+2. `SPEC-task-governance` 負責 L3-Action subclass 的治理規則（`task_status` state machine、handoff chain、confirm/accept、entity_entries 回饋），不重新定義 schema。
 3. `SPEC-identity-and-access` 負責 Core Identity & Access Layer 與共享邊界。
 4. `SPEC-zenos-auth-federation` 負責 Identity & Access Layer 的外部接入 contract（federation exchange、delegated credential、identity link）。
 5. `SPEC-crm-core` 等應用層 spec 必須明確標示自己是建立在 ZenOS Core 之上的 application module。

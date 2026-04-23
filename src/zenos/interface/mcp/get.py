@@ -65,13 +65,14 @@ async def _resolve_id_prefix_for_get(
         items = await mcp.entity_repo.find_by_id_prefix(prefix, partner_id)
         candidates = [{"id": e.id, "name": e.name, "type": e.type} for e in items]
     elif collection == "documents":
-        if mcp.document_repo is None:
+        if mcp.entity_repo is None:
             return _error_response(
                 status="rejected", error_code="SERVICE_UNAVAILABLE",
-                message="document_repo not initialized",
+                message="entity_repo not initialized",
             )
-        items = await mcp.document_repo.find_by_id_prefix(prefix, partner_id)
-        candidates = [{"id": d.id, "name": getattr(d, "title", d.id), "type": "document"} for d in items]
+        items = await mcp.entity_repo.find_by_id_prefix(prefix, partner_id)
+        items = [e for e in items if e.type == "document"]
+        candidates = [{"id": e.id, "name": e.name, "type": "document"} for e in items]
     elif collection == "blindspots":
         if mcp.blindspot_repo is None:
             return _error_response(

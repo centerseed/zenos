@@ -11,9 +11,12 @@ interface ApiRequestOptions extends Omit<RequestInit, "body"> {
   json?: unknown;
   responseType?: ApiResponseType;
   retryWithSameOrigin?: boolean;
+  timeoutMs?: number;
   token?: string | null;
   useWorkspace?: boolean;
 }
+
+const DEFAULT_API_TIMEOUT_MS = 15000;
 
 export function getStoredActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
@@ -130,14 +133,26 @@ export async function apiRequest<T = unknown>(
   const {
     responseType = "json",
     retryWithSameOrigin = true,
+    timeoutMs = DEFAULT_API_TIMEOUT_MS,
     ...requestOptions
   } = options;
-  const init = buildRequestInit(requestOptions);
+  const abortController = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timeoutId =
+    abortController && timeoutMs > 0
+      ? globalThis.setTimeout(() => abortController.abort(), timeoutMs)
+      : null;
+  const init = buildRequestInit({
+    ...requestOptions,
+    ...(abortController ? { signal: abortController.signal } : {}),
+  });
 
   let response: Response;
   try {
     response = await fetch(`${API_BASE}${path}`, init);
   } catch (error) {
+    if (typeof error === "object" && error !== null && "name" in error && error.name === "AbortError") {
+      throw new Error(`API ${path}: request timed out after ${timeoutMs}ms`);
+    }
     const canRetry =
       retryWithSameOrigin &&
       API_BASE.startsWith("http") &&
@@ -145,6 +160,10 @@ export async function apiRequest<T = unknown>(
       isNetworkFailure(error);
     if (!canRetry) throw error;
     response = await fetch(path, init);
+  } finally {
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId);
+    }
   }
 
   if (!response.ok) {

@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
-from zenos.domain.identity import AccessPolicy, AgentPrincipal, AgentScope, Classification, InheritanceMode, UserPrincipal
 from zenos.domain.knowledge import Entity, EntityEntry, EntityType, EntryStatus, EntryType, Relationship, RelationshipType, Tags
 
 
@@ -45,7 +42,7 @@ class TestRelationshipTypeNewValues:
 # ──────────────────────────────────────────────
 
 def _make_tags() -> Tags:
-    return Tags(what="test", why="testing", how="automated", who="developer")
+    return Tags(what=["test"], why="testing", how="automated", who=["developer"])
 
 
 class TestEntityLevelField:
@@ -164,33 +161,3 @@ class TestEntityEntryModel:
     def test_entry_status_is_str_enum(self):
         assert isinstance(EntryStatus.ACTIVE, str)
         assert EntryStatus.ACTIVE == "active"
-
-
-class TestPermissionGovernanceModels:
-    def test_user_principal_defaults(self):
-        principal = UserPrincipal(user_id="u1", partner_id="p1")
-        assert principal.role_ids == []
-        assert principal.department_ids == []
-        assert principal.is_admin is False
-
-    def test_agent_scope_defaults(self):
-        scope = AgentScope()
-        assert scope.read_classification_max == Classification.OPEN
-        assert scope.write_classification_max == Classification.INTERNAL
-
-    def test_access_policy_inherit_disallows_custom_scope(self):
-        policy = AccessPolicy(
-            classification=Classification.INTERNAL,
-            inheritance_mode=InheritanceMode.INHERIT,
-            allowed_role_ids=["engineering"],
-        )
-        assert policy.validate_custom_scope() is False
-
-    def test_access_policy_cannot_weaken_parent_classification(self):
-        policy = AccessPolicy(classification=Classification.INTERNAL)
-        assert policy.validate_transition_from_parent(Classification.RESTRICTED) is False
-
-    def test_agent_principal_keeps_scope(self):
-        principal = AgentPrincipal(agent_id="a1", owner_user_id="u1", partner_id="p1")
-        assert principal.scope.read_classification_max == Classification.OPEN
-

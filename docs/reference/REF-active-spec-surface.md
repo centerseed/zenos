@@ -30,16 +30,22 @@ ZenOS 現階段不應讓 `docs/specs/` 同時承載：
 
 ---
 
-## Tier 1 — Current Core Specs (2026-03-27 正式版)
+## Tier 1 — Current Core Specs (2026-04-23 v2 canonical)
 
 以下是目前仍屬 active decision surface 的核心規格：
 
-- `docs/specs/SPEC-doc-governance.md`
-- `docs/specs/SPEC-task-governance.md`
-- `docs/specs/SPEC-l2-entity-redefinition.md`
+- `docs/specs/SPEC-ontology-architecture.md` ★ canonical master (L1-L3 schema + L3-Action + Relationship + Embedding + Migration)
+- `docs/specs/SPEC-zenos-core.md`
+- `docs/specs/SPEC-identity-and-access.md`
+- `docs/specs/SPEC-governance-framework.md`
+- `docs/specs/SPEC-mcp-tool-contract.md`
+- `docs/specs/SPEC-doc-governance.md`（改寫中，→ L3-Document subclass 治理）
+- `docs/specs/SPEC-task-governance.md`（改寫中，→ L3-Action subclass 治理）
 - `docs/specs/SPEC-partner-context-fix.md`
 - `docs/specs/SPEC-agent-integration-contract.md`
 - `docs/specs/SPEC-governance-observability.md`
+
+> `SPEC-l2-entity-redefinition.md` 已於 2026-04-23 併入 `SPEC-ontology-architecture v2 §5/§7/§11`，檔案保留為 redirect stub。
 
 判斷標準：
 

@@ -229,6 +229,9 @@ integration contract 必須保留這個分界。
 - Codex 的 orchestrator 類角色（尤其 Architect）必須明示：`handoff` 不是完成，worker 回來後要先由 orchestrator 自己決定下一步
 - Codex skill / prompt 必須明示：Developer Completion Report 先經 Architect 審查，合格才派 QA
 - Codex skill / prompt 必須明示：QA PASS 不是最終交付宣告；Architect 仍需自己對齊 AC / Done Criteria
+- Codex skill / prompt 必須明示：SPEC 一旦定案，Architect 應直接補完本輪所需的 ADR / DESIGN / TEST 文件，不得為一般文件產出中斷
+- Codex skill / prompt 必須明示：在真正不確定前，不要先停下來做調查報告；若無不確定點，應一路推進到 QA PASS
+- Codex skill / prompt 必須明示：`QA PASS` 是這一輪內部自動化的停點；之後交由用戶做 external review，不自行往 deploy 推進
 - Codex skill / prompt 必須明示：只有高風險 / 不可逆 / 缺關鍵外部資訊時，才停下來問用戶
 
 ---

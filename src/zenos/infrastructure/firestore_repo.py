@@ -11,7 +11,7 @@ from google.cloud import firestore  # type: ignore[import-untyped]
 from google.cloud.firestore_v1 import AsyncClient  # type: ignore[import-untyped]
 
 from zenos.domain.action import Task
-from zenos.domain.knowledge import Blindspot, Document, DocumentTags, Entity, Gap, Protocol as OntologyProtocol, Relationship, Source, Tags
+from zenos.domain.knowledge import Blindspot, Entity, Gap, Protocol as OntologyProtocol, Relationship, Tags
 from zenos.infrastructure.context import current_partner_id
 
 # ---------------------------------------------------------------------------
@@ -228,64 +228,6 @@ def _dict_to_rel(doc_id: str, data: dict[str, Any]) -> Relationship:
 
 
 # ---------------------------------------------------------------------------
-# Document helpers
-# ---------------------------------------------------------------------------
-
-
-def _document_to_dict(doc: Document) -> dict[str, Any]:
-    raw: dict[str, Any] = {
-        "title": doc.title,
-        "source": {
-            "type": doc.source.type,
-            "uri": doc.source.uri,
-            "adapter": doc.source.adapter,
-        },
-        "tags": {
-            "what": doc.tags.what,
-            "why": doc.tags.why,
-            "how": doc.tags.how,
-            "who": doc.tags.who,
-        },
-        "linked_entity_ids": doc.linked_entity_ids,
-        "summary": doc.summary,
-        "status": doc.status,
-        "confirmed_by_user": doc.confirmed_by_user,
-        "last_reviewed_at": doc.last_reviewed_at,
-        "created_at": doc.created_at,
-        "updated_at": doc.updated_at,
-    }
-    return to_firestore_dict(raw)
-
-
-def _dict_to_document(doc_id: str, data: dict[str, Any]) -> Document:
-    d = from_firestore_dict(data)
-    source_raw = d.get("source", {})
-    tags_raw = d.get("tags", {})
-    return Document(
-        id=doc_id,
-        title=d.get("title", ""),
-        source=Source(
-            type=source_raw.get("type", ""),
-            uri=source_raw.get("uri", ""),
-            adapter=source_raw.get("adapter", ""),
-        ),
-        tags=DocumentTags(
-            what=tags_raw.get("what", []),
-            why=tags_raw.get("why", ""),
-            how=tags_raw.get("how", ""),
-            who=tags_raw.get("who", []),
-        ),
-        linked_entity_ids=d.get("linked_entity_ids", []),
-        summary=d.get("summary", ""),
-        status=d.get("status", "draft"),
-        confirmed_by_user=d.get("confirmed_by_user", False),
-        last_reviewed_at=_to_dt(d.get("last_reviewed_at")),
-        created_at=_to_dt(d.get("created_at")) or _now(),
-        updated_at=_to_dt(d.get("updated_at")) or _now(),
-    )
-
-
-# ---------------------------------------------------------------------------
 # Protocol helpers
 # ---------------------------------------------------------------------------
 
@@ -484,66 +426,6 @@ class FirestoreRelationshipRepository:
             await col.document(doc.id).delete()
             deleted += 1
         return deleted
-
-
-class FirestoreDocumentRepository:
-    """Firestore-backed DocumentRepository."""
-
-    def __init__(self, db: AsyncClient | None = None) -> None:
-        self._db = db or get_db()
-        self._col = self._db.collection("documents")
-
-    async def get_by_id(self, doc_id: str) -> Document | None:
-        snap = await self._col.document(doc_id).get()
-        if not snap.exists:
-            return None
-        return _dict_to_document(snap.id, snap.to_dict())  # type: ignore[arg-type]
-
-    async def list_all(self) -> list[Document]:
-        results: list[Document] = []
-        async for doc in self._col.stream():
-            results.append(_dict_to_document(doc.id, doc.to_dict()))
-        return results
-
-    async def upsert(self, doc: Document) -> Document:
-        now = _now()
-        doc.updated_at = now
-        data = _document_to_dict(doc)
-
-        if doc.id is None:
-            doc.created_at = now
-            data["createdAt"] = now
-            _, doc_ref = await self._col.add(data)
-            doc.id = doc_ref.id
-        else:
-            await self._col.document(doc.id).set(data, merge=True)
-
-        return doc
-
-    async def list_by_entity(self, entity_id: str) -> list[Document]:
-        query = self._col.where("linkedEntityIds", "array_contains", entity_id)
-        results: list[Document] = []
-        async for doc in query.stream():
-            results.append(_dict_to_document(doc.id, doc.to_dict()))
-        return results
-
-    async def update_linked_entities(self, doc_id: str, linked_entity_ids: list[str]) -> None:
-        """Update only the linkedEntityIds field of a document.
-
-        This bypasses full upsert validation so that GovernanceAI auto-linking
-        does not trigger another round of document validation.
-        """
-        await self._col.document(doc_id).set(
-            {"linkedEntityIds": linked_entity_ids},
-            merge=True,
-        )
-
-    async def list_unconfirmed(self) -> list[Document]:
-        query = self._col.where("confirmedByUser", "==", False)
-        results: list[Document] = []
-        async for doc in query.stream():
-            results.append(_dict_to_document(doc.id, doc.to_dict()))
-        return results
 
 
 class FirestoreProtocolRepository:

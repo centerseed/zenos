@@ -323,66 +323,7 @@ async def test_relationship_list_all(pool):
 
 
 # ---------------------------------------------------------------------------
-# 3. Document CRUD + join table
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_document_create_with_linked_entities(pool):
-    from zenos.domain.knowledge import Document, DocumentTags, Source
-    from zenos.infrastructure.knowledge import SqlDocumentRepository, SqlEntityRepository
-
-    entity_repo = SqlEntityRepository(pool)
-    doc_repo = SqlDocumentRepository(pool)
-
-    entity = await entity_repo.upsert(_make_entity("doc_linked"))
-
-    doc = Document(
-        title=f"{TEST_PREFIX}_doc_create",
-        source=Source(type="upload", uri="s3://bucket/doc.pdf", adapter="upload"),
-        tags=DocumentTags(what=["spec"], why="testing", how="pytest", who=["dev"]),
-        summary="Test document",
-        linked_entity_ids=[entity.id],
-    )
-    saved = await doc_repo.upsert(doc)
-
-    assert saved.id is not None
-    fetched = await doc_repo.get_by_id(saved.id)
-    assert fetched is not None
-    assert fetched.title == doc.title
-    assert entity.id in fetched.linked_entity_ids
-
-
-@pytest.mark.asyncio
-async def test_document_update_linked_entities(pool):
-    from zenos.domain.knowledge import Document, DocumentTags, Source
-    from zenos.infrastructure.knowledge import SqlDocumentRepository, SqlEntityRepository
-
-    entity_repo = SqlEntityRepository(pool)
-    doc_repo = SqlDocumentRepository(pool)
-
-    entity1 = await entity_repo.upsert(_make_entity("doc_upd_e1"))
-    entity2 = await entity_repo.upsert(_make_entity("doc_upd_e2"))
-
-    doc = Document(
-        title=f"{TEST_PREFIX}_doc_update_links",
-        source=Source(type="upload", uri="s3://bucket/d2.pdf", adapter="upload"),
-        tags=DocumentTags(what=["spec"], why="testing", how="pytest", who=["dev"]),
-        summary="Document to update links",
-        linked_entity_ids=[entity1.id],
-    )
-    saved = await doc_repo.upsert(doc)
-
-    # Replace linked entities: remove entity1, add entity2
-    await doc_repo.update_linked_entities(saved.id, [entity2.id])
-
-    fetched = await doc_repo.get_by_id(saved.id)
-    assert entity2.id in fetched.linked_entity_ids
-    assert entity1.id not in fetched.linked_entity_ids
-
-
-# ---------------------------------------------------------------------------
-# 4. Protocol CRUD
+# 3. Protocol CRUD
 # ---------------------------------------------------------------------------
 
 

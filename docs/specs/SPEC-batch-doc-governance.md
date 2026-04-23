@@ -1,15 +1,18 @@
 ---
-doc_id: SPEC-batch-doc-governance
-title: "功能規格：批次文件治理"
 type: SPEC
-ontology_entity: L3 文件治理
-status: draft
-version: "0.2"
-date: 2026-04-04
-supersedes: SPEC-doc-source-governance
+id: SPEC-batch-doc-governance
+status: Draft
+ontology_entity: l3-document
+created: 2026-04-04
+updated: 2026-04-23
+depends_on: SPEC-doc-governance, SPEC-ontology-architecture v2 §8.1
 ---
 
 # SPEC: 批次文件治理
+
+> **Layering note（2026-04-23）**：本 SPEC 只管「批次 mutation 的效率與原子性語意」。L3-Document 的 schema canonical 在主 SPEC v2 §8.1；source structure / `source_id` / URI validation / lifecycle canonical 在 `SPEC-doc-governance`。本 SPEC 不得重新定義上述內容。
+>
+> 舊的 `SPEC-doc-source-governance` 已併入 `SPEC-doc-governance`（同日 `SPEC-document-bundle` 亦併入）；本 SPEC 的 source URI 治理規則基礎，自 2026-04-23 起改以 `SPEC-doc-governance` 為權威。
 
 ## 背景與動機
 
@@ -19,7 +22,7 @@ supersedes: SPEC-doc-source-governance
 2. `/zenos-sync` 偵測到 rename 後，修復流程不是原子操作——agent 仍須逐一呼叫 `write`，偵測與修復之間有多餘往返。
 3. `skills/governance/*.md` 與 `governance_guide(topic=...)` 內容高度重疊，CLAUDE.md 維護兩套指引，SSOT 不清晰。
 
-本 Spec 取代 `SPEC-doc-source-governance`，在其 source URI 治理規則基礎上，新增批次操作能力與 SSOT 去重。
+本 SPEC 在 `SPEC-doc-governance` 的 source 治理規則基礎上，新增批次操作能力與 SSOT 去重。
 
 ## 目標用戶
 

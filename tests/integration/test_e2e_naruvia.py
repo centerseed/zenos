@@ -21,7 +21,6 @@ from zenos.application.knowledge.governance_service import GovernanceService
 from zenos.application.knowledge.ontology_service import OntologyService
 from zenos.infrastructure.firestore_repo import (
     FirestoreBlindspotRepository,
-    FirestoreDocumentRepository,
     FirestoreEntityRepository,
     FirestoreProtocolRepository,
     FirestoreRelationshipRepository,
@@ -58,13 +57,11 @@ async def svc():
     """Create OntologyService (module-scoped)."""
     entity_repo = FirestoreEntityRepository()
     relationship_repo = FirestoreRelationshipRepository()
-    document_repo = FirestoreDocumentRepository()
     protocol_repo = FirestoreProtocolRepository()
     blindspot_repo = FirestoreBlindspotRepository()
     return OntologyService(
         entity_repo=entity_repo,
         relationship_repo=relationship_repo,
-        document_repo=document_repo,
         protocol_repo=protocol_repo,
         blindspot_repo=blindspot_repo,
     )
@@ -75,12 +72,10 @@ async def gov():
     """Create GovernanceService (module-scoped)."""
     entity_repo = FirestoreEntityRepository()
     relationship_repo = FirestoreRelationshipRepository()
-    document_repo = FirestoreDocumentRepository()
     protocol_repo = FirestoreProtocolRepository()
     blindspot_repo = FirestoreBlindspotRepository()
     return GovernanceService(
         entity_repo=entity_repo,
-        document_repo=document_repo,
         relationship_repo=relationship_repo,
         protocol_repo=protocol_repo,
         blindspot_repo=blindspot_repo,

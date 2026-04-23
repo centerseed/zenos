@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from .knowledge import Document, DocumentTags, Entity, Protocol, Tags
+from .knowledge import Document, Entity, Protocol, Tags
 
 
 @dataclass
@@ -71,11 +71,10 @@ def _collect_searchable_text_entity(entity: Entity) -> str:
 def _collect_searchable_text_document(doc: Document) -> str:
     """Collect all searchable text from a document."""
     parts = [doc.title, doc.summary]
-    if isinstance(doc.tags, DocumentTags):
-        parts.extend(doc.tags.what)
-        parts.append(doc.tags.why)
-        parts.append(doc.tags.how)
-        parts.extend(doc.tags.who)
+    parts.extend(doc.tags.what)
+    parts.append(doc.tags.why)
+    parts.append(doc.tags.how)
+    parts.extend(doc.tags.who)
     return " ".join(parts)
 
 
@@ -198,6 +197,8 @@ def search_ontology(
                 type="protocol",
                 id=protocol.id,
                 name=protocol.entity_name,
+                # Keep version visible in search results as artifact metadata;
+                # ranking does not depend on protocol.version.
                 summary=f"Protocol v{protocol.version}",
                 score=score,
             ))

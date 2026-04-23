@@ -22,6 +22,7 @@ class EntityStatus(str, Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     PLANNED = "planned"
+    ARCHIVED = "archived"
     # Document-specific statuses (only valid when type="document")
     CURRENT = "current"
     STALE = "stale"

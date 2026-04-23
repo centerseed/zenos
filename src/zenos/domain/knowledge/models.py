@@ -17,13 +17,13 @@ class Tags:
     """Four-dimensional tag set for entities.
 
     what/who are list[str] to support multiple topics/audiences (unified
-    with the old DocumentTags format). Reading from Firestore, legacy
+    with the old document tag format). Reading from Firestore, legacy
     string values are automatically wrapped in a list.
     """
-    what: list[str] | str
+    what: list[str]
     why: str
     how: str
-    who: list[str] | str
+    who: list[str]
 
 
 @dataclass
@@ -85,24 +85,11 @@ class Source:
 
 
 @dataclass
-class DocumentTags:
-    """Four-dimensional tag set for neural-layer documents.
-
-    what/who are lists (a doc can cover multiple topics/audiences).
-    why/how are single strings.
-    """
-    what: list[str]
-    why: str
-    how: str
-    who: list[str]
-
-
-@dataclass
 class Document:
     """Neural-layer entry: a semantic proxy for an actual file."""
     title: str
     source: Source
-    tags: DocumentTags
+    tags: Tags
     summary: str
     linked_entity_ids: list[str] = field(default_factory=list)
     status: str = DocumentStatus.CURRENT  # DocumentStatus value
@@ -114,7 +101,7 @@ class Document:
 
 
 # ──────────────────────────────────────────────
-# Protocol (View)
+# Protocol (Derived Collection)
 # ──────────────────────────────────────────────
 
 @dataclass
@@ -126,12 +113,17 @@ class Gap:
 
 @dataclass
 class Protocol:
-    """A generated context-protocol view for an entity."""
+    """A generated context-protocol derived collection for an entity.
+
+    `version` is an opaque revision label for the generated artifact. It is
+    persisted and surfaced to callers, but current runtime behavior does not
+    branch on specific version values.
+    """
     entity_id: str
     entity_name: str
     content: dict  # { what: {}, why: {}, how: {}, who: {} }
     gaps: list[Gap] = field(default_factory=list)
-    version: str = "1.0"
+    version: str = "1.0"  # Opaque revision label, not a schema/control version.
     id: str | None = None
     confirmed_by_user: bool = False
     generated_at: datetime = field(default_factory=datetime.utcnow)

@@ -2,12 +2,15 @@
 type: SPEC
 id: SPEC-entry-consolidation-skill
 status: Draft
-ontology_entity: TBD
+ontology_entity: l2
 created: 2026-03-29
-updated: 2026-03-29
+updated: 2026-04-23
+depends_on: SPEC-ontology-architecture v2 §7, SPEC-entry-distillation-quality, SPEC-governance-feedback-loop
 ---
 
 # Feature Spec: Entry Consolidation Skill
+
+> **Layering note（2026-04-23）**：entry 所屬的 L2 entity schema / entries sidecar canonical 在 `SPEC-ontology-architecture v2 §7.3`。本 SPEC 只管 client-side consolidation workflow（proposal → 確認 → 執行 → 驗證），不重新定義 schema 或 lifecycle。
 
 ## 背景與動機
 
@@ -137,7 +140,8 @@ Server 端的 `analyze` tool 在偵測到某個 entity 的 active entries >= 20 
 
 ## 相關文件
 
-- `docs/decisions/ADR-010-entity-entries.md`（Entry 資料結構與治理規則）
-- `docs/specs/SPEC-l2-entity-redefinition.md`（Entry 治理規則）
+- `docs/specs/SPEC-ontology-architecture.md v2 §7.3`（L2 entity + EntityEntry canonical schema / lifecycle）
+- `docs/specs/SPEC-entry-distillation-quality.md`（entry 蒸餾品質閘）
 - `docs/specs/SPEC-governance-feedback-loop.md`（治理品質回饋迴路）
 - `docs/specs/SPEC-governance-framework.md`（治理功能索引）
+- `docs/decisions/ADR-010-entity-entries.md`（歷史決策，schema 已進主 SPEC）
