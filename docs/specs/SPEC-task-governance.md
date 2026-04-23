@@ -111,7 +111,7 @@ Task 是「**需要跨角色驗收**」的最小工作單位。
 
 狀態機同 Task。額外強制：
 - `parent_task_id` 必須指向 Task row（`task_service.py:204-210` 確認 parent 存在；`PARENT_NOT_FOUND` on miss）
-- subtask 自身不得再有 subtask（disallow `subtask → subtask` nesting；agent 派工只有一層）
+- **Governance 建議**：subtask 不應再有 subtask（agent 派工單位只有一層）；目前 **client-side 紀律**，server 未擋（`task_service.py:204-224` 只驗 parent 存在 / 跨 plan / 跨 product）。若未來要硬擋需新增 server check
 - subtask terminal 不自動關閉 parent task；parent task 終結由 handoff / confirm 決定
 
 ## 4. Dispatcher & Handoff Chain
@@ -392,7 +392,7 @@ search(collection="tasks", status="todo,in_progress,review",
 - `AC-TASK-08` Given `confirm(collection="tasks", id=X, accepted=True)`，When server process，Then status → `done` + append terminal HandoffEvent(to=`human`, reason=`accepted`)
 - `AC-TASK-08b` Given caller 傳 `accept=True` alias，When server process，Then 行為等同 `accepted=True`，response 附 warning「參數 alias 'accept' 已自動改寫為 'accepted'」
 - `AC-TASK-09` Given Milestone `active` → `completed`，When server process，Then `result` 必須非空字串（含 completion_criteria 檢核結果）
-- `AC-TASK-10` Given subtask 試圖建立 subtask（`parent.type='subtask'`），When server validate，Then reject with `SUBTASK_NESTING_DISALLOWED`
+> **Gap note**：舊 draft 的 AC-TASK-10（`SUBTASK_NESTING_DISALLOWED`）runtime 未實作——`task_service.py:204-224` 只驗 `PARENT_NOT_FOUND` / `CROSS_PLAN_SUBTASK` / `CROSS_PRODUCT_SUBTASK`，**不阻擋 `parent_task_id` 指向已經是 subtask 的 row**。治理上仍建議 subtask 只有一層（agent 派工單位），但這是 client-side 紀律，不是 server enforcement。若未來要硬擋，需新增一條 server check 並補 AC。
 
 ## 18. 相關文件
 

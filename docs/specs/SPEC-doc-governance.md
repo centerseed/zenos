@@ -198,8 +198,8 @@ draft ──► current ──► stale ──► archived
 **合法轉換**：
 - `draft → current`：通過 §6.3 Approved 品質閘
 - `current ↔ stale`：re-review 復活 / impacts 斷鏈降級
-- `current → conflict`：同主題出現第二份 current → server 標 conflict，兩邊都進裁決待辦
-- `conflict → current`：人工裁決後留一份
+- `current → conflict`：caller / agent 顯式 `write(..., status="conflict")` 標示同主題有競爭的 current 版本（server 不會自動偵測雙 `current` 並降級；見 §18 Gap note）
+- `conflict → current`：人工裁決後留一份；caller 將勝出方設回 `current`，另一方 supersede
 - `current | stale | conflict → archived`：supersede 或手動封存
 
 **禁止**：`archived → 任何狀態`（terminal）。
@@ -464,7 +464,10 @@ Agent 偵測到以下情境必須建立 governance task（不得靜默）：
 - `AC-DOC-18b` Given entity status 由 `draft` 嘗試升 `current` 但 `ontology_entity=TBD`，When write，Then reject（同 error code）
 - `AC-DOC-19` Given supersede 新建 doc，When write，Then 舊 entity status → `archived` + `superseded_by` 寫回 + relationships 建 `supersede` edge
 - `AC-DOC-20` Given entity status=`archived`，When try update status → 任何值，Then reject (terminal)
-- `AC-DOC-20b` Given 同主題已存在 status=`current` 的 bundle，且新 bundle 設 status=`current`，When write，Then 兩者 status → `conflict` + 自動建 backlog task 交人工裁決
+> **Gap note**：舊 draft 的 AC-DOC-20b（同主題雙 `current` → 自動雙方 `conflict` + auto-task）runtime 未實作。`ontology_service.py:1368` 只把 `conflict` 列入 `_DOCUMENT_STATUSES` enum，允許 caller 主動寫入；`write.py:596-677` 的 auto-task 路徑只對 blindspot 生效，**沒有 document-conflict 的 auto-task path**。今日治理：
+> - 進入 `conflict` 是**人工 / agent 顯式設定**（`write(..., status="conflict")`）
+> - 裁決後 caller 自行 `write(..., status="current")` + 同步 supersede 另一份
+> - 若未來要 server 自動偵測雙 `current` + 降級 + 建 task，需新增 ontology_service check 並補 AC
 
 **Routing & UX**：
 - `AC-DOC-21` Given agent capture 新文件且已有同主題 index，When 路由判斷，Then 選 `add_source` 而非建新 entity
