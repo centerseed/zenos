@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from zenos.domain.action import DISPATCHER_PATTERN, HandoffEvent, Task, TaskPriority, TaskStatus
+from zenos.domain.action.models import L3TaskEntity
 from zenos.domain.knowledge import Blindspot, EntityType
 from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.domain.action import TaskRepository
@@ -723,6 +724,281 @@ class TaskService:
     async def list_pending_review(self) -> list[Task]:
         """List tasks awaiting creator confirmation."""
         return await self._tasks.list_pending_review()
+
+    # ──────────────────────────────────────────
+    # Wave 9 Phase B prime — L3 path adapters
+    # ──────────────────────────────────────────
+    # Strategy: normalize-to-legacy. Convert L3TaskEntity → dict, then
+    # delegate to the existing create_task / update_task logic so all
+    # validation, error codes, and response shapes are byte-equal.
+    # Runtime callers still use the legacy Task path; these methods only
+    # exist to satisfy the parity gate (Phase C will flip the switch).
+
+    @staticmethod
+    def _l3_task_entity_to_create_dict(
+        entity: L3TaskEntity,
+        *,
+        created_by: str,
+        product_id: str,
+        plan_id: str | None = None,
+        parent_task_id: str | None = None,
+        project: str | None = None,
+        linked_entities: list[str] | None = None,
+        linked_protocol: str | None = None,
+        linked_blindspot: str | None = None,
+        source_type: str = "",
+        source_metadata: dict | None = None,
+        attachments: list[dict] | None = None,
+    ) -> dict:
+        """Convert an L3TaskEntity to the dict shape expected by create_task.
+
+        This is the normalize-to-legacy bridge for the dual-path adapter.
+        Fields that don't exist on legacy Task (e.g. type_label, level,
+        status/'active') are mapped to their closest legacy equivalents or
+        dropped intentionally.
+
+        Hierarchy routing is the caller's responsibility — this method does NOT
+        infer plan_id / parent_task_id from entity.parent_id or entity.dispatcher.
+        Callers must pass the correct hierarchy kwargs explicitly (fix-5, fix-6).
+
+        Args:
+            entity: The L3TaskEntity to convert.
+            created_by: Creator identifier for the legacy Task.
+            product_id: REQUIRED — product that owns this task. Caller must
+                resolve and supply this; adapter does not infer from entity.
+            plan_id: Explicit plan affiliation (optional). Pass when task
+                belongs to a plan. Mutually exclusive with parent_task_id.
+            parent_task_id: Explicit parent task ID for subtasks (optional).
+            project: Optional project name hint for product resolution fallback.
+        """
+        # L3TaskEntity.depends_on is the union of depends_on_task_ids + blocked_by.
+        # We split back: put the full list in both (lossy but parity-safe).
+        depends_on = list(entity.depends_on)
+
+        # due_date: L3 uses date, legacy uses datetime
+        due_date = None
+        if entity.due_date is not None:
+            from datetime import datetime, date as _date
+            if isinstance(entity.due_date, datetime):
+                due_date = entity.due_date.isoformat()
+            elif isinstance(entity.due_date, _date):
+                due_date = entity.due_date.isoformat()
+
+        # dispatcher: L3 stores "human" explicitly; legacy uses None for human
+        dispatcher = entity.dispatcher if entity.dispatcher != "human" else None
+
+        return {
+            "title": entity.name,
+            "created_by": created_by,
+            "description": entity.description or "",
+            "status": entity.task_status,
+            "priority": entity.priority,
+            "assignee": entity.assignee,
+            "dispatcher": dispatcher,
+            "acceptance_criteria": list(entity.acceptance_criteria),
+            "result": entity.result,
+            "plan_id": plan_id,
+            "plan_order": entity.plan_order,
+            "parent_task_id": parent_task_id,
+            "product_id": product_id,
+            "project": project,
+            "depends_on_task_ids": depends_on,
+            "blocked_by": [],               # fix-9: L3.depends_on is prerequisite chain, not blocked
+            "blocked_reason": entity.blocked_reason,
+            "due_date": due_date,
+            # fix-10: forward caller-provided ontology links and provenance
+            "linked_entities": list(linked_entities or []),
+            "linked_protocol": linked_protocol,
+            "linked_blindspot": linked_blindspot,
+            "source_type": source_type,
+            "source_metadata": dict(source_metadata or {}),
+            "attachments": list(attachments or []),
+        }
+
+    async def create_task_via_l3_entity(
+        self,
+        entity: L3TaskEntity,
+        *,
+        created_by: str,
+        product_id: str,
+        plan_id: str | None = None,
+        parent_task_id: str | None = None,
+        project: str | None = None,
+        linked_entities: list[str] | None = None,
+        linked_protocol: str | None = None,
+        linked_blindspot: str | None = None,
+        source_type: str = "",
+        source_metadata: dict | None = None,
+        attachments: list[dict] | None = None,
+        conn: Any | None = None,
+    ) -> TaskResult:
+        """Create a task from an L3TaskEntity (dual-path adapter, Phase B prime).
+
+        Normalizes the L3TaskEntity to the legacy dict format, then delegates
+        to create_task so that all validation and response shapes are byte-equal
+        with the legacy path.
+
+        Callers MUST provide product_id explicitly. plan_id / parent_task_id
+        are optional and represent the hierarchy position — the adapter does NOT
+        infer these from entity.parent_id or entity.dispatcher (fix-5, fix-6).
+
+        fix-10: linked_entities / linked_protocol / linked_blindspot /
+        source_type / source_metadata / attachments are forwarded as caller
+        kwargs so that MCP callers can pass ontology links and provenance
+        without silent drops.
+
+        Args:
+            entity: The L3TaskEntity to create.
+            created_by: Creator identifier.
+            product_id: REQUIRED — product that owns this task.
+            plan_id: Optional plan affiliation. Mutually exclusive with
+                parent_task_id (subtask routing).
+            parent_task_id: Optional parent task ID for subtask creation.
+            project: Optional project name hint.
+            linked_entities: Optional list of ontology entity IDs to link.
+            linked_protocol: Optional protocol entity ID to link.
+            linked_blindspot: Optional blindspot entity ID to link.
+            source_type: Source type string (e.g. "chat", "doc").
+            source_metadata: Source provenance metadata dict.
+            attachments: Initial attachments list.
+            conn: Optional DB connection for atomic operations.
+        """
+        data = self._l3_task_entity_to_create_dict(
+            entity,
+            created_by=created_by,
+            product_id=product_id,
+            plan_id=plan_id,
+            parent_task_id=parent_task_id,
+            project=project,
+            linked_entities=linked_entities,
+            linked_protocol=linked_protocol,
+            linked_blindspot=linked_blindspot,
+            source_type=source_type,
+            source_metadata=source_metadata,
+            attachments=attachments,
+        )
+        return await self.create_task(data, conn=conn)
+
+    async def update_task_via_l3_entity(
+        self,
+        task_id: str,
+        entity: L3TaskEntity,
+        *,
+        product_id: str | None = None,
+        plan_id: str | None = None,
+        parent_task_id: str | None = None,
+        linked_entities: list[str] | None = None,
+        linked_protocol: str | None = None,
+        linked_blindspot: str | None = None,
+        source_type: str | None = None,
+        source_metadata: dict | None = None,
+        attachments: list[dict] | None = None,
+        blocked_by: list[str] | None = None,
+    ) -> TaskResult:
+        """Update a task from an L3TaskEntity (dual-path adapter, Phase B prime).
+
+        Entity fields are applied with full-replace semantics — the L3TaskEntity
+        represents a complete desired state snapshot, so all mutable fields
+        (including empty lists and None values) are forwarded unconditionally
+        to update_task (fix-8). This allows explicit clearing of acceptance_criteria,
+        depends_on, description, etc.
+
+        Hierarchy kwargs (product_id / plan_id / parent_task_id) are partial-update:
+        only included in the update dict when the caller explicitly passes them
+        (fix-7). This lets the caller rehome a task without touching entity fields.
+
+        MCP mutable field kwargs (fix-14): linked_entities / linked_protocol /
+        linked_blindspot / source_type / source_metadata / attachments / blocked_by
+        are forwarded as caller kwargs with partial-update semantics (None = no change).
+        This ensures byte-equal parity with the legacy update path for all MCP fields.
+
+        Note: blocked_by is a legacy-only field. fix-9 principle still applies —
+        entity.depends_on is NOT automatically promoted to blocked_by. The caller
+        must pass blocked_by explicitly when needed.
+
+        Args:
+            task_id: ID of the task to update.
+            entity: L3TaskEntity representing the full desired state.
+            product_id: If provided, update the task's product affiliation.
+            plan_id: If provided, rehome the task to this plan.
+            parent_task_id: If provided, re-parent the task under this parent.
+            linked_entities: If provided, update linked entity IDs (partial-update).
+            linked_protocol: If provided, update linked protocol ID (partial-update).
+            linked_blindspot: If provided, update linked blindspot ID (partial-update).
+            source_type: If provided, update source type (partial-update).
+            source_metadata: If provided, update source metadata (partial-update).
+            attachments: If provided, full-replace attachments list (partial-update).
+            blocked_by: If provided, update blocked_by task IDs (partial-update).
+        """
+        from datetime import datetime, date as _date
+
+        # Full-replace for all entity-sourced mutable fields (fix-8).
+        # L3TaskEntity is a complete state snapshot — always pass, even if empty/None.
+        # title (entity.name) is intentionally omitted: update_task does not accept
+        # title as an update field (title is immutable after create).
+        depends_on = list(entity.depends_on)
+
+        # dispatcher: L3 stores "human" explicitly; legacy uses None for human
+        dispatcher = entity.dispatcher if entity.dispatcher != "human" else None
+
+        updates: dict = {
+            "status": entity.task_status,
+            "priority": entity.priority,
+            "assignee": entity.assignee,
+            "description": entity.description,
+            "blocked_reason": entity.blocked_reason,
+            "result": entity.result,
+            "acceptance_criteria": list(entity.acceptance_criteria),
+            "depends_on_task_ids": depends_on,
+            # blocked_by intentionally omitted here: update is partial-update,
+            # so blocked_by must only enter updates when caller explicitly passes
+            # the kwarg (handled below at line 992-993). Hardcoding [] here would
+            # silently clear existing blocked_by on every L3 update call.
+            # (fix-9 correctly puts "blocked_by": [] in the CREATE path to prevent
+            # depends_on from being misread as blocked state; that is a different
+            # code path in create_task_via_l3_entity.)
+            "plan_order": entity.plan_order,
+            "dispatcher": dispatcher,
+        }
+
+        # due_date: always convert (can be None → explicit clear)
+        if entity.due_date is not None:
+            if isinstance(entity.due_date, datetime):
+                updates["due_date"] = entity.due_date.isoformat()
+            elif isinstance(entity.due_date, _date):
+                updates["due_date"] = entity.due_date.isoformat()
+        else:
+            updates["due_date"] = None
+
+        # Hierarchy kwargs: partial-update semantics — only include when caller
+        # explicitly passes them (fix-7). None kwarg = "don't change this field".
+        if product_id is not None:
+            updates["product_id"] = product_id
+        if plan_id is not None:
+            updates["plan_id"] = plan_id
+        if parent_task_id is not None:
+            updates["parent_task_id"] = parent_task_id
+
+        # MCP mutable field kwargs: partial-update semantics (fix-14).
+        # None kwarg = "don't change this field".
+        # This ensures the L3 update path has byte-equal parity with the legacy
+        # update path for all MCP-exposed mutable fields.
+        if linked_entities is not None:
+            updates["linked_entities"] = list(linked_entities)
+        if linked_protocol is not None:
+            updates["linked_protocol"] = linked_protocol
+        if linked_blindspot is not None:
+            updates["linked_blindspot"] = linked_blindspot
+        if source_type is not None:
+            updates["source_type"] = source_type
+        if source_metadata is not None:
+            updates["source_metadata"] = dict(source_metadata)
+        if attachments is not None:
+            updates["attachments"] = list(attachments)
+        if blocked_by is not None:
+            updates["blocked_by"] = list(blocked_by)
+
+        return await self.update_task(task_id, updates)
 
     # ──────────────────────────────────────────
     # Internal helpers
