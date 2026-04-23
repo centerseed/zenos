@@ -51,7 +51,7 @@ related_plans:
 |---|------|------|
 | E1 | `ADR-048-grand-ontology-refactor` status = Approved | ADR 前頁 frontmatter |
 | E2 | 主 SPEC v2 §9 schema（entity_l3_*）已通過 architect review 無進一步修訂 | 無 pending review comment |
-| E3 | `PLAN-data-model-consolidation` 已通過 S03 Phase 1a（preflight + EntityStatus.archived）| 該 Plan status 或 S03 task status=done |
+| E3 | `PLAN-data-model-consolidation` 為 **ACTIVE**（refactor-index.md 已於 2026-04-23 修正；該 Plan 不是 OBSOLETE）且其 S03（preflight + `EntityStatus.archived` + migration stub）為 **done** — 本 PLAN Phase A02 的 `entities_base` table 依賴該上游落地 | S03 task 的 MCP entity status=done；若該 Plan 尚未啟動，Architect 需先 claim S03 或把其內容搬進本 PLAN 的 A0x（見 §Coordination） |
 | E4 | Staging 環境 DB backup + restore drill 完成 | 運維文件記錄 |
 | E5 | 本 PLAN 的 Resume Point 已由 Architect claim | `mcp__zenos__task` 下此 PLAN 有 L3 task 處於 in_progress |
 
@@ -65,7 +65,8 @@ related_plans:
 | X4 | Task `product_id` / `plan_id` / `parent_task_id` 三欄在 DB 層刪除；歸屬由 `parent_id` 表達 | migration 確認；主 SPEC v2 §9.4 DDL 完全落地 |
 | X5 | Server 強制 `parent_id` 鏈終止於 L1（level=1, parent_id=null）；違反 reject `INVALID_PARENT_CHAIN` | `governance_rules.py` 更新 + test 通過 |
 | X6 | MCP `task` / `plan` / `confirm` / `search(collection="tasks")` 外部 contract（`SPEC-mcp-tool-contract §8.5-§8.9`）行為不變 | partner key e2e 測試通過；dashboard 顯示一致；迴歸 test 零失敗 |
-| X7 | AC-TASK-01..10 compliance test 全部通過（先前 spec-stage 寫的 AC 從 red 變 green）| `pytest tests/spec_compliance/ -v` |
+| X7 | Compliance test 全綠——以下 AC 必須從 red → green：`AC-TASK-01..09`、`AC-MCP-01..35`（除 Gap-note 標記為非 runtime 強制的條目；見下）；`AC-TASK-10` 不列入本 PLAN 退場標準——SPEC-task-governance §17 明載其 `SUBTASK_NESTING_DISALLOWED` 為 governance target 而非 runtime 強制（Wave 9 不新加 validation，若之後要做走 §9.1 stretch task） | `pytest tests/spec_compliance/ -v` |
+| X7b | SPEC-mcp-tool-contract §13 標為「governance target」的 AC（AC-MCP-20 / AC-MCP-21 / AC-MCP-31 find_gaps / AC-MCP-32 analyze 中的非強制分支）維持現狀；本 PLAN 不 implement 也不阻擋 | 該些 AC 在 test suite 維持 skipped / 標註為 target-state | |
 | X8 | ADR-028 / ADR-044 / ADR-047 frontmatter status → Superseded，`superseded_by: ADR-048` | grep ADR frontmatter |
 | X9 | 主 SPEC v2 §9 intro 的「當前 runtime 狀態」block 改寫為「已落地」；`REF-ontology-current-state` 的 Wave 9 warning 清除 | grep 文件 |
 | X10 | Stable 運行 ≥ 2 週、partner 零資料不一致 incident | 運維報告 + error log |
@@ -110,26 +111,31 @@ related_plans:
 ## Phase 劃分（dependency chain）
 
 ```
-Phase A (schema preflight)
+Phase A (schema preflight, additive)
     │
-    ├─► Phase B (domain dataclass duality)
+    ▼
+Phase B (domain dataclass duality)
     │
-    ├─► Phase C (infra dual-write / dual-read)
-    │         │
-    │         ▼
-    │     Phase D (parent_id backfill + validation)
-    │         │
-    │         ▼
-    │     Phase E (cutover：primary reads/writes 切新路徑)
-    │         │
-    │   (穩定 2 週)
-    │         ▼
-    │     Phase F (legacy drop)
-    │         │
-    │         ▼
-    │     Phase G (SPEC / ADR / REF 後處理)
+    ▼
+Phase B' (application + interface contract-preserving adapter)
+    │    ↑ 保證 MCP contract 行為不變；Phase C 之前必完
+    ▼
+Phase C (infra dual-write / dual-read with feature flag)
     │
-    └─► [PLAN-data-model-consolidation] 並行
+    ▼
+Phase D (parent_id backfill + INVALID_PARENT_CHAIN validator)
+    │
+    ▼
+Phase E (cutover: feature flag ramp)
+    │
+    │ (穩定 2 週)
+    ▼
+Phase F (legacy drop: 舊欄位 / task_entities / Task dataclass)
+    │
+    ▼
+Phase G (SPEC / ADR / REF / index 後處理)
+
+（本 PLAN 與 PLAN-data-model-consolidation 的 coordination 見 §8）
 ```
 
 ## Tasks
@@ -153,6 +159,21 @@ Phase A (schema preflight)
 | **B03** | 加 domain-level converter `Task ↔ L3TaskEntity`，確保新舊雙向可轉換（避免 Phase C 讀寫不一致時炸掉）| 同；test 加 | round-trip equal 測試通過 |
 | **B04** | `governance.py:223-230` 雙路徑邏輯擴充：同時支援舊 `Task` 與 `L3TaskEntity`（現在已同時支援 `Document` vs `Entity`；把 Task 納入）| `src/zenos/domain/governance.py` | 既有 test 不動；新增 Task-as-entity test 通過 |
 
+### Phase B' — Application / Interface contract-preserving adapter（在 C 之前、B 之後）
+
+> **目的**：`B` 只動 domain dataclass，`C` 才碰 DB。中間需要 application + interface 層把新 dataclass 接上去，**同時保證 `SPEC-mcp-tool-contract §8.5-§8.9` 的 MCP contract 零行為變化**。沒有這些 task，repo 改完會發現 MCP response shape / error code / warning 漂掉。
+
+| ID | Title | Files | Verify |
+|----|-------|-------|--------|
+| **BP01** | `task_service.py` 擴充：同時可以處理 `Task` 與 `L3TaskEntity` 型別輸入／輸出；validation logic（`CROSS_PLAN_SUBTASK` / `CROSS_PRODUCT_SUBTASK` / `MISSING_PRODUCT_ID` / `HANDOFF_EVENTS_READONLY` 等）搬到新 class 仍會被觸發 | `src/zenos/application/action/task_service.py:180-224,340-480,660-700` | 現有 `tests/application/test_validation.py` 全綠；新加 `test_task_service_l3_entity_path.py` 確認新類型走過同一套 validation；每個 error code（見 `governance_rules.py:930-948`）仍能觸發 |
+| **BP02** | `plan_service.py` 同上：同時接受 legacy `Plan` 與 `L3PlanEntity`；`PLAN_HAS_UNFINISHED_TASKS` 的 ValueError 字串輸出維持（Shape B rejection reason）| `src/zenos/application/action/plan_service.py:148-196` | integration test：plan completed 時訊息含前 5 個 task id，字串完全等同 legacy path |
+| **BP03** | `mcp/task.py` 輸出 normalization：確保 `data.linked_entities` 仍為 expanded objects（per `SPEC-mcp-tool-contract §8.5` + dogfood Issue 7 已修）；dual-path 期間兩條路徑的 response shape byte-equal | `src/zenos/interface/mcp/task.py:577-708` + `_common._enrich_task_result` | 新增 `tests/interface/test_task_response_parity.py`：legacy 與 new-entity 路徑對同一 input 的 response dict 深度等同 |
+| **BP04** | `mcp/plan.py` 輸出 normalization：`action="get"` 回 `tasks_summary`；`action="list"` 回 collection-keyed；`PLAN_HAS_UNFINISHED_TASKS` shape 不變（Shape B） | `src/zenos/interface/mcp/plan.py:198-275` + `_plan_handler` | parity test 對 create/update/get/list 四 action 的 response；rejection_reason 字串等同 |
+| **BP05** | `mcp/confirm.py` parity：`collection="tasks"` 的 `accepted=True/False` 走 new-entity path 與 legacy path 行為等同；`entity_entries` writeback 仍命中 L2 sidecar；`accept` alias warning 字串不變 | `src/zenos/interface/mcp/confirm.py:24-140` + `_enrich_task_result` | parity test：accept 與 reject 兩 branch；HandoffEvent append 內容 byte-equal；entry write 結果一致 |
+| **BP06** | `mcp/search.py` — `collection="tasks"` 走新 repo path 時 response shape 不變；legacy status normalize（`backlog` / `blocked` / `archived`）仍 warning；filter 欄位（`plan_id` / `parent_task_id` / `dispatcher` / `linked_entity`）全部能走 | `src/zenos/interface/mcp/search.py:145-260` | parity test：對同一 query legacy 與 new path 回傳完全一致；legacy status alias warning 字串一致 |
+| **BP07** | `mcp/get.py` — `collection="tasks"`、`id` / `id_prefix` / `include` 三類 path 在 new-entity path 下仍保持 `SPEC-mcp-tool-contract §8.2` 行為；`AMBIGUOUS_PREFIX` reject 字串不變 | `src/zenos/interface/mcp/get.py:139-200` | parity test |
+| **BP08** | `governance_rules.py` 的所有 task-related error code（`CROSS_PLAN_SUBTASK / CROSS_PRODUCT_SUBTASK / CROSS_PRODUCT_PLAN_TASK / MISSING_PRODUCT_ID / INVALID_PRODUCT_ID / LINKED_ENTITIES_PRODUCT_STRIPPED / HANDOFF_EVENTS_READONLY / PARENT_NOT_FOUND / INVALID_DISPATCHER`）在新 entity path 下皆 wired，且 envelope shape（Shape A flat `data.error: str`）一致 | `src/zenos/interface/governance_rules.py:930-948` + 相關 caller | AC-MCP-06/07/08/09/10/11 全綠 |
+
 ### Phase C — Infrastructure dual-write / dual-read
 
 | ID | Title | Files | Verify |
@@ -170,7 +191,8 @@ Phase A (schema preflight)
 |----|-------|-------|--------|
 | **D01** | backfill script：對每個 task 計算 `parent_id = plan_id OR product_id`（按主 SPEC §9 語意）；subtask 的 `parent_id = parent_task_id` | `scripts/backfill_l3_action_parent_id.py` 新檔 | dry-run 無 cross-partner 洩漏；所有 row 有 parent_id |
 | **D02** | backfill script：plan 的 `parent_id = product_id`；milestone 的 `parent_id` 視 A01 / C04 決策 | 同 | 同 |
-| **D03** | 寫 `INVALID_PARENT_CHAIN` validator：new task / plan 的 parent_id 必須可走回 level=1 / parent_id=null 的 L1 entity | `governance_rules.py` + `task_service.py` | test 驗證 rejection；既有 task 若 parent chain 壞會進 `legacy_parent_chain_warnings` table |
+| **D03** | 寫 `INVALID_PARENT_CHAIN` validator：new task / plan 的 parent_id 必須可走回 level=1 / parent_id=null 的 L1 entity | `governance_rules.py` + `task_service.py` | test 驗證 rejection；既有 task 若 parent chain 壞進入 §D03a 定義的 legacy table |
+| **D03a** | 定義「既有孤兒 / 斷鏈 task」落腳載體（decision + migration）。兩張表載體需在同一 migration 建立，避免 Phase D 落地時隱性引入 schema：<br>**table 1: `zenos.legacy_orphan_tasks`**（D01 backfill 過不去的 row，column：`task_id / partner_id / reason / detected_at / resolved_at / resolver_partner_id / manual_parent_id`；Wave 9 完成後 2 週若 rows 仍 >0 升 incident）<br>**table 2: `zenos.legacy_parent_chain_warnings`**（D03 validator 觸發但 allowlist 過渡的 row；column：`task_id / chain_snapshot_json / detected_at / triaged_at`；migration drop 時間點見 Phase F）| 新 migration：`migrations/20260xxx_wave9_legacy_shadow_tables.sql`；admin runbook：`docs/runbooks/wave9-legacy-task-triage.md`（新建） | 兩張 table 存在且有 DDL；runbook 描述 SLA（orphan row TTL 7 天人工處理）；本 PLAN §Decisions 記錄「採 DB table 而非 journal / runbook-only」理由 |
 | **D04** | D01/D02 執行 on staging → staging regression → production（small batch first）| 同 | staging 通過 + 監控指標不變 |
 | **D05** | Phase A 設的 CHECK constraint 從 NOT VALID 改 VALID（啟用強制）| migration | CHECK violation count = 0 on production |
 
@@ -180,7 +202,8 @@ Phase A (schema preflight)
 |----|-------|-------|--------|
 | **E01** | Feature flag `l3_read_new_path` 由 off → on（分階段：staging 100% → prod 10% → prod 100%）| config + monitoring | 每階段 48h 無 regression |
 | **E02** | 停止 dual-write 的舊路徑：`zenos.tasks` / `zenos.plans` / `task_entities` 改為 **read-only shadow**（仍有資料，但不再寫新 row）| `sql_task_repo.py` | 所有 mutation 只走 `entity_l3_*` + `relationships`；舊表行數不再增長 |
-| **E03** | AC compliance test 全綠：`AC-TASK-01..10` + `AC-MCP-01..35` + 主 SPEC §9 CHECK test | `tests/spec_compliance/` | `pytest` 綠 |
+| **E03** | AC compliance test 全綠：`AC-TASK-01..09` + `AC-MCP` 中標為「runtime enforcement」的條目 + 主 SPEC §9 CHECK test（見 §Exit Criteria X7/X7b 排除清單）| `tests/spec_compliance/` | `pytest` 綠；skipped 清單以 reviewer-accepted gap 為限 |
+| **E03b** | 新增 `tests/spec_compliance/test_wave9_ac_status_map.py`：每條 AC 標記 `runtime_enforced | governance_target | pending_wave`；CI 失敗若清單與本 PLAN 不一致 | 新 test file | CI 綠 |
 | **E04** | Partner key e2e 驗證（create task → handoff → confirm → entity_entries 回饋 → delete）| `tests/integration/test_e2e_*` | 全部綠 |
 
 ### Phase F — Legacy cleanup（E 穩定 ≥ 2 週後）
@@ -193,6 +216,7 @@ Phase A (schema preflight)
 | **F04** | 刪除 legacy `Task` / `Plan` dataclass（保留 `L3TaskEntity` 等新 class）；刪 Phase B 的 converter | `src/zenos/domain/action/models.py`；`governance.py:223-230` 去 Document-like 雙路徑 | grep `class Task(` 0 hit；test suite 綠 |
 | **F05** | 刪除 `sql_task_repo.py` / `sql_plan_repo.py` 裡對舊 table 的查詢 / dual-write code | infra repo | grep 確認無 `zenos.tasks` 殘留 |
 | **F06** | Drop `zenos.tasks` / `zenos.plans` 本體 table（最後步驟；保留 2 週 read-only shadow 期滿後）| migration | table 不存在 |
+| **F07** | Drop `zenos.legacy_orphan_tasks` 與 `zenos.legacy_parent_chain_warnings`（D03a 定義的 shadow tables）。前提：兩表 row count = 0 持續 ≥ 2 週，且 runbook triage 全部結案 | migration | table 不存在；runbook 封存至 `docs/runbooks/archive/` |
 
 ### Phase G — Post-landing SPEC / ADR / REF 同步
 
@@ -214,7 +238,7 @@ Phase A (schema preflight)
 | Risk | 影響 | Mitigation |
 |------|------|-----------|
 | **task / plan 資料在 dual-write 階段出現不一致** | partner 看到錯誤狀態 | C01 transaction wrap；每次 mutation 有 invariant check；staging 跑 1 週後才 prod |
-| **`parent_id` backfill 對既有孤兒 task 失效** | task 無法歸屬 L1 | D01 先做 dry-run；孤兒 row 寫入 `legacy_orphan_tasks` side table 由人工分配；不 silent 吞 |
+| **`parent_id` backfill 對既有孤兒 task 失效** | task 無法歸屬 L1 | D01 先做 dry-run；孤兒 row 寫入 **D03a 定義的 `zenos.legacy_orphan_tasks` DB table**（非 journal / 非 runbook-only）；每筆在 Wave 9 完成後 2 週內須人工 triage，reason / resolver_partner_id 記錄；不 silent 吞 |
 | **Cutover 當下 MCP 行為意外變化** | 所有 partner 受影響 | feature flag 分階段 rollout（E01）；每階段 48h 觀察；有 rollback 步驟 |
 | **Phase F drop table 之後才發現還有 caller** | 服務 500 | F01-F06 前必做 `grep -r "zenos.tasks"` 全 repo 確認 0 caller；灰度期 2 週 |
 | **`PLAN-data-model-consolidation` 與本 PLAN 同時改 `entities_base` 語意** | schema 衝突 | §8 Coordination 強制 Architect 同步；Phase A03 明確檢查相容性 |
@@ -238,6 +262,11 @@ Phase A (schema preflight)
 ## Decisions（build 期間追加）
 
 - 2026-04-23：PLAN 初稿建立。scope 與 `PLAN-data-model-consolidation` 明確切開（document / protocol 不碰）。
+- 2026-04-23：`PLAN-data-model-consolidation` 的 OBSOLETE 判斷於 refactor-index.md:239 撤回 — 兩份 PLAN 並行、scope 正交（見 §Coordination）。
+- 2026-04-23：legacy 孤兒 / 斷鏈 task 的載體採 **DB table**（`zenos.legacy_orphan_tasks` + `zenos.legacy_parent_chain_warnings`），不採 journal / runbook-only。理由：
+  - DB table 可查詢、可 join、可跨 session 持久；journal / runbook-only 會失去 structured triage state
+  - Row count / TTL 可當 ops 指標；Phase F07 drop 條件可量化（row=0 連續 2 週）
+  - 建立成本極低（migration 兩張表 ≤20 行 SQL），不值得為省這點成本採非結構化載體
 - 〔待定〕`task_blockers` 的去留（A01 調查後由 Architect 拍板）
 - 〔待定〕Milestone 是否 in-place upgrade 現有 `goal` entity（C04 決策）
 - 〔待定〕`handoff_events` 存儲位置：subclass JSONB 或獨立 `task_handoff_events` 表（A02 決策）

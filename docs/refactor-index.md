@@ -236,7 +236,8 @@ created: 2026-04-23
 | PLAN | Action |
 |------|--------|
 | PLAN-l1-level-ssot-refactor | 已完成（ADR-047），保留歷史 |
-| PLAN-data-model-consolidation | **OBSOLETE** — 由 new master plan 取代；task 歸檔 |
+| PLAN-data-model-consolidation | ✅ **ACTIVE — 與 Wave 9 PLAN 並行**（2026-04-23 修正，撤回先前 OBSOLETE 判斷）。原 OBSOLETE 是假設單一 master plan 吸收全部；實際 `PLAN-ontology-grand-refactor-wave9-migration §Scope` 明確把 Document / Protocol / Tags / dead-identity 切給本 PLAN。本 PLAN 的 S03（EntityStatus.archived + preflight）是 Wave 9 Plan Phase A 的上游依賴 |
+| PLAN-ontology-grand-refactor-wave9-migration | ✅ **NEW 2026-04-23** — Wave 9 runtime migration blueprint（L3-Action MTI + ownership tree + task_entities drop）；與 PLAN-data-model-consolidation 平行 |
 | PLAN-task-ownership-ssot | 已完成（ADR-044），保留歷史 |
 | PLAN-governance-ssot-convergence | 保留 |
 | PLAN-identity-access-consolidation | 保留 |
