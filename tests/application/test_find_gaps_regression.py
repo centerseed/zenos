@@ -16,11 +16,13 @@ def _make_entity(
     entity_type: str,
     parent_id: str | None = None,
 ) -> Entity:
+    from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS
     now = datetime.now(timezone.utc)
     return Entity(
         id=entity_id,
         name=name,
         type=entity_type,
+        level=DEFAULT_TYPE_LEVELS.get(entity_type),
         summary=f"{name} summary",
         tags=Tags(what=["x"], why="y", how="z", who=["pm"]),
         status="active",

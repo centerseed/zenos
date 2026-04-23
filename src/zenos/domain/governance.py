@@ -23,6 +23,7 @@ from .knowledge import (
     Severity,
     Tags,
 )
+from .knowledge.collaboration_roots import is_collaboration_root_entity
 from .shared import (
     QualityCheckItem,
     QualityReport,
@@ -477,10 +478,10 @@ def analyze_blindspots(
             ))
 
     # --- 2. Core feature lacks documentation ---
-    # An entity marked as a product/module in active status with < 2 docs.
-    core_types = {EntityType.PRODUCT, EntityType.MODULE}
+    # L1/L2 entities (product/module) in active status should have >= 2 docs.
+    # Level-based gate (ADR-047 S03): any type at level 1 or 2 qualifies.
     for entity in entities:
-        if entity.type not in core_types or entity.status != EntityStatus.ACTIVE:
+        if (entity.level or 0) not in {1, 2} or entity.status != EntityStatus.ACTIVE:
             continue
         if not entity.id:
             continue
@@ -1081,10 +1082,11 @@ def run_quality_check(
     ))
 
     # --- 2. Are dependency relationships complete? ---
-    # Every active product/module should have at least one relationship.
+    # Every active L1/L2 entity should have at least one relationship.
+    # Level-based gate (ADR-047 S03): any type at level 1 or 2 qualifies.
     core_entities = [
         e for e in entities
-        if e.type in (EntityType.PRODUCT, EntityType.MODULE)
+        if (e.level or 0) in {1, 2}
         and e.status == EntityStatus.ACTIVE
         and e.id
     ]
@@ -1553,8 +1555,9 @@ def run_quality_check(
         ))
 
     # --- 21. L2 count balance per product ---
-    # Products with < 3 or > 15 modules are imbalanced.
-    products = [e for e in entities if e.type == EntityType.PRODUCT and e.id]
+    # L1 collaboration roots with < 3 or > 15 modules are imbalanced.
+    # Uses is_collaboration_root_entity (ADR-047 S03): level==1 and no parent.
+    products = [e for e in entities if is_collaboration_root_entity(e) and e.id]
     module_count_by_product: dict[str, int] = {}
     for mod in candidate_modules:
         pid = mod.parent_id

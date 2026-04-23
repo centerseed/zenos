@@ -54,13 +54,13 @@ class PlanService:
             raise ValueError("created_by is required for plan creation")
 
         product_entity = await self._resolve_product_entity(
-            product_id=data.get("product_id") or data.get("project_id"),
+            product_id=data.get("product_id"),
             project_hint=data.get("project"),
         )
         if product_entity is None:
             raise ValueError("product_id is required for plan creation")
         product_name = getattr(product_entity, "name", None) or (data.get("project") or "")
-        canonical_product_id = getattr(product_entity, "id", None) or data.get("product_id") or data.get("project_id")
+        canonical_product_id = getattr(product_entity, "id", None) or data.get("product_id")
 
         plan = Plan(
             goal=goal,
@@ -108,8 +108,7 @@ class PlanService:
             plan.status = new_status
 
         normalized_updates = dict(updates)
-        if "project_id" in normalized_updates and "product_id" not in normalized_updates:
-            normalized_updates["product_id"] = normalized_updates["project_id"]
+        # project_id alias removed (ADR-047 D3). Callers must use product_id.
 
         product_entity = await self._resolve_product_entity(
             product_id=normalized_updates.get("product_id") or plan.product_id,
@@ -256,7 +255,6 @@ def _plan_to_dict(plan: Plan) -> dict[str, Any]:
         "exit_criteria": plan.exit_criteria,
         "project": plan.project,
         "product_id": plan.product_id,
-        "project_id": plan.product_id,
         "created_by": plan.created_by,
         "updated_by": plan.updated_by,
         "result": plan.result,

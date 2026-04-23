@@ -31,6 +31,7 @@ def _make_product(product_id: str = "prod-1", name: str = "ZenOS") -> Entity:
         id=product_id,
         name=name,
         type="product",
+        level=1,
         summary="Product",
         tags=Tags(what="x", why="x", how="x", who="x"),
         status="active",

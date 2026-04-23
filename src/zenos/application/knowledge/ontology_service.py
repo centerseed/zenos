@@ -33,6 +33,8 @@ from zenos.infrastructure.github_adapter import parse_github_url, GitHubAdapter
 from zenos.domain.knowledge import Blindspot, Document, DocumentStatus, DocumentTags, Entity, EntityStatus, EntityType, Protocol, Relationship, RelationshipType, Severity, Source, SourceType, Tags
 from zenos.domain.shared import SplitRecommendation, TagConfidence
 from zenos.domain.knowledge import BlindspotRepository, DocumentRepository, EntityRepository, ProtocolRepository, RelationshipRepository
+from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS, default_level_for_type
+from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.domain.search import SearchResult, search_ontology
 from zenos.domain.partner_access import describe_partner_access, is_guest, is_unassigned_partner
 from zenos.application.identity.source_access_policy import entity_has_visible_source
@@ -543,11 +545,11 @@ class OntologyService:
         return parent_id  # give up, return original
 
     async def _find_product_ancestor(self, entity: Entity) -> Entity | None:
-        """Walk the parentId chain upward to find the product ancestor."""
+        """Walk the parentId chain upward to find the L1 collaboration root ancestor."""
         visited: set[str] = set()
         current = entity
         while current:
-            if current.type == EntityType.PRODUCT:
+            if is_collaboration_root_entity(current):
                 return current
             if current.id in visited or not current.parent_id:
                 return None
@@ -657,6 +659,8 @@ class OntologyService:
         def _line(ent: Entity) -> str:
             return f"{ent.id}|{ent.name}|{ent.summary}"
 
+        # UI label judgment: filtering by EntityType for display context sent to GovernanceAI.
+        # Not a business gate — these labels guide the AI's context, not access control.
         active_products = [
             _line(ent)
             for ent in non_doc_entities
@@ -927,6 +931,8 @@ class OntologyService:
             e for e in all_entities
             if e.type == EntityType.DOCUMENT and e.id and _in_scope(e)
         ]
+        # UI label judgment: filtering skeleton (L1/L2) entities by type label for
+        # context payload sent to GovernanceAI. Not a business gate.
         skeleton_entities = [
             e for e in all_entities
             if e.type in (EntityType.PRODUCT, EntityType.MODULE)
@@ -1098,8 +1104,9 @@ class OntologyService:
     # Governance-facing use cases (治理端)
     # ──────────────────────────────────────────
 
-    # ── L1/L2 type constants for write guard ──
-    _L1_TYPES: frozenset[str] = frozenset({"product", "company", "person"})
+    # ── L2/L3 type constants for write guard ──
+    # NOTE: type whitelist for L1 was removed (ADR-047 S03). L1 is now determined by level,
+    # not by a type whitelist. See _enforce_guest_write_guard.
     _L2_TYPES: frozenset[str] = frozenset({"module"})
     _L3_TYPES: frozenset[str] = frozenset({"document", "goal", "role", "project"})
     _MODULE_SCOPED_L3_TYPES: frozenset[str] = frozenset({"document", "role", "project"})
@@ -1108,7 +1115,8 @@ class OntologyService:
         """Enforce write restrictions for guest partners.
 
         Rules:
-        - L1 entity creation → always rejected for guests.
+        - L1 entity creation → always rejected for guests. L1 is determined by
+          level==1 (explicit) or by DEFAULT_TYPE_LEVELS fallback (ADR-047 D2).
         - L2 entity creation → always rejected for guests.
         - L3 entity creation → allowed only when parent_id is within the guest's
           authorized L1 subtree. If no parent_id is provided the guard also rejects,
@@ -1119,9 +1127,14 @@ class OntologyService:
             PermissionError: When the guest violates any of the above rules.
         """
         entity_type = str(data.get("type", "")).strip()
+        explicit_level = data.get("level")
 
-        # L1: always rejected
-        if entity_type in self._L1_TYPES:
+        # L1: always rejected — level-based, not type-whitelist (ADR-047 S03)
+        is_l1 = (
+            explicit_level == 1
+            or (explicit_level is None and default_level_for_type(entity_type) == 1)
+        )
+        if is_l1:
             raise PermissionError(
                 f"Guest partners cannot create L1 entities (type='{entity_type}'). "
                 "Only member or owner roles may create top-level entities."
@@ -1604,6 +1617,8 @@ class OntologyService:
                     f"Are you sure '{name}' is not a duplicate?\n"
                 ]
                 for ent in similar:
+                    # UI label judgment: show child modules only for product-type
+                    # entities in the duplicate-check display. Not a business gate.
                     modules = [
                         e for e in await self._entities.list_all(type_filter="module")
                         if e.parent_id == ent.id
@@ -1718,18 +1733,11 @@ class OntologyService:
                     sources.append(s)
 
         # Auto-set level based on type; caller-provided level takes precedence.
-        _TYPE_TO_LEVEL: dict[str, int] = {
-            EntityType.PRODUCT: 1,
-            EntityType.MODULE: 2,
-            EntityType.DOCUMENT: 3,
-            EntityType.GOAL: 3,
-            EntityType.ROLE: 3,
-            EntityType.PROJECT: 3,
-        }
+        # Uses DEFAULT_TYPE_LEVELS SSOT (ADR-047 S03) — replaced the previous local type-to-level dict.
         level = (
             merged_data.get("level")
             if merged_data.get("level") is not None
-            else _TYPE_TO_LEVEL.get(merged_data["type"])
+            else default_level_for_type(merged_data["type"])
         )
 
         # L2 status transition validation (update path):
@@ -2232,7 +2240,7 @@ class OntologyService:
             visited: set[str] = set()
             while current is not None and current.id not in visited:
                 visited.add(current.id)
-                if current.type == "product":
+                if is_collaboration_root_entity(current):
                     return current.name == scope_product
                 parent_id = getattr(current, "parent_id", None)
                 current = entity_map.get(parent_id) if parent_id else None

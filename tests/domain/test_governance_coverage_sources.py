@@ -20,10 +20,12 @@ def _make_core_entity(
     sources: list[dict],
     entity_type: str = EntityType.MODULE,
 ) -> Entity:
+    from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS
     return Entity(
         id=entity_id,
         name=name,
         type=entity_type,
+        level=DEFAULT_TYPE_LEVELS.get(entity_type),
         status=EntityStatus.ACTIVE,
         summary="Test entity",
         tags=Tags(what="test", why="testing", how="automated", who="developer"),

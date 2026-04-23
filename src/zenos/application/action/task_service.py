@@ -186,9 +186,10 @@ class TaskService:
                 error_code="INVALID_DISPATCHER",
             )
 
+        # project_id alias removed (ADR-047 D3). Callers must use product_id.
         product_entity = await _resolve_product_entity(
             self._entities,
-            product_id=data.get("product_id") or data.get("project_id"),
+            product_id=data.get("product_id"),
             project_hint=data.get("project"),
         )
         effective_product_id = product_entity.id if product_entity else None
@@ -335,7 +336,7 @@ class TaskService:
             blocked_reason=blocked_reason,
             acceptance_criteria=data.get("acceptance_criteria") or [],
             project=effective_project_name or _normalize_project_scope(data.get("project")),
-            product_id=effective_product_id or data.get("product_id") or data.get("project_id") or None,
+            product_id=effective_product_id or data.get("product_id") or None,
             attachments=data.get("attachments") or [],
             parent_task_id=parent_task_id,
             dispatcher=dispatcher,
@@ -385,9 +386,10 @@ class TaskService:
                         error_code="CROSS_PLAN_SUBTASK",
                     )
 
+        # project_id alias removed (ADR-047 D3). Callers must use product_id.
         product_entity = await _resolve_product_entity(
             self._entities,
-            product_id=updates.get("product_id") or updates.get("project_id") or task.product_id,
+            product_id=updates.get("product_id") or task.product_id,
             project_hint=updates.get("project") or task.project,
         )
         effective_product_id = product_entity.id if product_entity else None
@@ -481,10 +483,9 @@ class TaskService:
                     continue
                 filtered_linked_entity_ids.append(entity_id)
             task.linked_entities = filtered_linked_entity_ids
+        # project_id alias removed (ADR-047 D3). Callers must use product_id.
         if "product_id" in updates:
             task.product_id = effective_product_id or updates["product_id"]
-        elif "project_id" in updates:
-            task.product_id = effective_product_id or updates["project_id"]
         elif effective_product_id:
             task.product_id = effective_product_id
         if "due_date" in updates:

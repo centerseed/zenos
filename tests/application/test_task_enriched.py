@@ -66,6 +66,7 @@ def _entity(id: str = "ent-1", name: str = "Paceriz", summary: str = "A running 
         id=id,
         name=name,
         type="product",
+        level=1,
         summary=summary,
         tags=Tags(what="app", why="coaching", how="AI", who="runners"),
         status="active",

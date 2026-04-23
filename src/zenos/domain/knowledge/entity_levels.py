@@ -9,7 +9,7 @@ Usage
 -----
 - ``backfill_entity_level.py``: infer level from type for NULL-level rows.
 - ``application/crm/crm_service.py``: default level when CRM bridge creates an entity.
-- ``application/knowledge/ontology_service.py``: replace the scattered ``_TYPE_TO_LEVEL`` dict.
+- ``application/knowledge/ontology_service.py``: canonical level lookup (ADR-047 S03).
 
 Do **not** import ``EntityType``, domain models, or infrastructure here.
 """

@@ -103,11 +103,11 @@ def build_intel_summary(
     }
 
 
-def intel_writeback(summary: Mapping[str, Any], *, project_id: str, topic: str) -> dict[str, Any]:
+def intel_writeback(summary: Mapping[str, Any], *, product_id: str, topic: str) -> dict[str, Any]:
     content_direction = summary.get("content_direction") or []
     return {
         "document": {
-            "parent_id": project_id,
+            "parent_id": product_id,
             "doc_kind": "intel",
             "topic": topic,
             "summary": summary.get("trend_summary") or "",

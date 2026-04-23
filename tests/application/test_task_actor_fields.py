@@ -23,6 +23,7 @@ def _make_product() -> Entity:
         id="prod-1",
         name="ZenOS",
         type="product",
+        level=1,
         summary="Product",
         tags=Tags(what="x", why="x", how="x", who="x"),
         status="active",

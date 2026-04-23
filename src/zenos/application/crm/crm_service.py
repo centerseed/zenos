@@ -25,6 +25,7 @@ from zenos.domain.crm_models import (
 from zenos.domain.knowledge import Entity, Relationship, Tags
 from zenos.domain.knowledge import EntityRepository, RelationshipRepository
 from zenos.domain.repositories import CrmRepository
+from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS
 
 logger = logging.getLogger(__name__)
 
@@ -221,12 +222,12 @@ class CrmService:
         )
         company = await self._crm.create_company(company)
 
-        # Bridge: create ZenOS L1 entity
+        # Bridge: create ZenOS entity — level from DEFAULT_TYPE_LEVELS SSOT (ADR-047 S03)
         entity = await self._entities.upsert(Entity(
             id=_new_id(),
             name=company.name,
             type="company",
-            level=1,
+            level=DEFAULT_TYPE_LEVELS.get("company"),
             summary=f"{company.industry or '未分類'} · {company.region or ''}".strip(" ·"),
             tags=Tags(what=["company"], why="CRM 客戶公司", how="crm", who=["業務"]),
             confirmed_by_user=True,
@@ -282,12 +283,12 @@ class CrmService:
         )
         contact = await self._crm.create_contact(contact)
 
-        # Bridge: create ZenOS L1 entity (type=person)
+        # Bridge: create ZenOS entity — level from DEFAULT_TYPE_LEVELS SSOT (ADR-047 S03)
         entity = await self._entities.upsert(Entity(
             id=_new_id(),
             name=contact.name,
             type="person",
-            level=1,
+            level=DEFAULT_TYPE_LEVELS.get("person"),
             summary=f"{contact.title or '聯絡人'} @ {contact.company_id}",
             tags=Tags(what=["person"], why="CRM 聯絡人", how="crm", who=["業務"]),
             confirmed_by_user=True,
@@ -382,13 +383,13 @@ class CrmService:
 
         deal = await self._crm.create_deal(deal)
 
-        # Bridge: create ZenOS L1 entity (type=deal)
+        # Bridge: create ZenOS entity — level from DEFAULT_TYPE_LEVELS SSOT (ADR-047 S03)
         summary, crm_snapshot = self._build_deal_projection(deal, [], [])
         entity = await self._entities.upsert(Entity(
             id=_new_id(),
             name=deal.title,
             type="deal",
-            level=1,
+            level=DEFAULT_TYPE_LEVELS.get("deal"),
             summary=summary,
             details={"crm_snapshot": crm_snapshot},
             tags=Tags(what=["deal"], why="CRM 商機", how="crm", who=["業務"]),

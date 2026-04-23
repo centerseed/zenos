@@ -855,7 +855,7 @@ class TestWorkflowRuntime:
     def test_ac_mktg_34_intel_written_back(self):
         from zenos.application.marketing_runtime import intel_writeback
 
-        writeback = intel_writeback(self._intel(), project_id="proj-1", topic="跑步新手暖身")
+        writeback = intel_writeback(self._intel(), product_id="proj-1", topic="跑步新手暖身")
         assert writeback["document"]["doc_kind"] == "intel"
         assert writeback["entry"]["type"] == "insight"
 

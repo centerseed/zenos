@@ -453,6 +453,23 @@ class TestUpsertProtocolValidation:
             "content": {"what": {}, "why": {}, "how": {}, "who": {}},
         })
         assert result.entity_name == "Paceriz"
+        assert result.version == "1.0"
+
+    async def test_protocol_version_round_trips_as_revision_label(self):
+        repos = _mock_repos()
+        entity = Entity(
+            id="ent-1", name="Paceriz", type="product",
+            summary="X", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=entity)
+        svc = _make_service(repos)
+        result = await svc.upsert_protocol({
+            "entity_id": "ent-1",
+            "entity_name": "Paceriz",
+            "content": {"what": {}, "why": {}, "how": {}, "who": {}},
+            "version": "2.3",
+        })
+        assert result.version == "2.3"
 
 
 # ---------------------------------------------------------------------------
@@ -1076,7 +1093,7 @@ class TestTaskPriorityValidation:
         repos = _mock_repos()
         repos["entity_repo"].get_by_id = AsyncMock(
             return_value=Entity(
-                id="prod-1", name="ZenOS", type="product",
+                id="prod-1", name="ZenOS", type="product", level=1,
                 summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
             )
         )
@@ -1099,7 +1116,7 @@ class TestTaskPriorityValidation:
         repos = _mock_repos()
         repos["entity_repo"].get_by_id = AsyncMock(
             return_value=Entity(
-                id="prod-1", name="ZenOS", type="product",
+                id="prod-1", name="ZenOS", type="product", level=1,
                 summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
             )
         )
@@ -1123,7 +1140,7 @@ class TestTaskPriorityValidation:
         repos = _mock_repos()
         repos["entity_repo"].get_by_id = AsyncMock(
             return_value=Entity(
-                id="prod-1", name="ZenOS", type="product",
+                id="prod-1", name="ZenOS", type="product", level=1,
                 summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
             )
         )
@@ -1149,7 +1166,7 @@ class TestTaskSchemaAlignedValidation:
         repos = _mock_repos()
         repos["entity_repo"].get_by_id = AsyncMock(
             return_value=Entity(
-                id="prod-1", name="ZenOS", type="product",
+                id="prod-1", name="ZenOS", type="product", level=1,
                 summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
             )
         )
@@ -1173,7 +1190,7 @@ class TestTaskSchemaAlignedValidation:
         repos = _mock_repos()
         repos["entity_repo"].get_by_id = AsyncMock(
             return_value=Entity(
-                id="prod-1", name="ZenOS", type="product",
+                id="prod-1", name="ZenOS", type="product", level=1,
                 summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
             )
         )
@@ -1199,7 +1216,7 @@ class TestTaskSchemaAlignedValidation:
         repos = _mock_repos()
         repos["entity_repo"].get_by_id = AsyncMock(
             return_value=Entity(
-                id="prod-1", name="ZenOS", type="product",
+                id="prod-1", name="ZenOS", type="product", level=1,
                 summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
             )
         )
@@ -2001,10 +2018,12 @@ class TestCrossProductRelatedToGuard:
     """Verify that auto-inferred related_to across different products is silently skipped."""
 
     def _make_entity(self, id: str, name: str, type: str, parent_id: str | None = None) -> Entity:
+        from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS
         return Entity(
             id=id,
             name=name,
             type=type,
+            level=DEFAULT_TYPE_LEVELS.get(type),
             summary=f"Test {name}",
             tags=Tags(what=["test"], why="test", how="test", who=["test"]),
             parent_id=parent_id,
@@ -2550,7 +2569,7 @@ class TestGuestWriteGuard:
         entity_repo = AsyncMock()
         entity_repo.get_by_id = AsyncMock(
             return_value=Entity(
-                id="prod-1", name="ZenOS", type="product",
+                id="prod-1", name="ZenOS", type="product", level=1,
                 summary="Product", tags=Tags(what="x", why="x", how="x", who="x"),
             )
         )

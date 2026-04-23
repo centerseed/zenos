@@ -32,12 +32,17 @@ def _make_entity(
     entity_id: str | None = "e1",
     details: dict | None = None,
     updated_at: datetime | None = None,
+    level: int | None = None,
 ) -> Entity:
+    from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS
     now = updated_at or datetime(2026, 3, 1)
+    # Default level from SSOT if not provided (ADR-047 S03)
+    effective_level = level if level is not None else DEFAULT_TYPE_LEVELS.get(entity_type)
     return Entity(
         id=entity_id,
         name=name,
         type=entity_type,
+        level=effective_level,
         summary=summary,
         tags=Tags(what="test module", why="testing", how="automated", who="developer"),
         status=status,

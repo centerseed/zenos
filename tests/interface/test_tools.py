@@ -1678,7 +1678,7 @@ class TestTaskTool:
         try:
             with patch("zenos.interface.mcp.task_service") as mock_ts:
                 mock_ts.create_task = AsyncMock(return_value=create_result)
-                entity_repo.get_by_name = AsyncMock(return_value=_make_entity(id="prod-1", name="Paceriz"))
+                entity_repo.get_by_name = AsyncMock(return_value=_make_entity(id="prod-1", name="Paceriz", level=1))
 
                 await task(
                     action="create",

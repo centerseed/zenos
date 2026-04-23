@@ -1,18 +1,21 @@
 from __future__ import annotations
 
-from zenos.domain.knowledge.enums import EntityType
-
-
-COLLABORATION_ROOT_TYPES = {
-    EntityType.PRODUCT.value,
-    EntityType.COMPANY.value,
-}
-
 
 def is_collaboration_root_entity(entity: object | None) -> bool:
+    """Return True iff the entity is a collaboration root (L1).
+
+    An entity is L1 when level == 1 AND parent_id is absent or empty.
+    Type is irrelevant — any EntityType label is valid for L1 (ADR-047 D2).
+
+    Args:
+        entity: Any object with optional ``level`` and ``parent_id``/``parentId``
+                attributes, or None.
+
+    Returns:
+        True if the entity is a valid L1 collaboration root.
+    """
     if entity is None:
         return False
-    entity_type = getattr(entity, "type", None)
-    parent_id = getattr(entity, "parent_id", getattr(entity, "parentId", None))
     level = getattr(entity, "level", None)
-    return entity_type in COLLABORATION_ROOT_TYPES and not parent_id and (level == 1 or level is None)
+    parent_id = getattr(entity, "parent_id", getattr(entity, "parentId", None))
+    return level == 1 and not parent_id

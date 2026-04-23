@@ -25,6 +25,7 @@ def _make_task_service() -> TaskService:
             id="prod-1",
             name="ZenOS",
             type=EntityType.PRODUCT,
+            level=1,
             summary="test",
             tags=Tags(what=[], why="", how="", who=[]),
             status="active",

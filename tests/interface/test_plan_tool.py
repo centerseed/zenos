@@ -59,7 +59,7 @@ def mock_plan_service():
 async def test_create_plan_returns_ok(mock_plan_service):
     plan = _make_plan()
     mock_plan_service.create_plan = AsyncMock(return_value=plan)
-    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product")))
+    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product", level=1, parent_id=None)))
 
     with patch(_PLAN_SVC, mock_plan_service), \
          patch(_ENSURE, new=AsyncMock()), \
@@ -85,7 +85,7 @@ async def test_create_plan_rejects_missing_goal():
 async def test_create_plan_uses_default_project_from_partner(mock_plan_service):
     plan = _make_plan(project="ZenOS")
     mock_plan_service.create_plan = AsyncMock(return_value=plan)
-    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product")))
+    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product", level=1, parent_id=None)))
 
     with patch(_PLAN_SVC, mock_plan_service), \
          patch(_ENSURE, new=AsyncMock()), \
@@ -116,7 +116,7 @@ async def test_create_plan_passes_product_id_when_provided(mock_plan_service):
 async def test_create_plan_resolves_product_id_from_default_project(mock_plan_service):
     plan = _make_plan(product_id="prod-1")
     mock_plan_service.create_plan = AsyncMock(return_value=plan)
-    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product")))
+    entity_repo = SimpleNamespace(get_by_name=AsyncMock(return_value=SimpleNamespace(id="prod-1", type="product", level=1, parent_id=None)))
 
     with patch(_PLAN_SVC, mock_plan_service), \
          patch(_ENSURE, new=AsyncMock()), \

@@ -104,7 +104,7 @@ def test_intel_writeback_returns_document_and_entry():
             keyword_trends=["跑步暖身"],
             high_performing_examples=["爆文"],
         ),
-        project_id="proj-1",
+        product_id="proj-1",
         topic="跑步新手暖身",
     )
     assert payload["document"]["doc_kind"] == "intel"
