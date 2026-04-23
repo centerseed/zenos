@@ -4,12 +4,16 @@ id: ADR-007-entity-architecture
 status: Approved
 ontology_entity: TBD
 created: 2026-03-23
-updated: 2026-03-27
+updated: 2026-04-23
+superseded_sections:
+  - "L1 單一 type 定義"（2026-04-23 由 ADR-047 改為 level-based 判定；type 降為 UI label）
 ---
 
 # ADR-007: Entity 架構決策
 
 > 從 `docs/spec.md` Part 7.2 搬出。
+> **2026-04-23 update：** L1 的「product 單一 type」定義已由 ADR-047 supersede。
+> 實際判定走 `level == 1 AND parent_id IS NULL`；type（product/company/person/…）為 UI 識別 label，不再作為業務邏輯的 gate。
 
 
 ### Ontology 就是 Entity 的總和
@@ -26,9 +30,10 @@ Firestore
 ### Entity 分層
 
 ```
-第一層（基礎）    product          ← 每間公司一定有
+第一層（共享根）  level=1 任何 type   ← 預設 label=product；CRM 擴充含 company/person/deal
+                                        判定走 level，不走 type（ADR-047）
 第二層（治理概念）module + governance concepts
-                  ← product 底下的長期共識概念，可是業務模組也可是治理節點
+                  ← L1 底下的長期共識概念，可是業務模組也可是治理節點
 第三層（應用）    document         ← 高價值文件的語意代理
                   goal             ← 公司或產品的目標
                   role             ← 職能角色
@@ -36,6 +41,9 @@ Firestore
 ```
 
 第一、二層是每間公司的基礎建設，30 分鐘對話就能建立。第三層按需生長。
+
+> **L1 的本質（ADR-047）：** L1 是「共享邊界」（collaboration root）——可以整棵子樹分享給別的用戶的底層節點。
+> 所有 L1 entity 一律透過 `product_id` 當 API 語彙，無論 type 是什麼；UI 可用 type 決定 icon / 分類顯示，但不過濾。
 
 ### Entity 的邊界
 

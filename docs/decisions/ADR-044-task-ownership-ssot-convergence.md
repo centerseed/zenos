@@ -4,11 +4,21 @@ id: ADR-044
 status: Draft
 ontology_entity: action-layer
 created: 2026-04-22
-updated: 2026-04-22
+updated: 2026-04-23
 supersedes: null
+superseded_sections:
+  - "D2 type=product 檢查"（2026-04-23 由 ADR-047 改為 L1 level 檢查）
+  - "D4/D5 project 字串 deprecated + PROJECT_STRING_IGNORED"（2026-04-23 由 ADR-047 完全移除，caller 傳 project_id 或 project 字串都直接 reject）
 ---
 
 # ADR-044：Task Ownership SSOT 收斂（product_id 必填）
+
+> **2026-04-23 update（由 ADR-047 supersede 指定段落）：**
+> - D2 的「type=product 檢查」改為「L1 root 檢查」（`level=1 AND parent_id=null`，type 不限）
+> - D3 `linked_entities` strip 規則改為「含 L1 entity」（不再特指 type=product）
+> - D4/D5 的 `project` 字串過渡期結束：MCP tool 完全移除 `project_id` 參數與 `project` 字串回寫；`PROJECT_STRING_IGNORED` warning 不再存在
+> - D6 fallback SQL 的 `type = 'product'` 改為 `level = 1`
+> - 以下原文保留作為歷史追溯；實作請以 ADR-047 / 更新後的 SPEC-task-governance 為準
 
 ## Context
 
