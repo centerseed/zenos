@@ -12,7 +12,7 @@
 mcp__zenos__search(collection="entities", query="{產品名}", entity_level="L1")
 ```
 
-- 找到 `type=product` 的 entity → 記下 `PRODUCT_ID` 和 `PRODUCT_NAME`
+- 找到 level=1 且無 parent 的 L1 entity → 記下 `PRODUCT_ID` 和 `PRODUCT_NAME`
 - 找不到 → **停下來問用戶**：「找不到產品 {名稱}，要先建立嗎？」
 - 用戶確認後才建立 product entity，拿到 `PRODUCT_ID`
 

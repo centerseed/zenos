@@ -173,8 +173,7 @@ mcp__zenos__plan(
 |------|------|------------|
 | 沒傳 `product_id` 也無 `partner.defaultProject` 可解析 | reject | `MISSING_PRODUCT_ID` |
 | `product_id` 指向不存在 / 非 product 類 entity | reject | `INVALID_PRODUCT_ID` |
-| `linked_entities` 含 type=product 的 entity | strip + warning | `LINKED_ENTITIES_PRODUCT_STRIPPED` |
-| 同時傳 `project` 字串和 `product_id` 但對不上 | 以 `product_id` 為準 + warning | `PROJECT_STRING_IGNORED` |
+| `linked_entities` 含 L1 entity | strip + warning | `LINKED_ENTITIES_PRODUCT_STRIPPED` |
 | `subtask.product_id` ≠ `parent.product_id` | reject | `CROSS_PRODUCT_SUBTASK` |
 | `subtask.plan_id` ≠ `parent.plan_id` | reject | `CROSS_PLAN_SUBTASK` |
 | `task.product_id` ≠ `plan.product_id`（task 有 plan_id） | reject | `CROSS_PRODUCT_PLAN_TASK` |
@@ -199,7 +198,7 @@ mcp__zenos__plan(
 
 ## linked_entities 使用規則
 
-- **禁止含 type=product 的 entity**（歸屬由 product_id 表達，放這裡會被 server strip）
+- **禁止含 L1 entity**（歸屬由 product_id 表達，放這裡會被 server strip）
 - 上限 1-3 個（4+ 通常代表粒度太大）
 - 只放 **L2 module / L3 entity**（goal=milestone / document / role）
 - 先 search 找到 entity ID 再填

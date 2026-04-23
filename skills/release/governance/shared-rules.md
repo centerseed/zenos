@@ -124,7 +124,7 @@ linked_entities 是否指向同組核心節點。有重複就 update，不要開
 mcp__zenos__search(query="節點名稱", collection="entities", entity_level="L2")
 ```
 
-- **禁止含 type=product entity**（server 會 strip + warning `LINKED_ENTITIES_PRODUCT_STRIPPED`）
+- **禁止含 L1 entity**（server 會 strip + warning `LINKED_ENTITIES_PRODUCT_STRIPPED`）
 - Server 會 reject 不存在的 ID（不會 silently drop）
 - 找不到穩定對應節點時，在 description 標注 `[Ontology Gap: 缺少 XXX 對應節點]`，不要亂掛
 - 推薦上限：1-3 個。4 個以上通常代表粒度太大
