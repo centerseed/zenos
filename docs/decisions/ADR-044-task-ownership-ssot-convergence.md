@@ -7,8 +7,8 @@ created: 2026-04-22
 updated: 2026-04-23
 supersedes: null
 superseded_sections:
-  - "D2 type=product 檢查"（2026-04-23 由 ADR-047 改為 L1 level 檢查）
-  - "D4/D5 project 字串 deprecated + PROJECT_STRING_IGNORED"（2026-04-23 由 ADR-047 完全移除，caller 傳 project_id 或 project 字串都直接 reject）
+  - "D2 type=product 檢查（2026-04-23 由 ADR-047 改為 L1 level 檢查）"
+  - "D4/D5 project 字串 deprecated + PROJECT_STRING_IGNORED（2026-04-23 由 ADR-047 完全移除，caller 傳 project_id 或 project 字串都直接 reject）"
 ---
 
 # ADR-044：Task Ownership SSOT 收斂（product_id 必填）

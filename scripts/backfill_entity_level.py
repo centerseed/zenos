@@ -245,7 +245,15 @@ async def run_apply(
     conn: asyncpg.Connection,
     snapshot_path: str,
     output_path: str | None,
-) -> None:
+) -> int:
+    """Apply backfill updates.
+
+    Returns the process exit code:
+      0 — all NULL levels resolved, GATE A exit criteria satisfied
+      3 — partial success: some rows had unresolvable types and remain NULL;
+          GATE A exit criteria NOT satisfied; operator must manually resolve
+          before deploying strict-level code.
+    """
     rows = await fetch_null_level_rows(conn)
     resolvable, unresolvable = classify_rows(rows)
 
@@ -266,13 +274,32 @@ async def run_apply(
 
     report = build_apply_report(rows, resolvable, unresolvable, updated, snapshot_path)
     emit_report(report, output_path)
+
+    if unresolvable:
+        print(
+            f"\n[APPLY] INCOMPLETE: Updated {updated} rows but {len(unresolvable)} entity/entities "
+            "still have level IS NULL (unresolvable types).  GATE A exit criteria NOT satisfied — "
+            "strict-level code MUST NOT be deployed until these are manually resolved.  "
+            f"Snapshot at {snapshot_path}.",
+            file=sys.stderr,
+        )
+        return 3
+
     print(
-        f"\n[APPLY] Done. Updated {updated} rows. Snapshot at {snapshot_path}.",
+        f"\n[APPLY] Done. Updated {updated} rows. All NULL levels resolved. "
+        f"Snapshot at {snapshot_path}.",
         file=sys.stderr,
     )
+    return 0
 
 
-async def main(args: argparse.Namespace) -> None:
+async def main(args: argparse.Namespace) -> int:
+    """Returns process exit code.
+
+    0 — success
+    1 — missing DATABASE_URL
+    3 — apply completed but unresolvable rows remain (GATE A not satisfied)
+    """
     database_url = os.environ.get("DATABASE_URL")
     if not database_url:
         print(
@@ -280,15 +307,16 @@ async def main(args: argparse.Namespace) -> None:
             "Example: DATABASE_URL=postgresql://user:pass@host/db",  # pragma: allowlist secret
             file=sys.stderr,
         )
-        sys.exit(1)
+        return 1
 
     conn: asyncpg.Connection = await asyncpg.connect(database_url)
     try:
         if args.dry_run:
             await run_dry_run(conn, args.output)
+            return 0
         else:
             # apply mode — snapshot_path is validated before we get here
-            await run_apply(conn, args.snapshot_path, args.output)
+            return await run_apply(conn, args.snapshot_path, args.output)
     finally:
         await conn.close()
 
@@ -342,4 +370,4 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     args = parse_args()
-    asyncio.run(main(args))
+    sys.exit(asyncio.run(main(args)))

@@ -6,7 +6,7 @@ ontology_entity: TBD
 created: 2026-03-23
 updated: 2026-04-23
 superseded_sections:
-  - "L1 單一 type 定義"（2026-04-23 由 ADR-047 改為 level-based 判定；type 降為 UI label）
+  - "L1 單一 type 定義（2026-04-23 由 ADR-047 改為 level-based 判定；type 降為 UI label）"
 ---
 
 # ADR-007: Entity 架構決策

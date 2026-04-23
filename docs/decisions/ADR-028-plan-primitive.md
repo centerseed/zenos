@@ -9,7 +9,7 @@ date: 2026-04-10
 updated: 2026-04-23
 supersedes: null
 superseded_sections:
-  - "project_id 欄位命名"（2026-04-22 由 ADR-044 rename 為 product_id；2026-04-23 由 ADR-047 定義為指向任何 L1 entity）
+  - "project_id 欄位命名（2026-04-22 由 ADR-044 rename 為 product_id；2026-04-23 由 ADR-047 定義為指向任何 L1 entity）"
 ---
 
 > **2026-04-23 update：**

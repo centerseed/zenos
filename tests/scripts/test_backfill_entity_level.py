@@ -138,7 +138,7 @@ def test_dry_run_does_not_mutate_db() -> None:
 # ---------------------------------------------------------------------------
 
 def test_apply_updates_inferable_entities(tmp_path: Path) -> None:
-    """Apply mode issues one UPDATE per resolvable row with the correct level."""
+    """Apply mode issues one UPDATE per resolvable row with the correct level; exit 0 when clean."""
     rows = [
         _make_row("e1", "product"),
         _make_row("e2", "module"),
@@ -147,10 +147,11 @@ def test_apply_updates_inferable_entities(tmp_path: Path) -> None:
     conn = _make_conn(rows)
     snap = tmp_path / "snap.jsonl"
 
-    async def _run() -> None:
-        await bfe.run_apply(conn, str(snap), None)
+    async def _run() -> int:
+        return await bfe.run_apply(conn, str(snap), None)
 
-    asyncio.run(_run())
+    exit_code = asyncio.run(_run())
+    assert exit_code == 0, "run_apply must return 0 when all rows resolvable"
 
     # Three entities, all resolvable → three UPDATEs
     assert conn.execute.call_count == 3
@@ -174,7 +175,7 @@ def test_apply_updates_inferable_entities(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def test_apply_skips_unresolvable_types(tmp_path: Path) -> None:
-    """Unknown types must NOT be updated and must appear in skipped_unresolvable."""
+    """Unknown types must NOT be updated, must appear in skipped_unresolvable, AND exit code = 3 (GATE A fail)."""
     rows = [
         _make_row("good1", "company"),
         _make_row("bad1", "widget"),
@@ -184,10 +185,14 @@ def test_apply_skips_unresolvable_types(tmp_path: Path) -> None:
     snap = tmp_path / "snap.jsonl"
     report_file = tmp_path / "report.json"
 
-    async def _run() -> None:
-        await bfe.run_apply(conn, str(snap), str(report_file))
+    async def _run() -> int:
+        return await bfe.run_apply(conn, str(snap), str(report_file))
 
-    asyncio.run(_run())
+    exit_code = asyncio.run(_run())
+    assert exit_code == 3, (
+        "run_apply must return non-zero (3) when unresolvable rows remain — "
+        "GATE A exit criteria not satisfied"
+    )
 
     # Only one UPDATE — for the resolvable "company" row
     assert conn.execute.call_count == 1
@@ -402,10 +407,9 @@ def test_parse_command_tag_count_edge_cases() -> None:
 
 
 def test_apply_refuses_without_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
-    """main() exits non-zero when DATABASE_URL is not set."""
+    """main() returns non-zero when DATABASE_URL is not set."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
 
     ns = bfe.parse_args(["--dry-run"])
-    with pytest.raises(SystemExit) as exc_info:
-        asyncio.run(bfe.main(ns))
-    assert exc_info.value.code != 0
+    exit_code = asyncio.run(bfe.main(ns))
+    assert exit_code == 1, "main() must return 1 when DATABASE_URL is missing"

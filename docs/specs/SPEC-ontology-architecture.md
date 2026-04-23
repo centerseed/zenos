@@ -6,7 +6,7 @@ ontology_entity: TBD
 created: 2026-03-21
 updated: 2026-04-23
 superseded_sections:
-  - "L1 = product 單一 type"（2026-04-23 由 ADR-047 改為 level-based 判定）
+  - "L1 = product 單一 type（2026-04-23 由 ADR-047 改為 level-based 判定）"
 ---
 
 # ZenOS Knowledge Ontology 架構
