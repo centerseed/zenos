@@ -2,10 +2,13 @@
 type: SPEC
 id: SPEC-task-communication-sync
 status: Draft
-ontology_entity: action-layer
+ontology_entity: l3-action
 created: 2026-03-30
-updated: 2026-04-19
+updated: 2026-04-23
+depends_on: SPEC-task-governance, SPEC-task-view-clarity, SPEC-crm-core
 ---
+
+> **Layering note（2026-04-23）**：本 SPEC 僅定義 task 詳情頁的「知識對齊 UI」（context card / input provenance / cross-platform sync indicator）。task schema / lifecycle canonical 在 `SPEC-task-governance`；`linked_entities` 掛載規則見 `SPEC-task-governance §8`。
 
 # Feature Spec: Task 通訊同步與知識對齊 (Lowering Communication Cost)
 

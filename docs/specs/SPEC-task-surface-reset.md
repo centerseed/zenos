@@ -1,16 +1,14 @@
 ---
 type: SPEC
 id: SPEC-task-surface-reset
-doc_id: SPEC-task-surface-reset
-title: Feature Spec: Task Surface Reset
-status: draft
-version: "0.1"
-date: 2026-04-22
-supersedes: null
-l2_entity: action-layer
+status: Draft
+ontology_entity: l3-action
 created: 2026-04-22
-updated: 2026-04-22
+updated: 2026-04-23
+depends_on: SPEC-task-view-clarity, SPEC-task-kanban-operations, SPEC-task-governance, SPEC-project-progress-console, SPEC-dashboard-ai-rail
 ---
+
+> **Layering note（2026-04-23）**：本 SPEC 定義 **task-related screens 的責任邊界**（Task Hub / Product Console / Task Detail / AI Rail），不重定義 task schema、status 或 lifecycle——那些 canonical 在 `SPEC-task-governance §3` + `SPEC-ontology-architecture v2 §9`。舊 refactor-index 曾把本檔標為 DELETE（被 task-governance 取代），此判斷不成立：本 SPEC 是 UI 層，與 task-governance 的 L3-Action 治理正交。
 
 # Feature Spec: Task Surface Reset
 

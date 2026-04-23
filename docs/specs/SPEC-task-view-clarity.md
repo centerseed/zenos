@@ -2,12 +2,19 @@
 type: SPEC
 id: SPEC-task-view-clarity
 status: Under Review
-l2_entity: action-layer
+ontology_entity: l3-action
 created: 2026-03-27
-updated: 2026-04-19
+updated: 2026-04-23
+depends_on: SPEC-task-governance, SPEC-mcp-tool-contract, SPEC-task-surface-reset
+runtime_canonical:
+  - dashboard/src/types/index.ts:191 (TaskStatus = "todo" | "in_progress" | "review" | "done" | "cancelled")
+  - dashboard/src/lib/task-risk.ts (overdue / upcoming / idle 判定)
+  - SPEC-mcp-tool-contract §9 (legacy status normalization backlog|blocked → todo, archived → done)
 ---
 
 # Feature Spec: Task 畫面可讀性與跨專案狀態清晰化
+
+> **Layering note（2026-04-23 revision）**：本 SPEC 僅定義 `/tasks` 畫面可讀性規則。Canonical task status 以 `SPEC-task-governance §3.1` + runtime `dashboard/src/types/index.ts:191` 為準，**只有 5 個值**：`todo / in_progress / review / done / cancelled`。舊 legacy 值 `backlog / blocked / archived` 已於 MCP 層由 server normalize（`SPEC-mcp-tool-contract §9.2`），UI 不再處理。
 
 ## 背景與動機
 
@@ -23,7 +30,7 @@ updated: 2026-04-19
 1. 讓使用者在 30 秒內看懂「未完成任務全貌」。
 2. 讓使用者可直接比較不同專案的任務狀態，不需離開 `/tasks`。
 3. 讓每一個數字都可追溯到同一批資料，避免各區塊定義不一致。
-4. 保持 Task 治理語義一致：`done/archived/cancelled` 與「待處理」必須明確分離。
+4. 保持 Task 治理語義一致：`done / cancelled`（closed）與「待處理」（open）必須明確分離。
 
 ## 非目標
 
@@ -36,21 +43,26 @@ updated: 2026-04-19
 
 - 每日查看任務盤點的 PM / owner
 - 需要跨專案協作的執行者與 reviewer
-- 需要快速判斷風險（blocked/overdue/review 堵塞）的管理者
+- 需要快速判斷風險（overdue / idle_todo / review 堵塞）的管理者
 
 ## 現況問題定義（As-Is）
 
 1. `Pulse` 與 `Kanban` 切換缺少明確預設意圖，首次進入不易理解下一步操作。
-2. `Kanban` 欄位目前只呈現 `todo/in_progress/review/blocked/backlog`，看板視角看不到 `done/cancelled/archived` 的規模。
+2. `Kanban` 欄位歷史上只呈現「進行中」狀態集，看板視角看不到終態（`done / cancelled`）的規模。
 3. 畫面缺少 `project` 維度的一級摘要，使用者看不到「同狀態在不同專案的差異」。
 4. 各區塊（Pulse 指標、ProjectProgress、PeopleMatrix、ActivityTimeline）對「活躍 task」與「完成 task」的口徑雖接近，但未被明文化為同一規則。
 
 ## 名詞與判斷定義
 
-- `待處理`：`backlog,todo,in_progress,review,blocked`
-- `完成/結束`：`done,cancelled,archived`
-- `overdue`：task 的 `dueDate` 存在，且時間早於當前時間，且 task 狀態不屬於 `done,cancelled,archived`。
-- `專案未指定`：`task.project=""`，必須顯示為固定 bucket `unscoped`。
+Canonical `TaskStatus` 5 值（`SPEC-task-governance §3.1` / runtime `dashboard/src/types/index.ts:191`）：`todo / in_progress / review / done / cancelled`。
+
+- `待處理（open）`：`todo, in_progress, review`
+- `完成/結束（closed）`：`done, cancelled`
+  - 對應 runtime `dashboard/src/lib/task-risk.ts:5` 的 `CLOSED_STATUSES`（程式碼端因歷史兼容仍接受 `archived`，server 端已於 `SPEC-mcp-tool-contract §9.2` 將 `archived → done` normalize；UI 判定時 `archived` 與 `done` 同視）
+- `overdue`：task 的 `dueDate` 存在，且時間早於當前時間，且狀態不屬於 `closed`（`task-risk.ts:13-18`）
+- `upcoming`：task 的 `dueDate` 在未來 3 天內，狀態不屬於 `closed`（`task-risk.ts:20-26`）
+- `idle_todo`：`status=todo` + 有 assignee + `updatedAt` 超過 48h（`task-risk.ts:28-33`）
+- `專案未指定`：`task.project=""`，必須顯示為固定 bucket `unscoped`
 
 ## 需求（含優先級與對應驗收）
 
@@ -60,28 +72,28 @@ updated: 2026-04-19
 - 若某區塊採不同分母，必須在畫面上標示分母定義。
 
 AC-R1:
-1. Given 同一批 task 資料  
-   When 同時檢查摘要總數與看板欄位  
-   Then `待處理總數` 必須等於 `backlog+todo+in_progress+review+blocked` 欄位總和。
-2. Given 任一統計卡片與任務列表  
-   When 套用同一篩選條件  
+1. Given 同一批 task 資料
+   When 同時檢查摘要總數與看板欄位
+   Then `待處理總數` 必須等於 `todo + in_progress + review` 欄位總和（canonical 5-status，不含 closed）。
+2. Given 任一統計卡片與任務列表
+   When 套用同一篩選條件
    Then 卡片數字與列表數字必須一致。
 
 ### P0-2（R2）跨專案狀態摘要
 
-- `/tasks` 畫面必須提供「專案 x 狀態」摘要區，至少顯示每個 `task.project` 在 `backlog,todo,in_progress,review,blocked,done` 的數量。
-- 摘要區必須以可見欄位直接呈現風險：每個專案顯示 `blocked` 與 `overdue` 計數；不得只靠顏色暗示。
+- `/tasks` 畫面必須提供「專案 x 狀態」摘要區，至少顯示每個 `task.project` 在 canonical 5 狀態（`todo / in_progress / review / done / cancelled`）的數量。
+- 摘要區必須以可見欄位直接呈現風險：每個專案顯示 `overdue`（§名詞定義）與 `idle_todo` 計數；不得只靠顏色暗示。
 - `task.project=""` 必須歸入 `unscoped` 並顯示計數。
 
 AC-R2:
-1. Given 至少兩個不同 `task.project`  
-   When 進入 `/tasks`  
-   Then 摘要區必須同時顯示兩個專案的狀態分布。
-2. Given 某專案有 blocked 與 overdue 任務  
-   When 查看摘要區  
-   Then 該專案列必須同時顯示 blocked 與 overdue 的具體數字。
-3. Given 有 `task.project=""` 的任務  
-   When 查看摘要區  
+1. Given 至少兩個不同 `task.project`
+   When 進入 `/tasks`
+   Then 摘要區必須同時顯示兩個專案的 canonical 5 狀態分布。
+2. Given 某專案有 `overdue` 與 `idle_todo` 任務
+   When 查看摘要區
+   Then 該專案列必須同時顯示兩者的具體數字。
+3. Given 有 `task.project=""` 的任務
+   When 查看摘要區
    Then 必須出現 `unscoped` 列，且數量可對回任務列表。
 
 ### P0-3（R3）主視圖預設與導覽
@@ -100,17 +112,17 @@ AC-R3:
 ### P1-1（R4）Kanban 可觀測性補齊
 
 - Kanban 必須支援「待處理視圖」與「全狀態視圖」切換。
-- 待處理視圖只顯示 `backlog,todo,in_progress,review,blocked`。
-- 全狀態視圖額外顯示 `done,cancelled,archived`。
+- 待處理視圖只顯示 `todo, in_progress, review`（§名詞的 `open`）。
+- 全狀態視圖額外顯示 `done, cancelled`（`closed`）。
 - 任一狀態被隱藏時，必須有可見提示，不得讓使用者誤判資料不存在。
 
 AC-R4:
-1. Given Kanban 在待處理視圖  
-   When 檢查欄位  
-   Then 不得顯示 `done,cancelled,archived` 欄位，且須看到「已隱藏已完成狀態」等同級提示。
-2. Given 切換為全狀態視圖  
-   When 檢查欄位  
-   Then 必須顯示 `done,cancelled,archived`。
+1. Given Kanban 在待處理視圖
+   When 檢查欄位
+   Then 不得顯示 `done / cancelled` 欄位，且須看到「已隱藏已完成狀態」等同級提示。
+2. Given 切換為全狀態視圖
+   When 檢查欄位
+   Then 必須顯示全部 5 個 canonical 欄位（`todo / in_progress / review / done / cancelled`）。
 
 ### P1-2（R5）篩選與計數一致性
 
@@ -192,10 +204,10 @@ AC-R8:
 
 每位使用者進入 `/tasks` 時，第一屏頂部顯示個人化晨報區塊，只呈現與當前使用者相關的風險任務。
 
-顯示三個 bucket：
-- **即將到期**：assigned to me，due_date 在未來 3 天內，狀態非 done/cancelled/archived
-- **已逾期**：assigned to me，due_date < now，狀態非 done/cancelled/archived
-- **建的任務—無人動**：created by me，assignee 已指定，status 仍為 todo，updated_at 超過 48h
+顯示三個 bucket（對齊 `task-risk.ts` 判定）：
+- **即將到期**：assigned to me，due_date 在未來 3 天內，狀態 ∈ `open`（即非 `closed`）
+- **已逾期**：assigned to me，due_date < now，狀態 ∈ `open`
+- **建的任務—無人動**：created by me，assignee 已指定，status 仍為 `todo`，updated_at 超過 48h（對齊 `task-risk.ts:28-33` 的 `getIdleTodoHours`）
 
 AC-R9:
 1. Given 使用者登入，When 進入 `/tasks`，Then 晨報區塊顯示在第一屏，內容僅包含當前使用者相關任務。
@@ -207,15 +219,15 @@ AC-R9:
 
 TaskCard 上直接顯示到期與停滯的視覺警示 badge，不需點開詳情即可判斷風險。
 
-- **逾期**：due_date < now，狀態非 done/cancelled/archived → 紅色「逾期 N 天」
-- **即將到期**：due_date 在未來 3 天內，狀態非 done/cancelled/archived → 橘色「N 天後到期」
-- **未開始**：status = todo，assignee 存在，updated_at > 48h → 灰色「未開始 Nh」
+- **逾期**：due_date < now，狀態 ∈ `open` → 紅色「逾期 N 天」（runtime `task-risk.ts:41-53`）
+- **即將到期**：due_date 在未來 3 天內，狀態 ∈ `open` → 橘色「N 天後到期」（runtime `task-risk.ts:54-60`）
+- **未開始**：status = `todo`，assignee 存在，updated_at > 48h → 灰色「未開始 Nh」（runtime `task-risk.ts:62-68`）
 
 AC-R10:
-1. Given task 的 due_date 在 2 天後，status = in_progress，When 在 Kanban 檢視，Then 卡片顯示橘色「2 天後到期」badge。
-2. Given task 的 due_date 在昨天，status = todo，When 在 Kanban 檢視，Then 卡片顯示紅色「逾期 1 天」badge。
-3. Given task status = todo，assignee 存在，updated_at = 72h 前，When 在 Kanban 檢視，Then 卡片顯示灰色「未開始 72h」badge。
-4. Given task 狀態為 done/cancelled/archived，When 在 Kanban 檢視，Then 不顯示任何風險 badge，無論 due_date 為何。
+1. Given task 的 due_date 在 2 天後，status = `in_progress`，When 在 Kanban 檢視，Then 卡片顯示橘色「2 天後到期」badge。
+2. Given task 的 due_date 在昨天，status = `todo`，When 在 Kanban 檢視，Then 卡片顯示紅色「逾期 1 天」badge。
+3. Given task status = `todo`，assignee 存在，updated_at = 72h 前，When 在 Kanban 檢視，Then 卡片顯示灰色「未開始 72h」badge。
+4. Given task 狀態 ∈ `closed`（`done / cancelled`，server 已將 legacy `archived` normalize 為 `done`），When 在 Kanban 檢視，Then 不顯示任何風險 badge，無論 due_date 為何。
 
 ### P0-7（R11）Richer Task Context 可見性
 

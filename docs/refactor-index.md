@@ -93,10 +93,10 @@ created: 2026-04-23
 
 | # | Spec | Action |
 |---|------|--------|
-| 31 | `SPEC-task-view-clarity` | **REVISE** per-subclass 顯示規則 |
-| 32 | `SPEC-task-kanban-operations` | **REVISE** |
-| 33 | `SPEC-task-surface-reset` | **DELETE** 已完成 + 內容被新 SPEC-task-governance 取代 |
-| 34 | `SPEC-task-communication-sync` | **REVISE** |
+| 31 | `SPEC-task-view-clarity` | ✅ **REVISED** | frontmatter 標準化（`l2_entity` → `ontology_entity: l3-action`，補 runtime_canonical 三條：`dashboard/src/types/index.ts:191` / `lib/task-risk.ts` / `SPEC-mcp-tool-contract §9`）；**legacy status enum 全清**：`backlog / blocked / archived` → canonical 5-state；§名詞重寫 `open / closed / overdue / upcoming / idle_todo`（對齊 `task-risk.ts`）；AC-R1/R2/R4/R9/R10 全部改用 canonical 5-state |
+| 32 | `SPEC-task-kanban-operations` | ✅ **REVISED** | frontmatter 標準化；R6 Review 流程修正：Approve 必須走 `confirm(accepted=True)` 而非 `task.update status=done`（`SPEC-mcp-tool-contract §8.5`）；Reject 的 `rejection_reason` 改必填（canonical `task_service.py:664-665`），退回 dispatcher 語意依 §9 actual behaviour；R8 禁止「todo 直接跳 done」強制選項（server 會擋），補終態 immutable 規則 |
+| 33 | `SPEC-task-surface-reset` | ✅ **KEPT + aligned**（撤回原 DELETE 判斷）| frontmatter 從 mixed（`doc_id / title / version / date / l2_entity`）收斂為標準格式；加 Layering note 說明本 SPEC 是 UI screen boundary，**與 task-governance 正交**；舊索引判斷本檔被 task-governance 取代不成立（該 SPEC 2026-04-22 新建晚於索引） |
+| 34 | `SPEC-task-communication-sync` | ✅ **REVISED** | frontmatter `ontology_entity: action-layer → l3-action`；補 Layering note + depends_on |
 
 ---
 

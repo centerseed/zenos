@@ -2,10 +2,17 @@
 type: SPEC
 id: SPEC-task-kanban-operations
 status: Under Review
-l2_entity: action-layer
+ontology_entity: l3-action
 created: 2026-03-31
-updated: 2026-04-19
+updated: 2026-04-23
+depends_on: SPEC-task-view-clarity, SPEC-task-governance, SPEC-mcp-tool-contract
+runtime_canonical:
+  - dashboard/src/types/index.ts:191 (TaskStatus 5-value canonical)
+  - SPEC-mcp-tool-contract §8.5 (task action contract)
+  - SPEC-task-governance §4 (dispatcher & handoff chain)
 ---
+
+> **Layering note（2026-04-23 revision）**：本 SPEC 的狀態值語意以 `SPEC-task-governance §3` 為準；MCP 呼叫格式以 `SPEC-mcp-tool-contract §8.5 / §8.6` 為準。拖曳合法轉換仍以 server 狀態機 enforce 為真。
 
 # Feature Spec: Task Kanban 操作能力
 
@@ -73,11 +80,11 @@ updated: 2026-04-19
 
 #### R6：Review 流程 — Approve / Reject
 
-- **描述**：當任務狀態為 `review` 時，reviewer 可以在 Detail Drawer 中執行 approve 或 reject 操作。
+- **描述**：當任務狀態為 `review` 時，reviewer 可以在 Detail Drawer 中執行 approve 或 reject 操作。UI 必須透過 `confirm(collection="tasks", ...)` 而非 `task(action="update", status=...)`——`done` 狀態不得由 `task.update` 直接設置（`SPEC-mcp-tool-contract §8.5`）。
 - **Acceptance Criteria**：
   - Given 任務狀態為 `review`，When 在 Detail Drawer 查看，Then 必須可見「Approve」與「Reject」按鈕。
-  - Given 使用者點擊 Approve，When 確認，Then 任務狀態變為 `done`。
-  - Given 使用者點擊 Reject，When 操作，Then 顯示 rejection reason 輸入框（選填），提交後任務狀態回到 `in_progress`。
+  - Given 使用者點擊 Approve，When 確認，Then UI 呼叫 `confirm(collection="tasks", id=X, accepted=True)`（或可附 `entity_entries` 做知識回饋，見 `SPEC-task-governance §11`）；server 將 `review → done` 並 append terminal HandoffEvent。
+  - Given 使用者點擊 Reject，When 操作，Then 顯示 `rejection_reason` 輸入框（**必填**，canonical: `task_service.py:664-665`；空字串 server reject），送出後 UI 呼叫 `confirm(collection="tasks", id=X, accepted=False, rejection_reason="...")`；server 將 `review → in_progress`，append HandoffEvent（`to_dispatcher = task.dispatcher or "human"`；**不自動改派 developer**，見 `SPEC-task-governance §9`）。
   - Given 任務狀態不是 `review`，When 在 Detail Drawer 查看，Then 不顯示 Approve / Reject 按鈕。
 
 #### R7：Handoff 補齊 output_ref
@@ -93,10 +100,20 @@ updated: 2026-04-19
 
 #### R8：狀態轉換規則提示
 
-- **描述**：當使用者嘗試不合理的狀態轉換時（如 `todo` 直接跳到 `done`），UI 應給予提示或阻擋。
+- **描述**：Canonical state machine 見 `SPEC-task-governance §3.1`（runtime `task_rules.py:19-33` 的 `_VALID_TRANSITIONS`）。UI 必須只開合法轉換的 drop target，並在非法情境給出正確引導。
+- **合法 drop targets**（從 `fromStatus` 看可拖到哪些欄）：
+  - `todo` → `in_progress` / `cancelled`
+  - `in_progress` → `todo` / `review` / `cancelled`
+  - `review` → `in_progress` / `cancelled`（`review → done` **必須走 `confirm(accepted=True)`**，不是拖曳）
+  - `done` → `todo`（reopen）
+  - `cancelled` → 無合法出站（唯一 terminal）
 - **Acceptance Criteria**：
-  - Given 使用者嘗試將 `todo` 拖曳到 `done`，When 放置卡片，Then 顯示提示「建議先經過 in_progress 和 review」，使用者可選擇強制執行或取消。
-  - Given 拖曳到 `review` 狀態，When 任務沒有填寫 result，Then 顯示警告「建議填寫任務成果後再送審」，使用者可選擇繼續或取消。
+  - Given 使用者試圖拖曳 `todo` 卡到 `review` 欄（`_VALID_TRANSITIONS` 不允許），When 放置，Then UI 擋下並提示「`todo` 不能直接送審；請先拖到 `in_progress`，在執行後送審」。
+  - Given 使用者試圖拖曳 `todo` / `in_progress` / `review` 卡到 `done` 欄，When 放置，Then UI 擋下並提示「`done` 需由 reviewer 在 Detail Drawer 按 Approve 觸發 `confirm(accepted=True)`；UI 不得直接寫入 `status=done`」（canonical: `task_rules.py:36` `_UPDATE_FORBIDDEN_TARGETS` + `SPEC-mcp-tool-contract §8.5`）。
+  - Given 使用者拖曳到 `review`，When 任務沒有填寫 `result`，Then UI 先開 result 輸入 dialog（canonical CHECK: `task_status != 'review' OR result IS NOT NULL`，主 SPEC §9.4）；填寫後方 submit。
+  - Given 使用者拖曳 `done` 卡到 `todo`（reopen），When 放置，Then UI 放行並呼叫 `task(action="update", status="todo")`（runtime 合法，`task_rules.py:32`）。
+  - Given 使用者試圖拖曳 `cancelled` 卡到任何其他狀態欄，When 放置，Then UI 擋下並提示「`cancelled` 為 terminal，如需恢復請新開一張 task 並以 `Supersedes:` 引用」。
+  - Given 使用者試圖拖曳 `done` 卡到 `cancelled` 欄（非 `todo`），When 放置，Then UI 擋下（`task_rules.py` 無 `done → cancelled`）並提示「`done` 僅能 reopen 回 `todo`；若任務需作廢請先 reopen，再取消」。
 
 ### P2（可以有）
 

@@ -77,24 +77,34 @@ Task 是「**需要跨角色驗收**」的最小工作單位。
 
 ### 3.1 Task（`task_status`: todo / in_progress / review / done / cancelled）
 
+Canonical state machine 以 runtime `src/zenos/domain/task_rules.py:19-33` 的 `_VALID_TRANSITIONS` 為準。
+
 | From → To | 觸發條件 | Server 強制 |
 |----------|---------|-----------|
 | `todo` → `in_progress` | dispatcher claim 或 caller 更新 | 必須有 `assignee` 或 `dispatcher`（非 null） |
-| `in_progress` → `review` | handoff to `agent:qa` **或** caller 直接更新 | 必須附 `result`（CHECK constraint） |
-| `review` → `done` | `confirm(collection="tasks", accepted=True)` 驗收通過 | caller 必須有 owner/member 權限；server append terminal handoff event（to=`human`, reason=`accepted`） |
+| `todo` → `cancelled` | caller 明確取消 | 必附 cancel reason |
+| `in_progress` → `todo` | 釋放認領 / 退回等待 | 無額外閘 |
+| `in_progress` → `review` | handoff to `agent:qa` **或** caller 直接更新 | 必須附 `result`（CHECK constraint `task_status != 'review' OR result IS NOT NULL`）|
+| `in_progress` → `cancelled` | caller 明確取消 | 必附 cancel reason |
 | `review` → `in_progress` | `confirm(collection="tasks", accepted=False, rejection_reason=...)` 退回 | `rejection_reason` 必附；server append handoff event（`to_dispatcher = task.dispatcher or "human"`，**不自動改派回 developer**；切換角色需後續 handoff）|
-| `*` → `cancelled` | caller 明確取消 | 必附 cancel reason；subtask 亦須連帶 cancelled |
+| `review` → `done` | `confirm(collection="tasks", accepted=True)` 驗收通過 | caller 必須有 owner/member 權限；`task.update(status="done")` 直接呼叫會被 `_UPDATE_FORBIDDEN_TARGETS`（`task_rules.py:36`）擋下（`done` 只能經 `confirm_task`）；server append terminal handoff event（to=`human`, reason=`accepted`）|
+| `review` → `cancelled` | caller 明確取消 | 必附 cancel reason |
+| `done` → `todo` | **Reopen** — 重新啟動已完成任務 | 無額外閘；完成後發現需補做時使用 |
 
 > **Alias**：`confirm(..., accept=True)` 為 `accepted=True` 的 alias；server 自動改寫並回 warning。新 caller 一律用 `accepted`。
 
-**禁止**：`done` / `cancelled` → 任何狀態（terminal immutable）。
+**Runtime 規則**：
+- `cancelled` **是唯一 terminal state**（`task_rules.py` 的 `_VALID_TRANSITIONS` 無任何 `cancelled → ?` pair）
+- `done` **不是 terminal**：允許 `done → todo` reopen（`task_rules.py:32`）；若要永久收掉應改 `cancelled`
+- `done` 只能經 `confirm(accepted=True)` 到達；`task.update(status="done")` 會被 `is_valid_update_target` 擋下
+- 未列於本表的轉換（例如 `todo → review`、`cancelled → *`、`review → todo`）→ `is_valid_transition` 回 false，server reject
 
 ### 3.2 Plan（`task_status`: draft / active / completed / cancelled）
 
 | From → To | 觸發條件 | Server 強制 |
 |----------|---------|-----------|
 | `draft` → `active` | caller 更新 | 必須有 `entry_criteria` + `exit_criteria`（非空） |
-| `active` → `completed` | caller 更新 | 必附 `result`；所有下轄 Task 必須處於 terminal（done/cancelled），違反 reject with `PLAN_HAS_UNFINISHED_TASKS`（訊息列前 5 個未 terminal task id） |
+| `active` → `completed` | caller 更新 | 必附 `result`；所有下轄 Task 必須處於 **snapshot-terminal**（`{done, cancelled}`，canonical `plan_service.py:19 _TASK_TERMINAL_STATUSES`）——不同於 §3.1 state-machine-terminal；`done` task 之後仍可被 reopen 回 `todo`，但不會回溯影響已 completed 的 Plan（Plan 本身 completed 後 immutable）。違反 reject：runtime 拋 `ValueError`「Cannot complete plan: N task(s) not in terminal state...」→ `_plan_handler:194-195` 包成 Shape B `rejection_reason` |
 | `*` → `cancelled` | caller 明確取消 | 必附 cancel reason |
 
 `completed` 後 Plan immutable。
