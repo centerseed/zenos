@@ -1263,7 +1263,6 @@ export function CrmAiPanel({
       entry={railEntry}
       chatStatus={shellChatStatus}
       connectorStatus={connectorStatus}
-      inlineOnly
       diagnostics={
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-[11px]">
           <div className="flex flex-wrap items-center gap-2">
