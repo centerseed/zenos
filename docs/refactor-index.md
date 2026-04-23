@@ -146,11 +146,11 @@ created: 2026-04-23
 | ADR-025 zenos-core-layering | Knowledge / Action Layer 分離 | SUPERSEDE | ✅ marked |
 | ADR-027 layer-contract | Layer 契約 | SUPERSEDE | ✅ marked |
 | ADR-028 plan-primitive | Plan 獨立 collection | **Partial** — Post-MTI 目標態；runtime 現行仍獨立 plans table | KEEP as current canonical（未加 supersede marker）|
-| ADR-032 document-delivery-layer-architecture | delivery 方案 | **Partial SUPERSEDE**（doc bundle 部分）| ✅ marked as Partial Supersede |
-| ADR-041 pillar-a-semantic-retrieval | embedding 放 entities 表 | **Partial SUPERSEDE** — embedding 改為 sidecar table | ✅ marked as Partial Supersede |
+| ADR-032 document-delivery-layer-architecture | delivery 方案 | **Partial**（doc bundle 部分併入 SPEC-doc-governance §3；sidecar tables 仍 canonical）| ✅ status=Approved，章節級收斂用 `partially_superseded_sections` / `retained_canonical_sections` frontmatter field 表達；避免非 enum 的 `Partial Supersede` status |
+| ADR-041 pillar-a-semantic-retrieval | embedding 放 entities 表 | **Partial** — embedding 改為 sidecar table（主 SPEC v2 §12）；retrieval 行為仍 canonical | ✅ 同上 frontmatter 處理 |
 | ADR-044 task-ownership-ssot | task.project_id → product_id | **KEEP as current canonical** — runtime 今日仍以 `product_id` 為唯一 ownership SSOT（`governance_rules.py:938`） | 未加 supersede marker |
 | ADR-045 protocol-collection-vs-view | Protocol 是 collection 非 view | KEEP — Protocol 判定仍有效 | 未加 marker |
-| ADR-046 document-entity-boundary | Document 合併 Entity | SUPERSEDE | ✅ marked |
+| ADR-046 document-entity-boundary | Document 合併 Entity | **Spec 目標態已落地，runtime 尚未** — 仍保留 Approved | status=Approved；2026-04-23 note 明示 runtime `Document` dataclass 仍活於 `src/zenos/domain/knowledge/models.py:88`，治理邏輯雙路徑（`governance.py:223-230`），Wave 9 migration 完成後才改 Superseded |
 | ADR-047 l1-level-ssot | L1 由 level 判定 | **Partial** — axiom 進主 SPEC；runtime enforcement 仍 canonical | 未加 marker（仍為 current canonical）|
 
 ### 保留（未被取代）

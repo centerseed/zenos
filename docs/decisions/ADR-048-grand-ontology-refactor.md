@@ -13,13 +13,13 @@ supersedes:
   - ADR-022-document-bundle-architecture
   - ADR-025-zenos-core-layering
   - ADR-027-layer-contract
-  - ADR-032-document-delivery-layer-architecture (partial)
-  - ADR-041-pillar-a-semantic-retrieval (partial)
-  - ADR-046-document-entity-boundary
 related:
-  - ADR-028-plan-primitive (partial — runtime plans table 仍存在)
-  - ADR-044-task-ownership-ssot-convergence (KEEP — runtime canonical)
-  - ADR-047-l1-level-ssot (partial — axioms 進主 SPEC)
+  - ADR-028-plan-primitive (runtime plans table 仍活)
+  - ADR-032-document-delivery-layer-architecture (sidecar tables 仍 canonical)
+  - ADR-041-pillar-a-semantic-retrieval (retrieval 行為仍 canonical)
+  - ADR-044-task-ownership-ssot-convergence (runtime ownership canonical)
+  - ADR-046-document-entity-boundary (runtime Document dataclass 仍活；spec 目標態已在 canonical SPEC 落地)
+  - ADR-047-l1-level-ssot (runtime L1 enforcement 仍 canonical)
 related_index: docs/refactor-index.md
 ---
 
@@ -74,7 +74,7 @@ ADR-028（plan-primitive）與 ADR-044（task-ownership）因此**保留為 curr
 
 ### 4. 取代清單
 
-**完全 supersede**（決策已完整由新 SPEC 取代）：
+**完全 supersede**（決策已完整由新 SPEC 取代，spec-level 無殘留）：
 
 - ADR-006 entity-project-separation → 主 SPEC v2 §8.3 L3ProjectEntity
 - ADR-007 entity-architecture → 主 SPEC v2 §3-§9
@@ -82,7 +82,10 @@ ADR-028（plan-primitive）與 ADR-044（task-ownership）因此**保留為 curr
 - ADR-022 document-bundle-architecture → 主 SPEC v2 §8.1 + `SPEC-doc-governance §3`
 - ADR-025 zenos-core-layering → `SPEC-zenos-core` + 主 SPEC v2 §3
 - ADR-027 layer-contract → `SPEC-zenos-core` + `SPEC-mcp-tool-contract`
-- ADR-046 document-entity-boundary → 主 SPEC v2 §8.1 + `SPEC-doc-governance`
+
+**保留 Approved（非 Superseded），等待 Wave 9 migration 實際落地**：
+
+- **ADR-046 document-entity-boundary**：spec 目標態已寫在主 SPEC v2 §8.1 + `SPEC-doc-governance`，但 runtime 尚未完成——`src/zenos/domain/knowledge/models.py:88` 仍有獨立 `Document` dataclass；`src/zenos/domain/governance.py:223-230` 治理邏輯明確雙路徑（Document 與 Entity 並行）；`zenos.documents` / `task_entities` 舊 table 仍活著。Wave 9 migration 完成前**本 ADR 是活的決策**，不標 Superseded
 
 **部分 supersede**（核心決策收斂，但保留部分為 canonical）：
 
@@ -134,6 +137,5 @@ ADR-028（plan-primitive）與 ADR-044（task-ownership）因此**保留為 curr
 
 - `docs/refactor-index.md`（Wave 0-9 master index）
 - 主 canonical SPEC：`SPEC-ontology-architecture v2`、`SPEC-zenos-core`、`SPEC-identity-and-access`、`SPEC-governance-framework`、`SPEC-mcp-tool-contract`、`SPEC-task-governance`、`SPEC-doc-governance`、`SPEC-governance-guide-contract`
-- 保留 ADR：`ADR-028-plan-primitive`、`ADR-044-task-ownership-ssot-convergence`、`ADR-045-protocol-collection-vs-view`、`ADR-047-l1-level-ssot`
-- 完全 superseded ADR：`ADR-006` / `ADR-007` / `ADR-010` / `ADR-022` / `ADR-025` / `ADR-027` / `ADR-046`
-- 部分 superseded ADR：`ADR-032` / `ADR-041`
+- 完全 superseded ADR（status=Superseded）：`ADR-006` / `ADR-007` / `ADR-010` / `ADR-022` / `ADR-025` / `ADR-027`
+- 保留 Approved，等 Wave 9 runtime migration 落地後再收口：`ADR-028-plan-primitive`（runtime plans table 仍活）/ `ADR-032-document-delivery-layer-architecture`（bundle 部分併入 SPEC，sidecar 仍 canonical）/ `ADR-041-pillar-a-semantic-retrieval`（embedding 改 sidecar，retrieval 行為仍 canonical）/ `ADR-044-task-ownership-ssot-convergence`（`product_id` runtime 仍唯一 SSOT）/ `ADR-045-protocol-collection-vs-view` / `ADR-046-document-entity-boundary`（runtime `Document` dataclass 仍活）/ `ADR-047-l1-level-ssot`

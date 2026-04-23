@@ -14,7 +14,11 @@ version: v2.0 (Grand Ontology Refactor 2026-04-23)
 > Canonical 定義見 `SPEC-ontology-architecture v2`；治理細則見 `SPEC-task-governance` / `SPEC-doc-governance` / `SPEC-identity-and-access` / `SPEC-governance-framework`。
 > 本檔定期與 `git log` 對齊，落後於 SPEC / runtime 時以後者為準。
 
-## 1. 六 Axioms（鎖定）
+> **Spec vs Runtime 雙視角（重要）**：本 REF 有兩類條目——「Canonical（目標態，主 SPEC v2）」與「Runtime（今日實際 code / DB）」。Wave 9 migration 前兩者並存且不完全相同。每節遇差異處明文標示。
+
+## 1. 六 Axioms（鎖定；主 SPEC v2 §1 canonical）
+
+以下為**目標態 axioms**，指導 Wave 9 migration 的終點：
 
 1. **Entity = graph node**：L1 / L2 / L3 一律是 `entities_base` row
 2. **BaseEntity 強制繼承**：identity / permission / parent_id / owner / timestamps 共用
@@ -22,6 +26,8 @@ version: v2.0 (Grand Ontology Refactor 2026-04-23)
 4. **由內而外繼承擴充**：subclass 只能加欄位，不能改父層語意
 5. **Schema 結構強制**：違反 DDL CHECK 或 enum → server reject
 6. **MCP tool agent 語意最小化**：tool surface 穩定、參數收斂；caller 記憶負擔小
+
+**Runtime 現況差異（Wave 9 前）**：Axiom 1 尚未全落地——`zenos.tasks` / `zenos.plans` / `zenos.documents` 仍為獨立 table，**不是** `entities_base` subclass row；`Document` domain model（`src/zenos/domain/knowledge/models.py:88`）仍與 `Entity` 雙軌並存，治理層（`src/zenos/domain/governance.py:223-230`）同時支援兩條路徑。
 
 ## 2. L1 / L2 / L3 分層現況
 
@@ -77,7 +83,7 @@ Canonical: `ontology_service._DOCUMENT_STATUSES`
 Canonical: 主 SPEC v2 §10 + `zenos.relationships` table
 
 - 合法 type：`depends_on / serves / owned_by / part_of / blocks / related_to / impacts / enables`
-- 舊 `task_entities` junction **已廢止**，一律走 `relationships` 表
+- `task_entities` junction table **仍存在於 runtime**（`migrations/20260325_0001_sql_cutover_init.sql:293`；`sql_task_repo.py:101,117,273-280,394` 仍在讀寫）；Wave 9 migration 完成後才會 drop。Canonical 目標態為 `relationships` 表取代，但今日雙軌並存。
 - L2 `impacts gate`：至少 1 條具體 `impacts` relationship 才能升 `confirmed_by_user=true`
 - `impact_chain` / `reverse_impact_chain` 雙向遍歷（5 跳上限，cycle 防呆），shipped `commit 0ede9cf`
 

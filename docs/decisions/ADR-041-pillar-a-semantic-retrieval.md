@@ -1,17 +1,20 @@
 ---
 type: ADR
 id: ADR-041-pillar-a-semantic-retrieval
-status: Partial Supersede
+status: Approved
 ontology_entity: mcp-interface
 related_specs: SPEC-semantic-retrieval
 created: 2026-04-18
 updated: 2026-04-23
 phase_1_landed: 2026-04-18
-superseded_by: ADR-048-grand-ontology-refactor
-supersede_reason: embedding 不在 entities_base table 內聯，改為 entity_embeddings sidecar table（主 SPEC v2 §12）；retrieval 行為仍以 SPEC-semantic-retrieval 為 canonical
+related: ADR-048-grand-ontology-refactor
+partially_superseded_sections:
+  - "embedding 欄位內聯到 entities 表（已改為 entity_embeddings sidecar，主 SPEC v2 §12）"
+retained_canonical_sections:
+  - "Retrieval 行為：hybrid mode / neighbor ranking / backfill（Phase 1 已 ship，仍以 SPEC-semantic-retrieval 為 canonical）"
 ---
 
-> **2026-04-23 Partial Supersede note**：原 ADR 決定將 embedding 欄位內聯到 `entities` 表；Grand Refactor 改為 **sidecar**（主 SPEC v2 §12 `entity_embeddings`）。Phase 1 已 ship 的 retrieval 行為（hybrid mode / neighbor ranking / backfill）保持不變，仍以 `SPEC-semantic-retrieval` 為 canonical。
+> **2026-04-23 Status note**：frontmatter 合法 enum 只有 `Draft / Under Review / Approved / Superseded / Archived`（`SPEC-doc-governance §7`），因此保留 `Approved`；章節級收斂以 `partially_superseded_sections` / `retained_canonical_sections` 顯式列出。embedding schema 改以主 SPEC v2 §12 sidecar table 為權威；retrieval 行為以 `SPEC-semantic-retrieval` 為權威。
 
 # ADR-041: Pillar A — Semantic Retrieval 架構
 

@@ -1,16 +1,17 @@
 ---
 type: ADR
 id: ADR-046-document-entity-boundary
-status: Superseded
+status: Approved
 ontology_entity: l3-document
 created: 2026-04-22
 updated: 2026-04-23
 accepted_at: 2026-04-23
-superseded_by: ADR-048-grand-ontology-refactor
-supersede_reason: Document → Entity 收斂決策已完整落地為 SPEC-ontology-architecture v2 §8.1 的 L3DocumentEntity subclass + SPEC-doc-governance canonical
+related: ADR-048-grand-ontology-refactor
 ---
 
-> **2026-04-23 Supersede note**：本 ADR 決定的「廢除獨立 Document collection」已於 Grand Refactor 完整落地：`L3DocumentEntity` 是主 SPEC v2 §8.1 的 entity subclass；治理規則見 `SPEC-doc-governance`。
+> **2026-04-23 Status note**：本 ADR 的**目標態**決策（廢除獨立 Document collection，收斂為 `L3DocumentEntity` subclass）已於主 SPEC v2 §8.1 + `SPEC-doc-governance` 落地為 canonical spec。
+>
+> **Runtime 實況 warning**：runtime 層面的 Document → Entity 收斂**尚未完成**。`src/zenos/domain/knowledge/models.py:88` 仍有獨立 `Document` dataclass；治理邏輯（`src/zenos/domain/governance.py:223-230`）明確同時支援 `Document` 與 `Entity` 雙路徑；`zenos.documents` / `task_entities` 等舊 table 仍活在 DB（`migrations/20260325_0001_sql_cutover_init.sql`）。Wave 9 migration 完成前本 ADR **保留 Approved**（非 Superseded），caller 必須預期雙軌並存。
 
 # ADR-046: Document 完全併入 Entity，廢除獨立 Document collection
 
