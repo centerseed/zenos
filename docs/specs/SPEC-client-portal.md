@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-client-portal
 status: Draft
-ontology_entity: TBD
+ontology_entity: dashboard
 created: 2026-04-03
-updated: 2026-04-06
+updated: 2026-04-23
+depends_on: SPEC-identity-and-access, SPEC-zenos-auth-federation
 ---
 
 # Feature Spec: 客戶協作入口（Client Portal）

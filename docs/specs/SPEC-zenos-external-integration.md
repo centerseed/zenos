@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-zenos-external-integration
 status: Draft
-ontology_entity: agent-integration
+ontology_entity: agent-runtime
 created: 2026-04-10
-updated: 2026-04-21
+updated: 2026-04-23
+depends_on: SPEC-zenos-auth-federation, SPEC-identity-and-access, SPEC-mcp-tool-contract
 ---
 
 # Feature Spec: ZenOS External Integration Contract (v1)

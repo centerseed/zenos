@@ -94,7 +94,7 @@ created: 2026-04-23
 | # | Spec | Action |
 |---|------|--------|
 | 31 | `SPEC-task-view-clarity` | ✅ **REVISED** | frontmatter 標準化（`l2_entity` → `ontology_entity: l3-action`，補 runtime_canonical 三條：`dashboard/src/types/index.ts:191` / `lib/task-risk.ts` / `SPEC-mcp-tool-contract §9`）；**legacy status enum 全清**：`backlog / blocked / archived` → canonical 5-state；§名詞重寫 `open / closed / overdue / upcoming / idle_todo`（對齊 `task-risk.ts`）；AC-R1/R2/R4/R9/R10 全部改用 canonical 5-state |
-| 32 | `SPEC-task-kanban-operations` | ✅ **REVISED** | frontmatter 標準化；R6 Review 流程修正：Approve 必須走 `confirm(accepted=True)` 而非 `task.update status=done`（`SPEC-mcp-tool-contract §8.5`）；Reject 的 `rejection_reason` 改必填（canonical `task_service.py:664-665`），退回 dispatcher 語意依 §9 actual behaviour；R8 禁止「todo 直接跳 done」強制選項（server 會擋），補終態 immutable 規則 |
+| 32 | `SPEC-task-kanban-operations` | ✅ **REVISED** | frontmatter 標準化；R6 Review：Approve 必走 `confirm(accepted=True)` 而非 `task.update status=done`（`SPEC-mcp-tool-contract §8.5`）；Reject 的 `rejection_reason` 改必填（`task_service.py:664-665`），退回 dispatcher = `task.dispatcher or "human"`（**不自動派 developer**）；**R8 drop-target matrix 改以 `task_rules.py:19-33` 為準**：`cancelled` 是唯一 terminal，`done → todo` reopen 合法；`todo → review` 不存在（必須經 `in_progress`）|
 | 33 | `SPEC-task-surface-reset` | ✅ **KEPT + aligned**（撤回原 DELETE 判斷）| frontmatter 從 mixed（`doc_id / title / version / date / l2_entity`）收斂為標準格式；加 Layering note 說明本 SPEC 是 UI screen boundary，**與 task-governance 正交**；舊索引判斷本檔被 task-governance 取代不成立（該 SPEC 2026-04-22 新建晚於索引） |
 | 34 | `SPEC-task-communication-sync` | ✅ **REVISED** | frontmatter `ontology_entity: action-layer → l3-action`；補 Layering note + depends_on |
 
@@ -145,10 +145,10 @@ created: 2026-04-23
 | ADR-022 document-bundle-architecture | doc_role / bundle | SUPERSEDE — bundle 欄位進 L3-document subclass |
 | ADR-025 zenos-core-layering | Knowledge / Action Layer 分離 | SUPERSEDE — Layer 合併 |
 | ADR-027 layer-contract | Layer 契約 | SUPERSEDE |
-| ADR-028 plan-primitive | Plan 獨立 collection | SUPERSEDE — Plan 成 L3-action subclass |
+| ADR-028 plan-primitive | Plan 獨立 collection | **Partial SUPERSEDE**（目標態）— Post-MTI 後 Plan 成 L3-action subclass；**runtime 今日 Plan 仍為獨立 `zenos.plans` table**（`src/zenos/infrastructure/action/sql_plan_repo.py`），這條 ADR 在 runtime 層面仍為 canonical，migration 完成前不完全取代 |
 | ADR-032 document-delivery-layer-architecture | delivery 方案 | SUPERSEDE 部分（doc 部分）|
 | ADR-041 pillar-a-semantic-retrieval | embedding 放 entities 表 | SUPERSEDE — embedding 獨立 sidecar table |
-| ADR-044 task-ownership-ssot | task.project_id → product_id | SUPERSEDE（Task 成 entity 後，parent_id 取代 product_id） |
+| ADR-044 task-ownership-ssot | task.project_id → product_id | **KEEP as current canonical**（runtime 今日仍以 `product_id` 為唯一 ownership SSOT，見 `governance_rules.py:938 OWNERSHIP_SSOT_PRODUCT_ID`）。Post-MTI 時 `product_id` 會統一併入 `parent_id` 樹（主 SPEC §9 目標態），但那是 Wave 9 migration 後的事；在那之前本 ADR 未被取代 |
 | ADR-045 protocol-collection-vs-view | Protocol 是 collection 非 view | KEEP — Protocol 判定仍有效，但其 schema 納入新 Base |
 | ADR-046 document-entity-boundary | Document 合併 Entity | SUPERSEDE — 新 SPEC 完整實作 |
 | ADR-047 l1-level-ssot | L1 由 level 判定 | SUPERSEDE 部分 — axiom 保留，細節被新主 SPEC 覆蓋 |

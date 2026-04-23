@@ -2,9 +2,11 @@
 type: SPEC
 id: SPEC-zenos-setup-redesign
 status: Draft
-ontology_entity: TBD
+ontology_entity: agent-runtime
 created: 2026-04-05
-updated: 2026-04-21 (v3 — 補入安裝 target 選擇與安裝後使用說明)
+updated: 2026-04-23
+depends_on: SPEC-agent-setup, SPEC-mcp-tool-contract, SPEC-agent-integration-contract
+version_note: v3 — 補入安裝 target 選擇與安裝後使用說明（2026-04-21）
 ---
 
 # Feature Spec: /zenos-setup Redesign

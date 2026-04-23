@@ -367,7 +367,20 @@ CREATE TABLE entity_l3_project (
 
 ## 9. L3-Action Entities（舊 Action Layer 併入）
 
-舊的 `zenos.tasks` / `zenos.plans` 獨立 table + `task_entities` junction 於本 SPEC 起廢止。**所有任務類物件都是 entity**，透過 `entities_base` + L3-Action subclass 表表達。`parent_id`（圖的邊）取代 `product_id`；`relationships` 表取代 `task_entities`。
+> **Post-MTI 目標態（Wave 9 migration 完成後）**：所有任務類物件都是 entity，透過 `entities_base` + L3-Action subclass 表（`entity_l3_milestone / plan / task / subtask`）表達；`parent_id`（圖的邊）統一承載歸屬語意；`relationships` 表取代 `task_entities` junction。
+>
+> **當前 runtime 狀態**（2026-04-23）：
+> - `zenos.tasks` / `zenos.plans` 仍為獨立 table（見 `src/zenos/infrastructure/action/sql_task_repo.py` / `sql_plan_repo.py`）
+> - Ownership SSOT 為 `product_id`（**ADR-047 D3 canonical**；`governance_rules.py:938 OWNERSHIP_SSOT_PRODUCT_ID`）——新 caller 必傳 `product_id`，`project` 僅為 legacy fallback hint，`project_id` 參數 reject
+> - Subtask 仍以 `parent_task_id`（自指）區分，同表 row
+> - 本節（§9）描述的 subclass table DDL 與 `parent_id` 統一樹**尚未落地**；落地時程見 Wave 9 migration PLAN
+>
+> **治理 SSOT 雙視角**：
+> - **Canonical schema（未來）**：本節 §9 的 subclass table + `parent_id` 樹
+> - **Canonical runtime（今日）**：`SPEC-task-governance §1.1 歸屬語意` + `governance_rules.py §ownership`（`product_id` + `plan_id` + `parent_task_id` 四欄）
+> - 兩者在 Wave 9 migration 時由一份 schema migration PLAN 收斂
+
+下列 §9.1-§9.6 的 Python dataclass / DDL / CHECK 為 post-MTI 目標。caller 今日仍以 `SPEC-task-governance` 為 runtime contract。
 
 ### 9.1 L3TaskBaseEntity（abstract 基底）
 

@@ -1,15 +1,11 @@
 ---
 type: SPEC
 id: SPEC-cowork-knowledge-context
-doc_id: SPEC-cowork-knowledge-context
-title: Feature Spec: Web Cowork 活用知識圖譜的欄位級漸進預填
-status: draft
-version: "0.1"
-date: 2026-04-17
-supersedes: null
-l2_entity: TBD
+status: Draft
+ontology_entity: agent-runtime
 created: 2026-04-17
-updated: 2026-04-17
+updated: 2026-04-23
+depends_on: SPEC-agent-integration-contract, SPEC-mcp-tool-contract, SPEC-ontology-architecture v2 §10.4, SPEC-crm-intelligence
 ---
 
 # Feature Spec: Web Cowork 活用知識圖譜的欄位級漸進預填
@@ -54,7 +50,7 @@ ZenOS 的核心定位是「AI Context Layer」——一次建 ontology，所有 
 | **SPEC-marketing-automation** | 擴充 | 已定義 Context Pack 結構（field_id / field_value / project_summary / current_phase / suggested_skill / related_context）。本 spec 新增 `graph_context` 為 Context Pack 的一級欄位，不破壞既有結構。策略設定需求引用本 spec 的 AC |
 | **SPEC-crm-intelligence** | 擴充 | Briefing context pack 已列出「產品現況」「累積洞察」「相似案例」等需 ontology 的區塊。本 spec 定義這些區塊如何沿圖遍歷取得，briefing AC 引用本 spec 的 AC |
 | **ADR-034 Web Cowork Local Helper Bridge** | 銜接擴充 | 現行 helper 已透過 `--mcp-config` 載入 ZenOS MCP 並有 capability probe（`mcp_ok`）。本 spec 進一步要求「在首輪對話前主動執行圖遍歷並把結果注入 context pack」，而不是只在使用者主動詢問時才讓 AI 叫 MCP tool |
-| **SPEC-knowledge-graph-semantic** | 部分依賴 / 部分脫鉤 | 該 spec 的「影響鏈遍歷 API」（P0.2）是本 spec 技術上的理想依賴。但該 spec 的「關聯語意動詞」（P0.1、P1.4、P1.5）**不在本 spec 範圍**——本 demo 使用階層 + tags（what/why/who）即可達成預填目的。若 verb 後續落地，`graph_context` 的 neighbor 結構可加 `relation_verb` 欄位升級，不需改本 spec 語意 |
+| **SPEC-ontology-architecture v2 §10** | 部分依賴 | 主 SPEC §10.4 的「影響鏈遍歷」（ACCEPTED，shipped `commit 0ede9cf`）是本 SPEC 技術上的理想依賴。舊 `SPEC-knowledge-graph-semantic` P0.1/P1.4/P1.5 `verb` 議題 **REJECTED** 2026-04-18（填寫率 8.8%）已於主 SPEC §10.5 歸檔；本 SPEC 不依賴 `verb`，`graph_context.neighbors` 結構可預留欄位但不阻塞交付 |
 | **SPEC-zenos-core** | 無衝突 | 屬 Application Layer 的 UX 行為，不改 Core |
 | **SPEC-product-vision** | 無衝突，強化 | 這是「AI Context Layer」價值在 Web UI 的具體兌現 |
 
@@ -177,8 +173,8 @@ ZenOS 的核心定位是「AI Context Layer」——一次建 ontology，所有 
 
 ## 明確不包含
 
-- **不依賴語意動詞（verb）**：`graph_context.neighbors` 結構可預留 `relation_verb` 欄位，但本 spec 的 AC 不使用 verb 做篩選或推理；verb 何時落地由 SPEC-knowledge-graph-semantic 決定，不阻塞本 spec 交付
-- **不做影響鏈 API（多跳傳遞式查詢）**：本 spec 只做「seed + 2 跳鄰居」，不做 A → B → C → D 的傳遞查詢。多跳傳遞留給 SPEC-knowledge-graph-semantic 的 P0.2「影響鏈遍歷 API」交付後再評估
+- **不依賴語意動詞（verb）**：`graph_context.neighbors` 結構可預留 `relation_verb` 欄位，但本 SPEC 的 AC 不使用 verb 做篩選或推理（verb 議題已於 `SPEC-ontology-architecture v2 §10.5` 歸檔為 REJECTED，無時程）
+- **不做多跳影響鏈查詢**：本 SPEC 只做「seed + 2 跳鄰居」。多跳傳遞已由主 SPEC §10.4 的 `impact_chain` / `reverse_impact_chain` 承接（`commit 0ede9cf` shipped），本 SPEC 僅用到最小 get/search 兩跳鄰居
 - **不做圖譜治理**：若 Paceriz ontology 不夠豐富，是另一條治理線（由 capture / sync skill 處理）；本 spec 只負責「有多少資料做多少事」，不負責「補資料」
 - **不做 L3 文件全文載入**：`graph_context` 只載 L3 metadata + 500 字摘要，full content 要由 AI 自行呼叫 `mcp__zenos__read_source`
 - **不做跨 partner 圖遍歷**：seed 屬於哪個 partner，遍歷就在該 partner 範圍內
@@ -210,7 +206,7 @@ ZenOS 的核心定位是「AI Context Layer」——一次建 ontology，所有 
 |---|------|------|------|
 | 1 | Demo 情境 | Paceriz dogfood 的「官網 Blog」策略設定 | 使用者自己的產品 ontology 最豐富，先驗證 flow；後續其他模組（CRM）引用此 flow 做二級 demo |
 | 2 | 圖遍歷深度 | 預設 2 跳（L1 → L2 → L3 metadata） | 1 跳抓不到具體功能/定價細節；2 跳在 token budget 內可覆蓋大多數 dogfood 場景 |
-| 3 | 語意動詞（verb） | 不在 scope | verb 先前因「沒用處」被移除，ontology 現況就沒有；若 SPEC-knowledge-graph-semantic 後續把它補回，本 spec 的 neighbor 結構可升級承接 |
+| 3 | 語意動詞（verb） | 不在 scope | verb 先前因「沒用處」被移除（填寫率 8.8%，`SPEC-ontology-architecture v2 §10.5`）；ontology 現況無此信號，本 SPEC 不依賴 |
 | 4 | 欄位預填策略 | 漸進式多輪對話（一次一題） | 一次彈 7 個欄位讓使用者認知負擔大；漸進確認符合現場感，使用者的原話「讓使用者一步一步確認總好過回頭重新設定或自己填」 |
 | 5 | 圖 Context 可見性 | 預設收合，可展開 | 讓使用者看到「AI 真的讀了圖」做信任建立，但不佔對話版面 |
 | 6 | Fallback 策略 | L1 tags 保底 + 明確提示補 ontology | 永遠有輸出比「因資料不足直接失敗」好；但要誠實告訴使用者為何草案粗糙 |

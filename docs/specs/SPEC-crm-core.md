@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-crm-core
 status: Under Review
-ontology_entity: crm-客戶管理
+ontology_entity: crm
 created: 2026-03-28
-updated: 2026-04-10
+updated: 2026-04-23
+depends_on: SPEC-zenos-core, SPEC-ontology-architecture v2, SPEC-task-governance, SPEC-identity-and-access
 ---
 
 # Feature Spec: CRM 模組

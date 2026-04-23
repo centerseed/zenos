@@ -2,10 +2,10 @@
 type: SPEC
 id: SPEC-home-workspace-bootstrap
 status: Under Review
-ontology_entity: 夥伴身份與邀請
+ontology_entity: identity-and-access
 created: 2026-04-22
-updated: 2026-04-22
-supersedes:
+updated: 2026-04-23
+depends_on: SPEC-identity-and-access, SPEC-zenos-auth-federation
 ---
 
 # Feature Spec: Home Workspace Bootstrap from Shared Product

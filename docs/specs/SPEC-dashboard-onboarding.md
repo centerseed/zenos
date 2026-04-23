@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-dashboard-onboarding
 status: Draft
-l2_entity: Dashboard 知識地圖
+ontology_entity: dashboard
 created: 2026-04-09
-updated: 2026-04-09
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-ontology-architecture v2
 ---
 
 # Feature Spec: Dashboard Onboarding — 空知識地圖引導流程

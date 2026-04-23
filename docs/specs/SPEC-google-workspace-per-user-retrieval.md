@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-google-workspace-per-user-retrieval
 status: Draft
-ontology_entity: 知識系統 Adapter 策略
+ontology_entity: ingestion-adapter
 created: 2026-04-21
-updated: 2026-04-21
+updated: 2026-04-23
+depends_on: SPEC-doc-governance, SPEC-identity-and-access, SPEC-zenos-auth-federation
 ---
 
 # Feature Spec: Google Workspace Connector v0 — Per-User Live Retrieval

@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-user-department
 status: Under Review
-l2_entity: 夥伴身份與邀請
+ontology_entity: identity-and-access
 created: 2026-03-29
-updated: 2026-03-29
+updated: 2026-04-23
+depends_on: SPEC-identity-and-access
 ---
 
 # Feature Spec: User Department（用戶部門）

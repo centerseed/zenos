@@ -1,15 +1,11 @@
 ---
 type: SPEC
 id: SPEC-marketing-automation
-doc_id: SPEC-marketing-automation
-title: Feature Spec: ZenOS 行銷自動化模組
-status: draft
-version: "0.4"
-date: 2026-04-14
-supersedes: null
-l2_entity: 行銷定位與競爭策略
+status: Draft
+ontology_entity: marketing-automation
 created: 2026-04-12
-updated: 2026-04-14
+updated: 2026-04-23
+depends_on: SPEC-zenos-core, SPEC-ontology-architecture v2, SPEC-mcp-tool-contract, SPEC-task-governance
 ---
 
 # Feature Spec: ZenOS 行銷自動化模組

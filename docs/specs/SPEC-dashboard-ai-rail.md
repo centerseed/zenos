@@ -1,15 +1,11 @@
 ---
 type: SPEC
 id: SPEC-dashboard-ai-rail
-doc_id: SPEC-dashboard-ai-rail
-title: Feature Spec: Dashboard AI Rail 與入口協議
-status: draft
-version: "0.1"
-date: 2026-04-15
-supersedes: null
-l2_entity: TBD
+status: Draft
+ontology_entity: dashboard
 created: 2026-04-15
-updated: 2026-04-15
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-agent-integration-contract
 ---
 
 # Feature Spec: Dashboard AI Rail 與入口協議

@@ -1,13 +1,12 @@
 ---
-doc_id: SPEC-federation-auto-provisioning
-title: 功能規格：Federation Auto-Provisioning（Owner-Approve + Domain Auto-Link）
 type: SPEC
-ontology_entity: zenos-auth-federation
+id: SPEC-federation-auto-provisioning
 status: Draft
-version: "0.2"
-date: 2026-04-19
-supersedes: null
+ontology_entity: zenos-auth-federation
+created: 2026-04-19
+updated: 2026-04-23
 extends: SPEC-zenos-auth-federation
+depends_on: SPEC-zenos-auth-federation, SPEC-identity-and-access
 ---
 
 # Feature Spec: Federation Auto-Provisioning

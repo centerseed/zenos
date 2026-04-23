@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-skill-release-management
 status: Draft
-ontology_entity: agent-integration
+ontology_entity: agent-runtime
 created: 2026-03-26
-updated: 2026-03-26
+updated: 2026-04-23
+depends_on: SPEC-agent-integration-contract, SPEC-agent-setup
 ---
 
 # Feature Spec: ZenOS Skill 中央發佈與升級治理

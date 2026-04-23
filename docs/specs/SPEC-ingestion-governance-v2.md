@@ -2,10 +2,10 @@
 type: SPEC
 id: SPEC-ingestion-governance-v2
 status: Draft
-l2_entity: MCP 介面設計
+ontology_entity: mcp-interface
 created: 2026-04-12
-updated: 2026-04-12
-supersedes: null
+updated: 2026-04-23
+depends_on: SPEC-zentropy-ingestion-contract, SPEC-mcp-tool-contract, SPEC-ontology-architecture v2 §7, SPEC-task-governance
 ---
 
 # Feature Spec: Ingestion 治理分工（v2）
@@ -87,7 +87,7 @@ ZenOS（現有能力，不變）
 ### 硬邊界（不可違反）
 
 1. Zentropy **不可**繞過 ZenOS MCP 直接寫 entities/relationships/documents。
-2. Zentropy **不可**自行實作 L2 升級——最終升級仍走 ZenOS `confirm` + `SPEC-l2-entity-redefinition` 的三問判斷。
+2. Zentropy **不可**自行實作 L2 升級——最終升級仍走 ZenOS `confirm` + `SPEC-ontology-architecture v2 §7.1` 的三問 + impacts gate（舊 `SPEC-l2-entity-redefinition` 已於 2026-04-23 併入主 SPEC）。
 3. ZenOS Core mutation gate（scope/workspace/欄位白名單）維持不變，Zentropy 端的治理判斷不能取代 server 端的 hard gate。
 
 ### 預期遷移路徑

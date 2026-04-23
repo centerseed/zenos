@@ -1,16 +1,11 @@
 ---
 type: SPEC
 id: SPEC-crm-intelligence
-doc_id: SPEC-crm-intelligence
-title: Feature Spec: CRM AI Intelligence 模組
-status: draft
-version: "0.3"
-date: 2026-04-14
-supersedes: null
-depends_on: SPEC-crm-core
-l2_entity: crm-客戶管理
+status: Draft
+ontology_entity: crm
 created: 2026-04-14
-updated: 2026-04-15
+updated: 2026-04-23
+depends_on: SPEC-crm-core, SPEC-ontology-architecture v2, SPEC-mcp-tool-contract
 ---
 
 # Feature Spec: CRM AI Intelligence 模組

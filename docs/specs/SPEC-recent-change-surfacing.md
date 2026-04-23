@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-recent-change-surfacing
 status: Draft
-ontology_entity: MCP 介面設計
+ontology_entity: mcp-interface
 created: 2026-04-20
-updated: 2026-04-20
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-ontology-architecture v2 §10.4
 ---
 
 # Feature Spec: Recent Change Surfacing

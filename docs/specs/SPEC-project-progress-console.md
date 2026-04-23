@@ -1,15 +1,11 @@
 ---
 type: SPEC
 id: SPEC-project-progress-console
-doc_id: SPEC-project-progress-console
-title: Feature Spec: Product Progress Console
-status: draft
-version: "0.1"
-date: 2026-04-21
-supersedes: null
-l2_entity: Dashboard 知識地圖
+status: Draft
+ontology_entity: dashboard
 created: 2026-04-21
-updated: 2026-04-22
+updated: 2026-04-23
+depends_on: SPEC-task-governance, SPEC-mcp-tool-contract, SPEC-task-surface-reset, SPEC-task-view-clarity
 ---
 
 # Feature Spec: Product Progress Console
@@ -75,7 +71,7 @@ updated: 2026-04-22
 - `plan`：Action Layer 的 orchestration primitive，以 `goal` 作為顯示名稱。
 - `milestone`：沿用既有治理語義，為 `goal` entity；在產品頁可作為進度階段或分組語意，但不重定義為新的 task kind。
 - `subtask`：沿用既有治理語義，為 `parent_task_id != null` 的 task；在產品頁不得與 parent task 平鋪於同一層。
-- `open work`：尚未結束的 task，包含至少 `backlog,todo,in_progress,review,blocked`。
+- `open work`：尚未結束的 task，canonical 5-state `TaskStatus` 中的 `todo / in_progress / review`（canonical: `dashboard/src/types/index.ts:191`）。legacy 值 `backlog / blocked` 已於 MCP 層 normalize 為 `todo`（`SPEC-mcp-tool-contract §9.2`）；`archived` normalize 為 `done`。
 - `AI recap`：AI 針對當前產品狀態所產出的決策摘要。
 - `copy prompt`：可直接複製到 Claude Code / Codex 的 continuation prompt。
 

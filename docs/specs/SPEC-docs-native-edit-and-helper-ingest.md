@@ -2,17 +2,19 @@
 type: SPEC
 id: SPEC-docs-native-edit-and-helper-ingest
 status: Under Review
-l2_entity: L3 文件治理
+ontology_entity: l3-document
 created: 2026-04-20
-updated: 2026-04-20
-supersedes: null
+updated: 2026-04-23
+depends_on: SPEC-doc-governance, SPEC-ontology-architecture v2 §8.1, SPEC-document-delivery-layer, SPEC-batch-doc-governance
 ---
+
+> **Layering note（2026-04-23）**：本 SPEC 原依賴的 `SPEC-document-bundle` 與 `SPEC-doc-source-governance` 已於 2026-04-23 併入 `SPEC-doc-governance`；本 SPEC 內以下敘述的「bundle 基石規則」改以 `SPEC-doc-governance §3`（doc_role / sources / bundle_highlights / URI validation / read_source）為準。為保留歷史可讀性，正文內對 `SPEC-document-bundle` 的引用已全面替換為 `SPEC-doc-governance §3`；少數地方以註記形式保留舊名。
 
 # Feature Spec: Dashboard 原生文件編輯 + Helper Ingest Contract
 
 ## 背景與動機
 
-ZenOS 的 L3 document entity 已在 `SPEC-document-bundle` 定義為多源語意索引（一個 bundle 對應 1..N 份 source）。但今天非 GitHub 用戶要把資料餵進 ZenOS 仍有結構性缺口：
+ZenOS 的 L3 document entity 已在 `SPEC-doc-governance §3` 定義為多源語意索引（一個 bundle 對應 1..N 份 source）。但今天非 GitHub 用戶要把資料餵進 ZenOS 仍有結構性缺口：
 
 **缺口 1：沒有原生編輯入口。**
 當用戶沒有 GitHub 習慣、也不想先去 Notion 開一份再連回來，目前只能用 `POST /api/docs/{doc_id}/content` 的 REST API，沒有 Dashboard UI。Mockup 的「+新」、編輯器、右側大綱 / AI rail 並不存在。
@@ -23,7 +25,7 @@ ZenOS 的 L3 document entity 已在 `SPEC-document-bundle` 定義為多源語意
 **缺口 3：Re-sync 行為沒有定義。**
 既有 schema 只有 `source_status: valid/stale/unresolvable`，但沒有「用戶按重新同步」、「agent 偵測到 stale 自動拉」的操作行為。結果是外部文件在 Notion 改了，ZenOS 這端不知道，也沒路徑觸發更新。
 
-本 spec 只處理這三個缺口，其餘 L3 文件治理規則（多源聚合、bundle_highlights、URI 驗證、read_source）維持 `SPEC-document-bundle` 定義。
+本 spec 只處理這三個缺口，其餘 L3 文件治理規則（多源聚合、bundle_highlights、URI 驗證、read_source）維持 `SPEC-doc-governance §3` 定義。
 
 ### 產品定位
 
@@ -44,17 +46,17 @@ ZenOS 的 L3 document entity 已在 `SPEC-document-bundle` 定義為多源語意
 
 | Spec | 分析 | 處理方式 |
 |------|------|---------|
-| **SPEC-document-bundle** (Draft) | 多源聚合、bundle_highlights、URI 驗證、read_source 定義維持不變。本 spec 在其基礎上擴展三個欄位（external_id、external_updated_at、last_synced_at）並新增 write 的 helper upsert 語義。 | 本 spec 引用 bundle 為基石，不重新定義既有欄位。**需對 bundle spec 發 amendment**：將 §明確不包含「儲存文件內容 / 文件編輯器」兩條限制由 bundle spec 移出，改由本 spec 定義 ZenOS Delivery 與 Helper snapshot 兩種合法儲存模式（見 §Spec 相容性附記）。 |
+| **`SPEC-doc-governance §3`**（2026-04-23 吸收舊 `SPEC-document-bundle`）| 多源聚合、bundle_highlights、URI 驗證、read_source 定義維持不變。本 SPEC 在其基礎上擴展三個欄位（external_id、external_updated_at、last_synced_at）並新增 write 的 helper upsert 語義。 | 本 SPEC 引用 bundle 規則為基石，不重新定義既有欄位。**需對 `SPEC-doc-governance` 發 amendment**：將「儲存文件內容 / 文件編輯器」的舊排除條款收斂為本 SPEC 定義的 Delivery Snapshot + Helper snapshot 兩種合法儲存模式（見 §Spec 相容性附記）。 |
 | **SPEC-doc-governance** (Approved) | 既有文件治理規則適用。本 spec 不改 frontmatter / doc_type / dispatch gate 規則。 | 無衝突。 |
 | **SPEC-ingestion-governance-v2** (Draft) | 該 spec 定義「Zentropy 在 client 端跑沉澱邏輯、用既有 ZenOS MCP tools 做 mutation」的分治邊界。本 spec 的 Helper 模式走同一條路徑（`write(collection="documents")`），不新增 `/api/ext/*` endpoint。 | 相容。本 spec 是該決策的具體落地之一：Helper = 另一種 client-side ingestion agent。 |
 | **SPEC-dashboard-ai-rail** | Mockup 右欄「Agent 建議」「Agent 改寫」屬 AI rail 範疇。 | 本 spec 只定義編輯器本體；AI rail 整合走 ai-rail spec，不重定義。 |
 | **L2 entity「知識系統 Adapter 策略」** | 該 entity summary 原本把 GDrive OAuth / Notion polling 列為 P2。 | **本 spec 改寫該 L2 的核心決策**：GDrive / Notion / Local 一律走 Helper 模式，ZenOS 不做原生 OAuth。Spec approved 後需 update L2 entity summary 與 sources。 |
 
-**無其他衝突**。已比對 `SPEC-doc-governance`、`SPEC-document-bundle`、`SPEC-doc-source-governance` (Superseded)、`SPEC-ingestion-governance-v2`、`SPEC-dashboard-ai-rail`、`SPEC-batch-doc-governance`、`document-governance.md v2.2`。
+**無其他衝突**。已比對 `SPEC-doc-governance`、`SPEC-doc-governance §3`、`SPEC-doc-source-governance` (Superseded)、`SPEC-ingestion-governance-v2`、`SPEC-dashboard-ai-rail`、`SPEC-batch-doc-governance`、`document-governance.md v2.2`。
 
-### Spec 相容性附記（對 SPEC-document-bundle 的修訂）
+### Spec 相容性附記（對 SPEC-doc-governance §3 的修訂）
 
-`SPEC-document-bundle` §明確不包含 寫：
+`SPEC-doc-governance §3` §明確不包含 寫：
 
 > - 儲存文件內容 — ZenOS 是語意索引層，不存內容
 > - Content snapshot / 快取 — 不做內容副本
@@ -182,7 +184,7 @@ ZenOS 的 L3 document entity 已在 `SPEC-document-bundle` 定義為多源語意
 - **描述**：一個 L3 index doc entity 必須能同時容納以下 source 組合：`zenos_native` 原生文件、`github` 外部連結、helper 推入的 `notion/gdrive/local`。Dashboard 必須正確顯示混合 source 清單。
 
 - **顯示規則**：
-  - 沿用 `SPEC-document-bundle` §P0-9 的分組顯示（按 doc_type）
+  - 沿用 `SPEC-doc-governance §3` §P0-9 的分組顯示（按 doc_type）
   - 本 spec 補充：source.type 決定每個 source 的 badge（ZenOS / GitHub / Notion / GDrive / Local）
   - 使用者點 `zenos_native` source → 留在 Dashboard 內的 reader / editor
   - 使用者點 `github / notion / gdrive` source → 新分頁開外部
@@ -250,7 +252,7 @@ ZenOS 的 L3 document entity 已在 `SPEC-document-bundle` 定義為多源語意
 - **檔案類型支援除 markdown 外的任何格式** — 不做 .docx / .pdf / 圖檔；外部 source 可掛這些 URL，但 ZenOS 不解析其內容。
 - **外部文件全文 mirror** — `snapshot_summary` 是 helper 產出的 ≤10KB 語意摘要，不是全文快取。Helper 不准把整份 Notion 頁 / GDrive 文件丟進來；要看原文請用 `source.uri` 跳外站。
 - **Helper 的實作細節** — 本 spec 只定 contract；helper 由用戶自行組合（Claude Desktop / Cursor / ChatGPT 都可）。
-- **強制把既有 single-source doc entity 遷移為 index** — 沿用 SPEC-document-bundle 的自然演進策略。
+- **強制把既有 single-source doc entity 遷移為 index** — 沿用 SPEC-doc-governance §3 的自然演進策略。
 
 ---
 
@@ -263,7 +265,7 @@ ZenOS 的 L3 document entity 已在 `SPEC-document-bundle` 定義為多源語意
 - **API**：既有 `POST /api/docs/{doc_id}/content` 可沿用；需確認 Dashboard editor 的 auto-save debounce 與 content size 上限。
 - **Dashboard editor 選型**：markdown-first 編輯器候選 tiptap / lexical / milkdown，由 Architect 決定；outline 生成走 client-side markdown AST。
 - **影響 impact chain**：`L3 文件治理`（primary）、`知識系統 Adapter 策略`（L2 策略改寫）、`MCP 介面設計`（write mutation 擴展）、`Dashboard 知識地圖`（docs UI 新頁）。
-- **SPEC-document-bundle 的 exclusions 修訂**：實作前需發 amendment（或 bundle spec 直接 edit），移除兩條互斥條款。
+- **SPEC-doc-governance §3 的 exclusions 修訂**：實作前需發 amendment（或 bundle spec 直接 edit），移除兩條互斥條款。
 - **Staleness 判斷時窗 N=14 天**：可改為 workspace-level 可設定；Phase 1 先寫死。
 - **「推入內容較舊」的 staleness warning**：需防止 helper 覆蓋較新內容；可考慮 P0-2 的 write 擴展為 `if_external_updated_at_matches`（類 ETag）——列為開放問題。
 

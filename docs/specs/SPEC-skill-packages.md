@@ -2,9 +2,10 @@
 type: SPEC
 id: SPEC-skill-packages
 status: Draft
-l2_entity: Agent 整合架構
+ontology_entity: agent-runtime
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-23
+depends_on: SPEC-agent-integration-contract, SPEC-agent-setup, SPEC-skill-release-management
 ---
 
 # Feature Spec: Skill 分類安裝（Skill Packages）

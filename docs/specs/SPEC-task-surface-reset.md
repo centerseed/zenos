@@ -100,7 +100,7 @@ Task detail 的主問題只能是：
 - title
 - status / priority / dispatcher
 - owner / due date / project
-- next action / blocked reason / overdue signal
+- next action / `blocked_by` + `blocked_reason`（欄位值）/ overdue signal
 - description
 - acceptance criteria
 - result / handoff / review / attachments
@@ -169,7 +169,7 @@ AC-TSR-03:
   - product 名稱
   - current milestone / stage
   - active plan 數
-  - blocked / review / overdue 計數
+  - **阻塞 / review / overdue 計數**：阻塞定義為 `blocked_by` 非空（不是 `status="blocked"`；runtime 已不使用該 status，見 `governance_rules.py:798` 「不使用 blocked/backlog/archived 狀態」）；review 為 `status=review`；overdue 為 `dueDate < now` 且狀態 ∈ open
   - 最近更新
 - 使用者必須能從 milestone 或 plan 直接進入對應產品頁。
 
@@ -179,9 +179,10 @@ AC-TSR-04:
   Then 第一屏必須可直接看到各 root 的 milestone / plan 進度概況，而不是只看到 task board 或單純 task 統計卡。
 
 AC-TSR-05:
-- Given 某 product 底下有 blocked plan 或 overdue open work
+- Given 某 product 底下有阻塞（任一 task `blocked_by` 非空）或 overdue open work
   When 使用者查看 `/tasks`
   Then 該 product 的列或卡片必須直接顯示風險訊號，不需先進產品頁。
+  > 註：Plan 合法 status（`SPEC-task-governance §3.2`）為 `draft / active / completed / cancelled`，**無 blocked**；「blocked plan」是以 plan 下轄 task 有 `blocked_by` 推導的衍生 signal，不是 Plan 自身 status。
 
 AC-TSR-06:
 - Given 使用者點擊某個 milestone 或 plan
@@ -202,7 +203,7 @@ AC-TSR-06:
 AC-TSR-07:
 - Given 使用者開啟任一 task detail
   When 不做任何切換
-  Then 第一屏必須看得到 `status / priority / owner / due / blocked / next action / handoff controls`。
+  Then 第一屏必須看得到 `status / priority / owner / due / blocked_by（阻塞中 badge 取自欄位值，不是 status=blocked）/ next action / handoff controls`。
 
 AC-TSR-08:
 - Given 該 task 有 parent / siblings / subtasks / plan
@@ -249,7 +250,7 @@ AC-TSR-12:
 
 - execution board 上的主視覺權重必須先給：
   - next work
-  - blocked / overdue / review
+  - 阻塞（`blocked_by` 非空）/ overdue / status=review 三類風險 signal
   - owner / due
   - primary CTA
 - 編號、breadcrumb、plan UUID、same-level 對照、outline 樹，不得搶第一視線。

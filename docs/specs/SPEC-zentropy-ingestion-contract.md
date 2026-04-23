@@ -1,15 +1,16 @@
 ---
 type: SPEC
 id: SPEC-zentropy-ingestion-contract
-ontology_entity: MCP 介面設計
-created: 2026-04-11
 status: Approved
-updated: 2026-04-11
+ontology_entity: mcp-interface
+created: 2026-04-11
+updated: 2026-04-23
+depends_on: SPEC-zenos-core, SPEC-zenos-external-integration, SPEC-task-governance, SPEC-ontology-architecture v2 §7, SPEC-zenos-auth-federation
 ---
 
 # Feature Spec: Zentropy Signal Ingestion Contract (v1)
 
-> Layering note: 本文件是「Zentropy 輸入訊號接入 ZenOS」的對外合約與治理邊界定義。核心語意仍以 `SPEC-zenos-core`、`SPEC-zenos-external-integration`、`SPEC-task-governance`、`SPEC-l2-entity-redefinition`、`SPEC-zenos-auth-federation` 為準。
+> Layering note: 本文件是「Zentropy 輸入訊號接入 ZenOS」的對外合約與治理邊界定義。核心語意仍以 `SPEC-zenos-core`、`SPEC-zenos-external-integration`、`SPEC-task-governance`、`SPEC-ontology-architecture v2 §7`（L2 canonical，舊 `SPEC-l2-entity-redefinition` 已併入）、`SPEC-zenos-auth-federation` 為準。
 >
 > Decision binding: ZenOS 側內部治理實作決策由 `ADR-031` 鎖定；本文件是能力邊界的規格層 SSOT。
 
@@ -262,7 +263,7 @@ response（節錄）：
 
 1. ingestion API 不得直接改 `entities.summary`、`entities.tags`、`impacts relationships`。
 2. L2 更新必須以 `l2_update_candidate -> review -> confirm` 路徑執行。
-3. 若需要正式改 L2，必須走既有 L2 治理規範（`SPEC-l2-entity-redefinition`）。
+3. 若需要正式改 L2，必須走既有 L2 治理規範（`SPEC-ontology-architecture v2 §7`；舊 `SPEC-l2-entity-redefinition` 已併入）。
 
 ## 10. 治理執行模型
 
@@ -285,7 +286,7 @@ response（節錄）：
 1. `SPEC-zenos-core`：沿用 Core/App 分層與 Action/Identity 邊界。
 2. `SPEC-zenos-external-integration`：沿用 delegated credential + scope 合約。
 3. `SPEC-task-governance`：沿用 task lifecycle 與 review/confirm gate。
-4. `SPEC-l2-entity-redefinition`：沿用 L2 升級條件與 impacts gate。
+4. `SPEC-ontology-architecture v2 §7`：沿用 L2 升級條件與 impacts gate（2026-04-23 起 canonical）。
 5. `SPEC-zenos-auth-federation`：沿用 federation exchange 與 delegated token 模型。
 
 ## 12. Ontology 連結（本 spec 強制綁定）
@@ -307,7 +308,7 @@ response（節錄）：
 - `SPEC-zenos-core`：沿用 Core 與 Application 分層邊界
 - `SPEC-zenos-external-integration`：沿用 federation 與外部接入原則
 - `SPEC-task-governance`：task lifecycle 與 confirm gate 不重定義
-- `SPEC-l2-entity-redefinition`：L2 升降級與 impacts gate 不重定義
+- `SPEC-ontology-architecture v2 §7`：L2 升降級與 impacts gate 不重定義（canonical；舊 `SPEC-l2-entity-redefinition` 已併入）
 - `SPEC-agent-integration-contract`：日常寫入仍屬 MCP + server governance
 - `ADR-031`：鎖定 ZenOS 內部治理實作策略與 rollout
 

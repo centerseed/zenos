@@ -4,7 +4,8 @@ id: SPEC-zenos-auth-federation
 status: Draft
 ontology_entity: zenos-auth-federation
 created: 2026-04-09
-updated: 2026-04-10
+updated: 2026-04-23
+depends_on: SPEC-identity-and-access, SPEC-zenos-core
 ---
 
 # Feature Spec: ZenOS Auth Federation
