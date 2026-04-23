@@ -4,56 +4,128 @@ id: REF-glossary
 status: Draft
 ontology_entity: glossary
 created: 2026-03-26
-updated: 2026-03-26
+updated: 2026-04-23
 ---
 
-# ZenOS 核心概念速查
+# ZenOS 核心概念速查（2026-04-23 Grand Refactor 後）
 
-| 概念 | 一句話 | 在 spec 的哪裡 |
-|------|--------|---------------|
-| 語意代理 | Entity = 知識的代理人，承載 context 讓 AI 不用讀原始文件就能判斷相關性 | Part 4「Ontology 的形式與治理架構」 |
-| Entity 分層 | 三層：product（基礎）→ L2 治理概念（module + governance concepts）→ document/goal/role/project（應用層）。全部在 entities/ collection | Part 7.2「Entity 分層模型」 |
-| Entity 邊界 | 三個判斷：跨時間存活？有四維可描述？能當錨點？→ 是 entity。否則是 task 或 entity.sources | Part 7.2「Entity 的邊界定義」 |
-| Entity.sources | entity 身上掛的文件參考連結 [{uri, label, type}]。低價值文件不建 entity，掛 sources 就好 | Part 7.2 |
-| Task ≠ Entity | Task 有自己的 collection 和生命週期（backlog→done），透過 linkedEntities 連到 ontology，是消費者不是節點 | Part 7.2 |
-| 骨架層 | Layer 1（product）+ Layer 2（L2 治理概念）+ goal/role/project，從對話建立，低頻變動 | Part 4「雙層治理架構」 |
-| 分層路由規則 | 新輸入先判斷本質：治理原則進 L2、正式文件進 L3、可驗收工作進 Task、低價值材料掛 sources | docs/specs/SPEC-l2-entity-redefinition.md |
-| 神經層 | Layer 3 的 document entity + entity.sources，CRUD 自動觸發（Adapter），高頻變動 | Part 4「雙層治理架構」 |
-| 雙層互動 | 神經層異常反推骨架層更新（新實體、休眠實體、突發關聯） | Part 4「雙層治理架構」 |
-| 四維標籤 | 所有知識用 What/Why/How/Who 四個維度標注，是 AI 自動治理的依循 | Part 0 |
-| Context Protocol | Ontology 的 view — 從 ontology 自動生成、人微調確認，不是手寫文件 | Part 0 + Part 4 Step 2d |
-| 漸進式信任 | 不要求資料，先用對話展示價值，信任是賺來的 | Part 5 |
-| 全景圖 | AI 從 30 分鐘對話產出公司全貌 + 盲點推斷（骨架層的視覺展示） | Part 4 Step 2a-2b |
-| confirmedByUser | AI 產出 = draft，人確認 = 生效（資料層→知識層通用） | Part 4 |
-| Meta-Ontology | Schema 層：定義「ontology 應該長什麼樣」，全客戶共用一套 | Part 4「Ontology 的層次結構」 |
-| Ontology ≠ 原始文件 | 存語意代理和結構，不存文件內容，降低機密風險 | Part 5 |
-| BYOS | 每客戶一個 VM + 一個 Claude 訂閱，資料不過 ZenOS | Part 5 |
-| 三層治理系統 | 事件源層（偵測 CRUD）→ 治理引擎層（AI 分析）→ 確認同步層（人確認 + 級聯更新） | Part 7 |
-| Adapter 架構 | 統一介面 + 多生態系 Adapter（Git/Google/MS/Notion），文件留用戶端 | Part 7 |
-| ZenOS Dashboard | 唯一自建 UI，做六件事：全景圖、確認佇列、Protocol viewer、Storage Map、任務看板、團隊設定。不做文件管理 | Part 7 |
-| Who + Owner 分離 | Who = 多值（context 分發給哪些角色），Owner = 單值（治理問責誰來確認） | docs/reference/REF-enterprise-governance.md |
-| Who 三層模型 | 職能角色（ontology）→ 員工（公司層）→ agents（個人層）。ZenOS 管前兩層，第三層員工自理 | Part 0 + docs/reference/REF-enterprise-governance.md |
-| Pull Model | Agent 自宣告身份，透過 MCP query 帶 role filter 拉 context。ZenOS 不維護 agent registry | docs/reference/REF-enterprise-governance.md |
-| Action Layer | Ontology 的 output 路徑——任務管理。Ontology Context + 行動屬性。UI 和 MCP 對稱 | Part 7.1 |
-| Entity ≠ Project | Entity(project) 是短期工作容器，Entity(product/L2 governance concept) 是長期知識。知識不跟著專案死 | Part 7.2 + ADR-006 |
-| Dashboard 用語 | UI 不出現 entity/ontology。Product→專案、Module→模組、Knowledge Graph→知識地圖、Entity→「節點」 | Part 7.3 |
-| 權限模型 | 三層：來源層→ Ontology 層（entity.visibility + role）→ 消費層。Phase 0: admin/member/agent | Part 7.6 |
+> 本 REF 只提供快速對照；每個 term 的 canonical 定義以右欄 SPEC 為準。
+> 舊 spec.md Part X 引用已於 2026-04-23 改為新 SPEC 對照。
 
----
+## L1-L3 實體模型
 
-## 關鍵發現（2026-03-21 驗證）
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **L1 entity（root）** | workspace 內可獨立授權與分享的主軸 root（`product / company / customer / account` 等）；判定 = `level=1 AND parent_id IS NULL` | 主 SPEC v2 §6 + ADR-047 D1-D2 |
+| **L2 entity（知識節點）** | 通過三問 + impacts gate 的持久知識概念 | 主 SPEC v2 §7 |
+| **L3-Semantic** | `L3DocumentEntity / L3RoleEntity / L3ProjectEntity` — 文件語意代理 / 角色 / 工作容器 | 主 SPEC v2 §8 |
+| **L3-Action** | `Milestone / Plan / Task / Subtask`，原 Action Layer 併入 Knowledge Layer | 主 SPEC v2 §9 + `SPEC-task-governance` |
+| **L1 判定** | 由 `level` 欄位判定，不由 `entity_type`（舊 ADR-007 已 supersede） | ADR-047 |
 
-1. What/Who 是事實性維度，AI 高準確度；Why/How 是意圖性維度，必須人確認
-2. 老闆是 top-down 思維：先展示全景圖建立信任，再問他要什麼
-3. 盲點推斷是核心差異化：從跨產品關係圖中推斷老闆沒注意到的問題
-4. Ontology 建構的資訊來源不能依賴 codebase：真實場景老闆不會給
-5. 漸進式信任是 ZenOS 最關鍵的設計：決定 go-to-market 能不能走通
-6. Ontology 是文件的語意代理，不是文件本身也不是索引
-7. 骨架層 + 神經層的雙層治理：低頻結構（對話建）+ 高頻標籤（CRUD 觸發）互相餵養
-8. Context Protocol 是 ontology 的 view，不是手寫文件
-9. 市場空白確認：面向 SMB 的整合產品不存在
-10. Conversation Adapter 是被 dogfooding 發現的：AI 對話產出的知識捕獲點必須在產生點
-11. Agent 本質是 skill，Pull Model 而非 Push Model
-12. 任務是 ontology context + Who 三層模型 + 生命週期的交匯點：驗證 ontology 品質的唯一手段
-13. 知識地圖是 demo killer：展示 entity 關係圖給客戶全新視角，差異化在「原來我的公司知識長這樣」
-14. Entity 對外不叫 entity：UI 用「節點」或具體 type 名稱
+## 基礎屬性
+
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **BaseEntity** | 所有 entity 共用：identity / permission / parent_id / owner / timestamps | 主 SPEC v2 §4 |
+| **SemanticMixin** | L2 / L3-Semantic 共用：summary / tags / confirmed_by_user / last_reviewed_at | 主 SPEC v2 §5 |
+| **四維標籤** | What / Why / How / Who，源自 Ranganathan PMEST | 主 SPEC v2 §5 tags spec |
+| **`confirmed_by_user`** | AI 產出 = draft，人確認 = 生效；L2 升 confirmed 的 gate | 主 SPEC v2 §7.1 |
+| **L2 lifecycle**（二維）| `confirmed_by_user × status`：Draft `(false, active)` → Confirmed `(true, active)` ↔ Stale `(true, stale)` | 主 SPEC v2 §7.2 |
+| **三問** | q1_persistent / q2_cross_role / q3_company_consensus；三問全 true 才能升 L2 | 主 SPEC v2 §7.1 + `governance_rules` |
+| **impacts gate** | L2 升 confirmed 必須 ≥1 條具體 `impacts` relationship | 主 SPEC v2 §7.1 + §10.2 |
+| **EntityEntry** | L2 的結構化記憶條目（decision / insight / limitation / change / context）；1-200 字 | 主 SPEC v2 §7.3 |
+
+## Ownership & 分層路由
+
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **Task ownership SSOT** | `product_id`（唯一，ADR-047 D3）；legacy `project` 字串只是 fallback hint；`project_id` 參數 reject | `governance_rules.py:938` `OWNERSHIP_SSOT_PRODUCT_ID` |
+| **Subtask** | `tasks` row with `parent_task_id != null`（同表自指，不是獨立 subclass）；runtime target post-MTI 為 `entity_l3_subtask` | `SPEC-task-governance §1.1` |
+| **分層路由** | 新輸入先判：governance 原則 → L2；正式文件 → L3-Document；可驗收工作 → L3-Task；低價值材料 → L2.sources | 主 SPEC v2 §7 + `SPEC-doc-governance §10` |
+| **L2.sources 輕量參考**| 移除不影響 L2 語意的 uri；不升 L3 | `SPEC-doc-governance §10.1` |
+
+## Task / Plan 治理
+
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **TaskStatus canonical** | `todo / in_progress / review / done / cancelled`；legacy `backlog / blocked / archived` server normalize | `task_rules.py:19-33` + `SPEC-mcp-tool-contract §9.2` |
+| **Task terminal** | `cancelled` 是唯一真 terminal（無出站）；`done → todo` reopen 合法 | `task_rules.py:19-33` |
+| **`review → done`** | 必須經 `confirm(collection="tasks", accepted=True)`；`task.update(status="done")` 會被擋 | `task_rules.py:36` `_UPDATE_FORBIDDEN_TARGETS` |
+| **Dispatcher** | regex `^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$`；違反 `INVALID_DISPATCHER` | `governance_rules` |
+| **HandoffEvent** | append-only log；caller 傳 → strip + warning `HANDOFF_EVENTS_READONLY`（不 reject） | `SPEC-task-governance §4.2` |
+| **`entity_entries` 回饋** | `{entity_id, type, content}`；僅 `confirm(accepted=True)` 時寫入；target L2 必須在 task.linked_entities | `SPEC-task-governance §11` |
+| **Plan lifecycle** | `draft → active → completed | cancelled`；completed 時下轄 task 須 snapshot-terminal | `SPEC-task-governance §3.2` |
+
+## Document 治理
+
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **Document status** | `draft / current / stale / archived / conflict` | 主 SPEC v2 §8.1 + `ontology_service._DOCUMENT_STATUSES` |
+| **`doc_role`** | `single`（單檔例外）/ `index`（**預設**，聚合多 source） | `SPEC-doc-governance §3.1` |
+| **`bundle_highlights`** | index entity 必填 1-5 筆，至少 1 筆 `priority=primary` | `SPEC-doc-governance §3.4` |
+| **Source** | `{source_id, uri, type, label, doc_type, source_status, is_primary, ...}`；per-source CRUD | `SPEC-doc-governance §3.2` |
+| **`read_source` error** | helper types 走 `SNAPSHOT_UNAVAILABLE / LIVE_RETRIEVAL_REQUIRED`；adapter 走 `SOURCE_UNAVAILABLE / ADAPTER_ERROR` | `SPEC-mcp-tool-contract §8.3` |
+| **`doc_type` 泛用類別** | `SPEC / DECISION / DESIGN / PLAN / REPORT / CONTRACT / GUIDE / MEETING / REFERENCE / TEST / OTHER` | `SPEC-doc-governance §5` |
+
+## Relationship & Graph Traversal
+
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **Relationship type** | `depends_on / serves / owned_by / part_of / blocks / related_to / impacts / enables` | 主 SPEC v2 §10.1 |
+| **`impact_chain`（forward）** | 從此節點出發，沿 outgoing edges 的 5 跳影響鏈 | 主 SPEC v2 §10.4 |
+| **`reverse_impact_chain`（backward）** | 誰改了會影響我；同 5 跳上限 + cycle 防呆 | 主 SPEC v2 §10.4（shipped `commit 0ede9cf`）|
+| **`verb` on relationship** | 2026-04-18 REJECTED（填寫率 8.8%），DDL 欄位保留避免 migration risk，不作治理評分依據 | 主 SPEC v2 §10.5 |
+
+## Identity & Access
+
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **`visibility`** | `public / restricted / confidential`；`confidential` = owner + 明確授權（不是 owner-only） | 主 SPEC v2 §13 + `SPEC-identity-and-access §4.1` |
+| **白名單提權** | `visible_to_members / visible_to_roles / visible_to_departments`；member 可被提權讀 `confidential`；guest 不被提權 | `SPEC-identity-and-access §4.1` |
+| **Workspace** | partner 的獨立 tenant scope；subtree authorization 可跨 workspace 共享 | `SPEC-identity-and-access` |
+| **Federation** | 外部 app end-user 映射到 ZenOS principal；`identity_link` + delegated credential | `SPEC-zenos-auth-federation` |
+
+## MCP Tool Surface
+
+| 概念 | 一句話 | Canonical |
+|------|--------|-----------|
+| **Unified envelope** | `{status, data, warnings, suggestions, similar_items, context_bundle, governance_hints, workspace_context}` | `SPEC-mcp-tool-contract §6.1` |
+| **Status**（rejected 三 shape）| A 結構化 `data.error:str + data.message`；B 只 `rejection_reason`；C 巢狀 `data.error:{code,...}`（僅 doc linkage） | `SPEC-mcp-tool-contract §6.2` |
+| **`governance_guide`** | 7 topics：`entity / document / bundle / task / capture / sync / remediation`；3 levels | `SPEC-governance-guide-contract` + `mcp/governance.py:15 _VALID_TOPICS` |
+| **`id_prefix`** | 僅 lookup 支援（≥4 字元 hex）；write / confirm / handoff **不接受**（`id_prefix_not_allowed_for_write_ops`） | `SPEC-mcp-id-ergonomics` + `SPEC-mcp-tool-contract §8.12` |
+| **`include` (opt-in)** | `get` / `search` 的 response 欄位控制；未傳 → eager full + deprecation warning | `SPEC-mcp-opt-in-include` |
+
+## 歷史概念映射（v0.7 → v2.0）
+
+| 舊術語（v0.7 及更早）| 新 canonical |
+|----------------------|-------------|
+| 骨架層 / Skeleton Layer | L1 + L2 entity graph |
+| 神經層 / Neural Layer | L3-Document subclass（舊 `documents` collection 已合併進 entity）|
+| Meta-Ontology | 主 SPEC v2（axioms + DDL canonical）|
+| Context Protocol（獨立產出）| 不再獨立；`impact_chain` + `bundle_highlights` + `summary` 組合提供 agent context |
+| 雙層互動 | `impacts gate` + L2 lifecycle + `analyze(check_type="impacts")` |
+| 過時推斷 | `analyze(check_type="staleness"|"document_consistency")` |
+| 三層治理系統（事件源 / 引擎 / 確認同步）| server-side governance + MCP + client skills；見 `SPEC-governance-framework` |
+| Task ≠ Entity | 過時；Task 在主 SPEC v2 §9 已為 L3-Action subclass（runtime 今日仍獨立 `zenos.tasks` table，post-MTI 會統一）|
+| Entity ≠ Project | 過時；project 已為 `L3ProjectEntity`（主 SPEC v2 §8.3）|
+| Entity.sources | 改名 `sources_json`（typed JSON，主 SPEC v2 §8.1）|
+
+## Dashboard 用語（UI layer）
+
+| UI 名稱 | 內部 entity |
+|--------|------------|
+| 專案 | L1 Product（或 Company / Customer / Account）|
+| 模組 | L2 module / governance concept |
+| 知識地圖 | L1 + L2 + relationships graph |
+| 節點 | Entity（UI 永不直接稱 entity / ontology）|
+| 文件 | L3-Document bundle |
+| 任務 | L3-Task |
+
+## 產品哲學（仍 canonical）
+
+| 概念 | 一句話 |
+|------|--------|
+| 漸進式信任 | 不要求資料，先用對話展示價值，信任是賺來的（`SPEC-progressive-trust`）|
+| BYOS | 每客戶一個 VM + 一個 Claude 訂閱，資料不過 ZenOS |
+| Who + Owner 分離 | Who = 多值（context 分發）；Owner = 單值（治理問責）|
+| Pull Model | Agent 自宣告身份，透過 MCP query 帶 role filter 拉 context；ZenOS 不維護 agent registry |

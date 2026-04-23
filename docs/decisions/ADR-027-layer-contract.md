@@ -1,15 +1,17 @@
 ---
-doc_id: ADR-027-layer-contract
-title: 決策紀錄：Layer Contract Protocol — 層間公開介面與呼叫規則
-type: DECISION
+type: ADR
+id: ADR-027-layer-contract
+status: Superseded
 ontology_entity: zenos-core
-status: Draft
-version: "1.0"
-date: 2026-04-09
-supersedes: null
+created: 2026-04-09
+updated: 2026-04-23
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: Layer contract protocol 已由 SPEC-zenos-core + SPEC-mcp-tool-contract + SPEC-task-governance 取代；層間介面以 MCP tool contract 為唯一 SSOT
 ---
 
 # ADR-027: Layer Contract Protocol — 層間公開介面與呼叫規則
+
+> **2026-04-23 Supersede note**：本 ADR 的層間介面協議已由以下文件取代：`SPEC-zenos-core`（邊界聲明）+ `SPEC-mcp-tool-contract`（介面）+ 各 subclass SPEC（`SPEC-task-governance` / `SPEC-doc-governance` / `SPEC-identity-and-access`）。
 
 ## Context
 

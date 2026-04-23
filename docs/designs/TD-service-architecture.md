@@ -2,14 +2,24 @@
 type: TD
 id: TD-service-architecture
 status: Approved
-ontology_entity: TBD
+ontology_entity: service-architecture
 created: 2026-03-21
-updated: 2026-03-27
+updated: 2026-04-23
 ---
 
 # Technical Design: 服務架構 — Ontology 治理的落地實作
 
 > 從 `docs/spec.md` Part 7 搬出。原始內容寫於 2026-03-21。
+>
+> **2026-04-23 Layering note（Grand Ontology Refactor）**：
+> 本 TD 的早期服務架構概念（事件源 / 治理引擎 / 確認同步三層）仍保留為歷史設計記錄，但**schema / MCP contract / governance rule canonical** 已於 2026-04-23 由以下 SPECs 取代：
+> - Schema canonical → `SPEC-ontology-architecture v2`
+> - MCP tool contract → `SPEC-mcp-tool-contract`
+> - Task / Plan 治理 → `SPEC-task-governance`
+> - Document 治理 → `SPEC-doc-governance`
+> - 治理規則分發 → `SPEC-governance-guide-contract`
+>
+> 本 TD 內任何具體 schema / status enum / error code 如與上述 SPECs 不一致，以 SPEC 為準。新服務設計請直接對齊 SPEC，不要沿用本 TD 的過時欄位敘述。
 
 ### 核心問題：文件 CRUD 怎麼被偵測、ontology 怎麼主動更新？
 

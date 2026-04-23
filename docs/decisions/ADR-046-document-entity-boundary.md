@@ -1,14 +1,16 @@
 ---
-doc_id: ADR-046-document-entity-boundary
-title: 決策紀錄：完成 Document → Entity 收斂，廢除獨立 Document collection
-type: DECISION
-ontology_entity: Knowledge Layer
-status: Accepted
-version: "1.0"
-date: 2026-04-22
+type: ADR
+id: ADR-046-document-entity-boundary
+status: Superseded
+ontology_entity: l3-document
+created: 2026-04-22
+updated: 2026-04-23
 accepted_at: 2026-04-23
-supersedes: null
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: Document → Entity 收斂決策已完整落地為 SPEC-ontology-architecture v2 §8.1 的 L3DocumentEntity subclass + SPEC-doc-governance canonical
 ---
+
+> **2026-04-23 Supersede note**：本 ADR 決定的「廢除獨立 Document collection」已於 Grand Refactor 完整落地：`L3DocumentEntity` 是主 SPEC v2 §8.1 的 entity subclass；治理規則見 `SPEC-doc-governance`。
 
 # ADR-046: Document 完全併入 Entity，廢除獨立 Document collection
 

@@ -1,12 +1,16 @@
 ---
 type: ADR
-id: ADR-032
-status: Accepted
-ontology_entity: L3 文件治理
+id: ADR-032-document-delivery-layer-architecture
+status: Partial Supersede
+ontology_entity: l3-document
 created: 2026-04-11
-updated: 2026-04-20
+updated: 2026-04-23
 accepted_at: 2026-04-20
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: 核心 doc 決策已併入 SPEC-doc-governance；sidecar tables（document_revisions / document_share_tokens）仍為 current canonical，留在 SPEC-document-delivery-layer
 ---
+
+> **2026-04-23 Partial Supersede note**：本 ADR 的 doc 部分（bundle / source / read_source）決策已併入 `SPEC-doc-governance §3`；sidecar（revision / share_token）為 current canonical，見 `SPEC-document-delivery-layer`。
 
 # ADR-032: Document Delivery Layer 架構（Snapshot + Permalink + Share Token）
 

@@ -137,21 +137,21 @@ created: 2026-04-23
 ## ADRs（supersede / keep / delete）
 
 ### 被新 master ADR-048 supersede（舊決策失效）
-| ADR | 原議題 | 如何處理 |
-|-----|--------|---------|
-| ADR-006 entity-project-separation | project vs entity 分離 | SUPERSEDE — Action 併入 Knowledge，不再分家 |
-| ADR-007 entity-architecture | Entity 分層模型 | SUPERSEDE — 新主 SPEC 重寫 |
-| ADR-010 entity-entries | L2 entries 結構 | SUPERSEDE — entries 成 L2 subclass own 的 sidecar table |
-| ADR-022 document-bundle-architecture | doc_role / bundle | SUPERSEDE — bundle 欄位進 L3-document subclass |
-| ADR-025 zenos-core-layering | Knowledge / Action Layer 分離 | SUPERSEDE — Layer 合併 |
-| ADR-027 layer-contract | Layer 契約 | SUPERSEDE |
-| ADR-028 plan-primitive | Plan 獨立 collection | **Partial SUPERSEDE**（目標態）— Post-MTI 後 Plan 成 L3-action subclass；**runtime 今日 Plan 仍為獨立 `zenos.plans` table**（`src/zenos/infrastructure/action/sql_plan_repo.py`），這條 ADR 在 runtime 層面仍為 canonical，migration 完成前不完全取代 |
-| ADR-032 document-delivery-layer-architecture | delivery 方案 | SUPERSEDE 部分（doc 部分）|
-| ADR-041 pillar-a-semantic-retrieval | embedding 放 entities 表 | SUPERSEDE — embedding 獨立 sidecar table |
-| ADR-044 task-ownership-ssot | task.project_id → product_id | **KEEP as current canonical**（runtime 今日仍以 `product_id` 為唯一 ownership SSOT，見 `governance_rules.py:938 OWNERSHIP_SSOT_PRODUCT_ID`）。Post-MTI 時 `product_id` 會統一併入 `parent_id` 樹（主 SPEC §9 目標態），但那是 Wave 9 migration 後的事；在那之前本 ADR 未被取代 |
-| ADR-045 protocol-collection-vs-view | Protocol 是 collection 非 view | KEEP — Protocol 判定仍有效，但其 schema 納入新 Base |
-| ADR-046 document-entity-boundary | Document 合併 Entity | SUPERSEDE — 新 SPEC 完整實作 |
-| ADR-047 l1-level-ssot | L1 由 level 判定 | SUPERSEDE 部分 — axiom 保留，細節被新主 SPEC 覆蓋 |
+| ADR | 原議題 | 如何處理 | 2026-04-23 標記狀態 |
+|-----|--------|---------|------|
+| ADR-006 entity-project-separation | project vs entity 分離 | SUPERSEDE | ✅ marked |
+| ADR-007 entity-architecture | Entity 分層模型 | SUPERSEDE | ✅ marked |
+| ADR-010 entity-entries | L2 entries 結構 | SUPERSEDE | ✅ marked |
+| ADR-022 document-bundle-architecture | doc_role / bundle | SUPERSEDE | ✅ marked |
+| ADR-025 zenos-core-layering | Knowledge / Action Layer 分離 | SUPERSEDE | ✅ marked |
+| ADR-027 layer-contract | Layer 契約 | SUPERSEDE | ✅ marked |
+| ADR-028 plan-primitive | Plan 獨立 collection | **Partial** — Post-MTI 目標態；runtime 現行仍獨立 plans table | KEEP as current canonical（未加 supersede marker）|
+| ADR-032 document-delivery-layer-architecture | delivery 方案 | **Partial SUPERSEDE**（doc bundle 部分）| ✅ marked as Partial Supersede |
+| ADR-041 pillar-a-semantic-retrieval | embedding 放 entities 表 | **Partial SUPERSEDE** — embedding 改為 sidecar table | ✅ marked as Partial Supersede |
+| ADR-044 task-ownership-ssot | task.project_id → product_id | **KEEP as current canonical** — runtime 今日仍以 `product_id` 為唯一 ownership SSOT（`governance_rules.py:938`） | 未加 supersede marker |
+| ADR-045 protocol-collection-vs-view | Protocol 是 collection 非 view | KEEP — Protocol 判定仍有效 | 未加 marker |
+| ADR-046 document-entity-boundary | Document 合併 Entity | SUPERSEDE | ✅ marked |
+| ADR-047 l1-level-ssot | L1 由 level 判定 | **Partial** — axiom 進主 SPEC；runtime enforcement 仍 canonical | 未加 marker（仍為 current canonical）|
 
 ### 保留（未被取代）
 | ADR | 議題 |
@@ -191,10 +191,10 @@ created: 2026-04-23
 | ADR-042 entry-source-tiering | |
 | ADR-043 multi-tenant-deployment-architecture | |
 
-### 待建立
+### ✅ 已建立（2026-04-23）
 | ADR | 議題 |
 |-----|------|
-| **ADR-048 Grand Ontology Refactor（master）** | 整體 refactor 總宣告 + supersede 上表清單 |
+| **[ADR-048 Grand Ontology Refactor（master）](decisions/ADR-048-grand-ontology-refactor.md)** | ✅ 已建立 — 整體 refactor 總宣告 + supersede 9+ 份舊 ADR 清單 + 鎖定 6 axioms + 6 份 canonical SPEC |
 
 ---
 
@@ -204,12 +204,12 @@ created: 2026-04-23
 
 | TD | Action |
 |----|--------|
-| TD-foundation-p0-entity-schema | DELETE — 由新 master SPEC 取代 |
-| TD-l2-entity-redesign | DELETE |
-| TD-three-layer-architecture | DELETE — Action Layer 併入後整體重寫 |
-| TD-action-layer | DELETE |
-| TD-action-layer-mcp-interface | DELETE |
-| TD-service-architecture | REVISE 新 polymorphic service split |
+| TD-foundation-p0-entity-schema | ✅ **SUPERSEDED stub** → SPEC-ontology-architecture v2 |
+| TD-l2-entity-redesign | ✅ **SUPERSEDED stub** → 主 SPEC v2 §7 |
+| TD-three-layer-architecture | ✅ **SUPERSEDED stub** → 主 SPEC v2 + SPEC-zenos-core |
+| TD-action-layer | ✅ **SUPERSEDED stub** → SPEC-task-governance + 主 SPEC v2 §9 |
+| TD-action-layer-mcp-interface | ✅ **SUPERSEDED stub** → SPEC-mcp-tool-contract + SPEC-task-governance |
+| TD-service-architecture | ✅ **REVISED** — 保留歷史內容，補 2026-04-23 Layering note 指向六份 canonical SPEC |
 | TD-doc-primary-parent-remediation | KEEP — 歷史 remediation |
 | TD-distributed-governance | KEEP |
 | 其餘 TD（CRM / marketing / dashboard / federation / ingestion / semantic-retrieval / opt-in / id-ergonomics / recent-change / partner-access / invitation / zentropy）| KEEP — feature-level 實作細節 |
@@ -220,12 +220,12 @@ created: 2026-04-23
 
 | REF | Action |
 |-----|--------|
-| REF-ontology-current-state | **REWRITE** 依新主 SPEC 實況更新 |
-| REF-ontology-methodology | **REVISE** |
-| REF-glossary | **REVISE** 新術語（L3-action / subclass 等）|
-| REF-active-spec-surface | **REVISE** 納入 master SPEC |
+| REF-ontology-current-state | ✅ **REWRITTEN** v2.0（2026-04-23）— 完整重寫為 Grand Refactor 後的 ontology 快照；舊 v0.7「骨架/神經層」概念模型改為 L1-L3 subclass canonical 引用 |
+| REF-ontology-methodology | ✅ **REVISED** — 加 Layering note 指向主 SPEC + 各 canonical SPEC；方法論思想部分保留 |
+| REF-glossary | ✅ **REVISED** — 重寫對照表，新 canonical 結構（L1/L2/L3 + Axioms + MCP + error shapes）；加「歷史概念映射」章節 |
+| REF-active-spec-surface | ✅ 已於 Wave 1 更新（Tier 1 加主 SPEC / governance-framework / IAM / zenos-core / mcp-tool-contract；l2-redefinition 移出）|
 | REF-zenos-document-classification | KEEP |
-| REF-governance-paths-overview | **REVISE** |
+| REF-governance-paths-overview | ✅ **REVISED** — frontmatter 對齊；line 214 SPEC-l2-entity-redefinition 改指主 SPEC v2 §7 |
 | REF-open-decisions | KEEP |
 | 其餘 REF（competitive / market / positioning / enterprise）| KEEP |
 

@@ -1,11 +1,17 @@
 ---
 type: ADR
-id: ADR-010
-status: Proposed
+id: ADR-010-entity-entries
+status: Superseded
+ontology_entity: l2
 created: 2026-03-28
+updated: 2026-04-23
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: entity_entries schema + 生命週期已併入 SPEC-ontology-architecture v2 §7.3；品質閘則在 SPEC-entry-distillation-quality
 ---
 
 # ADR-010: Entity Entries — L2 從文件索引升級為知識容器
+
+> **2026-04-23 Supersede note**：本 ADR 的設計理念已落地到 `SPEC-ontology-architecture v2 §7.3 Entity Entries`（schema + lifecycle）+ `SPEC-entry-distillation-quality`（寫入前品質閘）+ `SPEC-entry-consolidation-skill`（飽和後 consolidation）。歷史決策保留作背景。
 
 ## 決策
 

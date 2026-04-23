@@ -1,15 +1,17 @@
 ---
 type: ADR
 id: ADR-007-entity-architecture
-status: Approved
-ontology_entity: TBD
+status: Superseded
+ontology_entity: ontology-architecture
 created: 2026-03-23
 updated: 2026-04-23
-superseded_sections:
-  - "L1 單一 type 定義（2026-04-23 由 ADR-047 改為 level-based 判定；type 降為 UI label）"
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: Entity 分層模型已完整由 SPEC-ontology-architecture v2 §3-§9 取代；L1 level-based 判定由 ADR-047 canonical
 ---
 
 # ADR-007: Entity 架構決策
+
+> **2026-04-23 Supersede note**：本 ADR 已由 `ADR-048-grand-ontology-refactor` supersede。canonical entity 分層在 `SPEC-ontology-architecture v2 §3-§9`；L1 判定規則在 `ADR-047`（仍為 current canonical）。
 
 > 從 `docs/spec.md` Part 7.2 搬出。
 > **2026-04-23 update：** L1 的「product 單一 type」定義已由 ADR-047 supersede。

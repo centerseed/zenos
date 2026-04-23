@@ -4,12 +4,14 @@ id: REF-ontology-methodology
 status: Draft
 ontology_entity: ontology-methodology
 created: 2026-03-26
-updated: 2026-03-26
+updated: 2026-04-23
 ---
 
 # ZenOS Ontology 治理方法論
 
-> 版本：v1.0 | 日期：2026-03-21
+> 版本：v1.0（2026-03-21 原稿，2026-04-23 frontmatter 標準化）
+>
+> **Canonical 分工**：本 REF 記錄 ontology **方法論思想**（對話建模、分層判準、迭代收斂、治理哲學）。具體 schema / lifecycle / state machine / error code 以 `SPEC-ontology-architecture v2` + `SPEC-task-governance` + `SPEC-doc-governance` + `SPEC-governance-framework` 為權威。本 REF 中若敘述具體 DDL 或狀態轉換與 SPEC 不一致，以 SPEC 為準。
 > 來源：從 ZenOS 自身 + Paceriz ontology 建構實戰中提煉
 
 ---

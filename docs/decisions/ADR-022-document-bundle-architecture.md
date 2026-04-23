@@ -1,14 +1,16 @@
 ---
-doc_id: ADR-022-document-bundle-architecture
-title: 決策紀錄：Document Bundle 架構
-type: DECISION
-ontology_entity: L3 文件治理
-status: Accepted
-version: "2.0"
-date: 2026-04-09
+type: ADR
+id: ADR-022-document-bundle-architecture
+status: Superseded
+ontology_entity: l3-document
+created: 2026-04-09
+updated: 2026-04-23
 accepted_at: 2026-04-20
-supersedes: null
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: Document bundle 決策已完整併入 SPEC-doc-governance §3（2026-04-23 吸收舊 SPEC-document-bundle）+ 主 SPEC v2 §8.1 DDL
 ---
+
+> **2026-04-23 Supersede note**：本 ADR 記錄的 document bundle（doc_role / sources / bundle_highlights）決策已落地為 `SPEC-doc-governance §3` canonical + 主 SPEC v2 §8.1 schema。
 
 # ADR-022: Document Bundle 架構
 

@@ -2,9 +2,9 @@
 type: REF
 id: REF-governance-paths-overview
 status: Draft
-ontology_entity: governance-paths
+ontology_entity: governance-framework
 created: 2026-03-26
-updated: 2026-03-26
+updated: 2026-04-23
 ---
 
 # ZenOS 治理路徑總覽
@@ -211,7 +211,7 @@ LLM 成本：
 
 | 主題 | 權威文件 | 允許寫入的規則類型 | 禁止重寫位置 |
 |------|----------|--------------------|--------------|
-| L2 entity 升降級與 impacts gate | `docs/specs/SPEC-l2-entity-redefinition.md` | 三問、impacts、L2 路由邊界 | Action Layer spec、文件治理 spec |
+| L2 entity 升降級與 impacts gate | `docs/specs/SPEC-ontology-architecture.md v2 §7`（canonical；舊 `SPEC-l2-entity-redefinition` 已於 2026-04-23 併入主 SPEC）| 三問、impacts、L2 lifecycle 二維模型 | Action Layer spec、文件治理 spec |
 | L3 文件生命週期治理 | `docs/specs/SPEC-doc-governance.md` | frontmatter、rename/reclassify/archive/supersede、sync contract | L2 spec、Action Layer spec |
 | Action Layer / L3 Task 治理 | `docs/specs/SPEC-task-governance.md` | 建票品質、粒度、linked_entities、duplicate/supersede、驗收與反饋 | L2 spec、文件治理 spec |
 

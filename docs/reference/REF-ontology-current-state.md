@@ -4,162 +4,130 @@ id: REF-ontology-current-state
 status: Draft
 ontology_entity: ontology-current-state
 created: 2026-03-26
-updated: 2026-03-26
+updated: 2026-04-23
+version: v2.0 (Grand Ontology Refactor 2026-04-23)
 ---
 
-# ZenOS Ontology — 當前狀態
+# ZenOS Ontology — 當前狀態（2026-04-23）
 
-> 版本：v0.7 | 更新：2026-03-21 | 方法：手動建構（未來自動化）
+> 本 REF 是「今日 ZenOS ontology 實際長什麼樣」的快照，不是 canonical SPEC。
+> Canonical 定義見 `SPEC-ontology-architecture v2`；治理細則見 `SPEC-task-governance` / `SPEC-doc-governance` / `SPEC-identity-and-access` / `SPEC-governance-framework`。
+> 本檔定期與 `git log` 對齊，落後於 SPEC / runtime 時以後者為準。
 
----
+## 1. 六 Axioms（鎖定）
 
-## 實體清單
+1. **Entity = graph node**：L1 / L2 / L3 一律是 `entities_base` row
+2. **BaseEntity 強制繼承**：identity / permission / parent_id / owner / timestamps 共用
+3. **無 ad-hoc unschemed JSON blob**：允許 typed JSON 欄位（有明確 domain type），禁 `details: dict` catch-all
+4. **由內而外繼承擴充**：subclass 只能加欄位，不能改父層語意
+5. **Schema 結構強制**：違反 DDL CHECK 或 enum → server reject
+6. **MCP tool agent 語意最小化**：tool surface 穩定、參數收斂；caller 記憶負擔小
 
-### 產品（What）
+## 2. L1 / L2 / L3 分層現況
 
-| 實體 | 類型 | 狀態 | 說明 |
-|------|------|------|------|
-| ZenOS | 產品 | Phase 0 概念驗證 | AI 知識本體層，面向中小企業的 Palantir |
+| 層 | 實體種類 | Runtime 存儲 | Canonical SPEC |
+|----|---------|------------|-------------|
+| **L1** | product / company / customer / account（任何 level=1、parent_id=null 的 collaboration root）| `entities_base`（level=1）| 主 SPEC v2 §6 |
+| **L2** | 知識節點（三問 + impacts gate 通過的持久知識）| `entities_base`（level=2）+ `entity_l2`（SemanticMixin: summary / tags / confirmed_by_user）+ `entity_entries` sidecar | 主 SPEC v2 §7 |
+| **L3-Semantic** | Document / Role / Project | `entity_l3_document` / `entity_l3_role` / `entity_l3_project` | 主 SPEC v2 §8 |
+| **L3-Action** | Milestone / Plan / Task / Subtask | **（目標態）**`entity_l3_milestone / plan / task / subtask`；**（runtime 今日）**仍為 `zenos.tasks` + `zenos.plans` 獨立 table，ownership 由 `product_id` 表達 | 主 SPEC v2 §9（目標態）+ `SPEC-task-governance §1.1`（runtime）|
 
-### 概念構件（What 的組成）
+> **L1 判定**：由 `level=1 AND parent_id IS NULL` 決定，**不**由 `entity_type` 判定（ADR-047 D1-D2 canonical；runtime `src/zenos/infrastructure/level_based_l1.py`）。
 
-| 實體 | 歸屬 | 狀態 | 說明 |
-|------|------|------|------|
-| 語意代理（Semantic Proxy） | ZenOS 核心架構 | ✅ 設計完成 | Ontology entry = 文件的代理人，承載多面向 context |
-| 骨架層（Skeleton Layer） | ZenOS Ontology 架構 | ✅ 設計完成 | 公司實體關係圖，從對話建立，低頻變動，人確認 |
-| 神經層（Neural Layer） | ZenOS Ontology 架構 | 📋 設計完成未實作 | 文件級 ontology entry，CRUD 自動觸發，高頻變動 |
-| Meta-Ontology | ZenOS Ontology 架構 | ✅ 設計完成 | Schema 層：定義「ontology 應該長什麼樣」，全客戶共用 |
-| 四維標籤體系 | Meta-Ontology 核心機制 | ✅ 設計完成 | What/Why/How/Who，源自 Ranganathan PMEST |
-| Context Protocol | ZenOS 核心產出物 | ✅ 模板驗證中 | Derived collection — 從 ontology 自動生成，人微調確認後凍結 |
-| 全景圖 | ZenOS 導入入口 | ✅ 原型完成 | 30 分鐘對話 → 公司全貌 + 盲點推斷 |
-| 盲點推斷 | ZenOS 差異化能力 | ✅ 原型驗證 | 從跨實體關係圖推斷未顯性化的問題 |
-| 漸進式信任 | ZenOS 導入策略 | ✅ 機制設計完成 | 三階段：對話 → 選擇性開放 → BYOS |
-| confirmedByUser | ZenOS + 資料層共用 | ✅ 設計完成 | AI 產出 = draft，人確認 = 生效 |
-| 迭代收斂 | ZenOS 建構流程 | ✅ 流程驗證 | 2-3 輪對話收斂，不是一次到位 |
-| 雙層互動 | ZenOS Ontology 治理 | ✅ 設計完成 | 神經層異常反推骨架層更新（unlinked 文件、休眠實體、突發關聯） |
-| Ontology 觸發規則 | ZenOS Ontology 治理 | ✅ 設計完成 | 何時新建/更新/歸檔 entry，設計期 vs 營運期差異 |
-| 過時推斷 | ZenOS Ontology 治理 | ✅ 設計完成 | 跨實體活動度推斷文件是否過時（不靠文件本身有沒有動） |
-| BYOS 部署 | ZenOS 部署模式 | 📋 設計完成未實作 | 每客戶一個 VM + 一個 Claude 訂閱 |
-| 三層治理系統 | ZenOS 服務架構 | ✅ 設計完成 | 事件源層 → 治理引擎層 → 確認與同步層 |
-| 事件源層 | 三層治理系統 | ✅ 設計完成 | Git hook / fswatch / Cloud API → 統一事件格式 |
-| 治理引擎層 | 三層治理系統 | ✅ 設計完成 | 變更分類器 + 影響分析器 + 過時偵測器 + 草稿產生器 |
-| Governance Daemon | 三層治理系統 Phase 2 | 📋 設計完成未實作 | 常駐服務，事件佇列 + AI 分析 + 自動更新 |
-| Phase 0.5 手動觸發 | ZenOS 落地方案 | 🔄 可立即使用 | git log + Claude Code session = 零基礎設施治理 |
-| Adapter 架構 | ZenOS 整合層 | ✅ 設計完成 | 統一介面（watchChanges/readContent/getMetadata）+ 多生態系 Adapter |
-| ZenOS Dashboard | ZenOS 消費介面 | ✅ 定位確立 | 做四件事：展示全景圖、收集確認、提供 Protocol、Storage Map。不做文件管理 |
-| Drop Zone | ZenOS Dashboard | 📋 設計完成未實作 | 文件讀完即丟，不儲存，解決「什麼都沒有」的 Stage 1 |
-| 模式 A 架構 | ZenOS 核心決策 | ✅ 決策完成 | 分散 agents + 共享 context（vs 模式 B super agent / 模式 C orchestrator） |
-| ZenOS MCP Server | 模式 A 核心組件 | 📋 設計完成未實作 | AI agents 的 context 接口，唯讀 + propose_update |
-| Firestore Ontology | 模式 A 核心組件 | 📋 設計完成未實作 | Ontology SSOT，ZenOS 治理服務是唯一寫入入口 |
-| Who + Owner 分離 | ZenOS 企業治理 | ✅ 設計完成 | Who = 多值 context 分發，Owner = 單值治理問責，解決傳統部門架構映射 |
-| Conversation Adapter | ZenOS Adapter 架構 | ✅ 概念設計完成 | AI 對話作為事件源，透過 Skill + MCP propose ontology 更新，知識捕獲在產生點 |
+## 3. Ownership SSOT 今日現況
 
-### 目標（Why）
+| 對象 | 歸屬欄位 | Server gate |
+|------|---------|-----------|
+| L1 | `parent_id = null` | 非 null → 非 L1 |
+| L2 | `parent_id` 指向 L1 或另一 L2 | `SPEC-l2-parent` 規則 |
+| L3-Semantic | `parent_id` 指向 L1 / L2 | — |
+| L3-Action (Task/Plan) | `product_id` 為**唯一 ownership SSOT**（ADR-047 D3；`governance_rules.py:938` `OWNERSHIP_SSOT_PRODUCT_ID`）| `MISSING_PRODUCT_ID` / `INVALID_PRODUCT_ID` |
+| Subtask | `parent_task_id`（同表自指）+ 繼承 parent 的 `plan_id` / `product_id` | `CROSS_PLAN_SUBTASK` / `CROSS_PRODUCT_SUBTASK` |
 
-| 實體 | 關聯產品 | 狀態 | 說明 |
-|------|---------|------|------|
-| 進入顧問市場 | ZenOS | 規劃中 | 用 ZenOS 作為 Naruvia 顧問服務的核心產品 |
-| Phase 0 概念驗證 | ZenOS | 🔄 進行中 | 用 Naruvia 自身 dogfooding 驗證核心流程 |
+Legacy `project` 字串僅為 partner-default fallback hint，不代表 ownership；`project_id` 參數 reject（`INVALID_INPUT`）。
 
-### 專案 / 活動（How）
+## 4. Task Status State Machine（runtime canonical）
 
-| 實體 | 服務的目標 | 狀態 | 說明 |
-|------|----------|------|------|
-| Naruvia dogfooding | Phase 0 驗證 | 🔄 進行中 | 用自己公司走完 Step 2 全流程 |
-| Paceriz Protocol 建立 | Phase 0 驗證 | ✅ 完成 | 第一份 Context Protocol |
-| Paceriz Ontology Instance 建立 | Phase 0 驗證 | ✅ 完成 | 第一份多檔 Ontology（骨架+神經+盲點），驗證架構可行性 |
-| 行銷夥伴試讀 | Phase 0 驗證 | 📋 待做 | 驗證 Protocol 對非技術人員的可用性 |
-| ZenOS 文件重組 | Phase 0 驗證 | ✅ 完成 | 用 ontology 邏輯治理自己（dogfooding） |
-| spec 持續迭代 | Phase 0 驗證 | 🔄 持續 | 每次討論後更新 spec.md |
-
-### 角色（Who）
-
-| 實體 | 跟 ZenOS 的關係 | 需要什麼 context |
-|------|----------------|-----------------|
-| Barry | 產品 / 開發 / 決策 | 全部 |
-| 行銷夥伴 | 推廣顧問服務 | ZenOS 的定位、價值主張、客戶案例 |
-| 新 Claude session | 接手討論 | CLAUDE.md → spec 的讀取順序 |
-| 未來顧問客戶 | ZenOS 的使用者 | 全景圖體驗、Protocol 產出 |
-
----
-
-## 關係圖
+Canonical: `src/zenos/domain/task_rules.py:19-33 _VALID_TRANSITIONS`
 
 ```
-ZenOS（產品）
-  ├── 由什麼組成（What 展開）
-  │   ├── Ontology 架構
-  │   │   ├── 語意代理（Semantic Proxy）← 核心概念：文件的代理人
-  │   │   ├── 骨架層（Skeleton Layer）← 來自「專案導向」方向
-  │   │   ├── 神經層（Neural Layer）← 來自「標籤索引」方向
-  │   │   ├── 雙層互動 ← 神經層異常反推骨架層更新
-  │   │   ├── Ontology 觸發規則 ← 新建/更新/歸檔的事件驅動規則
-  │   │   ├── 過時推斷 ← 跨實體活動度推斷，不靠文件本身
-  │   │   └── Meta-Ontology ← Schema：定義 ontology 長什麼樣
-  │   │       └── 四維標籤 ← 理論基礎：Ranganathan PMEST
-  │   │
-  │   ├── 產出物
-  │   │   ├── Context Protocol ← Derived collection，實例：paceriz.md, zenos.md
-  │   │   └── 全景圖 ← 骨架層的視覺展示，含盲點推斷
-  │   │
-  │   ├── 核心機制
-  │   │   ├── 漸進式信任 ← 護城河，寫在 spec Part 5
-  │   │   ├── confirmedByUser ← 從資料層延伸到知識層
-  │   │   ├── 迭代收斂 ← 2-3 輪對話收斂
-  │   │   └── 盲點推斷 ← 跨實體關係推斷未顯性化問題
-  │   │
-  │   ├── 服務架構（三層治理系統）
-  │   │   ├── 事件源層 ← Git hook / fswatch / Cloud API → 統一事件格式
-  │   │   ├── 治理引擎層 ← 變更分類 + 影響分析 + 過時偵測 + 草稿產出
-  │   │   ├── 確認與同步層 ← 待確認佇列 + 級聯更新 + Protocol 重生
-  │   │   └── Adapter Hub ← 統一介面，多生態系 Adapter（Git/Google/MS/Notion）
-  │   │
-  │   ├── ZenOS Dashboard（唯一自建 UI）
-  │   │   ├── 全景圖展示 ← 骨架層視覺化 + 盲點
-  │   │   ├── 確認佇列 ← confirmedByUser 介面
-  │   │   ├── Protocol Reader ← 給非技術成員的可讀介面
-  │   │   └── Drop Zone ← 文件讀完即丟，不儲存（Stage 1 用）
-  │   │
-  │   └── 部署
-  │       └── BYOS ← 每客戶一個 VM + 一個 Claude 訂閱 + Governance Daemon
+todo ─► in_progress ─► review ─► done ─► todo (reopen)
+  │         │          │        
+  │         ▼          │         
+  ├────── todo ◄───────┘
   │
-  ├── 為什麼做（Why）
-  │   └── 進入顧問市場
-  │       └── 前置：Phase 0 概念驗證 🔄
-  │
-  ├── 怎麼做（How）
-  │   ├── Naruvia dogfooding 🔄
-  │   │   ├── 全景圖原型 ✅
-  │   │   ├── Paceriz Protocol ✅
-  │   │   ├── Paceriz Ontology Instance ✅ ← 第一份多檔 ontology（骨架+神經+盲點）
-  │   │   ├── ZenOS 文件重組 ✅
-  │   │   ├── Ontology 架構定義 ✅
-  │   │   ├── 服務架構設計 ✅ ← 三層治理系統 + 分階段實作方案
-  │   │   └── 行銷夥伴試讀 📋
-  │   └── 技術架構設計 📋（Phase 1）
-  │
-  └── 誰相關（Who）
-      ├── Barry → 全端負責
-      ├── 行銷夥伴 → 需要可用素材
-      └── 顧問客戶 → 尚未獲取
+  └────► cancelled（唯一 terminal）
 ```
 
----
+- `cancelled` 是唯一真 terminal（無出站）
+- `done → todo` reopen 合法
+- `review → done` **必須**經 `confirm(accepted=True)`（`task_rules.py:36 _UPDATE_FORBIDDEN_TARGETS`）；`task.update(status="done")` 被擋
+- Legacy aliases `backlog / blocked / archived` 由 server normalize（`SPEC-mcp-tool-contract §9.2`）
 
-## 文件索引（每份文件的四維標籤）
+## 5. Document Status（L3-Document）
 
-| 文件 | What | Why | How | Who（目標讀者） |
-|------|------|-----|-----|----------------|
-| CLAUDE.md | ZenOS 全局 | 快速接手 | — | AI / 新 session |
-| spec.md | ZenOS 全局 | SSOT | Phase 0~3 全部 | Barry / 技術夥伴 |
-| REF-ontology-current-state.md | ZenOS | 自我治理 | ontology 範例 | Barry / 新 session |
-| ontology-instances/paceriz/ | Paceriz | 第一份客戶端 ontology | 多檔架構驗證 | 老闆 / 高管 / AI agent |
-| context-protocols/zenos.md | ZenOS | 理解產品 | — | 行銷夥伴 / 非技術人 |
-| context-protocols/paceriz.md | Paceriz | 行銷素材 | Protocol 範例 | 行銷夥伴 |
-| demo/naruvia-panorama.html | Naruvia 全局 | 能力展示 | Step 2a 產出物 | 老闆 / 客戶 |
-| decisions/ADR-002-...md | ZenOS | 思考記錄 | North Star 推導 | Barry / 深度理解者 |
-| archive/* | — | — | — | 已過時，僅供考古 |
+Canonical: `ontology_service._DOCUMENT_STATUSES`
 
----
+- `draft / current / stale / archived / conflict`
+- `conflict` 由 caller / agent 顯式寫入，server 不自動偵測雙 `current`（見 `SPEC-doc-governance §18` Gap note）
+- Bundle-first：新建 doc entity 預設 `doc_role=index`；`doc_role=single` 需理由
 
-*這份文件本身就是 ZenOS 的 ontology 實例 — 用產品自己的方法論描述產品自己*
+## 6. Relationships（Core graph edge）
+
+Canonical: 主 SPEC v2 §10 + `zenos.relationships` table
+
+- 合法 type：`depends_on / serves / owned_by / part_of / blocks / related_to / impacts / enables`
+- 舊 `task_entities` junction **已廢止**，一律走 `relationships` 表
+- L2 `impacts gate`：至少 1 條具體 `impacts` relationship 才能升 `confirmed_by_user=true`
+- `impact_chain` / `reverse_impact_chain` 雙向遍歷（5 跳上限，cycle 防呆），shipped `commit 0ede9cf`
+
+## 7. Embedding（sidecar）
+
+Canonical: 主 SPEC v2 §12 + `zenos.entity_embeddings` table
+
+- `summary_embedding vector(768)`（pgvector + HNSW）
+- L2 / L3-Semantic 可選擇性 embed；L1 / L3-Action 通常不 embed
+- search hybrid mode 預設 `0.7 semantic + 0.3 keyword`（`SPEC-mcp-tool-contract §8.1`）
+
+## 8. MCP Tool Surface（19 tools）
+
+Canonical: `SPEC-mcp-tool-contract §4` + `src/zenos/interface/mcp/*.py`
+
+`write / get / search / confirm / task / plan / analyze / governance_guide / find_gaps / common_neighbors / read_source / batch_update_sources / journal_read / journal_write / list_workspaces / upload_attachment / setup / suggest_policy / recent_updates`
+
+## 9. 治理層
+
+Canonical: `SPEC-governance-framework` 六維表 + `SPEC-governance-feedback-loop`
+
+六維：Quality Gate / Lifecycle / Relation / Feedback / 衝突仲裁 / 治理路徑（`SPEC-governance-guide-contract`）。
+
+## 10. 關鍵 ADR 狀態（2026-04-23）
+
+| ADR | 主題 | 狀態 |
+|-----|------|------|
+| ADR-044 | Task ownership SSOT = `product_id` | **KEEP**（current canonical） |
+| ADR-047 | L1 由 level 判定 | **Partial supersede**（axiom 保留，細節進主 SPEC） |
+| ADR-006 / 007 / 010 / 022 / 025 / 027 / 032 / 041 / 046 | 已由主 SPEC 吸收 | **SUPERSEDED**（見 ADR-048 master）|
+| ADR-028 | Plan primitive | **Partial**（目標態 SUPERSEDED，runtime 現行仍為獨立 table）|
+
+## 11. 與歷史版本差異
+
+本 REF 於 2026-04-23 從 v0.7（2026-03-21 描述的「骨架/神經/meta-ontology」概念模型）升級為 v2.0，對齊 Grand Ontology Refactor 後的 schema + runtime。舊版中的「骨架層 / 神經層 / Context Protocol」等概念改用以下新術語描述：
+
+| v0.7 術語 | v2.0 術語 / canonical |
+|----------|--------------------|
+| 骨架層（Skeleton Layer） | L1 + L2 entity graph（主 SPEC v2 §6-§7）|
+| 神經層（Neural Layer） | L3-Document（主 SPEC v2 §8.1）+ 舊 `documents` collection 已合併進 entity |
+| Context Protocol | 不再是獨立產出；`impact_chain` + `bundle_highlights` + `summary` 組合提供 agent context |
+| 雙層互動 | `impacts gate` + L2 lifecycle（主 SPEC v2 §7.2）|
+| 過時推斷 | `analyze(check_type="staleness" / "document_consistency")`（`mcp/analyze.py:606-620`）|
+| 漸進式信任 | `SPEC-progressive-trust`（仍 canonical）|
+| confirmedByUser | `BaseEntity.confirmed_by_user`（主 SPEC v2 §4）|
+| 三層治理系統 | server-side governance + MCP + client skills；見 `SPEC-governance-framework` |
+
+## 12. 下一次更新
+
+本 REF 應在下列事件後更新：
+- Wave 9 MTI migration 完成（§2 L3-Action 的 runtime 欄改為 subclass table）
+- 新 L3 subclass 落地（例如 L3-Campaign）
+- 重要 ADR 取代關係變更

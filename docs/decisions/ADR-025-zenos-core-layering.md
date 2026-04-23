@@ -1,15 +1,17 @@
 ---
-doc_id: ADR-025-zenos-core-layering
-title: 決策紀錄：ZenOS Core 分層邊界
-type: DECISION
+type: ADR
+id: ADR-025-zenos-core-layering
+status: Superseded
 ontology_entity: zenos-core
-status: Draft
-version: "1.0"
-date: 2026-04-09
-supersedes: null
+created: 2026-04-09
+updated: 2026-04-23
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: Core 分層決策（Knowledge / Action / Document Layer 分治）已由 Grand Refactor 收斂為 L3-Action + L3-Document subclass 併入 Knowledge Layer；新 canonical 在 SPEC-zenos-core v2 + 主 SPEC v2 §3
 ---
 
 # ADR-025: ZenOS Core 分層邊界
+
+> **2026-04-23 Supersede note**：本 ADR 的三層分治決策於 Grand Refactor 收斂——Action Layer 與 Document Layer 併入 Knowledge Layer 成 L3-Action / L3-Semantic subclass。Canonical 現在見 `SPEC-zenos-core` 與主 SPEC v2 §3。
 
 ## Context
 

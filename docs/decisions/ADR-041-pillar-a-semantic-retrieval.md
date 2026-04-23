@@ -1,13 +1,17 @@
 ---
 type: ADR
-id: ADR-041
-status: Accepted
-ontology_entity: MCP 介面設計
+id: ADR-041-pillar-a-semantic-retrieval
+status: Partial Supersede
+ontology_entity: mcp-interface
 related_specs: SPEC-semantic-retrieval
 created: 2026-04-18
-updated: 2026-04-18
+updated: 2026-04-23
 phase_1_landed: 2026-04-18
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: embedding 不在 entities_base table 內聯，改為 entity_embeddings sidecar table（主 SPEC v2 §12）；retrieval 行為仍以 SPEC-semantic-retrieval 為 canonical
 ---
+
+> **2026-04-23 Partial Supersede note**：原 ADR 決定將 embedding 欄位內聯到 `entities` 表；Grand Refactor 改為 **sidecar**（主 SPEC v2 §12 `entity_embeddings`）。Phase 1 已 ship 的 retrieval 行為（hybrid mode / neighbor ranking / backfill）保持不變，仍以 `SPEC-semantic-retrieval` 為 canonical。
 
 # ADR-041: Pillar A — Semantic Retrieval 架構
 

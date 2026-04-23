@@ -1,13 +1,17 @@
 ---
 type: ADR
 id: ADR-006-entity-project-separation
-status: Approved
+status: Superseded
 ontology_entity: entity-model
 created: 2026-03-23
-updated: 2026-03-26
+updated: 2026-04-23
+superseded_by: ADR-048-grand-ontology-refactor
+supersede_reason: Project 已升格為 L3ProjectEntity（主 SPEC v2 §8.3），Task 透過 product_id 歸屬 L1（ADR-047 D3），舊「entity vs project」分離已過時
 ---
 
 # ADR-006：Entity 與 Project 分離
+
+> **2026-04-23 Supersede note**：本 ADR 已由 `ADR-048-grand-ontology-refactor` supersede。Project 已為主 SPEC v2 §8.3 的 `L3ProjectEntity`（仍為獨立 subclass，不與 L2 混淆）；Task 的 product_id ownership 由 ADR-047 D3 / `SPEC-task-governance §1.2` 定義。
 
 **日期**：2026-03-23
 **狀態**：已決定
