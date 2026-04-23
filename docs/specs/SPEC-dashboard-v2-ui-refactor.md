@@ -1,9 +1,17 @@
+---
+type: SPEC
+id: SPEC-dashboard-v2-ui-refactor
+status: Draft
+ontology_entity: dashboard
+created: 2026-03-30
+updated: 2026-04-23
+depends_on: SPEC-mcp-tool-contract, SPEC-ontology-architecture v2
+---
+
 # ZenOS Dashboard UI v2 — 知識導航與側邊欄協作規格
 
-**狀態**：草案 (Draft)
-**版本**：2.0
-**日期**：2026-03-30
-**關聯文件**：`SPEC-dashboard-v1.md` (基礎)、`TD-dashboard-v1-implementation.md` (實作參考)
+**版本**：2.0（frontmatter 標準化於 2026-04-23）
+**關聯文件**：`SPEC-dashboard-v1.md`（基礎）、`TD-dashboard-v1-implementation.md`（實作參考）
 
 ---
 

@@ -104,33 +104,33 @@ created: 2026-04-23
 
 | # | Spec | Action |
 |---|------|--------|
-| 35 | `SPEC-crm-core` | **PATCH** 術語：type=company → L1 entity（label=company） |
-| 36 | `SPEC-crm-intelligence` | **PATCH** |
-| 37 | `SPEC-marketing-automation` | **PATCH** |
-| 38 | `SPEC-dashboard-ai-rail` | **PATCH** |
-| 39 | `SPEC-dashboard-onboarding` | **PATCH** |
-| 40 | `SPEC-dashboard-v2-ui-refactor` | **PATCH** |
-| 41 | `SPEC-client-portal` | **PATCH** |
-| 42 | `SPEC-zen-ink-real-data` | **PATCH** |
-| 43 | `SPEC-zen-ink-redesign` | **PATCH** |
-| 44 | `SPEC-federation-auto-provisioning` | **PATCH** |
-| 45 | `SPEC-home-workspace-bootstrap` | **PATCH** |
-| 46 | `SPEC-cowork-knowledge-context` | **PATCH** |
-| 47 | `SPEC-partner-context-fix` | **PATCH** |
-| 48 | `SPEC-user-department` | **PATCH** |
-| 49 | `SPEC-recent-change-surfacing` | **PATCH** |
-| 50 | `SPEC-project-progress-console` | **PATCH** |
-| 51 | `SPEC-docs-native-edit-and-helper-ingest` | **PATCH** |
-| 52 | `SPEC-ingestion-governance-v2` | **PATCH** |
-| 53 | `SPEC-zentropy-ingestion-contract` | **PATCH** |
-| 54 | `SPEC-google-workspace-per-user-retrieval` | **PATCH** |
-| 55 | `SPEC-skill-packages` | **PATCH** |
-| 56 | `SPEC-skill-release-management` | **PATCH** |
-| 57 | `SPEC-zenos-external-integration` | **PATCH** |
-| 58 | `SPEC-zenos-auth-federation` | **PATCH** |
-| 59 | `SPEC-zenos-setup-redesign` | **PATCH** |
-| 60 | `SPEC-product-vision` | **KEEP** 願景層，不動 |
-| 61 | `SPEC-aha-moment` | **KEEP** |
+| 35 | `SPEC-crm-core` | ✅ frontmatter | ontology_entity: crm-客戶管理 → crm；depends_on 補齊 |
+| 36 | `SPEC-crm-intelligence` | ✅ frontmatter | 舊格式（doc_id/title/version/date/l2_entity）→ 標準；updated 日期同步 |
+| 37 | `SPEC-marketing-automation` | ✅ frontmatter | 同上；ontology_entity → marketing-automation |
+| 38 | `SPEC-dashboard-ai-rail` | ✅ frontmatter | 同上；ontology_entity: TBD → dashboard |
+| 39 | `SPEC-dashboard-onboarding` | ✅ frontmatter | l2_entity: Dashboard 知識地圖 → ontology_entity: dashboard |
+| 40 | `SPEC-dashboard-v2-ui-refactor` | ✅ frontmatter | 原無 frontmatter block，補齊 type/id/status/ontology_entity/created/updated/depends_on |
+| 41 | `SPEC-client-portal` | ✅ frontmatter | ontology_entity: TBD → dashboard |
+| 42 | `SPEC-zen-ink-real-data` | ✅ frontmatter | 補 ontology_entity + updated + extends：SPEC-zen-ink-redesign |
+| 43 | `SPEC-zen-ink-redesign` | ✅ frontmatter | 補 ontology_entity + updated |
+| 44 | `SPEC-federation-auto-provisioning` | ✅ frontmatter | doc_id/title/version/date 舊格式清理 |
+| 45 | `SPEC-home-workspace-bootstrap` | ✅ frontmatter | ontology_entity: 夥伴身份與邀請 → identity-and-access |
+| 46 | `SPEC-cowork-knowledge-context` | ✅ frontmatter + content | SPEC-knowledge-graph-semantic 三處引用改指主 SPEC §10.4 / §10.5 |
+| 47 | `SPEC-partner-context-fix` | ✅ frontmatter | 原無 frontmatter block，補齊 |
+| 48 | `SPEC-user-department` | ✅ frontmatter | l2_entity → ontology_entity: identity-and-access |
+| 49 | `SPEC-recent-change-surfacing` | ✅ frontmatter | ontology_entity: MCP 介面設計 → mcp-interface；補 depends_on |
+| 50 | `SPEC-project-progress-console` | ✅ frontmatter + content | 同上；line 78 的 legacy status enum `backlog,blocked` → canonical 5-state |
+| 51 | `SPEC-docs-native-edit-and-helper-ingest` | ✅ frontmatter + content | SPEC-document-bundle 全部引用改指 SPEC-doc-governance §3；Layering note 加入 |
+| 52 | `SPEC-ingestion-governance-v2` | ✅ frontmatter + content | SPEC-l2-entity-redefinition → 主 SPEC v2 §7 |
+| 53 | `SPEC-zentropy-ingestion-contract` | ✅ frontmatter + content | 多處 SPEC-l2-entity-redefinition 改指主 SPEC v2 §7 |
+| 54 | `SPEC-google-workspace-per-user-retrieval` | ✅ frontmatter | ontology_entity 規範化 |
+| 55 | `SPEC-skill-packages` | ✅ frontmatter | l2_entity → ontology_entity: agent-runtime |
+| 56 | `SPEC-skill-release-management` | ✅ frontmatter | ontology_entity: agent-integration → agent-runtime |
+| 57 | `SPEC-zenos-external-integration` | ✅ frontmatter | 同上 |
+| 58 | `SPEC-zenos-auth-federation` | ✅ frontmatter | updated + depends_on |
+| 59 | `SPEC-zenos-setup-redesign` | ✅ frontmatter | ontology_entity: TBD → agent-runtime；version_note 抽出 |
+| 60 | `SPEC-product-vision` | ✅ frontmatter | ontology_entity: TBD → product-vision |
+| 61 | `SPEC-aha-moment` | ✅ frontmatter | 舊格式（doc_id/title/version/lowercase status）→ 標準 |
 
 ---
 

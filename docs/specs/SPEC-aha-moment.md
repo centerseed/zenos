@@ -1,13 +1,11 @@
 ---
-doc_id: SPEC-aha-moment
-title: 功能規格：Aha Moment 設計——三角色首次驚喜體驗
 type: SPEC
-ontology_entity: action-layer
-status: draft
-version: "0.1"
+id: SPEC-aha-moment
+status: Draft
+ontology_entity: dashboard
 created: 2026-04-06
-updated: 2026-04-06
-supersedes: null
+updated: 2026-04-23
+depends_on: SPEC-dashboard-onboarding, SPEC-agent-integration-contract
 ---
 
 # Feature Spec: Aha Moment 設計——三角色首次驚喜體驗

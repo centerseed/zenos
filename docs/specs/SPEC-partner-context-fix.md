@@ -1,6 +1,16 @@
+---
+type: SPEC
+id: SPEC-partner-context-fix
+status: Draft
+ontology_entity: identity-and-access
+created: 2026-03-25
+updated: 2026-04-23
+depends_on: SPEC-identity-and-access
+---
+
 # SPEC: 修復 Partner Context——Dashboard 自動解析身份，多人共享資料
 
-> PM: Claude (PM role) | Date: 2026-03-25 | Status: Draft
+> PM: Claude (PM role) | Status: Draft（frontmatter 標準化於 2026-04-23）
 
 ## 問題
 

@@ -2,8 +2,11 @@
 type: SPEC
 id: SPEC-zen-ink-real-data
 status: Draft
+ontology_entity: dashboard
 created: 2026-04-19
-supersedes: non-goal in SPEC-zen-ink-redesign (不對接後端 API)
+updated: 2026-04-23
+extends: SPEC-zen-ink-redesign
+depends_on: SPEC-mcp-tool-contract, SPEC-zen-ink-redesign
 ---
 
 # SPEC: Zen Ink 真實資料接線 + MCP 設定頁

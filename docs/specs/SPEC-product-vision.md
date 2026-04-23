@@ -2,9 +2,9 @@
 type: SPEC
 id: SPEC-product-vision
 status: Approved
-ontology_entity: TBD
+ontology_entity: product-vision
 created: 2026-03-19
-updated: 2026-03-27
+updated: 2026-04-23
 ---
 
 # ZenOS 產品願景與核心命題

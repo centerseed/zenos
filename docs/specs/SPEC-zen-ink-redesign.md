@@ -2,7 +2,9 @@
 type: SPEC
 id: SPEC-zen-ink-redesign
 status: Draft
+ontology_entity: dashboard
 created: 2026-04-19
+updated: 2026-04-23
 ---
 
 # SPEC: Zen Ink 全站設計語言重構
