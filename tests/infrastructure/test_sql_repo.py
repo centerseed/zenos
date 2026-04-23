@@ -712,6 +712,7 @@ class TestSqlTaskRepository:
             "rejection_reason": None,
             "result": None,
             "project": "zenos",
+            "product_id": None,
             "created_at": NOW,
             "updated_at": NOW,
             "completed_at": None,

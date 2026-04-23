@@ -26,7 +26,7 @@ def _row_to_plan(row: asyncpg.Record) -> Plan:
         entry_criteria=row["entry_criteria"],
         exit_criteria=row["exit_criteria"],
         project=row["project"],
-        product_id=row["product_id"] if "product_id" in row else (row["project_id"] if "project_id" in row else None),
+        product_id=row["product_id"],
         updated_by=row["updated_by"] if "updated_by" in row else None,
         result=row["result"] if "result" in row else None,
         created_at=_to_dt(row["created_at"]) or _now(),

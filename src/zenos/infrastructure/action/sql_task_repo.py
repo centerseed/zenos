@@ -77,7 +77,7 @@ def _row_to_task(row: asyncpg.Record, linked_entities: list[str], blocked_by: li
         rejection_reason=row["rejection_reason"],
         result=row["result"],
         project=row["project"],
-        product_id=row["product_id"] if "product_id" in row else (row["project_id"] if "project_id" in row else None),
+        product_id=row["product_id"],
         attachments=_json_loads_safe(row["attachments"] if "attachments" in row else None) or [],
         parent_task_id=row["parent_task_id"] if "parent_task_id" in row else None,
         dispatcher=row["dispatcher"] if "dispatcher" in row else None,
