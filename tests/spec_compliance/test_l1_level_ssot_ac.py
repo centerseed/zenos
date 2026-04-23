@@ -156,7 +156,11 @@ def test_ac_l1ssot_05_dashboard_projects_shows_all_l1():
 
     (Verified via vitest on dashboard side; this Python stub asserts the API
     contract that /api/data/entities?level=1 returns all L1 regardless of type.)"""
-    pytest.skip("Pending S06 — Dashboard UI isL1Entity helper")
+    pytest.skip(
+        "Covered by vitest: dashboard/src/__tests__/l1_level_ssot_ac.test.ts — "
+        "isL1Entity, buildAvailableProjectOptions, isPortfolioRootProduct, "
+        "TaskCreateDialog productOptions all verified level-based in vitest suite"
+    )
 
 
 # --- P0: Data completeness ---

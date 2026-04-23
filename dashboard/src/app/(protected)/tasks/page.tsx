@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth";
 import { useInk } from "@/lib/zen-ink/tokens";
+import { isL1Entity } from "@/lib/entity-level";
 import { Section } from "@/components/zen/Section";
 import { Btn } from "@/components/zen/Btn";
 import { Chip } from "@/components/zen/Chip";
@@ -83,7 +84,8 @@ export function buildAvailableProjectOptions(tasks: Task[], entities: Entity[]):
   const entitiesById = Object.fromEntries(entities.map((entity) => [entity.id, entity]));
 
   for (const entity of entities) {
-    if (entity.type !== "product" && entity.type !== "company" && entity.type !== "project") continue;
+    // ADR-047 D7: L1 判定改為 level-based，type 僅作 UI label
+    if (!isL1Entity(entity)) continue;
     const label = entity.name?.trim();
     const key = normalizeProjectKey(label);
     if (!key || projects.has(key)) continue;

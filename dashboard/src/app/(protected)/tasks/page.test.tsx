@@ -346,6 +346,7 @@ describe("TasksPage", () => {
         summary: "summary",
         tags: { what: [], why: "", how: "", who: [] },
         status: "active",
+        level: 1,
         parentId: null,
         details: null,
         confirmedByUser: true,
@@ -382,7 +383,8 @@ describe("TasksPage", () => {
         status: "active",
         owner: "Barry",
         project: "ZenOS",
-        project_id: "entity-1",
+        // ADR-047 D3: product_id is the single ownership field (project_id removed)
+        product_id: "entity-1",
       },
     ]);
 
@@ -545,6 +547,7 @@ describe("TasksPage", () => {
           summary: "summary",
           tags: { what: [], why: "", how: "", who: [] },
           status: "active",
+          level: 1,
           parentId: null,
           details: null,
           confirmedByUser: true,

@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { Blindspot, Entity } from "@/types";
 import { useInk } from "@/lib/zen-ink/tokens";
+import { isL1Entity } from "@/lib/entity-level";
 import { Dialog } from "@/components/zen/Dialog";
 import { Input } from "@/components/zen/Input";
 import { Textarea } from "@/components/zen/Textarea";
@@ -115,7 +116,8 @@ export function TaskCreateDialog({
   const productOptions = useMemo(
     () =>
       entities
-        .filter((entity) => entity.type === "product" || entity.type === "company")
+        // ADR-047 D7: L1 判定改為 level-based，type 僅作 UI label
+        .filter(isL1Entity)
         .map((entity) => ({ value: entity.id, label: entity.name })),
     [entities],
   );

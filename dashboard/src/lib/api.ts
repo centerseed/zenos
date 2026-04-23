@@ -10,6 +10,7 @@ import {
   hydrateDateFields,
   setActiveWorkspaceId,
 } from "@/lib/api-client";
+import { isL1Entity } from "@/lib/entity-level";
 
 export { API_BASE, setActiveWorkspaceId };
 
@@ -131,11 +132,9 @@ function isLegacyCrmProductProxy(entity: Entity): boolean {
 }
 
 export function isShareableRootEntity(entity: Entity): boolean {
-  const isSupportedType = entity.type === "product" || entity.type === "company";
-  const isRoot = !entity.parentId && (entity.level === 1 || entity.level == null);
+  // ADR-047 D7: L1 判定改為 level-based，type 僅作 UI label
   return (
-    isSupportedType &&
-    isRoot &&
+    isL1Entity(entity) &&
     entity.status === "active" &&
     entity.visibility === "public" &&
     !isProbablyTestRoot(entity) &&
@@ -148,14 +147,16 @@ export async function getProjectEntities(
   token: string,
   options?: { scope?: "projects" | "shareableRoots" }
 ): Promise<Entity[]> {
+  const res = await apiFetch<{ entities: Entity[] }>("/api/data/entities", token);
+  const all = res.entities ?? [];
+
   if (options?.scope === "shareableRoots") {
-    const res = await apiFetch<{ entities: Entity[] }>("/api/data/entities", token);
-    return (res.entities ?? []).filter(isShareableRootEntity);
+    // Team-sharing path: strict visibility + quality guards
+    return all.filter(isShareableRootEntity);
   }
 
-  // The non-sharing /projects list still comes from the dedicated product endpoint.
-  const res = await apiFetch<{ entities: Entity[] }>("/api/data/entities?type=product", token);
-  return res.entities;
+  // ADR-047 D7: /projects list shows all L1 entities regardless of type
+  return all.filter(isL1Entity);
 }
 
 export async function getProjectEntitiesInWorkspace(token: string, workspaceId: string): Promise<Entity[]> {

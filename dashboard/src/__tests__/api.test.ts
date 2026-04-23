@@ -53,27 +53,31 @@ afterEach(() => {
 // ─── getProjectEntities ───
 
 describe("getProjectEntities", () => {
-  it("calls GET /api/data/entities?type=product with auth header", async () => {
+  // ADR-047 D7: /projects list now fetches all entities and filters client-side by isL1Entity
+  it("calls GET /api/data/entities (no type filter) with auth header", async () => {
     const fakeFetch = mockFetch({ entities: [] });
     vi.stubGlobal("fetch", fakeFetch);
 
     await getProjectEntities(FAKE_TOKEN);
 
     expect(fakeFetch).toHaveBeenCalledWith(
-      `${API_BASE}/api/data/entities?type=product`,
-      { headers: { Authorization: `Bearer ${FAKE_TOKEN}` } }
+      `${API_BASE}/api/data/entities`,
+      expect.objectContaining({ headers: { Authorization: `Bearer ${FAKE_TOKEN}` } })
     );
   });
 
-  it("returns entity array unwrapped from { entities: [...] } response", async () => {
-    const entities = [{ id: "e-1", name: "Test Project", type: "product" }];
-    vi.stubGlobal("fetch", mockFetch({ entities }));
+  it("returns only L1 entities (level=1, no parentId) regardless of type", async () => {
+    const l1product = { id: "p-1", name: "ZenOS", type: "product", level: 1, parentId: null };
+    const l1company = { id: "co-1", name: "原心生技", type: "company", level: 1, parentId: null };
+    const l2module = { id: "m-1", name: "Auth", type: "module", level: 2, parentId: "p-1" };
+    const noLevel = { id: "old-1", name: "Old Product", type: "product", level: null, parentId: null };
+    vi.stubGlobal("fetch", mockFetch({ entities: [l1product, l1company, l2module, noLevel] }));
 
     const result = await getProjectEntities(FAKE_TOKEN);
-    expect(result).toEqual(entities);
+    expect(result.map((e) => e.id)).toEqual(["p-1", "co-1"]);
   });
 
-  it("filters shareable L1 roots to product + company and hides test / CRM proxy products", async () => {
+  it("filters shareable L1 roots by visibility + quality guards and accepts any L1 type", async () => {
     const entities = [
       { id: "product-1", name: "ZenOS", type: "product", level: 1, parentId: null, status: "active", visibility: "public", tags: { what: ["product"], why: "", how: "", who: [] }, details: null },
       { id: "company-1", name: "Banila Co", type: "company", level: 1, parentId: null, status: "active", visibility: "public", tags: { what: ["company"], why: "", how: "crm", who: [] }, details: null },
@@ -578,12 +582,13 @@ describe("getPartnerMe", () => {
 
     await getPartnerMe(FAKE_TOKEN);
 
+    // Use objectContaining to tolerate extra fields (e.g. signal from AbortController timeout)
     expect(fakeFetch).toHaveBeenCalledWith(
       `${API_BASE}/api/partner/me`,
-      {
+      expect.objectContaining({
         cache: "no-store",
         headers: { Authorization: `Bearer ${FAKE_TOKEN}` },
-      }
+      })
     );
   });
 
@@ -602,15 +607,16 @@ describe("getPartnerMe", () => {
     try {
       await getPartnerMe(FAKE_TOKEN);
 
+      // Use objectContaining to tolerate extra fields (e.g. signal from AbortController timeout)
       expect(fakeFetch).toHaveBeenCalledWith(
         `${API_BASE}/api/partner/me`,
-        {
+        expect.objectContaining({
           cache: "no-store",
           headers: {
             Authorization: `Bearer ${FAKE_TOKEN}`,
             "X-Active-Workspace-Id": "workspace-123",
           },
-        }
+        })
       );
     } finally {
       Object.defineProperty(window, "localStorage", {
@@ -857,9 +863,10 @@ describe("getQualitySignals", () => {
 
     await getQualitySignals(FAKE_TOKEN);
 
+    // Use objectContaining to tolerate extra fields (e.g. signal from AbortController timeout)
     expect(fakeFetch).toHaveBeenCalledWith(
       `${API_BASE}/api/data/quality-signals`,
-      { headers: { Authorization: `Bearer ${FAKE_TOKEN}` } }
+      expect.objectContaining({ headers: { Authorization: `Bearer ${FAKE_TOKEN}` } })
     );
   });
 

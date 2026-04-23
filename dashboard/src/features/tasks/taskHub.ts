@@ -1,6 +1,7 @@
 "use client";
 
 import type { PlanSummary } from "@/lib/api";
+import { isL1Entity } from "@/lib/entity-level";
 import type { Entity, Task, TaskPriority, TaskStatus } from "@/types";
 
 export type TaskHubFocus = `milestone:${string}` | `plan:${string}`;
@@ -108,11 +109,8 @@ function getEntityTimestamp(entity: Entity): number {
 }
 
 function isPortfolioRootProduct(entity: Entity): boolean {
-  return (
-    (entity.type === "product" || entity.type === "company") &&
-    !entity.parentId &&
-    (entity.level === 1 || entity.level == null)
-  );
+  // ADR-047 D7: L1 判定改為 level-based，type 僅作 UI label
+  return isL1Entity(entity);
 }
 
 function buildProductLookup(products: Entity[]) {
@@ -142,8 +140,8 @@ function resolveTaskProductId(
 
   if (task.planId) {
     const plan = plansById.get(task.planId);
-    const planProductId = plan?.product_id ?? plan?.project_id;
-    if (planProductId && productsById.has(planProductId)) return planProductId;
+    // ADR-047 D3: plan.project_id removed; product_id is the only ownership field
+    if (plan?.product_id && productsById.has(plan.product_id)) return plan.product_id;
     const byPlanName = productsByName.get(normalizeName(plan?.project));
     if (byPlanName) return byPlanName.id;
   }
@@ -229,7 +227,8 @@ export function buildTaskHubSnapshot(params: {
   const productRecaps = products.map((product) => {
     const relatedGoals = goals.filter((goal) => goal.parentId === product.id);
     const relatedPlans = plans.filter((plan) => {
-      if ((plan.product_id ?? plan.project_id) === product.id) return true;
+      // ADR-047 D3: plan.project_id removed; product_id is the only ownership field
+      if (plan.product_id === product.id) return true;
       return normalizeName(plan.project) === normalizeName(product.name);
     });
     const relatedTasks = (productTasks.get(product.id) ?? []).filter(isOpenTask);
