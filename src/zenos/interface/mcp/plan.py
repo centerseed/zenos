@@ -46,22 +46,30 @@ async def _plan_handler(
     exit_criteria: str | None = None,
     project: str | None = None,
     product_id: str | None = None,
-    project_id: str | None = None,
     id: str | None = None,
     status: str | None = None,
     result: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    **kwargs: object,
 ) -> dict:
     """Core plan handler — extracted for testability."""
     from zenos.interface.mcp import _ensure_services
+    from zenos.interface.mcp._common import _error_response
     import zenos.interface.mcp as _mcp
+
+    if "project_id" in kwargs:
+        return _error_response(
+            error_code="INVALID_INPUT",
+            message="project_id parameter is not supported; use product_id (ADR-047)",
+            status="rejected",
+        )
 
     try:
         partner = _current_partner.get()
         partner_default_project = partner.get("defaultProject", "") if partner else ""
         actor_id = (partner or {}).get("id")
-        effective_product_id = product_id if product_id is not None else project_id
+        effective_product_id = product_id
 
         if action == "create":
             if not goal:
@@ -195,13 +203,13 @@ async def plan(
     exit_criteria: str | None = None,
     project: str | None = None,
     product_id: str | None = None,
-    project_id: str | None = None,
     id: str | None = None,
     status: str | None = None,
     result: str | None = None,
     limit: int = 50,
     offset: int = 0,
     workspace_id: str | None = None,
+    project_id: str | None = None,  # DEPRECATED: ADR-047 D3 — passing any value → INVALID_INPUT
 ) -> dict:
     """管理 Action Layer 的 Plan primitive（任務群組 + 排序 + 所有權 + 完成邊界）。
 
@@ -228,15 +236,25 @@ async def plan(
         entry_criteria: 進入條件（何時算 Plan 可以開始）
         exit_criteria: 完成條件（何時算 Plan 達成目標）
         project: 所屬專案識別碼（如 "zenos"），未傳時使用 partner 預設
-        product_id: 連結到 product entity ID（選填）
-        project_id: 舊 alias；若同時傳入，`product_id` 優先
+        product_id: 連結到任何 L1 entity id（任何 type 只要 level=1 且無 parent 皆可）
         id: Plan ID（update/get 必填）
         status: 目標狀態（update 時使用）
         result: 完成產出描述（完成 Plan 時必填）
         limit: list 時的分頁大小（預設 50）
         offset: list 時的分頁偏移（預設 0）
         workspace_id: 切換到指定 workspace 執行（選填）
+        project_id: [DEPRECATED — ADR-047 D3] 此參數已完全移除語意。傳入任何非 None 值會立即
+            回傳 {"status": "rejected", "data": {"error": "INVALID_INPUT"}}。
+            請改用 product_id。
     """
+    if project_id is not None:
+        return _unified_response(
+            status="rejected",
+            data={
+                "error": "INVALID_INPUT",
+                "message": "project_id parameter is not supported; use product_id (ADR-047)",
+            },
+        )
     if workspace_id:
         err = _apply_workspace_override(workspace_id)
         if err is not None:
@@ -249,7 +267,6 @@ async def plan(
         exit_criteria=exit_criteria,
         project=project,
         product_id=product_id,
-        project_id=project_id,
         id=id,
         status=status,
         result=result,

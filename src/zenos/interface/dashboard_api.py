@@ -1846,7 +1846,6 @@ def _plan_payload_to_dict(plan: object) -> dict[str, object]:
         "entry_criteria": getattr(plan, "entry_criteria", None),
         "exit_criteria": getattr(plan, "exit_criteria", None),
         "project": getattr(plan, "project", None),
-        "project_id": plan.product_id,
         "product_id": plan.product_id,
         "created_by": getattr(plan, "created_by", None),
         "updated_by": getattr(plan, "updated_by", None),

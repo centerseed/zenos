@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 
 from zenos.application.knowledge.ontology_service import _collect_subtree_ids
 from zenos.domain.knowledge import Entity
+from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.infrastructure.context import current_partner_id as _current_partner_id
 
 from zenos.interface.mcp._auth import _apply_workspace_override
@@ -245,11 +246,11 @@ async def recent_updates(
         )
 
     if scope_root is not None:
-        if scope_root.type != "product" and (scope_root.level or 0) != 1:
+        if not is_collaboration_root_entity(scope_root):
             return _unified_response(
                 status="rejected",
                 data={},
-                rejection_reason="recent_updates product scope must resolve to a product entity",
+                rejection_reason="recent_updates product scope must resolve to a collaboration root entity (level=1, no parent)",
             )
         if not scope_root.id:
             return _unified_response(

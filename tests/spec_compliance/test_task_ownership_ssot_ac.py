@@ -562,15 +562,21 @@ async def test_ac_tosc_21_project_string_write_ignored():
 @pytest.mark.spec("AC-TOSC-22")
 async def test_ac_tosc_22_governance_rules_runtime_ssot_synced():
     """AC-TOSC-22: src/zenos/interface/governance_rules.py["task"] runtime SSOT 同步加上
-    三條繩子原則 + 七條 server validation 規則 (AC-TOSC-05..11) 的 level 2 內容."""
+    三條繩子原則 + 七條 server validation 規則 (AC-TOSC-05..11) 的 level 2 內容.
+
+    Note: PROJECT_STRING_IGNORED assertion removed as part of ADR-047 D3 — the warning
+    code is no longer surfaced in the agent governance prompt (level-based L1 replaces
+    type=product checks). Runtime still emits it but prompt text does not explain it.
+    """
     task_rules = GOVERNANCE_RULES["task"][2]
     assert "product_id" in task_rules
     assert "MISSING_PRODUCT_ID" in task_rules
     assert "INVALID_PRODUCT_ID" in task_rules
     assert "LINKED_ENTITIES_PRODUCT_STRIPPED" in task_rules
-    assert "PROJECT_STRING_IGNORED" in task_rules
     assert "CROSS_PRODUCT_SUBTASK" in task_rules
     assert "CROSS_PRODUCT_PLAN_TASK" in task_rules
+    # ADR-047 D3: governance prompt must NOT explain PROJECT_STRING_IGNORED anymore
+    assert "PROJECT_STRING_IGNORED" not in task_rules
 
 
 # ─────────────────────────────────────────────────────────
@@ -581,7 +587,11 @@ async def test_ac_tosc_22_governance_rules_runtime_ssot_synced():
 @pytest.mark.spec("AC-TOSC-23")
 async def test_ac_tosc_23_governance_guide_returns_ssot_rules():
     """AC-TOSC-23: governance_guide(topic="task", level=2) 回傳內容包含三條繩子原則
-    與七條 validation 規則."""
+    與七條 validation 規則.
+
+    Note: PROJECT_STRING_IGNORED removed from assertion per ADR-047 D3 — the code is
+    no longer part of the governance prompt text (level-based L1 replaces type=product).
+    """
     from zenos.interface.mcp import governance_guide
 
     result = await governance_guide(topic="task", level=2)
@@ -592,7 +602,8 @@ async def test_ac_tosc_23_governance_guide_returns_ssot_rules():
     assert "MISSING_PRODUCT_ID" in content
     assert "INVALID_PRODUCT_ID" in content
     assert "LINKED_ENTITIES_PRODUCT_STRIPPED" in content
-    assert "PROJECT_STRING_IGNORED" in content
+    # ADR-047 D3: PROJECT_STRING_IGNORED no longer appears in governance prompt
+    assert "PROJECT_STRING_IGNORED" not in content
     assert "CROSS_PRODUCT_SUBTASK" in content
     assert "CROSS_PRODUCT_PLAN_TASK" in content
 

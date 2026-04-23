@@ -156,12 +156,20 @@ async def _task_handler(
     output_ref: str | None = None,
     notes: str | None = None,
     conn: Any | None = None,
+    **kwargs: object,
 ) -> dict:
     """Core task handler logic — extracted for testability.
 
     Called by the ``task`` MCP tool wrapper. Tests import this function
     directly to avoid calling a ``FunctionTool`` object.
     """
+    if "project_id" in kwargs:
+        return _error_response(
+            error_code="INVALID_INPUT",
+            message="project_id parameter is not supported; use product_id (ADR-047)",
+            status="rejected",
+        )
+
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
 
@@ -603,6 +611,7 @@ async def task(
     output_ref: str | None = None,
     notes: str | None = None,
     workspace_id: str | None = None,
+    project_id: str | None = None,  # DEPRECATED: ADR-047 D3 — passing any value → INVALID_INPUT
 ) -> dict:
     """管理知識驅動的行動項目（Action Layer）。
 
@@ -683,7 +692,18 @@ async def task(
     系統欄位：
         updated_by: 不接受 caller 直接傳入；由 server 依當次 actor context 自動寫入
         workspace_id: 選填。切換到指定 workspace 執行任務操作（必須在你的可用列表內）。
+        project_id: [DEPRECATED — ADR-047 D3] 此參數已完全移除語意。傳入任何非 None 值會立即
+            回傳 {"status": "rejected", "data": {"error": "INVALID_INPUT"}}。
+            請改用 product_id。
     """
+    if project_id is not None:
+        return _unified_response(
+            status="rejected",
+            data={
+                "error": "INVALID_INPUT",
+                "message": "project_id parameter is not supported; use product_id (ADR-047)",
+            },
+        )
     # AC-MIDE-05: task (handoff/update/delete) 絕對不支援 id_prefix
     if id_prefix is not None:
         return _unified_response(

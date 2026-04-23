@@ -57,11 +57,60 @@ def test_ac_l1ssot_02_crm_company_accepted_as_product_id():
 # --- P0: Legacy alias rejection ---
 
 @pytest.mark.spec("AC-L1SSOT-03")
-def test_ac_l1ssot_03_project_id_param_rejected():
+@pytest.mark.asyncio
+async def test_ac_l1ssot_03_project_id_param_rejected():
     """AC-L1SSOT-03: Given a caller passes project_id parameter to MCP plan/task,
-    When the tool is invoked,
-    Then server responds with INVALID_INPUT (no silent accept, no alias mapping)."""
-    pytest.skip("Pending S04 — MCP interface layer removal of project_id alias")
+    When the tool is invoked via the PUBLIC WRAPPER (the path MCP callers actually hit),
+    Then server responds with structured INVALID_INPUT (not a Python TypeError).
+
+    Two layers verified:
+    1. Public wrapper (plan / task) — the FastMCP-registered entry point
+    2. Internal handler (_plan_handler / _task_handler) — defense-in-depth
+    """
+    from zenos.interface.mcp.plan import plan as plan_tool
+    from zenos.interface.mcp.task import task as task_tool
+    from zenos.interface.mcp.plan import _plan_handler
+    from zenos.interface.mcp.task import _task_handler
+
+    # --- Layer 1: Public wrapper path (what MCP callers actually hit) ---
+
+    # plan() public wrapper must return structured rejection, not raise TypeError
+    result = await plan_tool(action="create", goal="x", project_id="should-reject")
+    assert result.get("status") == "rejected", (
+        f"plan() public wrapper: expected status=rejected when project_id passed, got: {result}"
+    )
+    assert result.get("data", {}).get("error") == "INVALID_INPUT", (
+        f"plan() public wrapper: expected data.error=INVALID_INPUT, got: {result}"
+    )
+
+    # task() public wrapper must return structured rejection, not raise TypeError
+    result = await task_tool(action="create", title="qa test", project_id="should-reject")
+    assert result.get("status") == "rejected", (
+        f"task() public wrapper: expected status=rejected when project_id passed, got: {result}"
+    )
+    assert result.get("data", {}).get("error") == "INVALID_INPUT", (
+        f"task() public wrapper: expected data.error=INVALID_INPUT, got: {result}"
+    )
+
+    # --- Layer 2: Internal handler defense-in-depth (direct handler calls) ---
+
+    # _plan_handler still guards via **kwargs (defense in depth)
+    result = await _plan_handler(action="create", goal="x", project_id="y")
+    assert result.get("status") == "rejected", (
+        f"_plan_handler: expected status=rejected when project_id passed, got: {result}"
+    )
+    assert result.get("data", {}).get("error") == "INVALID_INPUT" or (
+        "INVALID_INPUT" in str(result)
+    ), f"_plan_handler: expected INVALID_INPUT error code, got: {result}"
+
+    # _task_handler still guards via **kwargs (defense in depth)
+    result = await _task_handler(action="create", title="x", project_id="y")
+    assert result.get("status") == "rejected", (
+        f"_task_handler: expected status=rejected when project_id passed, got: {result}"
+    )
+    assert result.get("data", {}).get("error") == "INVALID_INPUT" or (
+        "INVALID_INPUT" in str(result)
+    ), f"_task_handler: expected INVALID_INPUT error code, got: {result}"
 
 
 # --- P0: Governance prompt hygiene ---
@@ -70,8 +119,30 @@ def test_ac_l1ssot_03_project_id_param_rejected():
 def test_ac_l1ssot_04_governance_prompt_clean():
     """AC-L1SSOT-04: Given governance_guide("task") and governance_guide("plan"),
     When the rendered prompt text is inspected,
-    Then it contains neither 'type=product' nor 'project_id' substrings."""
-    pytest.skip("Pending S04 — governance_rules.py prompt rewrite")
+    Then it contains neither 'type=product' nor 'PROJECT_STRING_IGNORED' substrings."""
+    from zenos.interface.governance_rules import GOVERNANCE_RULES
+
+    # Collect all task governance text (levels 1 and 2)
+    task_rules = GOVERNANCE_RULES.get("task", {})
+    all_task_text = "\n".join(str(v) for v in task_rules.values())
+
+    # Collect all plan governance text if present
+    plan_rules = GOVERNANCE_RULES.get("plan", {})
+    all_plan_text = "\n".join(str(v) for v in plan_rules.values())
+
+    combined = all_task_text + "\n" + all_plan_text
+
+    assert "type=product" not in combined, (
+        "governance_rules.py still contains 'type=product' — agent will be misled. "
+        "Remove all type=product references from GOVERNANCE_RULES."
+    )
+    assert "type ≠ product" not in combined, (
+        "governance_rules.py still contains 'type ≠ product' — agent will be misled."
+    )
+    assert "PROJECT_STRING_IGNORED" not in combined, (
+        "governance_rules.py still contains 'PROJECT_STRING_IGNORED' — this warning code "
+        "should no longer appear in agent prompts after ADR-047 D3."
+    )
 
 
 # --- P0: Dashboard surface ---
