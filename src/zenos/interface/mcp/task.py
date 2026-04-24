@@ -742,7 +742,8 @@ async def task(
 
     不要用這個工具的情境：
     - 查任務列表 → 用 search(collection="tasks")
-    - 驗收任務 → 用 confirm(collection="tasks")
+    - 查單一任務完整資訊 → 用 get(collection="tasks", id="32-char-uuid") 或 get(collection="tasks", id_prefix="前8碼")
+    - 驗收任務 → 用 confirm(collection="tasks")（注意：confirm 需完整 32-char id，先 get 解析）
 
     Args:
         action: "create" 或 "update"

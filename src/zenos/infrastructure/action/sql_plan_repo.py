@@ -176,6 +176,19 @@ class SqlPlanRepository:
             return None
         return _row_to_plan_from_l3(row)
 
+    async def find_by_id_prefix(self, prefix: str, limit: int = 11) -> list[Plan]:
+        """Return plans whose id starts with prefix, scoped to current partner."""
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"{self._l3_select()} WHERE eb.id LIKE $1 || '%' AND eb.partner_id = $2"
+                f" ORDER BY eb.id LIMIT $3",
+                prefix.lower(),
+                pid,
+                limit,
+            )
+        return [_row_to_plan_from_l3(r) for r in rows]
+
     async def upsert(self, plan: Plan) -> Plan:
         pid = _get_partner_id()
         now = _now()

@@ -52,9 +52,10 @@ status: in-progress
 
 - [ ] S05: 補 AC 測試、回歸、build gate
   - Files: `dashboard/src/__tests__/task_surface_reset_ac.test.tsx`, related regression tests
-  - Owner: Architect after Developer handoff, then QA
+  - Owner: Developer (ZenOS task `ed1b3d24a17d458baec927ac271f0501`)
   - Verify: vitest + dashboard build
   - AC Scope: `AC-TSR-01~16`
+  - Status: in_progress — 16 stubs 全部 NOT IMPLEMENTED，需填入真實 assertion
 
 ## Dependencies
 
@@ -72,19 +73,17 @@ status: in-progress
 
 ## Resume Point
 
-已完成：
+已完成（2026-04-24 Architect sign-off）：
 
-- 調查報告
-- `SPEC-task-surface-reset.md` 升級為可派工版本（含 `AC-TSR-01~16`）
-- `TD-task-surface-reset-implementation.md` 升級為可派工版本
-- `DESIGN-task-multilayer-workspace.md` 已落地並同步 ZenOS
-- `PLAN-task-surface-reset` 已建立
-- `dashboard/src/__tests__/task_surface_reset_ac.test.tsx` 已補 architect AC stubs
-- ZenOS plan `1b16ee3cad40468ba8f8ba657fb4db8c` 已建立並切成 S01~S05 對應 implementation tasks
-- Task Hub / projects focus / rail 第一批實作已直接在主線落地，並通過 targeted vitest、TypeScript 與 `next build`
+- S01 ✅ Task Hub 首屏 recap（AC-TSR-01,04,05,14） — ZenOS done
+- S02 ✅ focus drill-down query contract（AC-TSR-06,16） — ZenOS done
+- S03 ✅ TaskDetailDrawer overview-first（AC-TSR-02,03,07,08,09,10,15） — ZenOS done
+- S04 ✅ copilot rail contract（AC-TSR-11,12） — ZenOS done
+- QA Verdict: CONDITIONAL PASS（2026-04-24）；4 個 review tasks 通過 Architect 逐條 AC sign-off
 
-下一步：
+**下一步：S05（ed1b3d24）**
 
-- 補 `S03`：TaskDetailDrawer overview-first / structure mode
-- 將 AC stubs 逐步轉成真實驗收測試
-- 我整合剩餘交付後執行 `S05`，再派 QA 驗收
+- `dashboard/src/__tests__/task_surface_reset_ac.test.tsx` 的 16 條 stubs 全部是 `it.fails("NOT IMPLEMENTED")`
+- 需填入真實 assertion，讓每條 AC 有可自動化驗證的測試覆蓋
+- PLAN exit criteria 要求「AC-TSR-01~16 全 PASS」，S05 完成才能關閉 PLAN
+- Known debt: 清空篩選應條件顯示（P2）；AC-TSR-11 sticky 需 Playwright E2E 最終驗收

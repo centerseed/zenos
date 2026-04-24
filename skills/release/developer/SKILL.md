@@ -24,12 +24,17 @@ version: 0.5.0
 mcp__zenos__journal_read(limit=20, project="{專案名}")
 
 # 看有沒有待開發任務
-mcp__zenos__search(collection="tasks", status="todo,in_progress")
+mcp__zenos__search(collection="tasks", status="todo,in_progress", project="zenos")
+
+# 查單一任務完整資訊（讀任務細節只用 get，不用 task(action="update")）
+mcp__zenos__get(collection="tasks", id="<完整32碼>")
+mcp__zenos__get(collection="tasks", id_prefix="前8碼")  # 讀取可用 prefix
 ```
 
 拿到任務立即標記：
 ```python
-mcp__zenos__task(action="update", id="task-id", status="in_progress")
+mcp__zenos__task(action="update", id="<完整32碼>", status="in_progress")
+# ⚠️ task id 需完整 32-char UUID；先用 get(id_prefix=...) 解析
 ```
 
 接單時不要只改狀態。先確認：

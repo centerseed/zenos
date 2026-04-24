@@ -74,7 +74,7 @@ async def confirm(
     if id_prefix is not None:
         return _unified_response(
             status="rejected",
-            data={"hint": "write 類操作需完整 32-char id，避免 prefix 碰撞誤觸破壞性操作"},
+            data={"hint": "write 類操作需完整 32-char id。恢復：先用 get(collection='tasks', id_prefix='前8碼') 解析完整 ID，再帶完整 ID 重呼叫 confirm。"},
             rejection_reason="id_prefix_not_allowed_for_write_ops",
         )
     await _ensure_services()

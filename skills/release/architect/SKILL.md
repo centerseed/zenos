@@ -98,6 +98,38 @@ QA 的責任是驗收；Architect 的責任是**收口**。
 
 ---
 
+## ZenOS MCP 快速查詢
+
+**讀取（不改資料）：**
+```python
+# 列任務
+mcp__zenos__search(collection="tasks", status="review", project="zenos")
+# 查單一任務完整內容（含 handoff_events）
+mcp__zenos__get(collection="tasks", id="32-char-uuid")
+mcp__zenos__get(collection="tasks", id_prefix="前8碼")   # 讀取操作可用 prefix
+# 查 Plan 詳情（含 tasks_summary）
+mcp__zenos__plan(action="get", id="32-char-uuid")
+```
+
+**寫入（需完整 32-char id）：**
+```python
+# ⚠️ confirm / handoff / task(update) 全部需要完整 UUID
+# 模式：先 get 解析完整 ID → 再 confirm
+mcp__zenos__get(collection="tasks", id_prefix="前8碼")   # → 回傳完整 id
+mcp__zenos__confirm(collection="tasks", id="<完整32碼>", accepted=True)
+# search plan_id 支援前綴自動解析（唯一匹配繼續，模糊回傳 candidates）
+mcp__zenos__search(collection="tasks", plan_id="前8碼也行", project="zenos")
+```
+
+**常見錯誤：**
+| 錯誤 | 原因 | 修正 |
+|------|------|------|
+| confirm 回傳 `id_prefix_not_allowed_for_write_ops` | 用 prefix 呼叫 confirm | 先 `get(id_prefix=...)` 取完整 ID |
+| search plan_id 回傳 AMBIGUOUS_PLAN_PREFIX | prefix 符合多個 plan | 從 candidates 挑完整 ID 再重試 |
+| task(action="update") 意外改狀態 | 誤把 update 當 read | 查詢只用 get / search，不用 update |
+
+---
+
 ## 流程
 
 ### Phase 0：拉 ZenOS Context + 調查
@@ -407,28 +439,10 @@ updated: YYYY-MM-DD
 
 ---
 
-## 2026-04-19 Action-Layer Handoff（SPEC-task-governance §Action-Layer 升級）
+## Action-Layer Handoff
 
-Architect 是 handoff chain 的中繼。收 PM spec handoff、必要時拆 subtask、派給 Developer。
-
-**重要：`task(action="handoff")` 只是在 ZenOS 任務層留下治理與派工履歷，不等於真的有 Developer runtime 開始做事。**
-
-要讓票正確進入執行態，Architect 必須完成兩件事，缺一不可：
-
-1. `handoff` 到 `agent:developer`，讓 task metadata 與 `handoff_events` 正確落地
-2. **真的啟動 / 喚醒 Developer agent**，把 task context 交給它執行
-
-若只做第 1 步，server 只會更新 `dispatcher`，**不會**自動：
-- 把 `todo` 升成 `in_progress`
-- 填 `assignee`
-- 幫你認領這張票
-
-`in_progress` 是 Developer agent 啟動後，依 Developer skill 主動做的第一步，不是 server-side automation。
-
-### 接手 PM handoff 後
-`get(collection="tasks", id=<task_id>)` 讀完整脈絡 + `handoff_events`（看 PM 交棒原因與 output_ref）。規模大需拆 → 建 subtask（必帶 `parent_task_id` + 繼承 `parent.plan_id`）。
-
-> `parent.plan_id` 必須是 PM 建的 Plan UUID（32-char）。若 get 回來是 slug 字串 → PM 漏建 Plan entity，打回 PM 補建再接手；不要自己塞字串繞過。
+**重要：`task(action="handoff")` 只是記治理履歷，不會自動啟動 Developer agent。**
+handoff 後必須真的叫起 Developer agent，status 由 Developer 自己改 in_progress。
 
 ### 拆 subtask
 ```python
@@ -436,65 +450,33 @@ mcp__zenos__task(
     action="create",
     title="{subtask 單一 outcome}",
     dispatcher="agent:architect",
-    parent_task_id="{parent_task_id}",   # subtask 必填——subtask 不能是孤兒
-    product_id="{parent.product_id}",     # 必填，必須 = parent.product_id 否則 CROSS_PRODUCT_SUBTASK reject
-    plan_id="{parent.plan_id}",           # Plan UUID，必須 = parent.plan_id 否則 CROSS_PLAN_SUBTASK reject
-    linked_entities=[...],                # 只放 L2 module / L3 goal(milestone)，禁止放 product entity
+    parent_task_id="{parent_task_id}",   # subtask 必填
+    product_id="{parent.product_id}",    # 必須 = parent.product_id 否則 CROSS_PRODUCT_SUBTASK
+    plan_id="{parent.plan_id}",          # 必須 = parent.plan_id 否則 CROSS_PLAN_SUBTASK（需完整 UUID）
+    linked_entities=[...],               # 只放 L2 module / L3 goal，禁止放 product entity
     acceptance_criteria=[...],
 )
 ```
 
-### Architect-initiated 工作（refactor / tech debt / incident）— 無 PM 起點時
-
-若工作來源是 Architect 自發（refactor、ADR、incident 回應），沒有 PM 建的 Plan，Architect 自己建：
-
+### Architect 自發工作（無 PM Plan 時）
 ```python
 plan = mcp__zenos__plan(
-    action="create",
-    goal="{refactor/incident 目標，一句話}",
-    product_id="{product_entity_id}",    # 必填，ADR-044 後為 plan/task 歸屬 SSOT
-    entry_criteria="{觸發條件，如 'ADR-NNN accepted' 或 'incident post-mortem signed'}",
-    exit_criteria="{收口條件，如 '舊 API 下線 + 呼叫方全部遷移 + 驗收通過'}",
+    action="create", goal="{一句話目標}",
+    product_id="{product_entity_id}",
+    entry_criteria="...", exit_criteria="...",
 )
-# 後續所有 task 用 plan["data"]["id"]；完成後由 Architect 自己關 Plan（status=completed + result）
+# 完成後 Architect 自己關 Plan（status=completed + result）
 ```
-
-責任：發起 Plan 的角色負責關 Plan。PM 起點 → PM 關；Architect 起點 → Architect 關。
 
 ### 交棒給 Developer
 ```python
-mcp__zenos__task(
-    action="handoff",
-    id="{task_id}",
-    to_dispatcher="agent:developer",
-    reason="TD ready, implementation dispatched",
-    output_ref="docs/designs/TD-{slug}.md",   # 或 ADR-{NNN}
-    notes="AC test stubs at tests/spec_compliance/test_{slug}_ac.py"
-)
+mcp__zenos__task(action="handoff", id="{完整32碼}", to_dispatcher="agent:developer",
+    reason="TD ready", output_ref="docs/designs/TD-{slug}.md",
+    notes="AC test stubs at tests/spec_compliance/test_{slug}_ac.py")
+# 然後真的啟動 Developer agent，傳入 task id + SPEC/TD + Done Criteria
 ```
 
-然後立刻做真的調度，不要停在 metadata handoff：
-
-1. 啟動 / 喚醒 Developer agent
-2. 傳入完整 task id、SPEC/TD、AC test stub 路徑、Done Criteria、架構約束
-3. 明確要求它啟動第一步先執行 `task(action="update", id="{task_id}", status="in_progress")`
-
-沒有真的叫起 Developer agent，就不得宣稱「已派工」。
-
-### 硬約束自查
-- dispatcher 必合正則 `^(human(:<id>)?|agent:[a-z_]+)$`，違反即 `INVALID_DISPATCHER` reject
-- subtask 禁止跨 plan，違反即 `CROSS_PLAN_SUBTASK` reject
-- 不要直接 write `handoff_events`，會被 `HANDOFF_EVENTS_READONLY` 忽略
-- `handoff -> agent:developer` 後，必須有對應的 Developer runtime claim；否則 task 仍可能停在 `todo`
-
----
-
-## MCP ID 使用紀律
-
-- MCP entity/entry/task/document/blindspot 的 ID 是 32 字元 lowercase hex UUID
-- **任何會被自動化管線 consume 的文本（報告、分析、handoff 內容），ID 必須寫完整 32 字元**；只有純人類閱讀的摘要表可以縮寫
-- 若只記得前綴，先用 `get(id_prefix=...)` 或 `search(id_prefix=...)` 取完整 ID 再做 write/archive
-- 破壞性操作（write/confirm/task handoff）**只接受完整 ID**，不支援 prefix 比對
+硬約束：dispatcher 格式 `^(human(:<id>)?|agent:[a-z_]+)$` / subtask 不跨 plan / 不直接 write handoff_events
 
 ---
 

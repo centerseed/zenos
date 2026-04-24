@@ -224,7 +224,7 @@ async def search(
         offset: 分頁偏移量，預設 0。搭配 limit 做分頁。
         project: 按專案過濾 tasks（如 "zenos"、"paceriz"）。
             未傳時自動使用 partner 的 default_project，確保跨專案隔離。
-        plan_id: 按 plan 過濾 tasks（精確找同一 plan 的所有票）。
+        plan_id: 按 plan 過濾 tasks（精確找同一 plan 的所有票）。支援前綴：傳入 < 32 chars 時自動解析為完整 UUID；唯一匹配才繼續，模糊時回傳 AMBIGUOUS_PLAN_PREFIX + candidates。
         product_id: 按產品 ID 過濾。只回傳該產品及其子樹內的 entity/task。
         product: 按產品名稱過濾（case-insensitive）。找不到時回傳錯誤提示。
             與 product_id 並存，product 優先。
@@ -634,6 +634,31 @@ async def search(
                         + ", ".join(f"{raw}->{normalize_task_status(raw)}" for raw in legacy_used)
                     )
                 status_list = normalized_statuses
+            # Resolve plan_id prefix to full UUID when caller passes < 32 chars
+            resolved_plan_id = plan_id
+            if plan_id and len(plan_id) < 32:
+                if _mcp.plan_repo is None:
+                    return _unified_response(
+                        status="rejected",
+                        data={"hint": "plan_repo not initialized"},
+                        rejection_reason="SERVICE_UNAVAILABLE",
+                    )
+                matched = await _mcp.plan_repo.find_by_id_prefix(plan_id)
+                if len(matched) == 0:
+                    return _unified_response(
+                        status="rejected",
+                        data={"hint": f"plan_id prefix '{plan_id}' 沒有找到任何 plan"},
+                        rejection_reason="PLAN_PREFIX_NOT_FOUND",
+                    )
+                if len(matched) > 1:
+                    candidates = [{"id": p.id, "goal": (p.goal or "")[:60]} for p in matched[:10]]
+                    return _unified_response(
+                        status="rejected",
+                        data={"candidates": candidates, "hint": "plan_id prefix 模糊，請增加長度"},
+                        rejection_reason="AMBIGUOUS_PLAN_PREFIX",
+                    )
+                resolved_plan_id = matched[0].id
+                warnings.append(f"plan_id prefix '{plan_id}' 已解析為完整 ID: {resolved_plan_id}")
             # Auto-fill project from partner context if caller omits it
             _partner = _current_partner.get()
             effective_project = _normalize_project_scope(project) or _normalize_project_scope(
@@ -650,7 +675,7 @@ async def search(
                 offset=offset,
                 project=effective_project or None,
                 product_id=product_id,
-                plan_id=plan_id,
+                plan_id=resolved_plan_id,
             )
             # Filter tasks by linked entity visibility
             visible_tasks = [t for t in tasks if await _is_task_visible(t)]
