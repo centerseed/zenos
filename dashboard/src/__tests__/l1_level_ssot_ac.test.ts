@@ -157,21 +157,28 @@ describe("buildTaskHubSnapshot — L1 product detection", () => {
 describe("taskHub.ts — plan.project_id dead code removed (ADR-047 D3)", () => {
   it("resolves task to product via plan.product_id (not project_id)", () => {
     const company = makeEntity({ id: "co-1", name: "原心生技", type: "company", level: 1, parentId: null });
-    const plan = { id: "plan-1", goal: "grow revenue", project: null, product_id: "co-1", status: "active" as const };
+    const plan = { id: "plan-1", goal: "grow revenue", project: null, product_id: "co-1", status: "active" as const, owner: null };
     const task: Task = {
       id: "t-1",
       title: "Task under company plan",
+      description: "",
       status: "in_progress",
       priority: "high",
+      priorityReason: "",
       productId: null,
-      project: null,
+      project: "",
+      createdBy: "test",
+      linkedProtocol: null,
+      linkedBlindspot: null,
+      contextSummary: "",
+      completedBy: null,
       planId: "plan-1",
       linkedEntities: [],
       blockedBy: [],
       blockedReason: null,
       dueDate: null,
       createdAt: new Date(),
-      updatedAt: null,
+      updatedAt: new Date(),
       completedAt: null,
       assignee: null,
       dispatcher: null,
@@ -179,9 +186,7 @@ describe("taskHub.ts — plan.project_id dead code removed (ADR-047 D3)", () => 
       result: null,
       rejectionReason: null,
       confirmedByCreator: false,
-      sourceType: null,
-      sourceMetadata: null,
-      comments: [],
+      sourceType: "",
       parentTaskId: null,
       attachments: [],
     };

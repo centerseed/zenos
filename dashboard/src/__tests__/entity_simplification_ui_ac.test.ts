@@ -203,7 +203,7 @@ describe("AC-ENTSIMP-UI-03: taskHubCopilot neutralisation", () => {
   it("prompt string contains no '產品' or 'products'", () => {
     const snapshot = makeMinimalSnapshot();
     const entry = buildTaskHubCopilotEntry({ snapshot });
-    const prompt = entry.build_prompt();
+    const prompt = entry.build_prompt("");
 
     expect(prompt).not.toContain("產品");
     expect(prompt).not.toContain("products");
