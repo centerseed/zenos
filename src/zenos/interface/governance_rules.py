@@ -941,6 +941,7 @@ Task 完成後的知識應流回 ontology：
 - `linked_entities` 含 L1 entity → strip + warning `LINKED_ENTITIES_PRODUCT_STRIPPED`
 - `subtask.product_id` ≠ `parent.product_id` → `error_code=CROSS_PRODUCT_SUBTASK`
 - `task.product_id` ≠ `plan.product_id`（task 有 plan_id）→ `error_code=CROSS_PRODUCT_PLAN_TASK`
+- `parent_task_id` 或 `plan_id` 指向的既有 Action parent 缺 `product_id`，無法回溯到 L1 collaboration root → `error_code=INVALID_PARENT_CHAIN`
 - 傳入 `project_id` 參數或 `project` 字串（非顯示用途）→ reject `INVALID_INPUT`（ADR-047 D3）
 
 **HANDOFF_EVENTS_READONLY**：`task(action="create" | "update")` 的 `data` 中若包含 `handoff_events` 欄位，server 強制忽略並回 warning。

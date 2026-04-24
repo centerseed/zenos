@@ -29,20 +29,20 @@ plan_id: c646d3c91374466baa92c6e03d6a4b37
 
 ### Phase 1: Schema Migration（最先做，影響後續所有 phase）
 
-- [ ] **S01**: 寫 schema migration `migrations/20260422_NNNN_task_product_id_rename.sql`
+- [x] **S01** ✅ 2026-04-23 done：`migrations/20260422_0001_task_product_id_rename.sql`（QA CONDITIONAL PASS）。S01 一併涵蓋 S02/S03 的 migration 檔（見下方註記）
   - Rename `tasks.project_id` → `tasks.product_id`，重建 index、FK、constraint
   - Rename `plans.project_id` → `plans.product_id`，同上
   - **不加 NOT NULL**（留給 S03 backfill 後再加）
   - Files: `migrations/20260422_NNNN_task_product_id_rename.sql`
   - Verify: `psql -c "\d zenos.tasks" | grep product_id`，無 project_id 欄位
 
-- [ ] **S02**: 寫 backfill migration `migrations/20260422_NNNN_task_product_id_backfill.sql`
+- [x] **S02** ❎ 2026-04-23 cancelled（covered by S01）：`migrations/20260422_0002_task_product_id_backfill.sql`
   - 按 ADR-044 D8 Step 2 順序：task_entities → project string → partner.defaultProject → first product entity 兜底
   - 兜底 task 插入 `governance:review_product_assignment` tag（透過 entity_tags 或 audit log，視 schema 而定）
   - Files: `migrations/20260422_NNNN_task_product_id_backfill.sql`
   - Verify: staging 跑完後 `SELECT COUNT(*) FROM zenos.tasks WHERE product_id IS NULL = 0`
 
-- [ ] **S03**: 寫 cleanup + NOT NULL migration `migrations/20260422_NNNN_task_product_id_finalize.sql`
+- [x] **S03** ❎ 2026-04-23 cancelled（covered by S01）：`migrations/20260422_0003_task_product_id_finalize.sql`
   - 從 task_entities 移除已升格為 product_id 的 product entity（D8 Step 3）
   - 加 `tasks.product_id NOT NULL`、`plans.product_id NOT NULL`
   - 加 type check（透過 trigger 或 application-level；FK 不夠）

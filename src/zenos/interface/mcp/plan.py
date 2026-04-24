@@ -13,6 +13,19 @@ from zenos.application.action.plan_service import _plan_to_dict
 logger = logging.getLogger(__name__)
 
 
+def _plan_error_response(exc: ValueError) -> dict:
+    from zenos.interface.mcp._common import _error_response
+
+    error_code = getattr(exc, "error_code", None)
+    if error_code:
+        return _error_response(
+            status="rejected",
+            error_code=str(error_code),
+            message=str(exc),
+        )
+    return _unified_response(status="rejected", data={}, rejection_reason=str(exc))
+
+
 async def _resolve_plan_product_id(
     *,
     explicit_product_id: str | None,
@@ -51,6 +64,8 @@ async def _plan_handler(
     result: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    # Wave 9 Phase B prime — optional L3PlanEntity for dual-path dispatch
+    l3_entity: object | None = None,
     **kwargs: object,
 ) -> dict:
     """Core plan handler — extracted for testability."""
@@ -64,6 +79,75 @@ async def _plan_handler(
             message="project_id parameter is not supported; use product_id (ADR-047)",
             status="rejected",
         )
+
+    # Wave 9 Phase B prime — L3PlanEntity dual-path dispatch.
+    from zenos.domain.action.models import L3PlanEntity as _L3PlanEntity
+    if l3_entity is not None and isinstance(l3_entity, _L3PlanEntity):
+        if _mcp.plan_service is None:
+            await _ensure_services()
+        try:
+            partner = _current_partner.get()
+            actor_id = (partner or {}).get("id") or ""
+            if action == "create":
+                # fix-12: run the same product resolution as the legacy plan create path.
+                # If caller omits product_id, resolve via project / partner.defaultProject.
+                partner_default_project = partner.get("defaultProject", "") if partner else ""
+                entity_repo = getattr(_mcp, "entity_repo", None)
+                resolved_product_id, resolution_error = await _resolve_plan_product_id(
+                    explicit_product_id=product_id,
+                    project_hint=project,
+                    partner_default_project=partner_default_project,
+                    entity_repo=entity_repo,
+                )
+                if resolution_error is not None:
+                    return _unified_response(
+                        status="rejected", data={},
+                        rejection_reason=resolution_error,
+                    )
+
+                # Attach resolved product_id onto the entity before delegating.
+                # create_plan_via_l3_entity reads parent_id as product_id; we
+                # must pass the resolved value via a kwarg so the legacy service
+                # layer has a concrete product_id to use.
+                plan = await _mcp.plan_service.create_plan_via_l3_entity(
+                    l3_entity, created_by=actor_id, product_id=resolved_product_id,
+                )
+                return _unified_response(data=_plan_to_dict(plan))
+            elif action == "update":
+                plan_id = id or (l3_entity.id if l3_entity.id else None)
+                if not plan_id:
+                    return _unified_response(
+                        status="rejected", data={},
+                        rejection_reason="id is required for plan update",
+                    )
+                # fix-16: L3 plan update must accept product_id / project overrides
+                # so callers can re-home a plan or trigger product resolution via
+                # defaultProject. Run the same _resolve_plan_product_id helper as
+                # the legacy update path and the L3 create path.
+                resolved_product_id_for_update: str | None = None
+                if product_id is not None or project is not None:
+                    partner_default_project_update = (
+                        partner.get("defaultProject", "") if partner else ""
+                    )
+                    entity_repo_update = getattr(_mcp, "entity_repo", None)
+                    _rpid, _rerr = await _resolve_plan_product_id(
+                        explicit_product_id=product_id,
+                        project_hint=project,
+                        partner_default_project=partner_default_project_update,
+                        entity_repo=entity_repo_update,
+                    )
+                    if _rerr is not None:
+                        return _unified_response(
+                            status="rejected", data={}, rejection_reason=_rerr,
+                        )
+                    resolved_product_id_for_update = _rpid
+                plan = await _mcp.plan_service.update_plan_via_l3_entity(
+                    plan_id, l3_entity, product_id=resolved_product_id_for_update,
+                )
+                return _unified_response(data=_plan_to_dict(plan))
+            # For get/list fall through to legacy path
+        except ValueError as _e:
+            return _plan_error_response(_e)
 
     try:
         partner = _current_partner.get()
@@ -192,7 +276,7 @@ async def _plan_handler(
             )
 
     except ValueError as e:
-        return _unified_response(status="rejected", data={}, rejection_reason=str(e))
+        return _plan_error_response(e)
 
 
 async def plan(

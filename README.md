@@ -156,7 +156,7 @@ MCP_TRANSPORT=sse PORT=8080 python -m zenos.interface.mcp
 ## SQL Migration（統一入口）
 
 - Migration runner：[scripts/run_sql_migrations.py](/Users/wubaizong/clients/ZenOS/scripts/run_sql_migrations.py)
-- 一鍵入口（自動讀 GCP secret `database-url`）：[scripts/migrate.sh](/Users/wubaizong/clients/ZenOS/scripts/migrate.sh)
+- 一鍵入口（自動讀 GCP secret；prod 預設為 `zenos-database-url`）：[scripts/migrate.sh](/Users/wubaizong/clients/ZenOS/scripts/migrate.sh)
 
 常用指令：
 
@@ -164,8 +164,20 @@ MCP_TRANSPORT=sse PORT=8080 python -m zenos.interface.mcp
 # 看目前狀態（已套用 / 待套用）
 ./scripts/migrate.sh --status
 
+# 看 staging 狀態
+./scripts/migrate.sh --target staging --status
+
 # 只看待套用，不實際執行
 ./scripts/migrate.sh --dry-run
+
+# 只套指定 migration，避免誤套 unrelated pending migration
+./scripts/migrate.sh --target staging --only 20260423_0004_wave9_l3_action_preflight
+./scripts/migrate.sh --target prod --only 20260423_0004_wave9_l3_action_preflight
+
+# 初始化 staging baseline 時排除尚未要套的 migration
+./scripts/migrate.sh --target staging \
+  --exclude 20260423_0003_drop_legacy_document_tables \
+  --exclude 20260423_0004_wave9_l3_action_preflight
 
 # 正式套用全部待套用 migration
 ./scripts/migrate.sh

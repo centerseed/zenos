@@ -139,6 +139,8 @@ def _make_stateful_pool() -> tuple[MagicMock, dict[str, list[dict]]]:
                 return conn
             return _r().__await__()
 
+    conn.transaction = MagicMock(return_value=_AsyncCtx())
+
     pool = MagicMock()
     pool.acquire = MagicMock(return_value=_AsyncCtx())
     pool.release = AsyncMock()
@@ -374,6 +376,8 @@ class TestPartnerDataScope:
                 async def _r():
                     return conn_spy
                 return _r().__await__()
+
+        conn_spy.transaction = MagicMock(return_value=_AsyncCtx())
 
         pool_spy = MagicMock()
         pool_spy.acquire = MagicMock(return_value=_AsyncCtx())

@@ -3,11 +3,12 @@ doc_id: ADR-028-plan-primitive
 title: 決策紀錄：Plan Primitive — Action Layer 的 Orchestration 實體化
 type: DECISION
 ontology_entity: action-layer
-status: Draft
+status: Superseded
 version: "1.2"
 date: 2026-04-10
-updated: 2026-04-23
+updated: 2026-04-24
 supersedes: null
+superseded_by: ADR-048-grand-ontology-refactor
 superseded_sections:
   - "project_id 欄位命名（2026-04-22 由 ADR-044 rename 為 product_id；2026-04-23 由 ADR-047 定義為指向任何 L1 entity）"
 ---
@@ -15,6 +16,8 @@ superseded_sections:
 > **2026-04-23 update：**
 > - 欄位命名：`project_id` 已於 ADR-044 重新命名為 `product_id`（本 ADR 原文保留歷史命名，實作請以最新命名為準）
 > - 指向語意：`product_id` 指向任何 **L1 entity**（`level=1 AND parent_id=null`），type 是 UI label，不再限定 `type=product`（ADR-047）
+>
+> **2026-04-24 update：** Wave 9 已將 Plan 落地為 `entities_base` + `entity_l3_plan` L3-Action subclass；`zenos.plans` 已 drop。本 ADR 由 ADR-048 完全 supersede。
 
 # ADR-028: Plan Primitive — Action Layer 的 Orchestration 實體化
 

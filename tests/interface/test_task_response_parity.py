@@ -26,7 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from zenos.application.action.task_service import TaskService, TaskValidationError
-from zenos.application.action.plan_service import PlanService, _plan_to_dict
+from zenos.application.action.plan_service import PlanService, PlanValidationError, _plan_to_dict
 from zenos.domain.action import Task, Plan, PlanStatus, TaskStatus
 from zenos.domain.action.models import (
     L3TaskEntity,
@@ -731,6 +731,9 @@ async def test_l3_plan_handler_error_surfacing():
 
         import zenos.interface.mcp as _mcp_module
         _mcp_module.plan_service = mock_plan_svc
+        entity_repo = AsyncMock()
+        entity_repo.get_by_name = AsyncMock(return_value=_make_entity())
+        _mcp_module.entity_repo = entity_repo
 
         entity = L3PlanEntity(
             id="", partner_id=_PARTNER_ID, name="Bad plan", type_label="plan", level=3,
@@ -743,6 +746,42 @@ async def test_l3_plan_handler_error_surfacing():
 
     assert result.get("status") == "rejected"
     assert "product_id" in result.get("rejection_reason", "")
+
+
+@pytest.mark.asyncio
+async def test_l3_plan_handler_error_codes_wired():
+    """L3 plan path in _plan_handler surfaces validation error_code when present."""
+    from zenos.interface.mcp.plan import _plan_handler
+
+    mock_plan_svc = AsyncMock()
+    mock_plan_svc.create_plan_via_l3_entity = AsyncMock(
+        side_effect=PlanValidationError(
+            "Plan parent chain cannot terminate at an L1 collaboration root.",
+            error_code="INVALID_PARENT_CHAIN",
+        )
+    )
+
+    with patch("zenos.interface.mcp.plan._current_partner") as mock_cp, \
+         patch("zenos.interface.mcp._ensure_services", AsyncMock()):
+        mock_cp.get.return_value = {"id": _PARTNER_ID, "defaultProject": "ZenOS"}
+
+        import zenos.interface.mcp as _mcp_module
+        _mcp_module.plan_service = mock_plan_svc
+        entity_repo = AsyncMock()
+        entity_repo.get_by_name = AsyncMock(return_value=_make_entity())
+        _mcp_module.entity_repo = entity_repo
+
+        entity = L3PlanEntity(
+            id="", partner_id=_PARTNER_ID, name="Bad plan", type_label="plan", level=3,
+            parent_id=None,
+            status="active", created_at=_NOW, updated_at=_NOW,
+            description="", task_status="draft", assignee=None, dispatcher="human",
+            goal_statement="Bad plan",
+        )
+        result = await _plan_handler(action="create", l3_entity=entity)
+
+    assert result.get("status") == "rejected"
+    assert result.get("data", {}).get("error") == "INVALID_PARENT_CHAIN"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

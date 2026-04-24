@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from zenos.domain.action import Plan, PlanStatus
+from zenos.domain.action.models import L3PlanEntity
 from zenos.domain.action.repositories import PlanRepository, TaskRepository
 from zenos.domain.knowledge import EntityRepository
 from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
@@ -25,6 +26,14 @@ _PLAN_TRANSITIONS: dict[str, set[str]] = {
     PlanStatus.COMPLETED: set(),
     PlanStatus.CANCELLED: set(),
 }
+
+
+class PlanValidationError(ValueError):
+    """Validation error with a machine-readable error_code."""
+
+    def __init__(self, message: str, error_code: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
 
 
 class PlanService:
@@ -115,6 +124,11 @@ class PlanService:
             project_hint=normalized_updates.get("project") or plan.project,
         )
         if product_entity is None:
+            if plan.product_id is None and "product_id" not in normalized_updates:
+                raise PlanValidationError(
+                    f"Plan '{plan_id}' has no product_id; parent chain cannot terminate at an L1 collaboration root.",
+                    error_code="INVALID_PARENT_CHAIN",
+                )
             raise ValueError("product_id is required for plan update")
         product_name = getattr(product_entity, "name", None) or normalized_updates.get("project") or plan.project
         canonical_product_id = (
@@ -215,6 +229,86 @@ class PlanService:
         plan.status = PlanStatus.ACTIVE
         plan.updated_at = _now()
         await self._plans.upsert(plan)
+
+    # ──────────────────────────────────────────
+    # Wave 9 Phase B prime — L3 path adapters
+    # ──────────────────────────────────────────
+
+    async def create_plan_via_l3_entity(
+        self,
+        entity: L3PlanEntity,
+        *,
+        created_by: str,
+        product_id: str | None = None,
+    ) -> Plan:
+        """Create a plan from an L3PlanEntity (dual-path adapter, Phase B prime).
+
+        Normalizes the L3PlanEntity to the legacy dict format, then delegates
+        to create_plan so that all validation and response shapes are byte-equal
+        with the legacy path.
+
+        fix-12: product_id kwarg takes precedence over entity.parent_id, allowing
+        callers (e.g. the MCP plan handler) to supply a resolved product_id even
+        when entity.parent_id is absent or unresolved.
+        """
+        data = {
+            "goal": entity.goal_statement or entity.name,
+            "created_by": created_by,
+            "owner": entity.assignee,
+            "entry_criteria": entity.entry_criteria or None,
+            "exit_criteria": entity.exit_criteria or None,
+            "product_id": product_id if product_id is not None else entity.parent_id,
+            "project": None,
+            "updated_by": created_by,
+        }
+        return await self.create_plan(data)
+
+    async def update_plan_via_l3_entity(
+        self,
+        plan_id: str,
+        entity: L3PlanEntity,
+        *,
+        product_id: str | None = None,
+    ) -> Plan:
+        """Update a plan from an L3PlanEntity (dual-path adapter, Phase B prime).
+
+        Extracts mutable fields from the L3PlanEntity and delegates to
+        update_plan so that all validation and response shapes are byte-equal.
+
+        fix-17: entry_criteria and exit_criteria use always-pass semantics so
+        that an empty string can explicitly clear existing values. The legacy
+        update_plan accepts "" and stores it as-is.
+
+        fix-16: product_id kwarg (partial-update semantic). If the caller
+        provides an explicit product_id (already resolved from project/
+        defaultProject by the MCP handler), it takes precedence over
+        entity.parent_id. This allows re-homing a plan to a different product
+        via the L3 update path.
+        """
+        updates: dict = {
+            # Always-pass semantics for goal so that callers can change it.
+            # goal_statement takes priority over name (L3 entity shape).
+            "goal": entity.goal_statement or entity.name or "",
+            # always-pass for entry/exit criteria (fix-17): empty string = explicit clear.
+            "entry_criteria": entity.entry_criteria,
+            "exit_criteria": entity.exit_criteria,
+        }
+        # status: only include when entity carries a value
+        if entity.task_status:
+            updates["status"] = entity.task_status
+        if entity.assignee is not None:
+            updates["owner"] = entity.assignee
+        if entity.result is not None:
+            updates["result"] = entity.result
+
+        # product_id resolution (fix-16): caller-supplied kwarg takes precedence
+        # over entity.parent_id so that MCP callers can re-home a plan after
+        # running _resolve_plan_product_id.
+        resolved_product_id = product_id if product_id is not None else entity.parent_id
+        if resolved_product_id is not None:
+            updates["product_id"] = resolved_product_id
+
+        return await self.update_plan(plan_id, updates)
 
     async def _resolve_product_entity(
         self,

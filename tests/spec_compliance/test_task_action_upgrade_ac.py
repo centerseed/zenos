@@ -7,8 +7,9 @@ Run: .venv/bin/pytest tests/spec_compliance/test_task_action_upgrade_ac.py -x
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -77,13 +78,14 @@ def test_ac_task_upg_01_schema_columns_with_index():
     assert DISPATCHER_PATTERN.match("agent:pm")
     assert not DISPATCHER_PATTERN.match("AGENT:PM")
 
-    # Verify repo upsert SQL includes new columns
+    # Verify repo L3 upsert carries the fields that replaced legacy table columns.
     import inspect
     from zenos.infrastructure.action.sql_task_repo import SqlTaskRepository
-    upsert_source = inspect.getsource(SqlTaskRepository.upsert)
-    assert "parent_task_id" in upsert_source
+    upsert_source = inspect.getsource(SqlTaskRepository._upsert_l3_task)
+    handoff_source = inspect.getsource(SqlTaskRepository._sync_handoff_events)
+    assert "parent_id" in upsert_source
     assert "dispatcher" in upsert_source
-    assert "handoff_events" in upsert_source
+    assert "handoff_events" in handoff_source
 
 
 # ─────────────────────────────────────────────────────────────
@@ -594,5 +596,8 @@ def test_ac_task_upg_09_related_spec_review_passed():
     required_note = "2026-04-19: reviewed against SPEC-task-governance dispatcher / handoff / subtask semantics"
     for path in targets:
         text = path.read_text(encoding="utf-8")
-        assert "updated: 2026-04-19" in text, f"{path.name} must update frontmatter date"
+        updated_match = re.search(r"^updated:\s*(\d{4}-\d{2}-\d{2})$", text, re.MULTILINE)
+        assert updated_match is not None, f"{path.name} must carry frontmatter updated date"
+        updated_at = date.fromisoformat(updated_match.group(1))
+        assert updated_at >= date(2026, 4, 19), f"{path.name} must not predate related-spec review"
         assert required_note in text, f"{path.name} must carry related-spec review note"

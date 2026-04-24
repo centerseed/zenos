@@ -145,13 +145,13 @@ created: 2026-04-23
 | ADR-022 document-bundle-architecture | doc_role / bundle | SUPERSEDE | ✅ marked |
 | ADR-025 zenos-core-layering | Knowledge / Action Layer 分離 | SUPERSEDE | ✅ marked |
 | ADR-027 layer-contract | Layer 契約 | SUPERSEDE | ✅ marked |
-| ADR-028 plan-primitive | Plan 獨立 collection | **Partial** — Post-MTI 目標態；runtime 現行仍獨立 plans table | KEEP as current canonical（未加 supersede marker）|
+| ADR-028 plan-primitive | Plan 獨立 collection | **SUPERSEDED** — Wave 9 已將 Plan 落地為 L3-Action subclass | ✅ superseded_by ADR-048 |
 | ADR-032 document-delivery-layer-architecture | delivery 方案 | **Partial**（doc bundle 部分併入 SPEC-doc-governance §3；sidecar tables 仍 canonical）| ✅ status=Approved，章節級收斂用 `partially_superseded_sections` / `retained_canonical_sections` frontmatter field 表達；避免非 enum 的 `Partial Supersede` status |
 | ADR-041 pillar-a-semantic-retrieval | embedding 放 entities 表 | **Partial** — embedding 改為 sidecar table（主 SPEC v2 §12）；retrieval 行為仍 canonical | ✅ 同上 frontmatter 處理 |
-| ADR-044 task-ownership-ssot | task.project_id → product_id | **KEEP as current canonical** — runtime 今日仍以 `product_id` 為唯一 ownership SSOT（`governance_rules.py:938`） | 未加 supersede marker |
+| ADR-044 task-ownership-ssot | task.project_id → product_id | **SUPERSEDED** — storage 已收斂到 `entities_base.parent_id` tree；API contract 留在 SPEC-task-governance | ✅ superseded_by ADR-048 |
 | ADR-045 protocol-collection-vs-view | Protocol 是 collection 非 view | KEEP — Protocol 判定仍有效 | 未加 marker |
-| ADR-046 document-entity-boundary | Document 合併 Entity | **Spec 目標態已落地，runtime 尚未** — 仍保留 Approved | status=Approved；2026-04-23 note 明示 runtime `Document` dataclass 仍活於 `src/zenos/domain/knowledge/models.py:88`，治理邏輯雙路徑（`governance.py:223-230`），Wave 9 migration 完成後才改 Superseded |
-| ADR-047 l1-level-ssot | L1 由 level 判定 | **Partial** — axiom 進主 SPEC；runtime enforcement 仍 canonical | 未加 marker（仍為 current canonical）|
+| ADR-046 document-entity-boundary | Document 合併 Entity | **Spec 目標態已落地，runtime 尚未** — 仍保留 Approved | status=Approved；runtime `Document` dataclass 仍活於 `src/zenos/domain/knowledge/models.py:88`，治理邏輯雙路徑（`governance.py:223-230`）；由 `PLAN-data-model-consolidation` 收口後再改 Superseded |
+| ADR-047 l1-level-ssot | L1 由 level 判定 | **SUPERSEDED** — axiom 與 runtime enforcement 收斂進主 SPEC v2 + ADR-048 | ✅ superseded_by ADR-048 |
 
 ### 保留（未被取代）
 | ADR | 議題 |
@@ -237,7 +237,7 @@ created: 2026-04-23
 |------|--------|
 | PLAN-l1-level-ssot-refactor | 已完成（ADR-047），保留歷史 |
 | PLAN-data-model-consolidation | ✅ **ACTIVE — 與 Wave 9 PLAN 並行**（2026-04-23 修正，撤回先前 OBSOLETE 判斷）。原 OBSOLETE 是假設單一 master plan 吸收全部；實際 `PLAN-ontology-grand-refactor-wave9-migration §Scope` 明確把 Document / Protocol / Tags / dead-identity 切給本 PLAN。本 PLAN 的 S03（EntityStatus.archived + preflight）是 Wave 9 Plan Phase A 的上游依賴 |
-| PLAN-ontology-grand-refactor-wave9-migration | ✅ **NEW 2026-04-23** — Wave 9 runtime migration blueprint（L3-Action MTI + ownership tree + task_entities drop）；與 PLAN-data-model-consolidation 平行 |
+| PLAN-ontology-grand-refactor-wave9-migration | ✅ **COMPLETED 2026-04-24** — L3-Action MTI + ownership tree + legacy task tables drop 已落地；與 PLAN-data-model-consolidation 平行 |
 | PLAN-task-ownership-ssot | 已完成（ADR-044），保留歷史 |
 | PLAN-governance-ssot-convergence | 保留 |
 | PLAN-identity-access-consolidation | 保留 |

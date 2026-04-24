@@ -12,6 +12,7 @@ from zenos.domain.knowledge import Entity, Tags
 from zenos.infrastructure.sql_common import (
     SCHEMA,
     _acquire,
+    _acquire_with_tx,
     _dumps,
     _get_partner_id,
     _json_loads_safe,
@@ -88,6 +89,97 @@ class SqlEntityRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
+    async def _upsert_l3_milestone(
+        self, conn: asyncpg.Connection, entity: Entity, pid: str
+    ) -> None:
+        if entity.type != "goal":
+            return
+
+        existing = await conn.fetchrow(
+            f"SELECT type_label FROM {SCHEMA}.entities_base WHERE id = $1 AND partner_id = $2",
+            entity.id,
+            pid,
+        )
+        if existing and existing["type_label"] != "milestone":
+            raise ValueError(
+                f"L3 entity type mismatch for milestone {entity.id}: {existing['type_label']}"
+            )
+
+        task_status = {
+            "active": "active",
+            "archived": "cancelled",
+            "done": "completed",
+            "completed": "completed",
+            "cancelled": "cancelled",
+            "planned": "planned",
+        }.get(entity.status, "planned")
+        dispatcher = (
+            entity.owner
+            if entity.owner and entity.owner.startswith(("agent:", "human"))
+            else "human"
+        )
+
+        await conn.execute(
+            f"""
+            INSERT INTO {SCHEMA}.entities_base (
+                id, partner_id, name, type_label, level, parent_id, status,
+                visibility, visible_to_roles, visible_to_members,
+                visible_to_departments, owner, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, 'milestone', 3, $4, $5,
+                $6, $7, $8, $9, $10, $11, $12
+            )
+            ON CONFLICT (partner_id, id) DO UPDATE SET
+                name=EXCLUDED.name,
+                type_label=EXCLUDED.type_label,
+                level=EXCLUDED.level,
+                parent_id=EXCLUDED.parent_id,
+                status=EXCLUDED.status,
+                visibility=EXCLUDED.visibility,
+                visible_to_roles=EXCLUDED.visible_to_roles,
+                visible_to_members=EXCLUDED.visible_to_members,
+                visible_to_departments=EXCLUDED.visible_to_departments,
+                owner=EXCLUDED.owner,
+                updated_at=EXCLUDED.updated_at
+            """,
+            entity.id,
+            pid,
+            entity.name,
+            entity.parent_id,
+            entity.status,
+            entity.visibility,
+            entity.visible_to_roles,
+            entity.visible_to_members,
+            entity.visible_to_departments,
+            entity.owner,
+            entity.created_at,
+            entity.updated_at,
+        )
+        await conn.execute(
+            f"""
+            INSERT INTO {SCHEMA}.entity_l3_milestone (
+                partner_id, entity_id, description, task_status, assignee,
+                dispatcher, acceptance_criteria_json, priority, result,
+                target_date, completion_criteria
+            ) VALUES (
+                $1, $2, $3, $4, $5,
+                $6, '[]'::jsonb, 'medium', NULL,
+                NULL, NULL
+            )
+            ON CONFLICT (partner_id, entity_id) DO UPDATE SET
+                description=EXCLUDED.description,
+                task_status=EXCLUDED.task_status,
+                assignee=EXCLUDED.assignee,
+                dispatcher=EXCLUDED.dispatcher
+            """,
+            pid,
+            entity.id,
+            entity.summary,
+            task_status,
+            entity.owner,
+            dispatcher,
+        )
+
     async def get_by_id(self, entity_id: str) -> Entity | None:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:
@@ -136,7 +228,8 @@ class SqlEntityRepository:
             "who": entity.tags.who if isinstance(entity.tags.who, list) else [entity.tags.who],
         }
 
-        async with _acquire(self._pool, conn) as _conn:
+        acquire = _acquire(self._pool, conn) if conn is not None else _acquire_with_tx(self._pool, None)
+        async with acquire as _conn:
             await _conn.execute(
                 f"""
                 INSERT INTO {SCHEMA}.entities (
@@ -179,6 +272,7 @@ class SqlEntityRepository:
                 entity.doc_role, _dumps(entity.bundle_highlights), entity.highlights_updated_at,
                 entity.change_summary, entity.summary_updated_at,
             )
+            await self._upsert_l3_milestone(_conn, entity, pid)
         return entity
 
     async def list_unconfirmed(self) -> list[Entity]:

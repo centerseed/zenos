@@ -5,8 +5,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from zenos.application.action.task_service import TaskService, _parse_due_date
-from zenos.domain.action import Task
+from zenos.application.action.task_service import TaskService, TaskValidationError, _parse_due_date
+from zenos.domain.action import Plan, Task
 from zenos.domain.knowledge import Entity, Tags
 
 
@@ -74,6 +74,73 @@ async def test_create_accepts_plan_fields_when_valid():
     assert result.task.plan_id == "plan-review-v1"
     assert result.task.plan_order == 2
     assert result.task.depends_on_task_ids == ["task-1"]
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_parent_task_without_product_id_as_invalid_parent_chain():
+    parent = Task(
+        id="parent-1",
+        title="Parent",
+        status="todo",
+        priority="medium",
+        created_by="pm",
+        product_id=None,
+        plan_id="plan-1",
+    )
+    task_repo = AsyncMock()
+    task_repo.get_by_id = AsyncMock(return_value=parent)
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("prod-1", "ZenOS", "product"))
+    blindspot_repo = AsyncMock()
+
+    svc = TaskService(task_repo, entity_repo, blindspot_repo)
+
+    with pytest.raises(TaskValidationError) as exc_info:
+        await svc.create_task(
+            {
+                "title": "Implement subtask",
+                "created_by": "pm",
+                "product_id": "prod-1",
+                "parent_task_id": "parent-1",
+                "plan_id": "plan-1",
+            }
+        )
+
+    assert exc_info.value.error_code == "INVALID_PARENT_CHAIN"
+
+
+@pytest.mark.asyncio
+async def test_create_rejects_plan_without_product_id_as_invalid_parent_chain():
+    task_repo = AsyncMock()
+    task_repo.upsert = AsyncMock(side_effect=lambda t: t)
+    entity_repo = AsyncMock()
+    entity_repo.get_by_id = AsyncMock(return_value=_make_entity("prod-1", "ZenOS", "product"))
+    blindspot_repo = AsyncMock()
+    plan_repo = AsyncMock()
+    plan_repo.get_by_id = AsyncMock(
+        return_value=Plan(
+            id="plan-1",
+            goal="Broken legacy plan",
+            status="draft",
+            created_by="pm",
+            product_id=None,
+        )
+    )
+
+    svc = TaskService(task_repo, entity_repo, blindspot_repo, plan_repo=plan_repo)
+
+    with pytest.raises(TaskValidationError) as exc_info:
+        await svc.create_task(
+            {
+                "title": "Implement task",
+                "created_by": "pm",
+                "product_id": "prod-1",
+                "plan_id": "plan-1",
+            }
+        )
+
+    assert exc_info.value.error_code == "INVALID_PARENT_CHAIN"
 
 
 @pytest.mark.asyncio

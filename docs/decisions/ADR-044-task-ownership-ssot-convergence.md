@@ -1,11 +1,12 @@
 ---
 type: ADR
 id: ADR-044
-status: Draft
+status: Superseded
 ontology_entity: action-layer
 created: 2026-04-22
-updated: 2026-04-23
+updated: 2026-04-24
 supersedes: null
+superseded_by: ADR-048-grand-ontology-refactor
 superseded_sections:
   - "D2 type=product 檢查（2026-04-23 由 ADR-047 改為 L1 level 檢查）"
   - "D4/D5 project 字串 deprecated + PROJECT_STRING_IGNORED（2026-04-23 由 ADR-047 完全移除，caller 傳 project_id 或 project 字串都直接 reject）"
@@ -19,6 +20,8 @@ superseded_sections:
 > - D4/D5 的 `project` 字串過渡期結束：MCP tool 完全移除 `project_id` 參數與 `project` 字串回寫；`PROJECT_STRING_IGNORED` warning 不再存在
 > - D6 fallback SQL 的 `type = 'product'` 改為 `level = 1`
 > - 以下原文保留作為歷史追溯；實作請以 ADR-047 / 更新後的 SPEC-task-governance 為準
+>
+> **2026-04-24 update：** Wave 9 已將 task / plan storage 收斂到 `entities_base.parent_id` tree；`product_id` 保留為 MCP/API contract 欄位，由 repo 轉換為 L3 parent graph。本 ADR 由 ADR-048 完全 supersede。
 
 ## Context
 

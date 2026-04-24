@@ -1,10 +1,10 @@
 ---
 type: SPEC
 id: SPEC-task-governance
-status: Under Review
+status: Approved
 ontology_entity: l3-action
 created: 2026-03-26
-updated: 2026-04-23
+updated: 2026-04-24
 depends_on: SPEC-ontology-architecture v2 §9, SPEC-identity-and-access, SPEC-governance-framework
 canonical_schema_from: SPEC-ontology-architecture v2 §9
 supersedes_sections:
@@ -24,24 +24,24 @@ supersedes_sections:
 
 L3-Action 家族共四種概念：**Milestone / Plan / Task / Subtask**。
 
-### 1.1 Runtime 實體模型（current，treat as canonical for callers）
+### 1.1 Runtime 實體模型（current）
 
 | 概念 | 儲存 | 識別方式 |
 |------|------|---------|
-| Milestone | L3 entity（`entity_type='goal'` / milestone，見 `src/zenos/domain/knowledge/enums.py`）| outcome anchor |
-| Plan | `zenos.plans` row（`src/zenos/infrastructure/action/sql_plan_repo.py`）| 獨立 plans table |
-| Task | `zenos.tasks` row（`src/zenos/infrastructure/action/sql_task_repo.py`）| 獨立 tasks table |
-| Subtask | `zenos.tasks` row 且 `parent_task_id IS NOT NULL` | **與 Task 同表**，靠 `parent_task_id` 區分 |
+| Milestone | `entities_base` + `entity_l3_milestone` | outcome anchor |
+| Plan | `entities_base` + `entity_l3_plan` | `type_label='plan'` |
+| Task | `entities_base` + `entity_l3_task` | `type_label='task'` |
+| Subtask | `entities_base` + `entity_l3_subtask` | `type_label='subtask'`，`parent_id` 指向 parent task |
 
-> **與主 SPEC v2 §9 的關係**：主 SPEC §9 把 Milestone / Plan / Task / Subtask 各自切成獨立 subclass table（`entity_l3_milestone / plan / task / subtask`），那是 **MTI migration 落地後的目標態**（Wave 9）。本節描述的是**今日 runtime**；caller、測試、migration 必須以本節為準，不要以主 SPEC §9 subclass table 為準。主 SPEC 與 runtime 的 schema 差距將隨 Wave 9 migration 一併收斂，屆時本節會改寫。
+> **與主 SPEC v2 §9 的關係**：Wave 9 已於 2026-04-24 落地。主 SPEC §9 的 L3-Action subclass table 是 runtime schema canonical；本 SPEC 定義 caller-facing MCP/API contract 與治理規則。
 
 ### 1.2 歸屬欄位（canonical，參見 runtime）
 
 | 關係 | 欄位 | 規則（取自 `src/zenos/application/action/task_service.py:189-201` + `governance_rules.py:938`）|
 |------|------|---------|
-| Task / Plan → L1 Product | `product_id` (string, L1 UUID) | **唯一 ownership SSOT（ADR-047 D3 / `OWNERSHIP_SSOT_PRODUCT_ID`）**。新 caller 必傳 `product_id`；tool doc 明示「新 write path 應優先傳 product_id」（`src/zenos/interface/mcp/task.py:678`）|
-| Task → Plan | `plan_id` (string, Plan UUID) | Task 所屬 Plan |
-| Subtask → Task | `parent_task_id` (string, Task UUID, 自指) | 辨別 subtask 的唯一欄位 |
+| Task / Plan → L1 Product | API: `product_id`; storage: `entities_base.parent_id` | **唯一 ownership SSOT**。caller 必傳 `product_id`；repo 寫入時轉成 L3 parent graph。|
+| Task → Plan | API: `plan_id`; storage: `entities_base.parent_id` 指向 plan | Task 所屬 Plan |
+| Subtask → Task | API: `parent_task_id`; storage: `entities_base.parent_id` 指向 parent task | 辨別 subtask 的 caller-facing 欄位 |
 | Ontology 關聯 | `relationships` + `linked_entities` | 跨實體關聯（impacts / serves / depends_on 等）|
 
 `project` 的語意：**legacy fallback hint**，不是 ownership 欄位。server 在 caller 沒傳 `product_id` 時，先解 `product_id`；失敗才 fallback 到 `project` / `partner.defaultProject` 去反推 L1 entity（`task_service.py:190-194`）。`project` 字串不代表 ownership；新 caller 不應依賴它。
@@ -55,7 +55,7 @@ Server-side 硬閘（以 `governance_rules.py:938-944` 為準）：
 - `task.product_id ≠ plan.product_id`（task 有 `plan_id` 時）→ reject `CROSS_PRODUCT_PLAN_TASK`
 - 直接傳入 `project_id` 參數 → reject `INVALID_INPUT`（ADR-047 D3）
 
-**本 SPEC 不定義**：DDL、欄位型別詳情（見 runtime repo files 與主 SPEC §9 目標態）、frontend UI、Zentropy 執行細節、application-specific checklist。
+**本 SPEC 不定義**：DDL、欄位型別詳情（見主 SPEC §9）、frontend UI、Zentropy 執行細節、application-specific checklist。
 
 ## 2. Task 的治理定位
 

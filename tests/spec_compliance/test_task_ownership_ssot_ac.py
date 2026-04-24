@@ -575,6 +575,7 @@ async def test_ac_tosc_22_governance_rules_runtime_ssot_synced():
     assert "LINKED_ENTITIES_PRODUCT_STRIPPED" in task_rules
     assert "CROSS_PRODUCT_SUBTASK" in task_rules
     assert "CROSS_PRODUCT_PLAN_TASK" in task_rules
+    assert "INVALID_PARENT_CHAIN" in task_rules
     # ADR-047 D3: governance prompt must NOT explain PROJECT_STRING_IGNORED anymore
     assert "PROJECT_STRING_IGNORED" not in task_rules
 
@@ -606,6 +607,7 @@ async def test_ac_tosc_23_governance_guide_returns_ssot_rules():
     assert "PROJECT_STRING_IGNORED" not in content
     assert "CROSS_PRODUCT_SUBTASK" in content
     assert "CROSS_PRODUCT_PLAN_TASK" in content
+    assert "INVALID_PARENT_CHAIN" in content
 
 
 # AC-TOSC-24 / AC-TOSC-25 are documentation-only (verified by Architect review,

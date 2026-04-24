@@ -156,6 +156,11 @@ async def _task_handler(
     output_ref: str | None = None,
     notes: str | None = None,
     conn: Any | None = None,
+    # Wave 9 Phase B prime — optional L3TaskEntity input for dual-path dispatch.
+    # When provided and action in ("create","update"), the service-layer
+    # L3 adapter is used instead of the flat-dict path.  Response shape is
+    # byte-equal with the legacy path (normalize-to-legacy strategy).
+    l3_entity: Any | None = None,
     **kwargs: object,
 ) -> dict:
     """Core task handler logic — extracted for testability.
@@ -172,6 +177,106 @@ async def _task_handler(
 
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
+
+    # Wave 9 Phase B prime — L3TaskEntity dual-path dispatch.
+    # If caller passes an L3TaskEntity, delegate to the service-layer adapter
+    # which normalizes it to the legacy dict and runs the same validation.
+    # This block returns the same shape as the legacy path (byte-equal).
+    from zenos.domain.action.models import L3TaskEntity as _L3TaskEntity
+    if l3_entity is not None and isinstance(l3_entity, _L3TaskEntity):
+        if _mcp.task_service is None:
+            await _ensure_services()
+        try:
+            partner = _current_partner.get()
+            actor_id = (partner or {}).get("id") or ""
+            if action == "create":
+                # fix-11: run the same product resolution as the legacy create path.
+                # If caller omits product_id, resolve via project / partner.defaultProject.
+                resolved_product_id = product_id
+                if resolved_product_id is None:
+                    partner_default_project = _normalize_project_scope(
+                        partner.get("defaultProject", "") if partner else ""
+                    )
+                    effective_project = _normalize_project_scope(project) or partner_default_project
+                    if effective_project:
+                        entity_repo = _mcp.entity_repo or getattr(_mcp.task_service, "_entities", None)
+                        if entity_repo is not None:
+                            resolved_product = await entity_repo.get_by_name(str(effective_project).strip())
+                            if resolved_product is not None and is_collaboration_root_entity(resolved_product):
+                                resolved_product_id = resolved_product.id
+
+                # Forward explicit hierarchy kwargs (fix-5, fix-6).
+                # product_id is REQUIRED; plan_id / parent_task_id are optional.
+                # Adapter does NOT infer hierarchy from entity.parent_id.
+                # fix-10: also forward ontology links and provenance kwargs.
+                task_result = await _mcp.task_service.create_task_via_l3_entity(
+                    l3_entity,
+                    created_by=actor_id or created_by or "",
+                    product_id=resolved_product_id or "",
+                    plan_id=plan_id,
+                    parent_task_id=parent_task_id,
+                    project=project,
+                    linked_entities=linked_entities,
+                    linked_protocol=linked_protocol,
+                    linked_blindspot=linked_blindspot,
+                    source_type=source_type or "",
+                    source_metadata=source_metadata,
+                    attachments=attachments,
+                    conn=conn,
+                )
+                task_data = await _enrich_task_result(task_result.task)
+                return _unified_response(data=task_data, warnings=[])
+            elif action == "update":
+                task_id = id or (l3_entity.id if l3_entity.id else None)
+                if not task_id:
+                    return _unified_response(
+                        status="rejected", data={},
+                        rejection_reason="id is required for update",
+                    )
+                # Forward hierarchy kwargs so caller can rehome a task (fix-7).
+                # fix-14: also forward MCP mutable field kwargs so the L3 update path
+                # has byte-equal parity with the legacy update path.
+                # Normalize list fields the same way the legacy update branch does.
+                normalized_linked_entities_l3: list[str] | None = None
+                if linked_entities is not None:
+                    _norm = _normalize_str_list(linked_entities, "linked_entities")
+                    if isinstance(_norm, dict):
+                        return _norm
+                    normalized_linked_entities_l3 = _norm
+
+                normalized_blocked_by_l3: list[str] | None = None
+                if blocked_by is not None:
+                    _norm_bb = _normalize_str_list(blocked_by, "blocked_by")
+                    if isinstance(_norm_bb, dict):
+                        return _norm_bb
+                    normalized_blocked_by_l3 = _norm_bb
+
+                task_result = await _mcp.task_service.update_task_via_l3_entity(
+                    task_id,
+                    l3_entity,
+                    product_id=product_id,
+                    plan_id=plan_id,
+                    parent_task_id=parent_task_id,
+                    linked_entities=normalized_linked_entities_l3,
+                    linked_protocol=linked_protocol,
+                    linked_blindspot=linked_blindspot,
+                    source_type=source_type,
+                    source_metadata=source_metadata,
+                    attachments=attachments,
+                    blocked_by=normalized_blocked_by_l3,
+                )
+                task_data = await _enrich_task_result(task_result.task)
+                return _unified_response(data=task_data, warnings=[])
+            # For other actions (handoff, etc.) fall through to legacy path
+        except ValueError as _e:
+            from zenos.application.action.task_service import TaskValidationError
+            if isinstance(_e, TaskValidationError):
+                return _error_response(
+                    status="rejected",
+                    error_code=_e.error_code,
+                    message=str(_e),
+                )
+            return _unified_response(status="rejected", data={}, rejection_reason=str(_e))
 
     def _looks_like_markdown(text: str) -> bool:
         markers = ("# ", "## ", "- ", "* ", "1. ", "|", "```", "**", "[", "](")

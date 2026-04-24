@@ -1,0 +1,2 @@
+task_id,table,reason
+af17b9db186048b99eb38c50a3878cf6,task_entities,78 linked_entities（僅此 1 task）；遠超正常值（median=1, p95=6）。所有 78 個 entity 與 task 同屬同一 partner/product，無跨 partner 污染，但此 task 明顯是被 Architect session 批量注入 context entity 用。技術上不是資料品質問題，但在 Wave 9 migration 時 relationships 對應將產生 78 row，需確認是否清理部份冗餘連結。

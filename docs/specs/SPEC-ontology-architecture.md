@@ -282,7 +282,7 @@ L2 可掛載 **EntityEntry**（時間軸知識條目），記錄 decision / insi
 
 ### 8.1 L3DocumentEntity（文件語意代理）
 
-舊 `Document` collection 於 ADR-046 起併入 entity。本 SPEC 固化為 L3 subclass，`documents` 表已於 ADR-047 後繼 migration 刪除。
+舊 `Document` collection 於 ADR-046 決議併入 entity 為 L3 subclass。本 SPEC 固化為**目標態** schema；目前 runtime 仍保留 `zenos.documents` 獨立 table 與 `Document` dataclass，直到 ADR-046 後繼 migration 完成（見 `PLAN-data-model-consolidation`）。caller 在該收斂完成前應以 SPEC-doc-governance 與現行 Document dataclass 為 contract。
 
 ```python
 @dataclass
@@ -367,20 +367,16 @@ CREATE TABLE entity_l3_project (
 
 ## 9. L3-Action Entities（舊 Action Layer 併入）
 
-> **Post-MTI 目標態（Wave 9 migration 完成後）**：所有任務類物件都是 entity，透過 `entities_base` + L3-Action subclass 表（`entity_l3_milestone / plan / task / subtask`）表達；`parent_id`（圖的邊）統一承載歸屬語意；`relationships` 表取代 `task_entities` junction。
+> **Wave 9 已落地（2026-04-24）**：所有任務類物件都是 entity，透過 `entities_base` + L3-Action subclass 表（`entity_l3_milestone / plan / task / subtask`）表達；`parent_id`（圖的邊）統一承載歸屬語意；`relationships` 表取代舊 `task_entities` junction。
 >
-> **當前 runtime 狀態**（2026-04-23）：
-> - `zenos.tasks` / `zenos.plans` 仍為獨立 table（見 `src/zenos/infrastructure/action/sql_task_repo.py` / `sql_plan_repo.py`）
-> - Ownership SSOT 為 `product_id`（**ADR-047 D3 canonical**；`governance_rules.py:938 OWNERSHIP_SSOT_PRODUCT_ID`）——新 caller 必傳 `product_id`，`project` 僅為 legacy fallback hint，`project_id` 參數 reject
-> - Subtask 仍以 `parent_task_id`（自指）區分，同表 row
-> - 本節（§9）描述的 subclass table DDL 與 `parent_id` 統一樹**尚未落地**；落地時程見 Wave 9 migration PLAN
+> **當前 runtime 狀態**（2026-04-24）：
+> - `zenos.tasks` / `zenos.plans` / `task_entities` / `task_blockers` 已 drop；task / plan runtime primary path 為 L3 subclass table。
+> - Ownership tree 由 `entities_base.parent_id` 表達；MCP contract 仍保留 `product_id` / `plan_id` / `parent_task_id` 參數作為 caller-facing API，repo 會轉換成 L3 parent graph。
+> - Subtask 以 `entities_base.type_label='subtask'` + `parent_id` 指向 parent task 區分。
 >
-> **治理 SSOT 雙視角**：
-> - **Canonical schema（未來）**：本節 §9 的 subclass table + `parent_id` 樹
-> - **Canonical runtime（今日）**：`SPEC-task-governance §1.1 歸屬語意` + `governance_rules.py §ownership`（`product_id` + `plan_id` + `parent_task_id` 四欄）
-> - 兩者在 Wave 9 migration 時由一份 schema migration PLAN 收斂
+> **治理 SSOT**：本節 §9 的 subclass table + `parent_id` 樹為 runtime schema canonical；`SPEC-task-governance` 定義外部 MCP/API contract 與治理行為。
 
-下列 §9.1-§9.6 的 Python dataclass / DDL / CHECK 為 post-MTI 目標。caller 今日仍以 `SPEC-task-governance` 為 runtime contract。
+下列 §9.1-§9.6 的 Python dataclass / DDL / CHECK 為 L3-Action runtime canonical。caller contract 仍以 `SPEC-task-governance` 為準。
 
 ### 9.1 L3TaskBaseEntity（abstract 基底）
 
@@ -648,7 +644,7 @@ class EntityStatus(str, Enum):
     # 以下僅對特定 subclass 有效：
     CURRENT   = "current"      # L3-document only
     STALE     = "stale"        # L2 / L3-document
-    DRAFT     = "draft"        # L2 only（confirm gate）
+    DRAFT     = "draft"        # L3-Document / L3-Plan task_status only（L2 draft 用 confirmed_by_user=false 表達，status 不會是 draft）
     CONFLICT  = "conflict"     # L3-document only
 ```
 
@@ -731,7 +727,7 @@ CREATE INDEX idx_entity_embeddings_hnsw ON entity_embeddings USING hnsw (summary
 2. BaseEntity row 含非 schema 欄位（DB 本身阻擋）
 3. L1 row 試圖寫入 `entity_l2` / `entity_l3_*` 子表
 4. Relationship.source / target 指向不存在 entity_id（FK 保證）
-5. L2 entity 首次寫入 `status != 'draft'`（service 強制）
+5. L2 entity 首次寫入 `confirmed_by_user != false` 或 `status != 'active'`（service 強制；L2 draft 態由 confirmed_by_user=false + status=active 表達，見 §7.2）
 6. L2 升 `active` 未過三問 + impacts gate（service 強制）
 7. L3-Task.status='review' 無 result（CHECK constraint）
 8. MCP tool 傳入 `project_id` / `details` / 任何不在本 SPEC 列出的欄位（全面 reject）

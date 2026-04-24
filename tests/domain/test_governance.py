@@ -1813,3 +1813,98 @@ class TestL2CountBalance:
         report = run_quality_check([], [], [], [], [])
         passed_names = [p.name for p in report.passed]
         assert "l2_count_balance" in passed_names
+
+
+# ──────────────────────────────────────────────
+# Wave 9 Phase B: L3TaskBaseEntity three-branch dispatch
+# ──────────────────────────────────────────────
+
+from zenos.domain.action.models import (
+    L3TaskBaseEntity,
+    L3TaskEntity,
+)
+
+
+def _make_l3_task_entity(
+    entity_id: str = "l3-1",
+    parent_id: str | None = "e1",
+    task_status: str = "todo",
+    updated_at: datetime | None = None,
+) -> L3TaskEntity:
+    """Build a minimal L3TaskEntity for governance tests."""
+    from datetime import datetime as _dt
+    now = updated_at or _dt(2026, 4, 23, 12, 0, 0)
+    return L3TaskEntity(
+        id=entity_id,
+        partner_id="partner-1",
+        name="L3 Task",
+        type_label="task",
+        level=3,
+        parent_id=parent_id,
+        status="active",
+        created_at=now,
+        updated_at=now,
+        description="A task",
+        task_status=task_status,
+        assignee=None,
+        dispatcher="agent:developer",
+    )
+
+
+class TestStalenessL3TaskEntityAsDocSource:
+    """detect_staleness should accept L3TaskEntity in the documents parameter."""
+
+    def test_l3_task_entity_routed_into_docs_by_entity(self):
+        """An L3TaskEntity with parent_id='e1' should land in docs_by_entity['e1']."""
+        now = datetime(2026, 4, 23, 12, 0, 0)
+        entity = _make_entity(entity_id="e1", updated_at=datetime(2026, 4, 20))
+        l3_task = _make_l3_task_entity(parent_id="e1", updated_at=datetime(2026, 3, 1))
+
+        # detect_staleness will build docs_by_entity from documents list.
+        # The L3 task was last touched 2026-03-01; entity updated 2026-04-20 (>30 days later).
+        # So we expect a feature_updated_docs_lagging warning.
+        result = detect_staleness([entity], [l3_task], [], now=now)
+        lag_warnings = [w for w in result if w.pattern == "feature_updated_docs_lagging"]
+        assert len(lag_warnings) >= 1
+        assert "e1" in lag_warnings[0].affected_entity_ids
+
+    def test_l3_task_entity_with_no_parent_not_indexed(self):
+        """L3TaskEntity with parent_id=None should not be indexed into docs_by_entity."""
+        now = datetime(2026, 4, 23, 12, 0, 0)
+        entity = _make_entity(entity_id="e1", updated_at=now)
+        l3_task = _make_l3_task_entity(parent_id=None, updated_at=now)
+
+        # No parent_id → nothing indexed → no staleness warning
+        result = detect_staleness([entity], [l3_task], [], now=now)
+        lag_warnings = [w for w in result if w.pattern == "feature_updated_docs_lagging"]
+        assert len(lag_warnings) == 0
+
+    def test_l3_task_entity_accepted_by_analyze_blindspots(self):
+        """analyze_blindspots must not crash when an L3TaskEntity is in the documents list."""
+        from zenos.domain.governance import analyze_blindspots
+        entity = _make_entity(entity_id="e1")
+        l3_task = _make_l3_task_entity(parent_id="e1")
+        # Should run without AttributeError or TypeError
+        result = analyze_blindspots([entity], [l3_task], [])
+        assert isinstance(result, list)
+
+    def test_l3_task_entity_accepted_by_run_quality_check(self):
+        """run_quality_check must not crash when an L3TaskEntity is in the documents list."""
+        entity = _make_entity(entity_id="e1")
+        l3_task = _make_l3_task_entity(parent_id="e1")
+        # Should run without AttributeError or TypeError
+        report = run_quality_check([entity], [l3_task], [], [], [])
+        assert isinstance(report.score, int)
+
+    def test_isinstance_l3_task_base_entity_branch_used(self):
+        """L3TaskBaseEntity subclass should hit the explicit isinstance branch, not the generic hasattr fallback."""
+        now = datetime(2026, 4, 23, 12, 0, 0)
+        entity = _make_entity(entity_id="parent-ent", updated_at=datetime(2026, 4, 20))
+        l3_task = _make_l3_task_entity(parent_id="parent-ent", updated_at=datetime(2026, 3, 1))
+
+        # Verify it IS an L3TaskBaseEntity (confirming the isinstance branch applies)
+        assert isinstance(l3_task, L3TaskBaseEntity)
+
+        result = detect_staleness([entity], [l3_task], [], now=now)
+        lag_warnings = [w for w in result if w.pattern == "feature_updated_docs_lagging"]
+        assert len(lag_warnings) >= 1

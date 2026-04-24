@@ -232,6 +232,31 @@ class TestSqlEntityRepository:
         result = asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
         assert result.id == "existing_id"
 
+    def test_goal_entity_dual_writes_l3_milestone_tables(self):
+        """Phase C04: legacy goal entities are mirrored into L3 milestone tables."""
+        from zenos.infrastructure.knowledge import SqlEntityRepository
+        from zenos.domain.knowledge import Entity, Tags
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlEntityRepository(pool)
+        entity = Entity(
+            id="goal1",
+            name="Milestone",
+            type="goal",
+            level=3,
+            summary="Reach the milestone",
+            tags=Tags(what=["milestone"], why="", how="", who=[]),
+            owner="agent:architect",
+        )
+
+        asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
+
+        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
+        assert any("INSERT INTO zenos.entities" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entities_base" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entity_l3_milestone" in sql for sql in execute_calls)
+
     def test_list_unconfirmed_queries_confirmed_false(self):
         """list_unconfirmed filters on confirmed_by_user = false."""
         from zenos.infrastructure.knowledge import SqlEntityRepository
@@ -667,10 +692,10 @@ class TestSqlTaskRepository:
         )
         asyncio.get_event_loop().run_until_complete(repo.upsert(task))
 
-        execute_sql = conn.execute.call_args_list[0][0][0]
+        execute_sql = next(c[0][0] for c in conn.execute.call_args_list if "entity_l3_task" in c[0][0])
         assert "assignee_role_id" in execute_sql
         # Verify the value was passed in the binding arguments
-        execute_args = conn.execute.call_args_list[0][0]
+        execute_args = next(c[0] for c in conn.execute.call_args_list if "entity_l3_task" in c[0][0])
         assert "role-99" in execute_args
 
     def test_get_by_id_fetches_join_tables(self):
@@ -678,15 +703,26 @@ class TestSqlTaskRepository:
         from zenos.infrastructure.action import SqlTaskRepository
         import asyncio
 
-        task_row = _make_row(**self._task_row("task1"))
+        task_row = _make_row(
+            **self._task_row("task1"),
+            partner_id=PARTNER_ID,
+            dispatcher="human",
+            handoff_events=[],
+            attachments=[],
+            parent_task_id=None,
+            plan_id=None,
+            plan_order=None,
+            depends_on_task_ids_json=json.dumps([]),
+            source_metadata_json=json.dumps({}),
+        )
         pool, conn = _make_pool(fetchrow=task_row, fetch=[])
         repo = SqlTaskRepository(pool)
 
         asyncio.get_event_loop().run_until_complete(repo.get_by_id("task1"))
 
         all_fetch_calls = [c[0][0] for c in conn.fetch.call_args_list]
-        assert any("task_entities" in sql for sql in all_fetch_calls)
-        assert any("task_blockers" in sql for sql in all_fetch_calls)
+        assert any("relationships" in sql for sql in all_fetch_calls)
+        assert any("entity_l3_task" in sql and "depends_on_json" in sql for sql in all_fetch_calls)
 
     def test_upsert_syncs_task_entities_and_task_blockers(self):
         """upsert() syncs both task_entities and task_blockers join tables."""
@@ -703,9 +739,217 @@ class TestSqlTaskRepository:
         asyncio.get_event_loop().run_until_complete(repo.upsert(task))
 
         execute_calls = [c[0][0] for c in conn.execute.call_args_list]
-        assert any("task_entities" in sql and "DELETE" in sql for sql in execute_calls)
-        assert any("task_blockers" in sql and "DELETE" in sql for sql in execute_calls)
-        assert conn.executemany.call_count >= 2
+        executemany_calls = [c[0][0] for c in conn.executemany.call_args_list]
+        assert any("relationships" in sql and "DELETE" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.relationships" in sql for sql in executemany_calls)
+        assert not any("task_entities" in sql or "task_blockers" in sql for sql in execute_calls)
+
+    def test_upsert_dual_writes_l3_task_tables(self):
+        """Phase C01: upsert writes legacy tasks and L3 task tables in one transaction."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlTaskRepository(pool)
+        task = Task(
+            title="T",
+            status="todo",
+            priority="medium",
+            created_by="Alice",
+            description="dual write",
+            acceptance_criteria=["done"],
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
+        assert not any("INSERT INTO zenos.tasks" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entities_base" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entity_l3_task" in sql for sql in execute_calls)
+        conn.transaction.assert_called()
+
+    def test_upsert_l3_write_flag_skips_legacy_task_shadow(self, monkeypatch):
+        """Phase E02: l3 write flag stops writing zenos.tasks/task_entities."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
+        import asyncio
+
+        monkeypatch.setenv("ZENOS_L3_WRITE_NEW_PATH", "1")
+        pool, conn = _make_pool()
+        repo = SqlTaskRepository(pool)
+        task = Task(
+            title="T",
+            status="todo",
+            priority="medium",
+            created_by="Alice",
+            linked_entities=["ent1"],
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
+        executemany_calls = [c[0][0] for c in conn.executemany.call_args_list]
+        assert not any("INSERT INTO zenos.tasks" in sql for sql in execute_calls)
+        assert not any("task_entities" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entities_base" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entity_l3_task" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.relationships" in sql for sql in executemany_calls)
+
+    def test_upsert_subtask_dual_writes_l3_subtask_tables(self):
+        """Phase C04: parent_task_id rows write entity_l3_subtask instead of entity_l3_task."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlTaskRepository(pool)
+        task = Task(
+            title="Subtask",
+            status="todo",
+            priority="medium",
+            created_by="Alice",
+            parent_task_id="parent-task",
+            dispatcher="agent:developer",
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
+        assert any("INSERT INTO zenos.entity_l3_subtask" in sql for sql in execute_calls)
+        assert any("DELETE FROM zenos.entity_l3_task" in sql for sql in execute_calls)
+
+    def test_upsert_dual_writes_task_relationships_when_linked_entities_present(self):
+        """Phase C05: task_entities writes are mirrored into relationships."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlTaskRepository(pool)
+        task = Task(
+            title="T",
+            status="todo",
+            priority="medium",
+            created_by="Alice",
+            linked_entities=["ent1"],
+        )
+        asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
+        executemany_calls = [c[0][0] for c in conn.executemany.call_args_list]
+        assert any("DELETE FROM zenos.relationships" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.relationships" in sql for sql in executemany_calls)
+
+    def test_l3_write_flag_reraises_relationship_fk_failure(self, monkeypatch):
+        """Phase E02: write-only mode must not silently drop linked_entities."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
+        import asyncio
+        import asyncpg
+
+        monkeypatch.setenv("ZENOS_L3_WRITE_NEW_PATH", "1")
+        pool, conn = _make_pool()
+        repo = SqlTaskRepository(pool)
+        task = Task(
+            title="T",
+            status="todo",
+            priority="medium",
+            created_by="Alice",
+            linked_entities=["ent1"],
+        )
+
+        original_transaction = conn.transaction
+
+        class _FailingSavepoint:
+            async def __aenter__(self):
+                raise asyncpg.ForeignKeyViolationError("fk")
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+        call_count = 0
+
+        def _transaction():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return original_transaction.return_value
+            return _FailingSavepoint()
+
+        conn.transaction.side_effect = _transaction
+
+        with pytest.raises(asyncpg.ForeignKeyViolationError):
+            asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+    def test_upsert_l3_type_mismatch_raises(self):
+        """Phase C01: an existing non-task entities_base row for the same id is rejected."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        from zenos.domain.action import Task
+        import asyncio
+
+        existing = _make_row(type_label="plan")
+        pool, _ = _make_pool(fetchrow=existing)
+        repo = SqlTaskRepository(pool)
+        task = Task(id="task1", title="T", status="todo", priority="medium", created_by="Alice")
+
+        with pytest.raises(ValueError, match="L3 entity type mismatch"):
+            asyncio.get_event_loop().run_until_complete(repo.upsert(task))
+
+    def test_get_by_id_uses_l3_read_path_when_flag_enabled(self, monkeypatch):
+        """Phase C02: l3_read_new_path flag switches get_by_id to L3 tables."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        import asyncio
+
+        monkeypatch.setenv("ZENOS_L3_READ_NEW_PATH", "1")
+        task_row = _make_row(
+            **self._task_row("task1"),
+            partner_id=PARTNER_ID,
+            dispatcher="human",
+            handoff_events=[],
+            attachments=[],
+            parent_task_id=None,
+            plan_id=None,
+            plan_order=None,
+            depends_on_task_ids_json=json.dumps([]),
+            source_metadata_json=json.dumps({}),
+        )
+        pool, conn = _make_pool(fetchrow=task_row, fetch=[])
+        repo = SqlTaskRepository(pool)
+
+        task = asyncio.get_event_loop().run_until_complete(repo.get_by_id("task1"))
+
+        assert task is not None
+        assert task.id == "task1"
+        sql = conn.fetchrow.call_args[0][0]
+        assert "entity_l3_task" in sql
+        assert "entities_base" in sql
+
+    def test_list_all_uses_legacy_read_path_by_default(self, monkeypatch):
+        """Phase C02: read flag is off by default to preserve current behavior."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        import asyncio
+
+        monkeypatch.delenv("ZENOS_L3_READ_NEW_PATH", raising=False)
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlTaskRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.list_all(status=["todo"]))
+
+        sql = conn.fetch.call_args_list[0][0][0]
+        assert "entity_l3_task" in sql
+        assert "entities_base" in sql
+
+    def test_list_all_uses_l3_read_path_when_flag_enabled(self, monkeypatch):
+        """Phase C02: l3_read_new_path flag switches list_all to L3 tables."""
+        from zenos.infrastructure.action import SqlTaskRepository
+        import asyncio
+
+        monkeypatch.setenv("ZENOS_L3_READ_NEW_PATH", "true")
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlTaskRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.list_all(status=["todo"]))
+
+        sql = conn.fetch.call_args_list[0][0][0]
+        assert "entity_l3_task" in sql
+        assert "entities_base" in sql
+        assert "l3_rows.status IN" in sql
 
     def test_list_all_with_status_uses_sql_in(self):
         """list_all(status=[...]) uses SQL IN clause instead of client filter."""
@@ -735,7 +979,7 @@ class TestSqlTaskRepository:
         )
 
         main_sql = conn.fetch.call_args_list[0][0][0]
-        assert "task_entities" in main_sql
+        assert "relationships" in main_sql
         assert "JOIN" in main_sql.upper()
 
     def test_list_all_excludes_archived_by_default(self):
@@ -786,8 +1030,8 @@ class TestSqlTaskRepository:
         asyncio.get_event_loop().run_until_complete(repo.list_blocked_by("task1"))
 
         sql = conn.fetch.call_args_list[0][0][0]
-        assert "blocker_task_id" in sql
-        assert "task_blockers" in sql
+        assert "depends_on_task_ids_json ? $1" in sql
+        assert "task_blockers" not in sql
 
     def test_list_pending_review_filters_review_status(self):
         """list_pending_review filters on status='review' and confirmed_by_creator=false."""
@@ -814,8 +1058,8 @@ class TestSqlTaskRepository:
 
         sql = conn.fetch.call_args_list[0][0][0]
         project_param = conn.fetch.call_args_list[0][0][2]
-        assert "LOWER(BTRIM(COALESCE(t.project, ''))) = LOWER(BTRIM($2))" in sql
-        assert "t.product_id = $2" in sql
+        assert "LOWER(BTRIM(COALESCE(l3_rows.project, ''))) = LOWER(BTRIM($2))" in sql
+        assert "l3_rows.product_id = $2" in sql
         assert project_param == "Paceriz"
 
     def test_upsert_new_task_generates_id(self):
@@ -864,27 +1108,26 @@ class TestSqlTaskRepository:
 
         asyncio.get_event_loop().run_until_complete(repo.upsert(task))
 
-        # The first execute call is the INSERT statement.
-        # asyncpg receives args as individual positional params:
-        # call.args[0] = SQL string, call.args[1..32] = the 32 parameter values.
-        all_args = conn.execute.call_args_list[0].args
+        # Inspect the L3 task INSERT statement.
+        all_args = next(c.args for c in conn.execute.call_args_list if "entity_l3_task" in c.args[0])
         insert_sql = all_args[0]
-        # params are 1-indexed in SQL ($1..$32), 1-indexed in all_args[1..32]
         assert "INSERT INTO" in insert_sql
 
-        # NOT NULL columns and their $N positions (1-indexed in SQL)
         not_null_positions = {
-            "id": 1,
-            "partner_id": 2,
-            "title": 3,
-            "description": 4,
-            "status": 5,
-            "priority": 6,
-            "priority_reason": 7,
-            "created_by": 10,
-            "source_type": 17,
-            "context_summary": 19,
-            "project": 27,
+            "partner_id": 1,
+            "entity_id": 2,
+            "description": 3,
+            "task_status": 4,
+            "dispatcher": 6,
+            "acceptance_criteria_json": 7,
+            "priority": 8,
+            "priority_reason": 14,
+            "created_by": 16,
+            "source_type": 20,
+            "context_summary": 22,
+            "confirmed_by_creator": 24,
+            "project": 26,
+            "attachments": 28,
         }
         for col_name, sql_pos in not_null_positions.items():
             arg_val = all_args[sql_pos]  # all_args[1] = $1, all_args[2] = $2 ...
@@ -917,11 +1160,11 @@ class TestSqlTaskRepository:
         )
         asyncio.get_event_loop().run_until_complete(repo.upsert(task))
 
-        all_args = conn.execute.call_args_list[0].args
-        # The description is at $4 (all_args[4] in the positional args list).
+        all_args = next(c.args for c in conn.execute.call_args_list if "entity_l3_task" in c.args[0])
+        # The description is at $3 (all_args[3] in the positional args list).
         # This test documents that passing None would reach asyncpg —
         # the guard must be upstream in task_service.create_task.
-        description_arg = all_args[4]
+        description_arg = all_args[3]
         # We assert this: if it's None, asyncpg would raise with PostgreSQL.
         # The task_service fix must ensure this is NEVER None.
         assert description_arg is None, (
@@ -1049,6 +1292,145 @@ class TestSqlTaskRepository:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SqlPlanRepository
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSqlPlanRepository:
+
+    @pytest.fixture(autouse=True)
+    def patch_partner(self, monkeypatch):
+        _set_partner(monkeypatch)
+
+    def _plan_row(self, plan_id: str = "plan1") -> dict:
+        return {
+            "id": plan_id,
+            "partner_id": PARTNER_ID,
+            "goal": "Ship Wave 9",
+            "status": "draft",
+            "created_by": "Alice",
+            "owner": "Bob",
+            "entry_criteria": "Ready",
+            "exit_criteria": "Done",
+            "project": "zenos",
+            "product_id": "prod1",
+            "updated_by": "Alice",
+            "result": None,
+            "created_at": NOW,
+            "updated_at": NOW,
+        }
+
+    def test_upsert_dual_writes_l3_plan_tables(self):
+        """Phase C03: upsert writes legacy plans and L3 plan tables in one transaction."""
+        from zenos.infrastructure.action import SqlPlanRepository
+        from zenos.domain.action import Plan
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlPlanRepository(pool)
+        plan = Plan(
+            goal="Ship Wave 9",
+            status="draft",
+            created_by="Alice",
+            owner="Bob",
+            entry_criteria="Ready",
+            exit_criteria="Done",
+            product_id="prod1",
+        )
+
+        asyncio.get_event_loop().run_until_complete(repo.upsert(plan))
+
+        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
+        assert not any("INSERT INTO zenos.plans" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entities_base" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entity_l3_plan" in sql for sql in execute_calls)
+        conn.transaction.assert_called()
+
+    def test_upsert_l3_write_flag_skips_legacy_plan_shadow(self, monkeypatch):
+        """Phase E02: l3 write flag stops writing zenos.plans."""
+        from zenos.infrastructure.action import SqlPlanRepository
+        from zenos.domain.action import Plan
+        import asyncio
+
+        monkeypatch.setenv("ZENOS_L3_WRITE_NEW_PATH", "true")
+        pool, conn = _make_pool()
+        repo = SqlPlanRepository(pool)
+        plan = Plan(
+            goal="Ship Wave 9",
+            status="draft",
+            created_by="Alice",
+            owner="Bob",
+            product_id="prod1",
+        )
+
+        asyncio.get_event_loop().run_until_complete(repo.upsert(plan))
+
+        execute_calls = [c[0][0] for c in conn.execute.call_args_list]
+        assert not any("INSERT INTO zenos.plans" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entities_base" in sql for sql in execute_calls)
+        assert any("INSERT INTO zenos.entity_l3_plan" in sql for sql in execute_calls)
+
+    def test_upsert_l3_plan_type_mismatch_raises(self):
+        """Phase C03: an existing non-plan entities_base row for the same id is rejected."""
+        from zenos.infrastructure.action import SqlPlanRepository
+        from zenos.domain.action import Plan
+        import asyncio
+
+        existing = _make_row(type_label="task")
+        pool, _ = _make_pool(fetchrow=existing)
+        repo = SqlPlanRepository(pool)
+        plan = Plan(id="plan1", goal="Ship", status="draft", created_by="Alice")
+
+        with pytest.raises(ValueError, match="L3 entity type mismatch"):
+            asyncio.get_event_loop().run_until_complete(repo.upsert(plan))
+
+    def test_get_by_id_uses_l3_plan_read_path_when_flag_enabled(self, monkeypatch):
+        """Phase C03: l3_read_new_path flag switches get_by_id to L3 plan tables."""
+        from zenos.infrastructure.action import SqlPlanRepository
+        import asyncio
+
+        monkeypatch.setenv("ZENOS_L3_READ_NEW_PATH", "1")
+        pool, conn = _make_pool(fetchrow=_make_row(**self._plan_row("plan1")))
+        repo = SqlPlanRepository(pool)
+
+        plan = asyncio.get_event_loop().run_until_complete(repo.get_by_id("plan1"))
+
+        assert plan is not None
+        assert plan.id == "plan1"
+        sql = conn.fetchrow.call_args[0][0]
+        assert "entity_l3_plan" in sql
+        assert "entities_base" in sql
+
+    def test_list_all_uses_legacy_plan_read_path_by_default(self, monkeypatch):
+        """Phase C03: plan read flag is off by default to preserve current behavior."""
+        from zenos.infrastructure.action import SqlPlanRepository
+        import asyncio
+
+        monkeypatch.delenv("ZENOS_L3_READ_NEW_PATH", raising=False)
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlPlanRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.list_all(status=["draft"]))
+
+        sql = conn.fetch.call_args_list[0][0][0]
+        assert "entity_l3_plan" in sql
+        assert "entities_base" in sql
+
+    def test_list_all_uses_l3_plan_read_path_when_flag_enabled(self, monkeypatch):
+        """Phase C03: l3_read_new_path flag switches list_all to L3 plan tables."""
+        from zenos.infrastructure.action import SqlPlanRepository
+        import asyncio
+
+        monkeypatch.setenv("ZENOS_L3_READ_NEW_PATH", "true")
+        pool, conn = _make_pool(fetch=[])
+        repo = SqlPlanRepository(pool)
+        asyncio.get_event_loop().run_until_complete(repo.list_all(status=["draft"]))
+
+        sql = conn.fetch.call_args_list[0][0][0]
+        assert "entity_l3_plan" in sql
+        assert "entities_base" in sql
+        assert "l3_rows.status IN" in sql
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SqlPartnerKeyValidator
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1148,7 +1530,7 @@ class TestCrossTenantAndTransaction:
         assert "partner_id = EXCLUDED.partner_id" in execute_sql
 
     def test_task_upsert_uses_transaction(self):
-        """Task upsert acquires a transaction wrapping main table + join syncs."""
+        """Task upsert acquires transaction protection for main + dual-write syncs."""
         from zenos.infrastructure.action import SqlTaskRepository
         from zenos.domain.action import Task
         import asyncio
@@ -1163,7 +1545,7 @@ class TestCrossTenantAndTransaction:
         )
         asyncio.get_event_loop().run_until_complete(repo.upsert(task))
 
-        conn.transaction.assert_called_once()
+        conn.transaction.assert_called()
 
     def test_blindspot_add_uses_transaction(self):
         """Blindspot add acquires a transaction wrapping main table + join sync."""

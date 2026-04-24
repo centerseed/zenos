@@ -4,21 +4,21 @@ id: REF-ontology-current-state
 status: Draft
 ontology_entity: ontology-current-state
 created: 2026-03-26
-updated: 2026-04-23
-version: v2.0 (Grand Ontology Refactor 2026-04-23)
+updated: 2026-04-24
+version: v2.1 (Wave 9 L3-Action landed 2026-04-24)
 ---
 
-# ZenOS Ontology — 當前狀態（2026-04-23）
+# ZenOS Ontology — 當前狀態（2026-04-24）
 
 > 本 REF 是「今日 ZenOS ontology 實際長什麼樣」的快照，不是 canonical SPEC。
 > Canonical 定義見 `SPEC-ontology-architecture v2`；治理細則見 `SPEC-task-governance` / `SPEC-doc-governance` / `SPEC-identity-and-access` / `SPEC-governance-framework`。
 > 本檔定期與 `git log` 對齊，落後於 SPEC / runtime 時以後者為準。
 
-> **Spec vs Runtime 雙視角（重要）**：本 REF 有兩類條目——「Canonical（目標態，主 SPEC v2）」與「Runtime（今日實際 code / DB）」。Wave 9 migration 前兩者並存且不完全相同。每節遇差異處明文標示。
+> **Spec vs Runtime**：主 SPEC v2 已是 runtime canonical。仍未完成的 Document / Protocol / Tags 收斂由 `PLAN-data-model-consolidation` 承擔；L3-Action 已由 Wave 9 落地。
 
 ## 1. 六 Axioms（鎖定；主 SPEC v2 §1 canonical）
 
-以下為**目標態 axioms**，指導 Wave 9 migration 的終點：
+以下為 runtime canonical axioms：
 
 1. **Entity = graph node**：L1 / L2 / L3 一律是 `entities_base` row
 2. **BaseEntity 強制繼承**：identity / permission / parent_id / owner / timestamps 共用
@@ -27,7 +27,7 @@ version: v2.0 (Grand Ontology Refactor 2026-04-23)
 5. **Schema 結構強制**：違反 DDL CHECK 或 enum → server reject
 6. **MCP tool agent 語意最小化**：tool surface 穩定、參數收斂；caller 記憶負擔小
 
-**Runtime 現況差異（Wave 9 前）**：Axiom 1 尚未全落地——`zenos.tasks` / `zenos.plans` / `zenos.documents` 仍為獨立 table，**不是** `entities_base` subclass row；`Document` domain model（`src/zenos/domain/knowledge/models.py:88`）仍與 `Entity` 雙軌並存，治理層（`src/zenos/domain/governance.py:223-230`）同時支援兩條路徑。
+**剩餘差異**：L3-Action 已落地為 `entities_base` subclass row；`zenos.tasks` / `zenos.plans` 已 drop。`Document` domain model（`src/zenos/domain/knowledge/models.py:88`）仍與 `Entity` 雙軌並存，治理層（`src/zenos/domain/governance.py:223-230`）同時支援兩條路徑，待 `PLAN-data-model-consolidation` 收斂。
 
 ## 2. L1 / L2 / L3 分層現況
 
@@ -36,7 +36,7 @@ version: v2.0 (Grand Ontology Refactor 2026-04-23)
 | **L1** | product / company / customer / account（任何 level=1、parent_id=null 的 collaboration root）| `entities_base`（level=1）| 主 SPEC v2 §6 |
 | **L2** | 知識節點（三問 + impacts gate 通過的持久知識）| `entities_base`（level=2）+ `entity_l2`（SemanticMixin: summary / tags / confirmed_by_user）+ `entity_entries` sidecar | 主 SPEC v2 §7 |
 | **L3-Semantic** | Document / Role / Project | `entity_l3_document` / `entity_l3_role` / `entity_l3_project` | 主 SPEC v2 §8 |
-| **L3-Action** | Milestone / Plan / Task / Subtask | **（目標態）**`entity_l3_milestone / plan / task / subtask`；**（runtime 今日）**仍為 `zenos.tasks` + `zenos.plans` 獨立 table，ownership 由 `product_id` 表達 | 主 SPEC v2 §9（目標態）+ `SPEC-task-governance §1.1`（runtime）|
+| **L3-Action** | Milestone / Plan / Task / Subtask | `entities_base` + `entity_l3_milestone / plan / task / subtask`；ownership tree 由 `parent_id` 表達 | 主 SPEC v2 §9 + `SPEC-task-governance §1.1` |
 
 > **L1 判定**：由 `level=1 AND parent_id IS NULL` 決定，**不**由 `entity_type` 判定（ADR-047 D1-D2 canonical；runtime `src/zenos/infrastructure/level_based_l1.py`）。
 
@@ -47,8 +47,8 @@ version: v2.0 (Grand Ontology Refactor 2026-04-23)
 | L1 | `parent_id = null` | 非 null → 非 L1 |
 | L2 | `parent_id` 指向 L1 或另一 L2 | `SPEC-l2-parent` 規則 |
 | L3-Semantic | `parent_id` 指向 L1 / L2 | — |
-| L3-Action (Task/Plan) | `product_id` 為**唯一 ownership SSOT**（ADR-047 D3；`governance_rules.py:938` `OWNERSHIP_SSOT_PRODUCT_ID`）| `MISSING_PRODUCT_ID` / `INVALID_PRODUCT_ID` |
-| Subtask | `parent_task_id`（同表自指）+ 繼承 parent 的 `plan_id` / `product_id` | `CROSS_PLAN_SUBTASK` / `CROSS_PRODUCT_SUBTASK` |
+| L3-Action (Task/Plan) | API `product_id` / storage `entities_base.parent_id` | `MISSING_PRODUCT_ID` / `INVALID_PRODUCT_ID` |
+| Subtask | API `parent_task_id` / storage `entities_base.parent_id` 指向 parent task | `CROSS_PLAN_SUBTASK` / `CROSS_PRODUCT_SUBTASK` |
 
 Legacy `project` 字串僅為 partner-default fallback hint，不代表 ownership；`project_id` 參數 reject（`INVALID_INPUT`）。
 
@@ -83,7 +83,7 @@ Canonical: `ontology_service._DOCUMENT_STATUSES`
 Canonical: 主 SPEC v2 §10 + `zenos.relationships` table
 
 - 合法 type：`depends_on / serves / owned_by / part_of / blocks / related_to / impacts / enables`
-- `task_entities` junction table **仍存在於 runtime**（`migrations/20260325_0001_sql_cutover_init.sql:293`；`sql_task_repo.py:101,117,273-280,394` 仍在讀寫）；Wave 9 migration 完成後才會 drop。Canonical 目標態為 `relationships` 表取代，但今日雙軌並存。
+- `task_entities` junction table 已於 Wave 9 Phase F drop；Task linked entities 走 `relationships` 表。
 - L2 `impacts gate`：至少 1 條具體 `impacts` relationship 才能升 `confirmed_by_user=true`
 - `impact_chain` / `reverse_impact_chain` 雙向遍歷（5 跳上限，cycle 防呆），shipped `commit 0ede9cf`
 
@@ -107,14 +107,14 @@ Canonical: `SPEC-governance-framework` 六維表 + `SPEC-governance-feedback-loo
 
 六維：Quality Gate / Lifecycle / Relation / Feedback / 衝突仲裁 / 治理路徑（`SPEC-governance-guide-contract`）。
 
-## 10. 關鍵 ADR 狀態（2026-04-23）
+## 10. 關鍵 ADR 狀態（2026-04-24）
 
 | ADR | 主題 | 狀態 |
 |-----|------|------|
-| ADR-044 | Task ownership SSOT = `product_id` | **KEEP**（current canonical） |
-| ADR-047 | L1 由 level 判定 | **Partial supersede**（axiom 保留，細節進主 SPEC） |
+| ADR-044 | Task ownership SSOT = `product_id` | **SUPERSEDED by ADR-048**（storage 已改 parent_id tree，API contract 留在 SPEC-task-governance） |
+| ADR-047 | L1 由 level 判定 | **SUPERSEDED by ADR-048**（axiom 進主 SPEC） |
 | ADR-006 / 007 / 010 / 022 / 025 / 027 / 032 / 041 / 046 | 已由主 SPEC 吸收 | **SUPERSEDED**（見 ADR-048 master）|
-| ADR-028 | Plan primitive | **Partial**（目標態 SUPERSEDED，runtime 現行仍為獨立 table）|
+| ADR-028 | Plan primitive | **SUPERSEDED by ADR-048**（Plan 已是 L3-Action subclass） |
 
 ## 11. 與歷史版本差異
 

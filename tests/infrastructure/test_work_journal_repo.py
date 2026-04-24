@@ -83,6 +83,34 @@ async def test_create_uses_empty_list_when_tags_is_none():
     assert [] in call_args
 
 
+async def test_create_trims_and_clamps_summary_to_db_limit():
+    """create() keeps summary inside the work_journal DB check constraint."""
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
+
+    conn = _make_conn()
+    repo = SqlWorkJournalRepository(_make_pool(conn))
+
+    await repo.create(partner_id="p1", summary=f"  {'x' * 600}  ")
+
+    call_args = conn.execute.call_args[0]
+    inserted_summary = call_args[3]
+    assert len(inserted_summary) == 500
+    assert inserted_summary == "x" * 500
+
+
+async def test_create_replaces_blank_summary_with_fallback():
+    """create() avoids inserting blank strings rejected by the DB check."""
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
+
+    conn = _make_conn()
+    repo = SqlWorkJournalRepository(_make_pool(conn))
+
+    await repo.create(partner_id="p1", summary="   ")
+
+    call_args = conn.execute.call_args[0]
+    assert call_args[3] == "Journal summary unavailable."
+
+
 async def test_count_returns_integer():
     """count() returns the fetchval result as an integer."""
     from zenos.infrastructure.agent import SqlWorkJournalRepository
@@ -209,3 +237,25 @@ async def test_create_summary_sets_is_summary_true():
     call_args = conn.execute.call_args[0]
     assert "compressed summary" in call_args
     assert as_of in call_args
+
+
+async def test_create_summary_clamps_llm_output_to_db_limit():
+    """create_summary() protects journal compression from overlong LLM output."""
+    from zenos.infrastructure.agent import SqlWorkJournalRepository
+
+    conn = _make_conn()
+    repo = SqlWorkJournalRepository(_make_pool(conn))
+    as_of = datetime(2026, 4, 4, tzinfo=timezone.utc)
+
+    await repo.create_summary(
+        partner_id="p1",
+        summary="長" * 700,
+        project="ZenOS",
+        flow_type="feature",
+        tags=["tag1"],
+        as_of=as_of,
+    )
+
+    call_args = conn.execute.call_args[0]
+    inserted_summary = call_args[4]
+    assert len(inserted_summary) == 500

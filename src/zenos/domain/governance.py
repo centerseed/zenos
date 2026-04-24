@@ -31,6 +31,11 @@ from .shared import (
     TagConfidence,
 )
 
+# Wave 9 Phase B: import L3TaskBaseEntity for three-branch governance dispatch.
+# Imported lazily-safe here; no circular import (action → governance is forbidden,
+# governance → action.models is one-way dependency that is acceptable).
+from .action.models import L3TaskBaseEntity as _L3TaskBaseEntity
+
 
 def _safe_str(val) -> str:
     """Safely convert a tag field value to str (handles list/str/None)."""
@@ -222,10 +227,17 @@ def detect_staleness(
     entity_map = {e.id: e for e in entities if e.id}
     docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
-        # Support both Document (linked_entity_ids) and Entity (parent_id)
+        # Three-branch dispatch (Wave 9 Phase B):
+        #   1. Document  — uses linked_entity_ids (many-to-many explicit links)
+        #   2. L3TaskBaseEntity — uses parent_id (single-edge affiliation tree)
+        #   3. Entity (fallback) — also uses parent_id if present
         if isinstance(doc, Document):
             for eid in doc.linked_entity_ids:
                 docs_by_entity.setdefault(eid, []).append(doc)
+        elif isinstance(doc, _L3TaskBaseEntity):
+            # L3-Action entities affiliate via parent_id (SPEC §9.1)
+            if doc.parent_id:
+                docs_by_entity.setdefault(doc.parent_id, []).append(doc)
         elif hasattr(doc, "parent_id") and doc.parent_id:
             docs_by_entity.setdefault(doc.parent_id, []).append(doc)
 
@@ -236,12 +248,16 @@ def detect_staleness(
         return d.status
 
     def _doc_last_reviewed(d: Entity | Document) -> datetime:
-        raw = d.last_reviewed_at or d.updated_at
+        # L3TaskBaseEntity has no last_reviewed_at; fall back to updated_at.
+        raw = getattr(d, "last_reviewed_at", None) or d.updated_at
         return _to_aware(raw)
 
     def _doc_who(d: Entity | Document) -> list[str]:
         if isinstance(d, Document):
             return d.tags.who
+        if isinstance(d, _L3TaskBaseEntity):
+            # L3-Action entities have no tags; they don't carry audience metadata.
+            return []
         who = d.tags.who
         if isinstance(who, str):
             return [who] if who else []
@@ -394,9 +410,13 @@ def analyze_blindspots(
     entity_map = {e.id: e for e in entities if e.id}
     docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
+        # Three-branch dispatch (Wave 9 Phase B) — same logic as detect_staleness
         if isinstance(doc, Document):
             for eid in doc.linked_entity_ids:
                 docs_by_entity.setdefault(eid, []).append(doc)
+        elif isinstance(doc, _L3TaskBaseEntity):
+            if doc.parent_id:
+                docs_by_entity.setdefault(doc.parent_id, []).append(doc)
         elif hasattr(doc, "parent_id") and doc.parent_id:
             docs_by_entity.setdefault(doc.parent_id, []).append(doc)
 
@@ -409,6 +429,8 @@ def analyze_blindspots(
     def _d_what(d: Entity | Document) -> list[str]:
         if isinstance(d, Document):
             return d.tags.what
+        if isinstance(d, _L3TaskBaseEntity):
+            return []  # L3-Action entities carry no What tags
         w = d.tags.what
         if isinstance(w, str):
             return [w] if w else []
@@ -417,6 +439,8 @@ def analyze_blindspots(
     def _d_who(d: Entity | Document) -> list[str]:
         if isinstance(d, Document):
             return d.tags.who
+        if isinstance(d, _L3TaskBaseEntity):
+            return []  # L3-Action entities carry no Who tags
         w = d.tags.who
         if isinstance(w, str):
             return [w] if w else []
@@ -425,6 +449,8 @@ def analyze_blindspots(
     def _d_uri(d: Entity | Document) -> str:
         if isinstance(d, Document):
             return d.source.uri
+        if isinstance(d, _L3TaskBaseEntity):
+            return ""  # L3-Action entities have no source URI
         if d.sources:
             return d.sources[0].get("uri", "")
         return ""
@@ -512,6 +538,9 @@ def analyze_blindspots(
     _SCHEDULE_INDICATORS = {"排程", "scheduled", "planned", "sprint", "milestone", "deadline", "時程"}
     for doc in documents:
         if _d_status(doc) == DocumentStatus.ARCHIVED:
+            continue
+        # L3TaskBaseEntity has no tags; skip problem detection for task-type objects.
+        if isinstance(doc, _L3TaskBaseEntity):
             continue
         how_lower = _safe_str(doc.tags.how if hasattr(doc.tags, 'how') else "").lower()
         has_problem = any(ind in how_lower for ind in _PROBLEM_INDICATORS)
@@ -1040,9 +1069,13 @@ def run_quality_check(
     entity_map = {e.id: e for e in entities if e.id}
     docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
+        # Three-branch dispatch (Wave 9 Phase B) — same logic as detect_staleness
         if isinstance(doc, Document):
             for eid in doc.linked_entity_ids:
                 docs_by_entity.setdefault(eid, []).append(doc)
+        elif isinstance(doc, _L3TaskBaseEntity):
+            if doc.parent_id:
+                docs_by_entity.setdefault(doc.parent_id, []).append(doc)
         elif hasattr(doc, "parent_id") and doc.parent_id:
             docs_by_entity.setdefault(doc.parent_id, []).append(doc)
 
@@ -1060,6 +1093,8 @@ def run_quality_check(
     def _qc_who(d: Entity | Document) -> list[str]:
         if isinstance(d, Document):
             return d.tags.who
+        if isinstance(d, _L3TaskBaseEntity):
+            return []  # L3-Action entities carry no Who tags
         w = d.tags.who
         if isinstance(w, str):
             return [w] if w else []
@@ -1112,7 +1147,8 @@ def run_quality_check(
     total_items = len(entities) + len(documents) + len(protocols)
     unconfirmed_count = (
         sum(1 for e in entities if not e.confirmed_by_user)
-        + sum(1 for d in documents if not d.confirmed_by_user)
+        # L3TaskBaseEntity has no confirmed_by_user (no SemanticMixin); treat as confirmed.
+        + sum(1 for d in documents if not isinstance(d, _L3TaskBaseEntity) and not d.confirmed_by_user)
         + sum(1 for p in protocols if not p.confirmed_by_user)
     )
     # It's a warning if everything is confirmed (suspicious) or nothing is.

@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from zenos.application.action.plan_service import PlanService
+from zenos.application.action.plan_service import PlanService, PlanValidationError
 from zenos.domain.action import Plan, PlanStatus, Task
 from zenos.domain.knowledge import Entity, Tags
 
@@ -155,6 +155,17 @@ async def test_update_plan_draft_to_active():
     svc = _make_service(plan=plan)
     updated = await svc.update_plan("plan-1", {"status": "active"})
     assert updated.status == PlanStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_update_plan_rejects_broken_parent_chain_with_error_code():
+    plan = _make_plan(product_id=None, project="")
+    svc = _make_service(plan=plan, entity=None)
+
+    with pytest.raises(PlanValidationError) as exc_info:
+        await svc.update_plan("plan-1", {"goal": "Keep working"})
+
+    assert exc_info.value.error_code == "INVALID_PARENT_CHAIN"
 
 
 @pytest.mark.asyncio

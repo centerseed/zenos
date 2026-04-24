@@ -9,6 +9,17 @@ import asyncpg  # type: ignore[import-untyped]
 
 from zenos.infrastructure.sql_common import SCHEMA
 
+_MAX_SUMMARY_LENGTH = 500
+_EMPTY_SUMMARY_FALLBACK = "Journal summary unavailable."
+
+
+def _normalize_summary(summary: str) -> str:
+    """Match zenos.work_journal.summary DB constraints before insert."""
+    normalized = (summary or "").strip()
+    if not normalized:
+        return _EMPTY_SUMMARY_FALLBACK
+    return normalized[:_MAX_SUMMARY_LENGTH]
+
 
 class SqlWorkJournalRepository:
     """PostgreSQL-backed repository for agent work journal entries.
@@ -31,6 +42,7 @@ class SqlWorkJournalRepository:
     ) -> str:
         """Insert a new journal entry and return its UUID string."""
         entry_id = str(uuid.uuid4())
+        normalized_summary = _normalize_summary(summary)
         async with self._pool.acquire() as conn:
             await conn.execute(
                 f"""
@@ -40,7 +52,7 @@ class SqlWorkJournalRepository:
                 """,
                 entry_id,
                 partner_id,
-                summary,
+                normalized_summary,
                 project,
                 flow_type,
                 tags or [],
@@ -134,6 +146,7 @@ class SqlWorkJournalRepository:
     ) -> str:
         """Insert a compressed summary entry (is_summary=TRUE) and return its UUID."""
         entry_id = str(uuid.uuid4())
+        normalized_summary = _normalize_summary(summary)
         async with self._pool.acquire() as conn:
             await conn.execute(
                 f"""
@@ -144,7 +157,7 @@ class SqlWorkJournalRepository:
                 entry_id,
                 partner_id,
                 as_of,
-                summary,
+                normalized_summary,
                 project,
                 flow_type,
                 tags or [],

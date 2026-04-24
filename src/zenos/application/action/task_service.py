@@ -36,6 +36,21 @@ class TaskValidationError(ValueError):
         self.error_code = error_code
 
 
+def _validate_action_parent_product_id(
+    *,
+    parent_kind: str,
+    parent_id: str,
+    parent_product_id: str | None,
+) -> None:
+    """Ensure an Action L3 parent chain can terminate at an L1 product root."""
+    if not parent_product_id:
+        raise TaskValidationError(
+            f"{parent_kind} '{parent_id}' has no product_id; "
+            "parent chain cannot terminate at an L1 collaboration root.",
+            error_code="INVALID_PARENT_CHAIN",
+        )
+
+
 def _normalize_project_scope(value: object) -> str:
     """Normalize partner-level project scope strings for stable storage/filtering."""
     if value is None:
@@ -217,6 +232,11 @@ class TaskService:
                     f"Subtasks must inherit the parent's plan_id.",
                     error_code="CROSS_PLAN_SUBTASK",
                 )
+            _validate_action_parent_product_id(
+                parent_kind="parent_task_id",
+                parent_id=parent_task_id,
+                parent_product_id=parent.product_id,
+            )
             if effective_product_id and parent.product_id and parent.product_id != effective_product_id:
                 raise TaskValidationError(
                     f"Subtask product_id '{effective_product_id}' does not match "
@@ -284,6 +304,11 @@ class TaskService:
                 raise ValueError(
                     f"plan_id '{plan_id}' does not exist. Create the plan first."
                 )
+            _validate_action_parent_product_id(
+                parent_kind="plan_id",
+                parent_id=plan_id,
+                parent_product_id=existing_plan.product_id,
+            )
             if effective_product_id and existing_plan.product_id and existing_plan.product_id != effective_product_id:
                 raise TaskValidationError(
                     f"task.product_id '{effective_product_id}' does not match "
@@ -386,6 +411,11 @@ class TaskService:
                         f"Subtasks must inherit the parent's plan_id.",
                         error_code="CROSS_PLAN_SUBTASK",
                     )
+                _validate_action_parent_product_id(
+                    parent_kind="parent_task_id",
+                    parent_id=new_parent_id,
+                    parent_product_id=parent.product_id,
+                )
 
         # project_id alias removed (ADR-047 D3). Callers must use product_id.
         product_entity = await _resolve_product_entity(
@@ -403,6 +433,12 @@ class TaskService:
 
         if parent is None and (updates.get("parent_task_id") or task.parent_task_id):
             parent = await self._tasks.get_by_id(updates.get("parent_task_id") or task.parent_task_id)
+            if parent is not None:
+                _validate_action_parent_product_id(
+                    parent_kind="parent_task_id",
+                    parent_id=updates.get("parent_task_id") or task.parent_task_id,
+                    parent_product_id=parent.product_id,
+                )
         if parent is not None and effective_product_id and parent.product_id and parent.product_id != effective_product_id:
             raise TaskValidationError(
                 f"Subtask product_id '{effective_product_id}' does not match "
@@ -417,6 +453,11 @@ class TaskService:
                 raise ValueError(
                     f"plan_id '{effective_plan_id}' does not exist. Create the plan first."
                 )
+            _validate_action_parent_product_id(
+                parent_kind="plan_id",
+                parent_id=effective_plan_id,
+                parent_product_id=existing_plan.product_id,
+            )
             if effective_product_id and existing_plan.product_id and existing_plan.product_id != effective_product_id:
                 raise TaskValidationError(
                     f"task.product_id '{effective_product_id}' does not match "

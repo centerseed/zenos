@@ -49,6 +49,26 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Show applied/pending migration status and exit",
     )
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        metavar="VERSION_OR_FILENAME",
+        help=(
+            "Apply/status only the specified migration version or filename. "
+            "May be passed multiple times."
+        ),
+    )
+    parser.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="VERSION_OR_FILENAME",
+        help=(
+            "Exclude the specified migration version or filename from this run. "
+            "May be passed multiple times."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -68,6 +88,40 @@ def load_migrations(migrations_dir: Path) -> list[Migration]:
     return migrations
 
 
+def filter_migrations(
+    migrations: list[Migration],
+    only: list[str],
+    exclude: list[str],
+) -> list[Migration]:
+    if only and exclude:
+        raise ValueError("--only and --exclude cannot be used together")
+
+    requested = set(only or exclude)
+    selected = [
+        migration
+        for migration in migrations
+        if migration.version in requested or migration.filename in requested
+    ]
+    matched = {migration.version for migration in selected} | {
+        migration.filename for migration in selected
+    }
+    missing = sorted(requested - matched)
+    if missing:
+        flag = "--only" if only else "--exclude"
+        raise ValueError(f"unknown migration(s) passed to {flag}: {', '.join(missing)}")
+
+    if only:
+        return selected
+
+    if exclude:
+        excluded_versions = {migration.version for migration in selected}
+        return [
+            migration for migration in migrations if migration.version not in excluded_versions
+        ]
+
+    return migrations
+
+
 def checksum_matches_applied(version: str, applied_checksum: str, current_checksum: str) -> bool:
     if applied_checksum == current_checksum:
         return True
@@ -76,6 +130,7 @@ def checksum_matches_applied(version: str, applied_checksum: str, current_checks
 
 
 async def ensure_migration_table(conn: asyncpg.Connection) -> None:
+    await conn.execute("CREATE SCHEMA IF NOT EXISTS zenos")
     await conn.execute(
         """
         CREATE TABLE IF NOT EXISTS zenos.schema_migrations (
@@ -140,7 +195,15 @@ async def main() -> int:
         print("ERROR: DATABASE_URL is required")
         return 1
 
-    migrations = load_migrations(migrations_dir)
+    try:
+        migrations = filter_migrations(
+            load_migrations(migrations_dir),
+            args.only,
+            args.exclude,
+        )
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return 1
     if not migrations:
         print(f"No migration files found in {migrations_dir}")
         return 0

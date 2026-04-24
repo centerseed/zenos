@@ -13,6 +13,9 @@ PROJECT_ID="${PROJECT_ID:-zenos-naruvia}"
 SOURCE_DIR="${SOURCE_DIR:-$ROOT_DIR}"
 MCP_TRANSPORT="${MCP_TRANSPORT:-dual}"
 ALLOW_UNAUTHENTICATED="${ALLOW_UNAUTHENTICATED:-true}"
+CLOUDSQL_INSTANCE="${CLOUDSQL_INSTANCE:-zentropy-4f7a5:asia-east1:zentropy-db}"
+MAX_INSTANCES="${MAX_INSTANCES:-2}"
+SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-165893875709-compute@developer.gserviceaccount.com}"
 
 echo "=== ZenOS MCP Deploy ==="
 echo ""
@@ -43,8 +46,11 @@ DEPLOY_CMD=(
   --region="$REGION" \
   --platform=managed \
   --source="$SOURCE_DIR" \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,MCP_TRANSPORT=$MCP_TRANSPORT,GOOGLE_SERVICE_ACCOUNT_EMAIL=165893875709-compute@developer.gserviceaccount.com" \
-  --update-secrets="GITHUB_TOKEN=github-token:latest,ZENOS_JWT_SECRET=zenos-jwt-secret:latest,GEMINI_API_KEY=gemini-api-key:latest" # pragma: allowlist secret
+  --service-account="$SERVICE_ACCOUNT" \
+  --max-instances="$MAX_INSTANCES" \
+  --add-cloudsql-instances="$CLOUDSQL_INSTANCE" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,MCP_TRANSPORT=$MCP_TRANSPORT,GOOGLE_SERVICE_ACCOUNT_EMAIL=$SERVICE_ACCOUNT,ZENOS_L3_READ_NEW_PATH=1,ZENOS_L3_WRITE_NEW_PATH=1" \
+  --update-secrets="DATABASE_URL=database-url:latest,GITHUB_TOKEN=github-token:latest,ZENOS_JWT_SECRET=zenos-jwt-secret:latest,GEMINI_API_KEY=gemini-api-key:latest" # pragma: allowlist secret
 )
 
 if [ "$ALLOW_UNAUTHENTICATED" = "true" ]; then

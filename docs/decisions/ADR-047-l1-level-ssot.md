@@ -1,10 +1,11 @@
 ---
 type: ADR
 id: ADR-047
-status: Accepted
+status: Superseded
 ontology_entity: entity-model
 created: 2026-04-23
-updated: 2026-04-23
+updated: 2026-04-24
+superseded_by: ADR-048-grand-ontology-refactor
 supersedes_sections:
   - ADR-007#L1-單型定義
 related:
@@ -14,6 +15,8 @@ related:
 ---
 
 # ADR-047: L1 判定收斂到 level、product_id 為唯一 API 語彙
+
+> **2026-04-24 update：** L1 level axiom 與 L3-Action ownership tree 已由主 SPEC v2 + ADR-048 收斂為 runtime canonical。本 ADR 保留作歷史追溯。
 
 ## Context
 

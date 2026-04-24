@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 
 # Dispatcher namespace pattern — single source of truth (used by write and handoff validators)
 DISPATCHER_PATTERN = re.compile(r"^(human(:[a-zA-Z0-9_-]+)?|agent:[a-z_]+)$")
@@ -113,3 +113,104 @@ class Task:
     @project_id.setter
     def project_id(self, value: str | None) -> None:
         self.product_id = value
+
+
+# ──────────────────────────────────────────────────────────────
+# Wave 9 L3-Action Entity dataclasses (Phase B — domain only)
+#
+# These coexist with the legacy Task / Plan dataclasses.
+# Repo / MCP / application layers still use Task / Plan.
+# Converters (see converters.py) bridge old ↔ new shapes.
+# ──────────────────────────────────────────────────────────────
+
+
+@dataclass(kw_only=True)
+class L3TaskBaseEntity:
+    """Wave 9 L3-Action entity base (abstract; do not instantiate directly).
+
+    Subclass of entities_base + adds action-layer fields common to all
+    L3-Action subclasses (milestone / plan / task / subtask).
+
+    Notes:
+        - L3-Action does NOT carry SemanticMixin (no tags / confirmed_by_user).
+        - ``status`` here is the BaseEntity lifecycle status ("active" for tasks).
+        - ``task_status`` carries the business-level status enum.
+        - ``parent_id`` encodes all affiliation (replaces product_id / plan_id tree).
+        - ``handoff_events`` is kept in-memory in Phase B; Phase C repo will
+          persist to the dedicated ``task_handoff_events`` table.
+    """
+
+    # entities_base fields
+    id: str
+    partner_id: str
+    name: str
+    type_label: str          # 'task' | 'plan' | 'subtask' | 'milestone'
+    level: int               # always 3 for L3-Action entities
+    parent_id: str | None
+    status: str              # EntityStatus lifecycle ("active" for all live tasks)
+    created_at: datetime
+    updated_at: datetime
+
+    # L3-Action shared fields (SPEC §9.1)
+    description: str
+    task_status: str         # business-level status; values depend on subclass
+    assignee: str | None
+    dispatcher: str          # agent:xxx | human[:id] — matches DISPATCHER_PATTERN
+    acceptance_criteria: list[str] = field(default_factory=list)
+    priority: str = "medium"    # critical | high | medium | low
+    result: str | None = None
+    handoff_events: list[HandoffEvent] = field(default_factory=list)
+
+
+@dataclass(kw_only=True)
+class L3MilestoneEntity(L3TaskBaseEntity):
+    """Wave 9 L3-Action Milestone — merges old Goal concept (SPEC §9.2).
+
+    task_status enum: planned | active | completed | cancelled
+    """
+
+    target_date: date | None = None
+    completion_criteria: str | None = None
+
+
+@dataclass(kw_only=True)
+class L3PlanEntity(L3TaskBaseEntity):
+    """Wave 9 L3-Action Plan — task grouping boundary (SPEC §9.3).
+
+    task_status enum: draft | active | completed | cancelled
+    """
+
+    goal_statement: str = ""
+    entry_criteria: str = ""
+    exit_criteria: str = ""
+
+
+@dataclass(kw_only=True)
+class L3TaskEntity(L3TaskBaseEntity):
+    """Wave 9 L3-Action Task — executable work item (SPEC §9.4).
+
+    task_status enum: todo | in_progress | review | done | cancelled
+
+    Notes:
+        - ``depends_on`` holds task entity IDs that block this task
+          (replaces the legacy ``depends_on_task_ids`` / ``blocked_by`` lists).
+        - ``due_date`` is a calendar date, not a datetime.
+    """
+
+    plan_order: int | None = None
+    depends_on: list[str] = field(default_factory=list)
+    blocked_reason: str | None = None
+    due_date: date | None = None
+
+
+@dataclass(kw_only=True)
+class L3SubtaskEntity(L3TaskEntity):
+    """Wave 9 L3-Action Subtask — agent-dispatched sub-unit (SPEC §9.5).
+
+    Subtask is a specialisation of L3TaskEntity:
+    - parent_id MUST point to an L3TaskEntity
+    - typically created automatically by an agent (auto_created=True)
+    """
+
+    dispatched_by_agent: str = ""
+    auto_created: bool = True
