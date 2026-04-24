@@ -83,6 +83,9 @@ interface ProjectListStats {
   updatedAt: Date | null;
 }
 
+// type === "product" is intentional: the home workspace bootstrap contract only ever
+// creates product-type placeholder entities. CRM L1s (company/person/deal) will never
+// match this filter, so they will never be mistakenly hidden.
 function isPlaceholderCompletedProject(entity: Entity): boolean {
   return (
     entity.type === "product" &&

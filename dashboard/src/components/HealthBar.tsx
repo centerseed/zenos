@@ -1,6 +1,7 @@
 "use client";
 
 import type { Entity, Blindspot } from "@/types";
+import { isL1Entity } from "@/lib/entity-level";
 
 interface HealthBarProps {
   entities: Entity[];
@@ -8,8 +9,8 @@ interface HealthBarProps {
 }
 
 export function HealthBar({ entities, blindspots }: HealthBarProps) {
-  const products = entities.filter((e) => e.type === "product");
-  const activeProducts = products.filter((e) => e.status === "active");
+  const products = entities.filter(isL1Entity);
+  const activeProducts = entities.filter((e) => isL1Entity(e) && e.status === "active");
   const openBlindspots = blindspots.filter((b) => b.status === "open");
   const redBlindspots = openBlindspots.filter((b) => b.severity === "red");
 
@@ -45,7 +46,7 @@ export function HealthBar({ entities, blindspots }: HealthBarProps) {
 
         {/* Quick stats in plain language */}
         <div className="flex items-center gap-4 text-xs text-dim">
-          <span>{activeProducts.length} 個產品進行中</span>
+          <span>{activeProducts.length} 個工作台進行中</span>
           <span>·</span>
           <span>{entities.length} 個知識節點</span>
           {openBlindspots.length > 0 && (
