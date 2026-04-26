@@ -10,7 +10,7 @@ import {
   hydrateDateFields,
   setActiveWorkspaceId,
 } from "@/lib/api-client";
-import { isL1Entity } from "@/lib/entity-level";
+import { isL1Entity, isPortfolioRootEntity } from "@/lib/entity-level";
 
 export { API_BASE, setActiveWorkspaceId };
 
@@ -155,8 +155,8 @@ export async function getProjectEntities(
     return all.filter(isShareableRootEntity);
   }
 
-  // ADR-047 D7: /projects list shows all L1 entities regardless of type
-  return all.filter(isL1Entity);
+  // Portfolio/workspace list excludes CRM record roots such as deals/people.
+  return all.filter(isPortfolioRootEntity);
 }
 
 export async function getProjectEntitiesInWorkspace(token: string, workspaceId: string): Promise<Entity[]> {

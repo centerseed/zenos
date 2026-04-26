@@ -21,3 +21,15 @@ export function isL1Entity(entity: Entity | null | undefined): boolean {
   const parentId = entity.parentId ?? null;
   return entity.level === 1 && !parentId;
 }
+
+/**
+ * Returns true for L1 entities that should appear as portfolio/workspace cards.
+ *
+ * CRM deals and people can be L1 collaboration scopes for task ownership and
+ * graph traversal, but they are CRM records and should stay in the CRM pipeline
+ * surfaces instead of being rendered as top-level Product/Workspace cards.
+ */
+export function isPortfolioRootEntity(entity: Entity | null | undefined): boolean {
+  if (!entity || !isL1Entity(entity)) return false;
+  return entity.type !== "deal" && entity.type !== "person";
+}

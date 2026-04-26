@@ -46,7 +46,7 @@ function makeEntity(overrides: Partial<Entity> = {}): Entity {
 
 // ─── AC-ENTSIMP-UI-01: HealthBar counts all L1 types ─────────────────────────
 
-import { isL1Entity } from "@/lib/entity-level";
+import { isL1Entity, isPortfolioRootEntity } from "@/lib/entity-level";
 
 describe("AC-ENTSIMP-UI-01: HealthBar L1 filter", () => {
   it("counts company L1 in active workspaces (not filtered out)", () => {
@@ -87,6 +87,20 @@ describe("AC-ENTSIMP-UI-01: HealthBar L1 filter", () => {
     const productL1 = makeEntity({ id: "e-prod", type: "product", level: 1, parentId: null, status: "active" });
     const l1Entities = [productL1].filter(isL1Entity);
     expect(l1Entities).toHaveLength(1);
+  });
+});
+
+describe("Portfolio root filter", () => {
+  it("keeps product/company roots but excludes CRM deal/person records from workspace cards", () => {
+    const productL1 = makeEntity({ id: "e-product", type: "product", level: 1, parentId: null });
+    const companyL1 = makeEntity({ id: "e-company", type: "company", level: 1, parentId: null });
+    const dealL1 = makeEntity({ id: "e-deal", type: "deal", level: 1, parentId: null });
+    const personL1 = makeEntity({ id: "e-person", type: "person", level: 1, parentId: null });
+
+    expect([productL1, companyL1, dealL1, personL1].filter(isPortfolioRootEntity).map((e) => e.id)).toEqual([
+      "e-product",
+      "e-company",
+    ]);
   });
 });
 

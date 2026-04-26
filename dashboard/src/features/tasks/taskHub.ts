@@ -1,7 +1,7 @@
 "use client";
 
 import type { PlanSummary } from "@/lib/api";
-import { isL1Entity } from "@/lib/entity-level";
+import { isPortfolioRootEntity } from "@/lib/entity-level";
 import type { Entity, Task, TaskPriority, TaskStatus } from "@/types";
 
 export type TaskHubFocus = `milestone:${string}` | `plan:${string}`;
@@ -109,8 +109,7 @@ function getEntityTimestamp(entity: Entity): number {
 }
 
 function isPortfolioRootProduct(entity: Entity): boolean {
-  // ADR-047 D7: L1 判定改為 level-based，type 僅作 UI label
-  return isL1Entity(entity);
+  return isPortfolioRootEntity(entity);
 }
 
 function buildProductLookup(products: Entity[]) {

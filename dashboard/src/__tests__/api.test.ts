@@ -53,7 +53,7 @@ afterEach(() => {
 // ─── getProjectEntities ───
 
 describe("getProjectEntities", () => {
-  // ADR-047 D7: /projects list now fetches all entities and filters client-side by isL1Entity
+  // ADR-047 D7: /projects list fetches all entities, then applies the portfolio root filter client-side.
   it("calls GET /api/data/entities (no type filter) with auth header", async () => {
     const fakeFetch = mockFetch({ entities: [] });
     vi.stubGlobal("fetch", fakeFetch);
@@ -66,12 +66,14 @@ describe("getProjectEntities", () => {
     );
   });
 
-  it("returns only L1 entities (level=1, no parentId) regardless of type", async () => {
+  it("returns only portfolio root L1 entities and excludes CRM record roots", async () => {
     const l1product = { id: "p-1", name: "ZenOS", type: "product", level: 1, parentId: null };
     const l1company = { id: "co-1", name: "原心生技", type: "company", level: 1, parentId: null };
+    const l1deal = { id: "deal-1", name: "Panel 自動化合作", type: "deal", level: 1, parentId: null };
+    const l1person = { id: "person-1", name: "子仁", type: "person", level: 1, parentId: null };
     const l2module = { id: "m-1", name: "Auth", type: "module", level: 2, parentId: "p-1" };
     const noLevel = { id: "old-1", name: "Old Product", type: "product", level: null, parentId: null };
-    vi.stubGlobal("fetch", mockFetch({ entities: [l1product, l1company, l2module, noLevel] }));
+    vi.stubGlobal("fetch", mockFetch({ entities: [l1product, l1company, l1deal, l1person, l2module, noLevel] }));
 
     const result = await getProjectEntities(FAKE_TOKEN);
     expect(result.map((e) => e.id)).toEqual(["p-1", "co-1"]);

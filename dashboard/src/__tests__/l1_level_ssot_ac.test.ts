@@ -139,6 +139,13 @@ describe("buildTaskHubSnapshot — L1 product detection", () => {
     expect(snapshot.products.map((p) => p.productName)).toContain("原心生技");
   });
 
+  it("excludes CRM deal L1 from task hub portfolio recap", () => {
+    const company = makeEntity({ id: "co-1", name: "Panel", type: "company", level: 1, parentId: null });
+    const deal = makeEntity({ id: "deal-1", name: "Panel 自動化合作", type: "deal", level: 1, parentId: null });
+    const snapshot = buildTaskHubSnapshot({ entities: [company, deal], tasks: [], plans: [] });
+    expect(snapshot.products.map((p) => p.productName)).toEqual(["Panel"]);
+  });
+
   it("excludes company entity with level=2", () => {
     const companyL2 = makeEntity({ id: "co-2", name: "Sub Co", type: "company", level: 2, parentId: "co-1" });
     const snapshot = buildTaskHubSnapshot({ entities: [companyL2], tasks: [], plans: [] });
