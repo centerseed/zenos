@@ -139,25 +139,37 @@ describe("parseStreamLine", () => {
   });
 
   it("extracts delta.text", () => {
-    expect(parseStreamLine('{"delta":{"text":"hello"}}')).toEqual({ delta: "hello", debug: "" });
+    expect(parseStreamLine('{"delta":{"text":"hello"}}')).toEqual({ delta: "hello", debug: "", strategy: "append" });
   });
 
   it("extracts top-level text", () => {
-    expect(parseStreamLine('{"text":"world"}')).toEqual({ delta: "world", debug: "" });
+    expect(parseStreamLine('{"text":"world"}')).toEqual({ delta: "world", debug: "", strategy: "append" });
   });
 
   it("extracts content_block_delta.text", () => {
-    expect(parseStreamLine('{"content_block_delta":{"text":"chunk"}}')).toEqual({ delta: "chunk", debug: "" });
+    expect(parseStreamLine('{"content_block_delta":{"text":"chunk"}}')).toEqual({ delta: "chunk", debug: "", strategy: "append" });
   });
 
   it("extracts nested message.content[0].text", () => {
-    expect(parseStreamLine('{"message":{"content":[{"text":"nested"}]}}')).toEqual({ delta: "nested", debug: "" });
+    expect(parseStreamLine('{"message":{"content":[{"text":"nested"}]}}')).toEqual({
+      delta: "nested",
+      debug: "",
+      strategy: "replace",
+    });
   });
 
   it("extracts nested stream_event payload", () => {
     expect(
       parseStreamLine('{"type":"stream_event","event":{"message":{"content":[{"content":{"text":"nested stream"}}]}}}')
-    ).toEqual({ delta: "nested stream", debug: "" });
+    ).toEqual({ delta: "nested stream", debug: "", strategy: "replace" });
+  });
+
+  it("marks Claude partial message snapshots as replace, not append", () => {
+    expect(parseStreamLine('{"type":"assistant","message":{"content":[{"type":"text","text":"full snapshot"}]}}')).toEqual({
+      delta: "full snapshot",
+      debug: "",
+      strategy: "replace",
+    });
   });
 
   it("passes through structured result (target_field + value) as raw JSON in delta", () => {

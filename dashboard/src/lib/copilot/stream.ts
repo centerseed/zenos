@@ -1,6 +1,7 @@
 export interface ParsedStreamLine {
   delta: string;
   debug: string;
+  strategy?: "append" | "replace";
 }
 
 export function parseStreamLine(line: string): ParsedStreamLine {
@@ -34,14 +35,18 @@ export function parseStreamLine(line: string): ParsedStreamLine {
       const messageContent = Array.isArray(messageObj?.content) ? messageObj?.content : null;
       if (messageContent && messageContent.length > 0) {
         const first = messageContent[0] as Record<string, unknown>;
-        candidates.push(first?.text);
+        if (typeof first?.text === "string" && first.text.trim().length > 0) {
+          return { delta: first.text, debug: "", strategy: "replace" };
+        }
         const nested = first?.content as Record<string, unknown> | undefined;
-        candidates.push(nested?.text);
+        if (typeof nested?.text === "string" && nested.text.trim().length > 0) {
+          return { delta: nested.text, debug: "", strategy: "replace" };
+        }
       }
     }
     for (const candidate of candidates) {
       if (typeof candidate === "string" && candidate.trim().length > 0) {
-        return { delta: candidate, debug: "" };
+        return { delta: candidate, debug: "", strategy: "append" };
       }
     }
     if (innerType) {

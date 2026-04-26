@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildProjectRecapEntry } from "@/features/projects/projectCopilot";
+import { buildCopilotPromptEnvelope } from "@/lib/copilot/envelope";
 import type { ProjectProgressResponse } from "@/lib/api";
 
 function makeProgress(): ProjectProgressResponse {
@@ -39,5 +40,22 @@ describe("project copilot entry", () => {
 
     expect(entry.mode).toBe("artifact");
     expect(entry.session_policy).toBe("ephemeral");
+  });
+
+  it("passes write-to-ZenOS document requests through instead of forcing triage", () => {
+    const entry = buildProjectRecapEntry({
+      progress: makeProgress(),
+      preset: "claude_code",
+      nextStep: "確認下一步",
+      workspaceId: "ws-1",
+    });
+
+    const envelope = buildCopilotPromptEnvelope(entry, "當然要入zenos啊，幫我寫文件");
+
+    expect(envelope).toContain("[USER_INPUT]\n當然要入zenos啊，幫我寫文件");
+    expect(envelope).toContain("Primary rule: answer or execute the user request above before any default recap.");
+    expect(envelope).toContain("create or update a ZenOS document entity");
+    expect(envelope).toContain("For document capture/write requests, persist into ZenOS ontology");
+    expect(envelope).not.toContain("suggested_skill=/triage");
   });
 });

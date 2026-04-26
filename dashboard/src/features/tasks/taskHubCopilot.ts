@@ -24,12 +24,15 @@ export function buildTaskHubCopilotEntry(params: {
     mode: "artifact",
     launch_behavior: "manual",
     session_policy: "ephemeral",
-    suggested_skill: "/triage",
     claude_code_bootstrap: {
       use_project_claude_config: true,
-      required_skills: ["/triage", "skills/governance/task-governance.md"],
-      governance_topics: ["task"],
+      required_skills: ["/triage", "/zenos-capture", "skills/governance/task-governance.md"],
+      governance_topics: ["task", "capture", "document"],
       verify_zenos_write: true,
+      execution_contract: [
+        "Obey USER_INPUT first. If USER_INPUT asks to write, save, capture, sync, or put content into ZenOS, do that action instead of producing a recap.",
+        "For document capture/write requests, persist into ZenOS ontology via MCP write or /zenos-capture; local files alone do not satisfy the request.",
+      ],
     },
     scope: {
       workspace_id: workspaceId,
@@ -52,11 +55,13 @@ export function buildTaskHubCopilotEntry(params: {
         subtitle: item.subtitle,
       })),
     },
-    build_prompt: () =>
+    build_prompt: (userInput) =>
       [
+        `User request: ${userInput.trim() || "(empty)"}`,
+        "Primary rule: answer or execute the user request above before any default recap.",
         "You are acting as the task copilot for the ZenOS Task Hub.",
         "Use the portfolio recap as the source of truth for current milestone / plan progress across workspaces.",
-        "Answer in this order:",
+        "For recap requests, answer in this order:",
         "1. 哪些工作台目前最需要先看",
         "2. 哪個 milestone 或 plan 風險最高",
         "3. 下一個建議 drill-down 的工作台與原因",

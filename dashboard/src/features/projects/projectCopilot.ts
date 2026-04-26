@@ -62,18 +62,21 @@ export function buildProjectRecapEntry(options: {
     mode: "artifact",
     launch_behavior: "manual",
     session_policy: "ephemeral",
-    suggested_skill: "/triage",
     claude_code_bootstrap: {
       use_project_claude_config: true,
       required_skills: [
         "/triage",
+        "/zenos-capture",
         "/zenos-governance",
         "skills/governance/task-governance.md",
+        "skills/workflows/knowledge-capture.md",
       ],
-      governance_topics: ["task"],
+      governance_topics: ["task", "capture", "document"],
       verify_zenos_write: true,
       execution_contract: [
         "Use the workspace .claude/mcp.json and settings.local.json instead of assuming a global helper profile.",
+        "Obey USER_INPUT first. If USER_INPUT asks to write, save, capture, sync, or put content into ZenOS, do that action instead of producing a recap.",
+        "For document capture/write requests, persist into ZenOS ontology via MCP write or /zenos-capture; local files alone do not satisfy the request.",
         "Before any task mutation, call mcp__zenos__governance_guide for topic=task and read local task governance files when they exist.",
         "Treat the first prompt as plan-level context only; if you need task, blocker, or subtask detail, fetch it via ZenOS MCP instead of assuming it is already embedded in the prompt.",
         "For any multi-step workstream, create a real plan first; do not use a parent task as a substitute for a plan.",
@@ -105,11 +108,15 @@ export function buildProjectRecapEntry(options: {
       requested_next_step: nextStep,
       fallback_recap: fallback,
     },
-    build_prompt: () =>
+    build_prompt: (userInput) =>
       [
+        `User request: ${userInput.trim() || "(empty)"}`,
+        "Primary rule: answer or execute the user request above before any default recap.",
+        "If the user asks to write/save/capture/register a document, create or update a ZenOS document entity linked to this root workspace and verify it with MCP get/search before claiming success.",
+        "If you also create a local Markdown file, clearly say it is local-only until the ZenOS document write succeeds.",
         `You are acting as the task copilot for ${progress.project.name} in ${preset === "claude_code" ? "Claude Code" : "Codex"}.`,
         "Treat the provided context as the current milestone / plan / task snapshot for this root workspace.",
-        "Your output must cover these sections in order:",
+        "For recap requests, cover these sections in order:",
         "1. 目前所在 milestone / 階段",
         "2. 正在進行的 plans 與 task 結構",
         "3. blockers、風險與卡點",

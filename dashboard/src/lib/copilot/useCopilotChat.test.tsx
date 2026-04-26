@@ -5,9 +5,10 @@ import type { CopilotEntryConfig } from "@/lib/copilot/types";
 import { writeSessionSnapshot } from "@/lib/copilot/session";
 
 const checkCoworkHelperHealthMock = vi.hoisted(() => vi.fn());
+const streamCoworkChatMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/cowork-helper", () => ({
-  streamCoworkChat: vi.fn(),
+  streamCoworkChat: (...args: unknown[]) => streamCoworkChatMock(...args),
   cancelCoworkRequest: vi.fn(),
   checkCoworkHelperHealth: (...args: unknown[]) => checkCoworkHelperHealthMock(...args),
   getDefaultHelperBaseUrl: () => "http://127.0.0.1:4317",
@@ -57,6 +58,8 @@ function Probe({ entry }: { entry: CopilotEntryConfig | null }) {
     <div>
       <div data-testid="status">{chat.status}</div>
       <div data-testid="messages">{chat.messages.map((message) => message.content).join(" | ")}</div>
+      <div data-testid="streaming">{chat.streamingText}</div>
+      <button onClick={() => void chat.send("請整理")}>send</button>
       <button onClick={() => chat.reset()}>reset</button>
     </div>
   );
@@ -67,6 +70,7 @@ describe("useCopilotChat", () => {
 
   beforeEach(() => {
     checkCoworkHelperHealthMock.mockReset();
+    streamCoworkChatMock.mockReset();
     checkCoworkHelperHealthMock.mockResolvedValue({
       ok: true,
       status: "ok",
@@ -129,5 +133,27 @@ describe("useCopilotChat", () => {
     fireEvent.click(screen.getByText("reset"));
 
     expect(storage.getItem(snapshotKey)).toBeNull();
+  });
+
+  it("replaces Claude partial message snapshots instead of appending duplicates", async () => {
+    streamCoworkChatMock.mockImplementation(async ({ onEvent }) => {
+      onEvent({
+        type: "message",
+        line: '{"type":"assistant","message":{"content":[{"type":"text","text":"文件已儲存。"}]}}',
+      });
+      onEvent({
+        type: "message",
+        line: '{"type":"assistant","message":{"content":[{"type":"text","text":"文件已儲存。現在給你快照。"}]}}',
+      });
+      onEvent({ type: "done" });
+    });
+
+    render(<Probe entry={makeEntry({ session_policy: "ephemeral" })} />);
+    fireEvent.click(screen.getByText("send"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("messages").textContent).toContain("文件已儲存。現在給你快照。");
+    });
+    expect(screen.getByTestId("messages").textContent).not.toContain("文件已儲存。文件已儲存。");
   });
 });

@@ -297,10 +297,15 @@ export function useCopilotChat(
                 if (event.requestId && !currentRequestIdRef.current) {
                   currentRequestIdRef.current = event.requestId;
                 }
-                const { delta, debug } = parseStreamLine(event.line);
+                const { delta, debug, strategy } = parseStreamLine(event.line);
                 if (delta) {
-                  collectedText += delta;
-                  setStreamingText((prev) => prev + delta);
+                  if (strategy === "replace") {
+                    collectedText = delta;
+                    setStreamingText(delta);
+                  } else {
+                    collectedText += delta;
+                    setStreamingText((prev) => prev + delta);
+                  }
                   // Transition to "streaming" if still "loading"
                   setStatus((prev) =>
                     prev === "loading"
