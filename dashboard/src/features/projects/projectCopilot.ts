@@ -61,7 +61,7 @@ export function buildProjectRecapEntry(options: {
     description: "Discuss this root workspace's milestones, plans, tasks, blockers, and next actions.",
     mode: "artifact",
     launch_behavior: "manual",
-    session_policy: "scoped_resume",
+    session_policy: "ephemeral",
     suggested_skill: "/triage",
     claude_code_bootstrap: {
       use_project_claude_config: true,

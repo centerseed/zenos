@@ -23,7 +23,7 @@ export function buildTaskHubCopilotEntry(params: {
     description: "Discuss portfolio-level milestone, plan, risk, and drill-down priorities.",
     mode: "artifact",
     launch_behavior: "manual",
-    session_policy: "scoped_resume",
+    session_policy: "ephemeral",
     suggested_skill: "/triage",
     claude_code_bootstrap: {
       use_project_claude_config: true,
