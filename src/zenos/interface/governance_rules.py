@@ -307,6 +307,14 @@ L3 document entity 是正式文件的語意索引入口。
 - `index` 即使目前只有 1 個 source 也合法
 - `single` 只保留給獨立治理、獨立分享、獨立 supersede 的例外情境
 
+## L3 index summary = 文件群 retrieval map
+- `doc_role=index` 的 `summary` 是文件群語意地圖，不是單一檔案摘要
+- Agent 預設順序：先找 L2 → `search(collection="documents", entity_name="<L2 name>")` → 讀 index 的 `summary` / `change_summary` / `bundle_highlights` → 再選讀 source
+- summary 必須說清楚 bundle 可回答哪些問題、primary/SSOT 是哪個 source、各 source 分別處理 spec/design/test/reference/delivery/sync 的哪一塊
+- summary 應優先使用 source metadata 與 `snapshot_summary` 做 source-aware routing；沒有 snapshot 時至少列出 label/uri/doc_type/doc_status/is_primary
+- 治理掃描預設用 scoped `analyze(check_type="invalid_documents", entity_id="<L2 id>")`；全域 analyze 只用於盤點 backlog
+- `change_summary` 描述文件群近期變化；`bundle_highlights` 是 source routing table
+
 ## Delivery-first 硬規則
 - current 正式入口文件不得只剩外部 source 而沒有 ZenOS 可讀 delivery
 - current formal-entry 文件應優先採 `git + gcs`
@@ -435,6 +443,18 @@ supersedes: null
 ### Dashboard 顯示差異
 - single：平面 source 列表
 - index：按 `doc_type` 分組顯示 sources，並優先展示 `bundle_highlights`
+
+### L3 index summary = 文件群 retrieval map
+- Agent 預設順序：先找 L2 → `search(collection="documents", entity_name="<L2 name>")` → 讀 index 的 `summary` / `change_summary` / `bundle_highlights` → 再選讀 source
+
+### Index summary 最低要求
+- `summary` 必須描述整個文件群可以回答哪些問題，不可只描述第一個 source
+- 必須指出 primary / SSOT source
+- 必須說明各 source 的用途，例如 spec、design、test、reference、delivery、sync
+- 必須區分 current / draft / stale source 的閱讀邊界
+- 必須能搭配 `linked_entity_ids`，讓 agent 從 L2 找到 L3 index 後知道下一步該讀哪份 source
+- summary 應優先使用 source metadata 與 `snapshot_summary` 做 source-aware routing；沒有 snapshot 時至少列出 label / uri / doc_type / doc_status / is_primary
+- 治理掃描預設用 scoped `analyze(check_type="invalid_documents", entity_id="<L2 id>")`；全域 analyze 只用於盤點 backlog
 
 ## 生命週期
 draft → under_review → approved（正式文件）
@@ -1121,6 +1141,7 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 - 新建 document 預設 `doc_role=index`
 - 同一主題的正式文件應收斂到同一個 bundle，不再平行建多個 single
 - index 必須帶 `bundle_highlights`
+- index 的 `summary` 必須是文件群 retrieval map，讓 agent 先讀摘要再選 source
 
 ## 最低要求
 - `bundle_highlights` 至少 1 筆，且至少 1 筆 `priority=primary`
@@ -1132,6 +1153,14 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 - 新建 document 預設 `doc_role=index`
 - 同一主題的正式文件，優先 `add_source` 到既有 index bundle
 - `single` 僅保留例外模式，不再是預設
+
+## index summary 最低要求
+- `summary` 是文件群 retrieval map，不是單一 source 摘要
+- Agent 應先用 `search(collection="documents", entity_name="<L2 name>")` 找 index，再讀 `summary` / `change_summary` / `bundle_highlights`
+- summary 必須說明 bundle 可回答哪些問題、primary/SSOT source、各 source 的用途與 current/draft/stale 閱讀邊界
+- summary 應優先使用 source metadata 與 `snapshot_summary` 做 source-aware routing；沒有 snapshot 時至少列出 label / uri / doc_type / doc_status / is_primary
+- 文件治理預設用 scoped `analyze(check_type="invalid_documents", entity_id="<L2 id>")`；全域 analyze 只用於盤點 backlog
+- `change_summary` 描述文件群近期變化，不是單一檔案 diff
 
 ## bundle_highlights 最低要求
 - index 必須帶 `bundle_highlights`
@@ -1276,7 +1305,17 @@ Step 2: 辨識公司共識概念（三問過濾）
 Step 3: 切割獨立的 L2 候選（可獨立改變原則）
 Step 4: 推斷 impacts（A 改了 → B 要跟著看）
 Step 5: 說不出 impacts → 降為 L3 或 sources
-Step 6: 全局確認後，批量 write（帶 layer_decision）""",
+Step 6: 全局確認後，批量 write（帶 layer_decision）
+
+## Helper source 摘要
+- Notion / GDrive / local / upload / wiki / url source 應帶 `snapshot_summary`
+- `snapshot_summary` 是 10KB 內語意摘要，不是全文 mirror
+- 缺少 snapshot 時，L3 analyzer 只能產 metadata-aware summary
+
+## Work Journal gate
+- 只有實際新增/更新知識，或留下 TBD / blindspot 需要下輪接續時才寫 journal
+- 純掃描無變更不要寫 journal
+- task 完成狀態寫在 task.result；durable knowledge 才寫 entries""",
 
         2: """# 知識捕獲分層路由規則 v1.0（完整版）
 
@@ -1340,7 +1379,17 @@ write(collection="entities", data={type="module", ...}) 時必須附帶 layer_de
 降為 sources：
 - 不建 entity，直接加到現有 L2 的 sources 陣列
 - 適合：參考資料、草稿、一次性輸入
-- sources 格式：{uri: "...", type: "document|github|notion", synced_at: "..."}""",
+- sources 格式：{uri: "...", type: "github|notion|gdrive|local|upload|wiki|url", synced_at: "..."}
+- Helper / connector 來源（Notion、GDrive、local、upload、wiki、url）要盡量帶 `snapshot_summary`
+- `snapshot_summary` 是 10KB 內的語意摘要，不是全文 mirror
+- 新建 L3 bundle 使用 `sources: [...]` 時，要保留 `snapshot_summary`、`external_id`、`external_updated_at`、`last_synced_at`、`retrieval_mode`、`content_access`
+- 若沒有 `snapshot_summary`，後續 analyzer 只能產 metadata-aware summary，不能產 content-aware source routing
+
+## Work Journal gate
+- 只有實際新增/更新知識，或留下 TBD / blindspot 需要下輪接續時才寫 journal
+- 純掃描無變更不要寫 journal
+- 不要把 QA PASS、pytest passed、部署完成、AC 通過等 task completion report 寫成 entry
+- task 完成狀態寫在 task.result；durable knowledge 才寫 entries""",
 
         3: """# 知識捕獲分層路由規則 v1.0（含完整範例）
 
@@ -1457,6 +1506,18 @@ layer_decision={
   ]
 }
 ```
+
+## Helper source 摘要
+- Notion / GDrive / local / upload / wiki / url source 應帶 `snapshot_summary`
+- `snapshot_summary` 是 10KB 內語意摘要，不是全文 mirror
+- 新建 L3 bundle 使用 `sources: [...]` 時，要保留 `snapshot_summary`、`external_id`、`external_updated_at`、`last_synced_at`、`retrieval_mode`、`content_access`
+- 缺少 snapshot 時，L3 analyzer 只能產 metadata-aware summary，不能產 content-aware source routing
+
+## Work Journal gate
+- 只有實際新增/更新知識，或留下 TBD / blindspot 需要下輪接續時才寫 journal
+- 純掃描無變更不要寫 journal
+- 不要把 QA PASS、pytest passed、部署完成、AC 通過等 task completion report 寫成 entry
+- task 完成狀態寫在 task.result；durable knowledge 才寫 entries
 
 ## 常見錯誤與修正
 

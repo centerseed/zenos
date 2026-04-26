@@ -10,6 +10,8 @@ from zenos.application.identity.source_access_policy import filter_sources_for_p
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
     _serialize,
+    _document_linkage_fields,
+    _load_document_relationships,
     _inject_workspace_context,
     _enrich_task_result,
     _unified_response,
@@ -449,9 +451,10 @@ async def get(
                 error_code="NOT_FOUND",
                 message=_format_not_found("Document", doc_id),
             )
+        relationships = await _load_document_relationships(result.id)
         if partner and is_guest(partner):
             allowed_ids = await _guest_allowed_entity_ids()
-            if not allowed_ids or not _is_document_like_entity_visible_for_guest(result, allowed_ids):
+            if not allowed_ids or not _is_document_like_entity_visible_for_guest(result, allowed_ids, relationships):
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
@@ -470,6 +473,13 @@ async def get(
                 message=_format_not_found("Document", doc_id),
             )
         serialized = _sanitize_entity_sources(_serialize(result), partner)
+        entity_map = None
+        try:
+            all_entities = await _mcp.ontology_service._entities.list_all()
+            entity_map = {e.id: e for e in all_entities if e.id}
+        except Exception:
+            entity_map = None
+        serialized.update(_document_linkage_fields(result, relationships, entity_map=entity_map))
         # ADR-022: enrich sources with canonical_type
         from zenos.domain.doc_types import canonical_type as compute_canonical_type
         for src in (serialized.get("sources") or []):

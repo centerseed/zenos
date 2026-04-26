@@ -1195,10 +1195,11 @@ class OntologyService:
         if partner is not None and is_guest(partner):
             await self._enforce_guest_write_guard(data, partner)
 
+        allow_create_with_id = bool(data.get("allow_create_with_id"))
         existing: Entity | None = None
         if data.get("id"):
             existing = await self._entities.get_by_id(data["id"])
-            if existing is None:
+            if existing is None and not allow_create_with_id:
                 raise ValueError(
                     f"Entity '{data['id']}' not found. Use create without id to add a new entity."
                 )
@@ -1605,8 +1606,15 @@ class OntologyService:
                     f"(id={existing.id}). To update it, provide id='{existing.id}'."
                 )
 
-            # 8. fuzzy similarity check — prevent semantically duplicate products
+            # 8. fuzzy similarity check — prevent semantically duplicate entities.
+            # L2 modules are owned by a product, so compare only siblings under
+            # the same parent; product/root duplicate protection remains global.
             all_same_type = await self._entities.list_all(type_filter=entity_type)
+            if entity_type == EntityType.MODULE and merged_data.get("parent_id"):
+                all_same_type = [
+                    ent for ent in all_same_type
+                    if ent.parent_id == merged_data.get("parent_id")
+                ]
             similar = self._find_similar_entities(name, all_same_type)
             if similar:
                 lines = [
@@ -1928,6 +1936,11 @@ class OntologyService:
                 f"Invalid relationship type '{rel_type}'. "
                 f"Must be one of: {', '.join(valid_rel_types)}"
             )
+        if rel_type == RelationshipType.IMPACTS and not self._is_concrete_impacts_description(description):
+            raise ValueError(
+                "impacts relationship description must be concrete. "
+                "Use format: A 改了什麼 → B 的什麼要跟著看"
+            )
 
         # --- Cross-product guard for ANY auto-inferred / auto-linked edge ---
         # DF-20260419-L2a (F6 symmetric): previously only related_to with
@@ -1967,6 +1980,9 @@ class OntologyService:
         # --- Dedup check ---
         existing = await self._relationships.find_duplicate(source_id, target_id, rel_type)
         if existing is not None:
+            if existing.description != description:
+                existing.description = description
+                return await self._relationships.add(existing)
             return existing
 
         rel = Relationship(
@@ -2364,7 +2380,8 @@ class OntologyService:
             await self._enforce_guest_write_guard({**data, "type": "document"}, partner)
 
         # --- Required field validation (clear error messages) ---
-        is_create = not data.get("id")
+        allow_create_with_id = bool(data.get("allow_create_with_id"))
+        is_create = not data.get("id") or allow_create_with_id
         if is_create:
             missing = []
             # title can be empty when source is GitHub (H1 derivation)
@@ -2390,14 +2407,16 @@ class OntologyService:
             if existing is None:
                 all_doc_entities = await self._entities.list_all(type_filter=EntityType.DOCUMENT)
                 existing = next((e for e in all_doc_entities if e.id == data["id"]), None)
-            if existing is None:
+            if existing is None and not allow_create_with_id:
                 raise ValueError(
                     f"Document entity '{data['id']}' not found. Use create without id."
                 )
-            if existing.type != EntityType.DOCUMENT:
+            if existing is not None and existing.type != EntityType.DOCUMENT:
                 raise ValueError(
                     f"Entity '{data['id']}' is type='{existing.type}', not document."
                 )
+            if existing is not None:
+                is_create = False
 
         # --- Validation ---
         source_data = data.get("source", {})
@@ -2432,9 +2451,24 @@ class OntologyService:
                     existing = d
                     break
 
-        linked_entity_ids = await self._validate_document_linked_entity_ids(
-            data.get("linked_entity_ids")
-        )
+        if "linked_entity_ids" in data:
+            linked_entity_ids = await self._validate_document_linked_entity_ids(
+                data.get("linked_entity_ids")
+            )
+        elif existing:
+            primary_linked_id, related_linked_ids = await self._load_document_linkage_state(
+                existing.id or data["id"]
+            )
+            fallback_linked_ids = [
+                eid
+                for eid in [primary_linked_id or existing.parent_id, *related_linked_ids]
+                if eid
+            ]
+            linked_entity_ids = await self._validate_document_linked_entity_ids(
+                fallback_linked_ids
+            )
+        else:
+            linked_entity_ids = await self._validate_document_linked_entity_ids(None)
 
         # Map fields to entity format (merge semantics for sparse updates)
         parent_id = (
@@ -2751,8 +2785,13 @@ class OntologyService:
                 sources: list[dict] = []
                 for src in sources_payload:
                     if isinstance(src, dict):
+                        snapshot = src.get("snapshot_summary")
+                        if snapshot is not None:
+                            _assert_snapshot_size(snapshot)
                         status = _bundle_source_status(src)
-                        sources.append({
+                        normalized_source = {
+                            "source_id": src.get("source_id"),
+                            "external_id": src.get("external_id"),
                             "uri": src.get("uri", ""),
                             "type": src.get("type", ""),
                             "label": src.get("label", ""),
@@ -2762,7 +2801,19 @@ class OntologyService:
                             "source_status": status,
                             "note": src.get("note", ""),
                             "is_primary": src.get("is_primary", False),
-                        })
+                            "container_id": src.get("container_id"),
+                            "container_ids": src.get("container_ids"),
+                            "retrieval_mode": src.get("retrieval_mode"),
+                            "content_access": src.get("content_access"),
+                        }
+                        for optional_key in (
+                            "external_updated_at",
+                            "last_synced_at",
+                            "snapshot_summary",
+                        ):
+                            if optional_key in src:
+                                normalized_source[optional_key] = src[optional_key]
+                        sources.append(normalized_source)
             else:
                 # Legacy path: build sources from singular source field
                 existing_source = (existing.sources[0] if existing and existing.sources else {})
@@ -2873,6 +2924,8 @@ class OntologyService:
         # Document lifecycle updates are governance operations that should remain
         # merge-safe but not be blocked by confirmed-entity protection.
         entity_payload["force"] = data.get("force", True)
+        if allow_create_with_id:
+            entity_payload["allow_create_with_id"] = True
         for optional_key in ("owner", "visibility", "last_reviewed_at"):
             if optional_key in data:
                 entity_payload[optional_key] = data[optional_key]

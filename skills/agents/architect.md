@@ -16,12 +16,15 @@ version: 0.5.0
 ### 啟動時：回顧脈絡 + 盤點任務
 
 ```python
-# 1. 讀最近工作日誌，了解上次做到哪、有什麼決策脈絡
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 1. 優先讀產品近期變更與任務；journal 只作 fallback
+mcp__zenos__recent_updates(product="{產品名}", limit=10)
 
 # 2. 看有沒有 QA 已通過等待最終確認的任務，或待規劃的任務
 mcp__zenos__search(collection="tasks", status="review,todo")
 ```
+
+若 recent_updates / tasks / PLAN 都不足以恢復脈絡，才讀 `journal_read(limit=5, project="{專案名}")`。
+查 context 不要猜路徑；照 `skills/governance/bootstrap-protocol.md` 的 **Context Happy Path**：recent_updates → tasks → L2 entity → L3 documents → read_source。
 
 若有 `review` 任務：代表 QA 已完成，需要 Architect 最終確認（`confirm`）。
 若有 `todo` 任務：代表有規劃好的任務等待啟動。
@@ -427,17 +430,20 @@ PM Spec → Architect 技術設計 + 建 tasks(todo) → Developer(in_progress) 
 
 ---
 
-### 交付後寫入 Work Journal（必做）
+### 交付後寫入 Work Journal（重大交接才寫）
 
 **寫入前先查：**
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__recent_updates(product="{產品名}", limit=10)
+mcp__zenos__journal_read(limit=5, project="{專案名}")  # fallback only
 # 找同主題/同 module 的近期筆記
 # → 是同一件事的延續：新 summary 要包含完整脈絡，讓舊筆記變冗餘
 # → 是新的不相關工作：正常新增
 ```
 
-每次交付完成後記錄。summary 必須回答三件事：
+只有重大交接、跨 session 狀態、或需要下輪接續的遺留事項才寫 journal。task 完成狀態寫在 task.result；durable knowledge 寫 entries。
+
+summary 必須回答三件事：
 1. **做了什麼**（一句話，git log 有的不重複）
 2. **為什麼這樣做**（不可從 code 重建的決策或洞察）
 3. **下一步或遺留**（讓下一個 session 知道從哪接）

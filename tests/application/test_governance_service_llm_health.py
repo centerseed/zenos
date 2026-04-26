@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from zenos.application.knowledge.governance_service import GovernanceService
-from zenos.domain.knowledge import Blindspot, Entity, Protocol, Tags
+from zenos.domain.knowledge import Blindspot, Entity, Protocol, Relationship, Tags
 
 
 def _entity(entity_id: str = "ent-1") -> Entity:
@@ -127,6 +127,148 @@ async def test_compute_health_signal_includes_llm_health_kpi(monkeypatch):
     assert result["kpis"]["llm_health"]["level"] == "red"
     assert result["overall_level"] == "red"
     assert any(item["kpi"] == "llm_health" for item in result["red_reasons"])
+
+
+@pytest.mark.asyncio
+async def test_compute_health_signal_scopes_to_entity_subtree_without_global_llm(monkeypatch):
+    now = datetime.now(timezone.utc)
+    product = _entity("prod-1")
+    product.name = "Dogfood"
+    product.type = "product"
+    product.level = 1
+    module = _entity("mod-1")
+    module.name = "Dogfood MCP Friction Log"
+    module.type = "module"
+    module.level = 2
+    module.parent_id = "prod-1"
+    other_product = _entity("prod-2")
+    other_product.name = "Other"
+    other_product.type = "product"
+    other_product.level = 1
+    other_module = _entity("mod-2")
+    other_module.name = "MCP Interface"
+    other_module.type = "module"
+    other_module.level = 2
+    other_module.parent_id = "prod-2"
+    rel = Relationship(
+        id="rel-1",
+        source_entity_id="mod-1",
+        target_id="mod-2",
+        type="impacts",
+        description="Dogfood MCP friction changed -> MCP Interface must review tool responses",
+    )
+
+    entity_repo = AsyncMock()
+    entity_repo.list_all = AsyncMock(return_value=[product, module, other_product, other_module])
+    relationship_repo = AsyncMock()
+    relationship_repo.list_by_entity = AsyncMock(
+        side_effect=lambda entity_id: [rel] if entity_id == "mod-1" else []
+    )
+    protocol_repo = AsyncMock()
+    protocol_repo.get_by_entity = AsyncMock(return_value=None)
+    blindspot_repo = AsyncMock()
+    blindspot_repo.list_all = AsyncMock(return_value=[
+        Blindspot(
+            description="dogfood issue",
+            severity="yellow",
+            related_entity_ids=["mod-1"],
+            suggested_action="fix",
+            confirmed_by_user=True,
+            created_at=now,
+        ),
+        Blindspot(
+            description="other issue",
+            severity="yellow",
+            related_entity_ids=["mod-2"],
+            suggested_action="fix",
+            confirmed_by_user=True,
+            created_at=now,
+        ),
+    ])
+
+    service = GovernanceService(
+        entity_repo=entity_repo,
+        relationship_repo=relationship_repo,
+        protocol_repo=protocol_repo,
+        blindspot_repo=blindspot_repo,
+    )
+    service.analyze_llm_health = AsyncMock(return_value={
+        "overall_level": "red",
+        "findings": [{"severity": "red"}],
+    })
+
+    result = await service.compute_health_signal(entity_id="prod-1")
+
+    assert result["scope"]["entity_id"] == "prod-1"
+    assert result["scope"]["entity_count"] == 2
+    assert result["scope"]["relationship_count"] == 1
+    assert result["scope"]["blindspot_count"] == 1
+    assert result["scope"]["global_signals_excluded"] == ["llm_health"]
+    assert "llm_health" not in result["kpis"]
+    assert result["kpis"]["active_l2_missing_impacts"]["value"] == 0
+    service.analyze_llm_health.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_compute_health_signal_scoped_external_target_is_context_not_source(monkeypatch):
+    product = _entity("prod-1")
+    product.name = "Dogfood"
+    product.type = "product"
+    product.level = 1
+    module = _entity("mod-1")
+    module.name = "Dogfood Module"
+    module.type = "module"
+    module.level = 2
+    module.parent_id = "prod-1"
+    external = _entity("external-1")
+    external.name = "External Module"
+    external.type = "module"
+    external.level = 2
+    external.parent_id = "other-prod"
+    scoped_to_external = Relationship(
+        id="rel-1",
+        source_entity_id="mod-1",
+        target_id="external-1",
+        type="impacts",
+        description="Dogfood changed -> External Module must review contract",
+    )
+    external_to_ghost = Relationship(
+        id="rel-2",
+        source_entity_id="external-1",
+        target_id="ghost",
+        type="impacts",
+        description="External changed -> Ghost must review contract",
+    )
+
+    entity_repo = AsyncMock()
+    entity_repo.list_all = AsyncMock(return_value=[product, module, external])
+    relationship_repo = AsyncMock()
+    relationship_repo.list_by_entity = AsyncMock(
+        side_effect=lambda entity_id: {
+            "mod-1": [scoped_to_external],
+            "external-1": [scoped_to_external, external_to_ghost],
+        }.get(entity_id, [])
+    )
+    protocol_repo = AsyncMock()
+    protocol_repo.get_by_entity = AsyncMock(return_value=None)
+    blindspot_repo = AsyncMock()
+    blindspot_repo.list_all = AsyncMock(return_value=[])
+
+    service = GovernanceService(
+        entity_repo=entity_repo,
+        relationship_repo=relationship_repo,
+        protocol_repo=protocol_repo,
+        blindspot_repo=blindspot_repo,
+    )
+    service.analyze_llm_health = AsyncMock()
+
+    result = await service.compute_health_signal(entity_id="prod-1")
+
+    assert result["scope"]["entity_count"] == 2
+    assert result["scope"]["relationship_count"] == 1
+    assert result["kpis"]["active_l2_missing_impacts"]["value"] == 0
+    assert result["kpis"]["quality_score"]["level"] == "green"
+    assert result["overall_level"] == "green"
 
 
 @pytest.mark.asyncio

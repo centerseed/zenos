@@ -172,6 +172,15 @@ class TestWriteEntitiesUnifiedFormat:
 
         assert result["status"] == "ok"
         assert "data" in result
+        assert result["data"]["id"] == entity.id
+        assert result["data"]["name"] == entity.name
+        assert result["data"]["type"] == entity.type
+        assert result["data"]["level"] == entity.level
+        assert result["data"]["status"] == entity.status
+        assert result["data"]["parent_id"] == entity.parent_id
+        assert result["data"]["entity_id"] == entity.id
+        assert result["data"]["entity_name"] == entity.name
+        assert result["data"]["entity"]["id"] == entity.id
         assert result["data"]["entity"]["name"] == "Paceriz"
         assert "warnings" in result
         assert "suggestions" in result

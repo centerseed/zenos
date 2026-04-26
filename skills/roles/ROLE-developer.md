@@ -19,12 +19,15 @@ version: 0.4.0
 ## 啟動
 
 ```python
-# 讀最近日誌，避免重複造輪子、了解已有決策
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 優先讀任務、L2 entity、recent_updates；不要把 journal 當主要 context source
+mcp__zenos__recent_updates(product="{產品名}", limit=10)
 
 # 看有沒有待開發任務
 mcp__zenos__search(collection="tasks", status="todo,in_progress")
 ```
+
+Journal 只在任務與 L2 context 不足時 fallback：`journal_read(limit=5, project="{專案名}")`。
+查 context 不要猜路徑；照 `skills/governance/bootstrap-protocol.md` 的 **Context Happy Path**：recent_updates → tasks → L2 entity → L3 documents → read_source。
 
 拿到任務立即標記：
 ```python
@@ -35,7 +38,7 @@ mcp__zenos__task(action="update", id="task-id", status="in_progress")
 
 ## ALWAYS
 
-1. **啟動時讀 journal** — 了解已有實作和決策，避免重做
+1. **啟動時先讀 task / L2 / recent_updates** — journal 只在這些來源不足時 fallback，避免把流水帳當主要脈絡
 2. **讀完 Spec + 技術設計再寫 code** — 不確定的先列出來
 3. **開工前查 impact chain** — 確認下游影響和上游依賴
 4. **TDD：先寫失敗測試 → 最少 code 通過 → simplify**

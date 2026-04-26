@@ -386,6 +386,279 @@ class TestSearchTool:
             assert "documents" in data
             assert [d["id"] for d in data["documents"]] == ["doc-1"]
 
+    async def test_documents_collection_query_matches_all_tokens_not_just_substring(self):
+        from zenos.interface.mcp import search
+
+        doc_hit = _make_entity(
+            id="doc-1",
+            name="ADR-013: 分散治理模型——Agent 端語意判斷 vs Server 端結構執法",
+            type="document",
+            summary="分散治理 decision",
+            sources=[{"uri": "adr.md", "label": "ADR-013-distributed-governance.md", "type": "github"}],
+        )
+        doc_miss = _make_entity(
+            id="doc-2",
+            name="Other ADR",
+            type="document",
+            summary="unrelated",
+            sources=[{"uri": "other.md", "label": "other.md", "type": "github"}],
+        )
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc_hit, doc_miss])
+            mock_os._entities.get_by_name = AsyncMock(return_value=None)
+
+            result = await search(
+                collection="documents",
+                query="Agent 端語意判斷 Server 端結構執法",
+            )
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"]] == ["doc-1"]
+
+    async def test_documents_entity_name_filter_uses_related_to_links(self):
+        from zenos.interface.mcp import search
+
+        primary = _make_entity(id="module-primary", name="Primary Module", type="module")
+        secondary = _make_entity(id="module-secondary", name="Secondary Module", type="module")
+        doc = _make_entity(
+            id="doc-1",
+            name="Shared Spec",
+            type="document",
+            parent_id="module-primary",
+            summary="spec",
+        )
+        rel = Relationship(
+            id="rel-1",
+            source_entity_id="doc-1",
+            target_id="module-secondary",
+            type="related_to",
+            description="document linked to entity",
+        )
+
+        async def list_all(type_filter=None):
+            if type_filter == "document":
+                return [doc]
+            return [primary, secondary, doc]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.get_by_name = AsyncMock(return_value=secondary)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[rel])
+
+            result = await search(collection="documents", entity_name="Secondary Module")
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"]] == ["doc-1"]
+            assert data["documents"][0]["linked_entity_ids"] == ["module-primary", "module-secondary"]
+            assert data["documents"][0]["related_entity_ids"] == ["module-secondary"]
+
+    async def test_documents_entity_name_prioritizes_primary_link_over_related_link(self):
+        from zenos.interface.mcp import search
+
+        target = _make_entity(id="module-mcp", name="MCP 介面設計", type="module")
+        l3_governance = _make_entity(id="module-l3", name="L3 文件治理", type="module")
+        primary_doc = _make_entity(
+            id="doc-primary",
+            name="MCP Primary Index",
+            type="document",
+            parent_id="module-mcp",
+            status="current",
+            summary="answers MCP tool design questions",
+            doc_role="single",
+            sources=[{"source_id": "src-primary", "uri": "mcp.md"}],
+        )
+        related_index = _make_entity(
+            id="doc-related-index",
+            name="L3 Governance Retrieval Map",
+            type="document",
+            parent_id="module-l3",
+            status="current",
+            summary="answers L3 document governance questions",
+            details={"formal_entry": True},
+            doc_role="index",
+            bundle_highlights=[{"source_id": "src-related", "priority": "primary"}],
+            sources=[
+                {"source_id": "src-related", "uri": "l3.md"},
+                {"source_id": "src-extra", "uri": "l3-extra.md"},
+            ],
+        )
+        rel = Relationship(
+            id="rel-1",
+            source_entity_id="doc-related-index",
+            target_id="module-mcp",
+            type="related_to",
+            description="document linked to entity",
+        )
+
+        async def list_all(type_filter=None):
+            if type_filter == "document":
+                return [related_index, primary_doc]
+            return [target, l3_governance, related_index, primary_doc]
+
+        async def list_by_entity(entity_id):
+            if entity_id == "doc-related-index":
+                return [rel]
+            return []
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.get_by_name = AsyncMock(return_value=target)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(side_effect=list_by_entity)
+
+            result = await search(collection="documents", entity_name="MCP 介面設計")
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"]] == ["doc-primary", "doc-related-index"]
+
+    async def test_documents_product_filter_uses_any_linked_entity(self):
+        from zenos.interface.mcp import search
+
+        product = _make_entity(id="product-1", name="Product", type="product", parent_id=None)
+        primary = _make_entity(id="module-primary", name="Primary Module", type="module", parent_id=None)
+        secondary = _make_entity(id="module-secondary", name="Secondary Module", type="module", parent_id="product-1")
+        doc = _make_entity(
+            id="doc-1",
+            name="Shared Spec",
+            type="document",
+            parent_id="module-primary",
+            summary="spec",
+        )
+        rel = Relationship(
+            id="rel-1",
+            source_entity_id="doc-1",
+            target_id="module-secondary",
+            type="related_to",
+            description="document linked to entity",
+        )
+
+        async def list_all(type_filter=None):
+            if type_filter == "document":
+                return [doc]
+            return [product, primary, secondary, doc]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.get_by_name = AsyncMock(return_value=None)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[rel])
+
+            result = await search(collection="documents", product_id="product-1")
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"]] == ["doc-1"]
+
+    async def test_documents_search_prioritizes_current_index_retrieval_maps(self):
+        from zenos.interface.mcp import search
+
+        module = _make_entity(id="module-1", name="L3 文件治理", type="module")
+        single_doc = _make_entity(
+            id="doc-single",
+            name="Single Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="single source doc",
+            doc_role="single",
+            sources=[{"source_id": "src-single", "uri": "single.md"}],
+            updated_at=datetime(2026, 4, 24, tzinfo=timezone.utc),
+        )
+        draft_index = _make_entity(
+            id="doc-draft-index",
+            name="Draft Index",
+            type="document",
+            parent_id="module-1",
+            status="draft",
+            summary="draft index",
+            doc_role="index",
+            bundle_highlights=[{"source_id": "src-draft", "priority": "primary"}],
+            sources=[{"source_id": "src-draft", "uri": "draft.md"}],
+            updated_at=datetime(2026, 4, 25, tzinfo=timezone.utc),
+        )
+        current_index = _make_entity(
+            id="doc-current-index",
+            name="Current Index",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="retrieval map for the bundle",
+            details={"formal_entry": True},
+            doc_role="index",
+            bundle_highlights=[{"source_id": "src-primary", "priority": "primary"}],
+            sources=[
+                {"source_id": "src-primary", "uri": "primary.md"},
+                {"source_id": "src-ref", "uri": "reference.md"},
+            ],
+            updated_at=datetime(2026, 4, 23, tzinfo=timezone.utc),
+        )
+
+        async def list_all(type_filter=None):
+            if type_filter == "document":
+                return [single_doc, draft_index, current_index]
+            return [module, single_doc, draft_index, current_index]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.get_by_name = AsyncMock(return_value=module)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await search(collection="documents", entity_name="L3 文件治理")
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"]] == [
+                "doc-current-index",
+                "doc-single",
+                "doc-draft-index",
+            ]
+
+    async def test_documents_entity_name_many_results_auto_degrades_to_summary_payload(self):
+        from zenos.interface.mcp import search
+
+        module = _make_entity(id="module-1", name="語意治理 Pipeline", type="module")
+        docs = [
+            _make_entity(
+                id=f"doc-{i}",
+                name=f"Doc {i}",
+                type="document",
+                parent_id="module-1",
+                status="current",
+                summary=f"retrieval map {i}",
+                sources=[{"source_id": f"src-{i}", "uri": f"doc-{i}.md", "type": "github"}],
+                doc_role="index",
+            )
+            for i in range(11)
+        ]
+
+        async def list_all(type_filter=None):
+            if type_filter == "document":
+                return docs
+            return [module, *docs]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.get_by_name = AsyncMock(return_value=module)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await search(collection="documents", entity_name="語意治理 Pipeline", limit=20)
+            data = _ok_data(result)
+
+            assert len(data["documents"]) == 11
+            assert "sources" not in data["documents"][0]
+            assert "summary" not in data["documents"][0]
+            assert "summary_short" in data["documents"][0]
+            assert data["documents"][0]["source_count"] == 1
+            assert data["documents"][0]["primary_source"]["uri"].endswith(".md")
+            assert any("compact summary" in warning for warning in result["warnings"])
+
 
 class TestSearchNewParams:
     """Tests for new search params: product_id, offset, entity_level."""
@@ -779,6 +1052,67 @@ class TestGetTool:
         finally:
             _current_partner.reset(token)
 
+    async def test_guest_get_document_allows_secondary_related_to_scope(self):
+        from zenos.interface.mcp import get, _current_partner
+
+        shared_root = _make_entity(id="product-acme", type="product", level=1, name="Acme", parent_id=None)
+        shared_module = _make_entity(
+            id="module-shared",
+            name="Shared Module",
+            type="module",
+            level=2,
+            parent_id="product-acme",
+            visibility="public",
+        )
+        other_root = _make_entity(id="product-other", type="product", level=1, name="Other", parent_id=None)
+        primary_module = _make_entity(
+            id="module-other",
+            name="Other Module",
+            type="module",
+            level=2,
+            parent_id="product-other",
+            visibility="public",
+        )
+        doc = _make_entity(
+            id="doc-secondary-shared",
+            name="Secondary Shared Doc",
+            type="document",
+            level=3,
+            parent_id="module-other",
+            visibility="public",
+        )
+        rel = Relationship(
+            id="rel-doc-secondary",
+            source_entity_id="doc-secondary-shared",
+            target_id="module-shared",
+            type="related_to",
+            description="document linked to entity",
+        )
+
+        token = _current_partner.set(
+            {
+                "id": "p-guest",
+                "isAdmin": False,
+                "workspaceRole": "guest",
+                "authorizedEntityIds": ["product-acme"],
+            }
+        )
+        try:
+            with patch("zenos.interface.mcp.entity_repo") as mock_er, \
+                 patch("zenos.interface.mcp.ontology_service") as mock_os:
+                mock_er.list_all = AsyncMock(return_value=[shared_root, shared_module, other_root, primary_module, doc])
+                mock_os.get_document = AsyncMock(return_value=doc)
+                mock_os._relationships = AsyncMock()
+                mock_os._relationships.list_by_entity = AsyncMock(return_value=[rel])
+                mock_os._entities = AsyncMock()
+                mock_os._entities.list_all = AsyncMock(return_value=[shared_root, shared_module, other_root, primary_module, doc])
+
+                result = await get(collection="documents", id="doc-secondary-shared")
+
+                assert _ok_data(result)["id"] == "doc-secondary-shared"
+        finally:
+            _current_partner.reset(token)
+
     async def test_get_entity_not_found(self):
         from zenos.interface.mcp import get
 
@@ -860,6 +1194,41 @@ class TestGetTool:
 
             assert _ok_data(result)["title"] == "API Spec"
 
+    async def test_get_document_exposes_canonical_linked_entity_ids(self):
+        from zenos.interface.mcp import get
+
+        doc = _make_entity(
+            id="doc-1",
+            name="Shared Spec",
+            type="document",
+            parent_id="module-primary",
+            summary="spec",
+        )
+        primary = _make_entity(id="module-primary", name="Primary Module", type="module")
+        secondary = _make_entity(id="module-secondary", name="Secondary Module", type="module")
+        rel = Relationship(
+            id="rel-1",
+            source_entity_id="doc-1",
+            target_id="module-secondary",
+            type="related_to",
+            description="document linked to entity",
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[rel])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[primary, secondary, doc])
+
+            result = await get(collection="documents", id="doc-1")
+            data = _ok_data(result)
+
+            assert data["linked_entity_ids"] == ["module-primary", "module-secondary"]
+            assert data["primary_linked_entity_id"] == "module-primary"
+            assert data["related_entity_ids"] == ["module-secondary"]
+            assert [e["name"] for e in data["linked_entities"]] == ["Primary Module", "Secondary Module"]
+
     async def test_get_protocol_by_id_prefers_protocol_doc_id(self):
         from zenos.interface.mcp import get
 
@@ -939,6 +1308,69 @@ class TestReadSourceTool:
 
             assert _non_ok_data(result, "error")["error"] == "ADAPTER_ERROR"
 
+    async def test_read_source_zenos_native_without_revision_returns_snapshot_unavailable(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-native",
+            name="Native Doc",
+            type="document",
+            sources=[{
+                "source_id": "src-native",
+                "uri": "/docs/doc-native",
+                "type": "zenos_native",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={"error": "NOT_FOUND"})
+
+            result = await read_source(doc_id="doc-native")
+            data = _non_ok_data(result, "error")
+
+            assert data["error"] == "SNAPSHOT_UNAVAILABLE"
+            assert data["source_type"] == "zenos_native"
+            assert "Dashboard 儲存文件" in data["setup_hint"]
+
+    async def test_read_source_zenos_native_returns_snapshot_content(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-native",
+            name="Native Doc",
+            type="document",
+            sources=[{
+                "source_id": "src-native",
+                "uri": "/docs/doc-native",
+                "type": "zenos_native",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={
+                "content": "# Native",
+                "content_type": "full",
+                "source_id": "src-native",
+            })
+
+            result = await read_source(doc_id="doc-native")
+            data = _ok_data(result)
+
+            assert data["content"] == "# Native"
+            assert data["content_type"] == "full"
+
 
 # ---------------------------------------------------------------------------
 # Tool 4: write
@@ -975,6 +1407,15 @@ class TestWriteTool:
             )
 
             assert result["status"] == "ok"
+            assert result["data"]["id"] == entity.id
+            assert result["data"]["name"] == entity.name
+            assert result["data"]["type"] == entity.type
+            assert result["data"]["level"] == entity.level
+            assert result["data"]["status"] == entity.status
+            assert result["data"]["parent_id"] == entity.parent_id
+            assert result["data"]["entity_id"] == entity.id
+            assert result["data"]["entity_name"] == entity.name
+            assert result["data"]["entity"]["id"] == entity.id
             assert result["data"]["entity"]["name"] == "Paceriz"
             assert result["warnings"] == []
             assert "context_bundle" in result
@@ -1127,6 +1568,486 @@ class TestWriteTool:
             assert result["status"] == "rejected"
             assert "Relationship" in result["rejection_reason"]
 
+    async def test_write_relationship_impacts_non_concrete_returns_rejected(self):
+        from zenos.interface.mcp import write
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.add_relationship = AsyncMock(
+                side_effect=ValueError(
+                    "impacts relationship description must be concrete. "
+                    "Use format: A 改了什麼 → B 的什麼要跟著看"
+                )
+            )
+
+            result = await write(
+                collection="relationships",
+                data={
+                    "source_entity_id": "ent-1",
+                    "target_entity_id": "ent-2",
+                    "type": "impacts",
+                    "description": "A affects B",
+                },
+            )
+
+            assert result["status"] == "rejected"
+            assert "impacts relationship description must be concrete" in result["rejection_reason"]
+
+    async def test_write_patches_dry_run_validates_document_repair_patches(self):
+        from zenos.interface.mcp import write
+
+        patch_payload = {
+            "tool": "write",
+            "collection": "documents",
+            "needs_agent_review": True,
+            "data": {
+                "id": "doc-1",
+                "title": "Spec Index",
+                "doc_role": "index",
+                "summary": "Agent 找到對應 L2 後，先讀這份 summary 再選 source。",
+                "linked_entity_ids": ["module-1"],
+            },
+        }
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            result = await write(
+                collection="patches",
+                data={"dry_run": True, "patches": [patch_payload]},
+            )
+
+        data = _ok_data(result)
+        assert data["dry_run"] is True
+        assert data["validated_count"] == 1
+        assert data["patches"][0]["data"]["id"] == "doc-1"
+        mock_os.upsert_document.assert_not_called()
+
+    async def test_write_patches_dry_run_validates_index_create_patch(self):
+        from zenos.interface.mcp import write
+
+        patch_payload = {
+            "tool": "write",
+            "collection": "documents",
+            "needs_agent_review": True,
+            "data": {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "create_index_document": True,
+                "title": "Action Layer：文件群索引",
+                "status": "current",
+                "doc_role": "index",
+                "formal_entry": True,
+                "linked_entity_ids": ["module-1"],
+                "tags": {"what": ["Action Layer"], "why": "routing", "how": "index", "who": ["agent"]},
+                "summary": "Agent 找到 L2 後，先讀這份 retrieval map 再選 source。",
+                "change_summary": "Analyzer 建議建立 current index document。",
+                "sources": [{
+                    "source_id": "src-1",
+                    "type": "zenos_native",
+                    "uri": "/docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "label": "GUIDE: Action Layer index",
+                    "doc_type": "GUIDE",
+                    "doc_status": "current",
+                    "is_primary": True,
+                    "retrieval_mode": "snapshot",
+                    "content_access": "full",
+                }],
+                "bundle_highlights": [{
+                    "source_id": "src-1",
+                    "headline": "Action Layer index",
+                    "reason_to_read": "需要理解 Action Layer 的文件入口時先讀。",
+                    "priority": "primary",
+                }],
+            },
+        }
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            result = await write(
+                collection="patches",
+                data={"dry_run": True, "patches": [patch_payload]},
+            )
+
+        data = _ok_data(result)
+        assert data["dry_run"] is True
+        assert data["validated_count"] == 1
+        assert data["patches"][0]["data"]["create_index_document"] is True
+        mock_os.upsert_document.assert_not_called()
+
+    async def test_write_patches_rejects_index_create_with_wrong_source_uri(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="patches",
+            data={
+                "patches": [{
+                    "tool": "write",
+                    "collection": "documents",
+                    "needs_agent_review": True,
+                    "data": {
+                        "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                        "create_index_document": True,
+                        "title": "Action Layer：文件群索引",
+                        "status": "current",
+                        "doc_role": "index",
+                        "linked_entity_ids": ["module-1"],
+                        "tags": {"what": ["Action Layer"], "why": "routing", "how": "index", "who": ["agent"]},
+                        "summary": "Agent 找到 L2 後，先讀這份 retrieval map 再選 source。",
+                        "change_summary": "Analyzer 建議建立 current index document。",
+                        "sources": [{
+                            "source_id": "src-1",
+                            "type": "zenos_native",
+                            "uri": "/docs/other-doc",
+                            "is_primary": True,
+                        }],
+                        "bundle_highlights": [{
+                            "source_id": "src-1",
+                            "headline": "Action Layer index",
+                            "reason_to_read": "需要理解 Action Layer 的文件入口時先讀。",
+                            "priority": "primary",
+                        }],
+                    },
+                }],
+            },
+        )
+
+        data = _non_ok_data(result, "rejected")
+        assert data["errors"][0]["reason"] == "patch_create_index_source_uri_must_match_document"
+
+    async def test_write_patches_rejects_non_document_patch_batch(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="patches",
+            data={
+                "patches": [{
+                    "tool": "write",
+                    "collection": "relationships",
+                    "needs_agent_review": True,
+                    "data": {
+                        "source_entity_id": "a",
+                        "target_entity_id": "b",
+                        "type": "related_to",
+                        "description": "x",
+                    },
+                }],
+            },
+        )
+
+        data = _non_ok_data(result, "rejected")
+        assert result["rejection_reason"] == "invalid_patch_batch"
+        assert data["errors"][0]["reason"] == "patch_collection_must_be_documents"
+        assert any("tool=write" in s and "collection=documents" in s for s in result["suggestions"])
+
+    async def test_write_patches_missing_review_flag_suggests_preserving_analyzer_patch(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="patches",
+            data={
+                "dry_run": True,
+                "patches": [{
+                    "tool": "write",
+                    "collection": "documents",
+                    "data": {
+                        "id": "doc-1",
+                        "title": "Spec Index",
+                        "summary": "Agent 找到對應 L2 後，先讀這份 summary 再選 source。",
+                    },
+                }],
+            },
+        )
+
+        data = _non_ok_data(result, "rejected")
+        assert data["errors"][0]["reason"] == "patch_must_be_analyzer_reviewable"
+        assert any("needs_agent_review=true" in s for s in result["suggestions"])
+
+    async def test_write_patches_rejects_disallowed_document_fields(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="patches",
+            data={
+                "patches": [{
+                    "tool": "write",
+                    "collection": "documents",
+                    "needs_agent_review": True,
+                    "data": {
+                        "id": "doc-1",
+                        "title": "Spec Index",
+                        "sync_mode": "archive",
+                    },
+                }],
+            },
+        )
+
+        data = _non_ok_data(result, "rejected")
+        assert data["errors"][0]["reason"] == "patch_data_has_disallowed_fields"
+        assert data["errors"][0]["fields"] == ["sync_mode"]
+        assert any("suggested_write_patch" in s for s in result["suggestions"])
+
+    async def test_write_patches_rejects_unsafe_add_source_patch(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="patches",
+            data={
+                "patches": [{
+                    "tool": "write",
+                    "collection": "documents",
+                    "needs_agent_review": True,
+                    "data": {
+                        "id": "doc-1",
+                        "title": "Spec Index",
+                        "add_source": {
+                            "type": "github",
+                            "uri": "https://github.com/acme/repo/blob/main/spec.md",
+                            "is_primary": True,
+                        },
+                    },
+                }],
+            },
+        )
+
+        data = _non_ok_data(result, "rejected")
+        assert data["errors"][0]["reason"] == "patch_add_source_must_be_zenos_native"
+        assert any("add_source repair patch" in s for s in result["suggestions"])
+
+    async def test_write_patches_rejects_invalid_add_source_retrieval_mode(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="patches",
+            data={
+                "patches": [{
+                    "tool": "write",
+                    "collection": "documents",
+                    "needs_agent_review": True,
+                    "data": {
+                        "id": "doc-1",
+                        "title": "Spec Index",
+                        "add_source": {
+                            "type": "zenos_native",
+                            "uri": "/docs/doc-1",
+                            "is_primary": True,
+                            "retrieval_mode": "full",
+                        },
+                    },
+                }],
+            },
+        )
+
+        data = _non_ok_data(result, "rejected")
+        assert data["errors"][0]["reason"] == "patch_add_source_invalid_retrieval_mode"
+
+    async def test_write_patches_rejects_invalid_add_source_doc_type(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="patches",
+            data={
+                "patches": [{
+                    "tool": "write",
+                    "collection": "documents",
+                    "needs_agent_review": True,
+                    "data": {
+                        "id": "doc-1",
+                        "title": "Spec Index",
+                        "add_source": {
+                            "type": "zenos_native",
+                            "uri": "/docs/doc-1",
+                            "is_primary": True,
+                            "doc_type": "NOT_A_TYPE",
+                        },
+                    },
+                }],
+            },
+        )
+
+        data = _non_ok_data(result, "rejected")
+        assert data["errors"][0]["reason"] == "patch_add_source_invalid_doc_type"
+
+    async def test_write_patches_applies_documents_sequentially(self):
+        from zenos.interface.mcp import write
+        from zenos.domain.knowledge import Entity, Tags
+
+        doc = Entity(
+            id="doc-1",
+            name="Spec Index",
+            type="document",
+            summary="retrieval map",
+            tags=Tags(what=["spec"], why="governance", how="mcp", who=["agent"]),
+            status="current",
+            parent_id="module-1",
+            sources=[],
+            doc_role="index",
+        )
+        patch_payload = {
+            "tool": "write",
+            "collection": "documents",
+            "needs_agent_review": True,
+            "data": {
+                "id": "doc-1",
+                "title": "Spec Index",
+                "status": "current",
+                "doc_role": "index",
+                "summary": "Agent 找到對應 L2 後，先讀這份 summary 再選 source。",
+                "linked_entity_ids": ["module-1"],
+            },
+        }
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.write._load_document_relationships", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._document_delivery_suggestions", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._maybe_auto_publish_document", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+            patch("zenos.interface.mcp.write._audit_log"),
+        ):
+            mock_os.upsert_document = AsyncMock(return_value=doc)
+
+            result = await write(
+                collection="patches",
+                data={"patches": [patch_payload], "source": "analyze.invalid_documents"},
+            )
+
+        data = _ok_data(result)
+        assert data["applied_count"] == 1
+        assert data["rejected_count"] == 0
+        assert data["applied"][0]["document_id"] == "doc-1"
+        mock_os.upsert_document.assert_awaited_once()
+        call_data = mock_os.upsert_document.await_args.args[0]
+        assert call_data["id"] == "doc-1"
+        assert call_data["summary"].startswith("Agent 找到對應 L2")
+
+    async def test_write_patches_accepts_top_level_source_metadata(self):
+        from zenos.interface.mcp import write
+        from zenos.domain.knowledge import Entity, Tags
+
+        doc = Entity(
+            id="doc-1",
+            name="Spec Index",
+            type="document",
+            summary="retrieval map",
+            tags=Tags(what=["spec"], why="governance", how="mcp", who=["agent"]),
+            status="current",
+            parent_id="module-1",
+            sources=[],
+            doc_role="index",
+        )
+        patch_payload = {
+            "tool": "write",
+            "collection": "documents",
+            "needs_agent_review": True,
+            "data": {
+                "id": "doc-1",
+                "title": "Spec Index",
+                "status": "current",
+                "doc_role": "index",
+                "summary": "Agent 找到對應 L2 後，先讀這份 summary 再選 source。",
+                "linked_entity_ids": ["module-1"],
+            },
+        }
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.write._load_document_relationships", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._document_delivery_suggestions", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._maybe_auto_publish_document", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+            patch("zenos.interface.mcp.write._audit_log") as audit_log,
+        ):
+            mock_os.upsert_document = AsyncMock(return_value=doc)
+
+            result = await write(
+                collection="patches",
+                data={"patches": [patch_payload]},
+                source="dogfood.patch_batch",
+            )
+
+        data = _ok_data(result)
+        assert data["applied_count"] == 1
+        audit_log.assert_called()
+        assert audit_log.call_args.kwargs["changes"]["source"] == "dogfood.patch_batch"
+
+    async def test_write_patches_applies_index_create_with_internal_allow_create(self):
+        from zenos.interface.mcp import write
+        from zenos.domain.knowledge import Entity, Tags
+
+        doc = Entity(
+            id="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            name="Action Layer：文件群索引",
+            type="document",
+            summary="retrieval map",
+            tags=Tags(what=["Action Layer"], why="routing", how="index", who=["agent"]),
+            status="current",
+            parent_id="module-1",
+            sources=[{
+                "source_id": "src-1",
+                "type": "zenos_native",
+                "uri": "/docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "is_primary": True,
+            }],
+            doc_role="index",
+            bundle_highlights=[{
+                "source_id": "src-1",
+                "headline": "Action Layer index",
+                "reason_to_read": "需要理解 Action Layer 的文件入口時先讀。",
+                "priority": "primary",
+            }],
+        )
+        patch_payload = {
+            "tool": "write",
+            "collection": "documents",
+            "needs_agent_review": True,
+            "data": {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "create_index_document": True,
+                "title": "Action Layer：文件群索引",
+                "status": "current",
+                "doc_role": "index",
+                "linked_entity_ids": ["module-1"],
+                "tags": {"what": ["Action Layer"], "why": "routing", "how": "index", "who": ["agent"]},
+                "summary": "Agent 找到 L2 後，先讀這份 retrieval map 再選 source。",
+                "change_summary": "Analyzer 建議建立 current index document。",
+                "sources": [{
+                    "source_id": "src-1",
+                    "type": "zenos_native",
+                    "uri": "/docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "label": "GUIDE: Action Layer index",
+                    "doc_type": "GUIDE",
+                    "doc_status": "current",
+                    "is_primary": True,
+                    "retrieval_mode": "snapshot",
+                    "content_access": "full",
+                }],
+                "bundle_highlights": [{
+                    "source_id": "src-1",
+                    "headline": "Action Layer index",
+                    "reason_to_read": "需要理解 Action Layer 的文件入口時先讀。",
+                    "priority": "primary",
+                }],
+            },
+        }
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.write._load_document_relationships", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._document_delivery_suggestions", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._maybe_auto_publish_document", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+            patch("zenos.interface.mcp.write._audit_log"),
+        ):
+            mock_os.upsert_document = AsyncMock(return_value=doc)
+
+            result = await write(
+                collection="patches",
+                data={"patches": [patch_payload], "source": "analyze.invalid_documents"},
+            )
+
+        data = _ok_data(result)
+        assert data["applied_count"] == 1
+        call_data = mock_os.upsert_document.await_args.args[0]
+        assert call_data["id"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        assert call_data["allow_create_with_id"] is True
+        assert "create_index_document" not in call_data
+
     async def test_write_documents_sync_mode_routes_to_sync_api(self):
         from zenos.interface.mcp import write
 
@@ -1278,6 +2199,58 @@ class TestWriteTool:
 
             assert result["status"] == "ok"
             assert any("git + gcs" in s for s in result["suggestions"])
+        finally:
+            _current_partner.reset(token)
+
+    async def test_write_documents_response_echoes_normalized_multi_linkage(self):
+        from zenos.interface.mcp import write, _current_partner
+        from zenos.domain.knowledge import Entity, Tags
+
+        doc = Entity(
+            id="doc-1",
+            name="Shared Spec",
+            type="document",
+            summary="summary",
+            tags=Tags(what=["demo"], why="why", how="how", who=["pm"]),
+            status="draft",
+            parent_id="module-primary",
+            sources=[],
+            doc_role="index",
+        )
+        rel = Relationship(
+            id="rel-1",
+            source_entity_id="doc-1",
+            target_id="module-secondary",
+            type="related_to",
+            description="document linked to entity",
+        )
+
+        token = _current_partner.set({"id": "partner-1", "isAdmin": False})
+        try:
+            with (
+                patch("zenos.interface.mcp.ontology_service") as mock_os,
+                patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+                patch("zenos.interface.mcp.write._audit_log"),
+            ):
+                mock_os.upsert_document = AsyncMock(return_value=doc)
+                mock_os._relationships = AsyncMock()
+                mock_os._relationships.list_by_entity = AsyncMock(return_value=[rel])
+
+                result = await write(
+                    collection="documents",
+                    data={
+                        "title": "Shared Spec",
+                        "summary": "summary",
+                        "status": "draft",
+                        "tags": {"what": ["demo"], "why": "why", "how": "how", "who": ["pm"]},
+                        "linked_entity_ids": ["module-primary", "module-secondary"],
+                    },
+                )
+
+            data = _ok_data(result)
+            assert data["linked_entity_ids"] == ["module-primary", "module-secondary"]
+            assert data["primary_linked_entity_id"] == "module-primary"
+            assert data["related_entity_ids"] == ["module-secondary"]
         finally:
             _current_partner.reset(token)
 
@@ -1560,7 +2533,7 @@ class TestConfirmTool:
             entries = [
                 {"type": "insight", "content": "missing entity_id — should be skipped"},
                 {"entity_id": "ent-1", "type": "insight", "content": "x" * 201},  # too long
-                {"entity_id": "ent-2", "type": "insight", "content": "valid entry"},
+                {"entity_id": "ent-2", "type": "insight", "content": "決策：entry 只記 code/git log 讀不出的長期脈絡。"},
             ]
             await confirm(
                 collection="tasks",
@@ -1571,6 +2544,32 @@ class TestConfirmTool:
 
             # Only the valid entry should be written
             assert mock_entry_repo.create.call_count == 1
+
+    async def test_confirm_task_entity_entries_skips_completion_reports(self):
+        from zenos.interface.mcp import confirm
+        from zenos.application.action.task_service import TaskResult
+
+        t = _make_task(id="task-review", status="done")
+        confirm_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.mcp.task_service") as mock_ts, \
+             patch("zenos.interface.mcp.entry_repo") as mock_entry_repo:
+            mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
+            mock_entry_repo.create = AsyncMock(side_effect=lambda e: e)
+
+            entries = [
+                {"entity_id": "ent-1", "type": "change", "content": "QA PASS；pytest 337 passed；AC-DF-01 通過"},
+                {"entity_id": "ent-2", "type": "decision", "content": "決策：journal 僅保留重大 flow；task completion 留在 task.result，不寫 entry。"},
+            ]
+            result = await confirm(
+                collection="tasks",
+                id="task-review",
+                accepted=True,
+                entity_entries=entries,
+            )
+
+            assert mock_entry_repo.create.call_count == 1
+            assert any("entry_is_acceptance_report" in warning for warning in result["warnings"])
 
     async def test_confirm_task_without_entity_entries_is_backward_compatible(self):
         """confirm without entity_entries works the same as before."""
@@ -1812,6 +2811,33 @@ class TestTaskTool:
             assert payload["source_metadata"]["sync_sources"] == metadata["sync_sources"]
             assert payload["source_metadata"]["provenance"] == metadata["provenance"]
             assert payload["source_metadata"]["created_via_agent"] is True
+
+    async def test_create_task_returns_auto_inferred_missing_link_warning(self):
+        from zenos.interface.mcp import task
+        from zenos.application.action.task_service import TaskResult
+
+        warning = (
+            "auto-inferred linked entity IDs were ignored because they no longer exist: "
+            "missing-auto-link"
+        )
+        create_result = TaskResult(
+            task=_make_task(linked_entities=[]),
+            cascade_updates=[],
+            warnings=[warning],
+        )
+
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+
+            result = await task(
+                action="create",
+                title="整理來源追溯資料",
+                created_by="amy",
+                product_id="prod-1",
+            )
+
+            assert result["status"] == "ok"
+            assert warning in result["warnings"]
 
     async def test_create_task_accepts_explicit_agent_metadata(self):
         from zenos.interface.mcp import task
@@ -2150,6 +3176,376 @@ class TestAnalyzeTool:
 
             assert _ok_data(result)["blindspots"]["count"] == 1
 
+    async def test_analyze_invalid_documents_caps_bundle_issues(self):
+        from zenos.interface.mcp import analyze
+
+        docs = [
+            _make_entity(
+                id=f"doc-{idx}",
+                name=f"Doc {idx}",
+                type="document",
+                parent_id=f"module-{idx}",
+                status="current",
+                doc_role="index",
+                summary="Thin.",
+                bundle_highlights=[],
+            )
+            for idx in range(60)
+        ]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=docs)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            data = _ok_data(result)["invalid_documents"]
+
+            assert data["bundle_issue_count"] == 120
+            assert data["bundle_issue_limit"] == 50
+            assert data["bundle_issues_truncated"] is True
+            assert len(data["bundle_issues"]) == 50
+            assert data["bundle_issues"][0]["severity"] == "red"
+
+    async def test_analyze_invalid_documents_filters_by_entity_scope(self):
+        from zenos.interface.mcp import analyze
+
+        product = _make_entity(id="prod-1", name="Product", type="product", parent_id=None)
+        module = _make_entity(id="module-1", name="Scoped Module", type="module", parent_id="prod-1")
+        outside_module = _make_entity(id="module-2", name="Outside Module", type="module", parent_id="other-prod")
+        scoped_doc = _make_entity(
+            id="doc-scoped",
+            name="Scoped Index",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            doc_role="index",
+            summary=(
+                "This document bundle answers scoped questions across sources, source routing, primary source, "
+                "and the current reading boundary for this module."
+            ),
+            bundle_highlights=[],
+        )
+        outside_doc = _make_entity(
+            id="doc-outside",
+            name="Outside Index",
+            type="document",
+            parent_id="module-2",
+            status="current",
+            doc_role="index",
+            summary=(
+                "This document bundle answers outside questions across sources, source routing, primary source, "
+                "and the current reading boundary for another module."
+            ),
+            bundle_highlights=[],
+        )
+
+        async def list_all(type_filter=None):
+            if type_filter == "document":
+                return [scoped_doc, outside_doc]
+            return [product, module, outside_module, scoped_doc, outside_doc]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents", entity_id="prod-1")
+            data = _ok_data(result)["invalid_documents"]
+
+            assert data["scope"]["entity_id"] == "prod-1"
+            assert data["scope"]["document_count"] == 1
+            assert data["bundle_issue_count"] == 1
+            assert data["bundle_issues"][0]["entity_id"] == "doc-scoped"
+
+    async def test_analyze_invalid_documents_returns_suggested_write_patch(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-1",
+            name="Thin Index",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            doc_role="index",
+            summary="Thin.",
+            sources=[{
+                "source_id": "src-1",
+                "label": "SPEC-thin.md",
+                "uri": "https://github.com/acme/repo/blob/main/docs/SPEC-thin.md",
+                "is_primary": True,
+                "snapshot_summary": "Defines delayed binding behavior and onboarding acceptance boundaries.",
+            }],
+            bundle_highlights=[],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            data = _ok_data(result)["invalid_documents"]
+
+            highlight_issue = next(
+                issue for issue in data["bundle_issues"]
+                if issue["issue_type"] == "index_missing_bundle_highlights"
+            )
+            repair_patch = highlight_issue["suggested_write_patch"]
+            assert repair_patch["tool"] == "write"
+            assert repair_patch["collection"] == "documents"
+            assert repair_patch["needs_agent_review"] is True
+            assert repair_patch["data"]["id"] == "doc-1"
+            assert repair_patch["data"]["bundle_highlights"][0]["source_id"] == "src-1"
+            assert repair_patch["data"]["bundle_highlights"][0]["priority"] == "primary"
+            assert "需求、驗收邊界或功能規格" in repair_patch["data"]["bundle_highlights"][0]["reason_to_read"]
+            assert repair_patch["data"]["change_summary"]
+
+            summary_issue = next(
+                issue for issue in data["bundle_issues"]
+                if issue["issue_type"] == "index_summary_not_retrieval_map"
+            )
+            summary_patch = summary_issue["suggested_write_patch"]["data"]["summary"]
+            assert "retrieval map" in summary_patch
+            assert "主要回答" in summary_patch
+            assert "Primary source 類型判定為 SPEC" in summary_patch
+            assert "delayed binding behavior" in summary_patch
+
+    async def test_analyze_invalid_documents_omits_unactionable_highlight_patch(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-1",
+            name="Source Without ID Index",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            doc_role="index",
+            summary=(
+                "This document bundle explains sources, source routing, primary source, "
+                "and the current reading boundary for this module."
+            ),
+            sources=[{"uri": "https://github.com/acme/repo/blob/main/docs/spec.md"}],
+            bundle_highlights=[],
+            change_summary="Updated routing.",
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            data = _ok_data(result)["invalid_documents"]
+
+            issue = data["bundle_issues"][0]
+            assert issue["issue_type"] == "index_missing_bundle_highlights"
+            assert "suggested_write_patch" not in issue
+
+    async def test_analyze_invalid_documents_suggests_native_source_patch(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-1",
+            name="SPEC: Sourceless Index",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            doc_role="index",
+            summary=(
+                "This document bundle explains sources, source routing, primary source, "
+                "and the current reading boundary for this module."
+            ),
+            sources=[],
+            bundle_highlights=[],
+            change_summary="Updated routing.",
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            data = _ok_data(result)["invalid_documents"]
+
+            issue = data["bundle_issues"][0]
+            assert issue["issue_type"] == "index_missing_sources"
+            repair_patch = issue["suggested_write_patch"]
+            assert repair_patch["collection"] == "documents"
+            assert repair_patch["data"]["add_source"]["type"] == "zenos_native"
+            assert repair_patch["data"]["add_source"]["uri"] == "/docs/doc-1"
+            assert repair_patch["data"]["add_source"]["doc_type"] == "SPEC"
+            assert repair_patch["data"]["add_source"]["label"].startswith("SPEC:")
+            assert repair_patch["data"]["add_source"]["is_primary"] is True
+            assert repair_patch["data"]["add_source"]["retrieval_mode"] == "snapshot"
+            assert repair_patch["data"]["add_source"]["content_access"] == "full"
+
+    async def test_analyze_invalid_documents_suggests_l2_index_create_patch(self):
+        from zenos.interface.mcp import analyze
+
+        module = _make_entity(
+            id="module-1",
+            name="Action Layer",
+            type="module",
+            parent_id="prod-1",
+        )
+        single_doc = _make_entity(
+            id="doc-single",
+            name="Action Layer PRD",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            doc_role="single",
+            summary="Action Layer requirements.",
+            sources=[{
+                "source_id": "src-existing",
+                "uri": "https://github.com/acme/repo/blob/main/docs/PRD.md",
+                "label": "PRD.md",
+                "doc_type": "SPEC",
+                "snapshot_summary": "Defines action lifecycle, ownership, and acceptance criteria.",
+            }],
+        )
+
+        async def list_all(type_filter=None):
+            if type_filter == "document":
+                return [single_doc]
+            return [module, single_doc]
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.analyze._new_id", return_value="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            patch("zenos.interface.mcp.analyze.generate_source_id", return_value="src-new"),
+        ):
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            issues = _ok_data(result)["invalid_documents"]["bundle_issues"]
+
+            issue = next(
+                item for item in issues
+                if item["issue_type"] == "l2_missing_current_index_document"
+            )
+            repair_patch = issue["suggested_write_patch"]
+            patch_data = repair_patch["data"]
+            assert repair_patch["collection"] == "documents"
+            assert patch_data["id"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            assert patch_data["create_index_document"] is True
+            assert patch_data["title"] == "Action Layer：文件群索引"
+            assert patch_data["linked_entity_ids"] == ["module-1"]
+            assert patch_data["sources"][0]["source_id"] == "src-new"
+            assert patch_data["sources"][0]["uri"] == "/docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            assert patch_data["bundle_highlights"][0]["source_id"] == "src-new"
+            assert "Action Layer PRD" in patch_data["summary"]
+            assert "action lifecycle" in patch_data["summary"]
+
+    async def test_analyze_invalid_documents_maps_doc_type_prefixes(self):
+        from zenos.interface.mcp import analyze
+
+        docs = [
+            _make_entity(
+                id="doc-adr",
+                name="ADR-005：Graph Library 選型",
+                type="document",
+                parent_id="module-1",
+                status="current",
+                doc_role="index",
+                summary=(
+                    "This document bundle explains sources, source routing, primary source, "
+                    "and the current reading boundary for this module."
+                ),
+                sources=[],
+                bundle_highlights=[],
+                change_summary="Updated routing.",
+            ),
+            _make_entity(
+                id="doc-td",
+                name="TD-dashboard-v1-implementation",
+                type="document",
+                parent_id="module-1",
+                status="current",
+                doc_role="index",
+                summary=(
+                    "This document bundle explains sources, source routing, primary source, "
+                    "and the current reading boundary for this module."
+                ),
+                sources=[],
+                bundle_highlights=[],
+                change_summary="Updated routing.",
+            ),
+            _make_entity(
+                id="doc-prd",
+                name="PRD: Action Layer",
+                type="document",
+                parent_id="module-1",
+                status="current",
+                doc_role="index",
+                summary=(
+                    "This document bundle explains sources, source routing, primary source, "
+                    "and the current reading boundary for this module."
+                ),
+                sources=[],
+                bundle_highlights=[],
+                change_summary="Updated routing.",
+            ),
+            _make_entity(
+                id="doc-guide",
+                name="task-governance：Task 治理操作規範",
+                type="document",
+                parent_id="module-1",
+                status="current",
+                doc_role="index",
+                summary=(
+                    "This document bundle explains sources, source routing, primary source, "
+                    "and the current reading boundary for this module."
+                ),
+                sources=[],
+                bundle_highlights=[],
+                change_summary="Updated routing.",
+            ),
+        ]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=docs)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            issues = _ok_data(result)["invalid_documents"]["bundle_issues"]
+
+            types_by_id = {
+                issue["entity_id"]: issue["suggested_write_patch"]["data"]["add_source"]["doc_type"]
+                for issue in issues
+                if issue["issue_type"] == "index_missing_sources"
+            }
+            assert types_by_id["doc-adr"] == "DECISION"
+            assert types_by_id["doc-td"] == "DESIGN"
+            assert types_by_id["doc-prd"] == "SPEC"
+            assert types_by_id["doc-guide"] == "GUIDE"
+
+    async def test_analyze_invalid_documents_missing_scope_returns_rejected(self):
+        from zenos.interface.mcp import analyze
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents", entity_id="ghost")
+
+            assert result["status"] == "rejected"
+            assert result["data"]["error"] == "NOT_FOUND"
+
     async def test_analyze_all(self):
         from zenos.interface.mcp import analyze
 
@@ -2283,6 +3679,37 @@ class TestAnalyzeTool:
             assert data["kpis"]["blindspot_total"] == 2
             assert data["kpis"]["duplicate_blindspot_rate"] == 0.5
             assert data["kpis"]["bundle_highlights_coverage"] == 0.5
+
+    async def test_analyze_health_forwards_entity_scope(self):
+        from zenos.interface.mcp import analyze
+
+        health_signal = {
+            "scope": {"entity_id": "prod-1", "mode": "subtree"},
+            "kpis": {"quality_score": {"value": 80, "level": "green"}},
+            "overall_level": "green",
+            "recommended_action": "none",
+            "red_reasons": [],
+        }
+        with patch("zenos.interface.mcp.governance_service") as mock_gs:
+            mock_gs.compute_health_signal = AsyncMock(return_value=health_signal)
+
+            result = await analyze(check_type="health", entity_id="prod-1")
+            data = _ok_data(result)
+
+            mock_gs.compute_health_signal.assert_awaited_once_with(entity_id="prod-1")
+            assert data["scope"]["entity_id"] == "prod-1"
+
+    async def test_analyze_health_missing_scope_returns_rejected(self):
+        from zenos.interface.mcp import analyze
+
+        with patch("zenos.interface.mcp.governance_service") as mock_gs:
+            mock_gs.compute_health_signal = AsyncMock(side_effect=ValueError("Entity 'ghost' not found"))
+
+            result = await analyze(check_type="health", entity_id="ghost")
+
+            assert result["status"] == "rejected"
+            assert result["data"]["error"] == "NOT_FOUND"
+            assert "ghost" in result["rejection_reason"]
 
     async def test_analyze_governance_ssot_returns_invalid_input(self):
         from zenos.interface.mcp import analyze
@@ -2536,6 +3963,22 @@ class TestWriteEntriesCollection:
 
         assert result["status"] == "rejected"
         assert "type" in result["rejection_reason"]
+
+    async def test_write_entry_rejects_completion_report_content(self):
+        from zenos.interface.mcp import write
+
+        result = await write(
+            collection="entries",
+            data={
+                "entity_id": "ent-1",
+                "type": "change",
+                "content": "Implementation complete；pytest 337 passed；QA PASS",
+            },
+        )
+
+        assert result["status"] == "rejected"
+        assert result["data"]["error"] == "LOW_VALUE_ENTRY"
+        assert result["data"]["reason"] == "entry_is_completion_report"
 
     async def test_write_entry_context_too_long(self):
         """write entries rejects context exceeding 200 chars."""
@@ -2914,6 +4357,9 @@ class TestGovernanceGuideTool:
 
         # External rule: routing is mentioned
         assert "LAYER_DOWNGRADE_REQUIRED" in content
+        assert "Work Journal gate" in content
+        assert "純掃描無變更不要寫 journal" in content
+        assert "task.result" in content
         # No internal model details
         assert "gemini" not in content.lower()
         assert "flash" not in content.lower()
@@ -2931,6 +4377,22 @@ class TestGovernanceGuideTool:
         assert "git + gcs" in content
         assert "linked_entity_ids" in content
         assert "Spec Compliance Matrix" in content
+        assert "L3 index summary" in content
+        assert "文件群 retrieval map" in content
+        assert 'search(collection="documents", entity_name="<L2 name>")' in content
+        assert "bundle_highlights" in content
+
+    async def test_bundle_rules_require_index_summary_retrieval_map(self):
+        """Bundle guide makes index summaries an agent-readable routing map."""
+        from zenos.interface.mcp import governance_guide
+
+        result = await governance_guide(topic="bundle", level=2)
+        content = _ok_data(result)["content"]
+
+        assert "index summary" in content
+        assert "文件群 retrieval map" in content
+        assert 'search(collection="documents", entity_name="<L2 name>")' in content
+        assert "change_summary" in content
 
 
 class TestBatchUpdateSources:

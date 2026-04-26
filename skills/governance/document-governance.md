@@ -11,6 +11,32 @@ L3 document entity 是正式文件的語意索引入口。
 文件不是 L2（文件是 L2 概念的具體體現），不是 task。
 但對使用者與 agent 而言，**它必須是從 L2 找到正式文件的穩定入口**，不能只是 metadata 容器。
 
+### L3 index summary = 文件群 retrieval map
+
+L3 `doc_role=index` 的 `summary` 不是單一檔案摘要，而是一組 sources 的語意地圖。
+Agent 的預設閱讀順序必須是：
+
+1. 先找到 L2 entity。
+2. 用 `search(collection="documents", entity_name="<L2 name>")` 找 L3 documents。
+3. 優先讀 `doc_role=index` 且 `status=current` 的 `summary` / `change_summary` / `bundle_highlights`。
+4. 只讀任務需要的 source，不盲目打開整包文件。
+
+Index summary 最少要說清楚：
+- 這個 bundle 可以回答哪些問題。
+- 哪個 source 是 SSOT / primary。
+- 哪些 source 分別處理 spec、design、test、reference、delivery、sync。
+- 哪些 source 是 current / draft / stale。
+- 這個 bundle 掛到哪些 L2（`linked_entity_ids`）。
+
+Index summary 應優先使用既有 source metadata 與 `snapshot_summary` 產生 source-aware routing：
+- 有 `snapshot_summary` 時，summary 要摘出該 source 的實際語意用途，不只列檔名。
+- 沒有 `snapshot_summary` 時，至少列出 `label/uri/doc_type/doc_status/is_primary` 與可讀邊界。
+- 治理掃描不得為了產 summary 直接 live 讀外部全文；需要原文時由 agent 另外呼叫 `read_source`。
+- `analyze(check_type="invalid_documents", entity_id="<L2 id>")` 是預設入口；全域 analyze 只用於盤點 backlog。
+
+`change_summary` 描述文件群近期變化，不是單一檔案 diff。
+`bundle_highlights` 是 agent 的 source routing table；缺少時不得宣稱 L3 文件治理完成。
+
 但不要把這句話誤解成「所有文件都不需要驗收邊界」。
 對齊 `SPEC-doc-governance` 與 `SPEC-task-governance`：
 - 文件本身不是 task，不會有 task 的 owner / assignee / confirm lifecycle。

@@ -17,12 +17,14 @@ version: 0.1.0
 ### 啟動時：回顧脈絡 + 搜尋既有 bug
 
 ```python
-# 1. 讀最近 bugfix 日誌，了解近期修過什麼、避免重複調查
-mcp__zenos__journal_read(limit=20, project="{專案名}", flow_type="bugfix")
+# 1. 優先讀近期變更與既有任務，journal 只作 fallback
+mcp__zenos__recent_updates(product="{產品名}", topic="{bug 關鍵字}", limit=10)
 
 # 2. 確認是否已有相同 bug 的任務
 mcp__zenos__search(query="bug 關鍵字", collection="tasks", status="todo,in_progress")
 ```
+
+若 recent_updates / tasks / L2 文件都不足，再讀 `journal_read(limit=5, project="{專案名}", flow_type="bugfix")`。
 
 若找到相同 bug → 更新現有 task，不重複建票。
 若無 → 建新 bug task。

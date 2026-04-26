@@ -21,9 +21,13 @@ version: 0.5.0
 ## 啟動
 
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__recent_updates(product="{產品名}", limit=10)
 mcp__zenos__search(collection="tasks", status="todo,in_progress")
 ```
+
+Journal 只在任務與 L2 context 不足時 fallback：`journal_read(limit=5, project="{專案名}")`。
+
+查 context 不要猜路徑；照 `skills/governance/bootstrap-protocol.md` 的 **Context Happy Path**：recent_updates → tasks → L2 entity → L3 documents → read_source。
 
 拿到任務立即標記：
 

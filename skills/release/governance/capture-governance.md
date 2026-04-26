@@ -22,7 +22,7 @@
 | L2 骨架層 | entity（module/product/goal） | 公司共識概念，改了有下游影響，跨時間存活 |
 | L3 神經層 | document entity | 某份具體文件值得在 ontology 建立語意代理 |
 | 知識條目 | entry（decision/insight 等） | 通過兩關判斷標準的具體知識點 |
-| Work Journal | journal | 每次捕獲完都寫，記錄捕獲狀態與待補 TBD |
+| Work Journal | journal | 只有實際新增/更新知識，或留下 TBD/盲點需要下輪接續時才寫 |
 
 ---
 
@@ -65,7 +65,7 @@
 
 ## Work Journal 規範
 
-每次 `/zenos-capture` 完成後**必須**寫 journal：
+`/zenos-capture` 只有在有實際新增/更新知識、或留下 TBD/盲點需要下輪接續時才寫 journal。純掃描無變更不要寫。
 
 - `flow_type = "capture"`
 - `summary` 寫「捕獲了什麼」和「還缺什麼（TBD）」，不寫數量

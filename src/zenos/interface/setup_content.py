@@ -49,6 +49,7 @@ _WORKFLOW_FILES: list[str] = [
     "feature.md",
     "debug.md",
     "triage.md",
+    "brainstorm.md",
     "marketing-intel.md",
     "marketing-plan.md",
     "marketing-generate.md",
@@ -60,6 +61,7 @@ _WORKFLOW_FILES: list[str] = [
 _AGENT_ROLES: list[str] = [
     "architect", "developer", "qa", "pm",
     "designer", "marketing", "debugger", "challenger",
+    "coach",
 ]
 
 # slash command → SSOT skill 對應

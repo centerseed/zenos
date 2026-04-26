@@ -567,6 +567,37 @@ class TestDocumentConsistencyDetection:
         result = detect_stale_documents_from_consistency([mod, doc], [])
         assert len(result) == 0
 
+    def test_related_to_links_are_first_class_document_links(self):
+        """L3 document consistency should group docs by related_to, not only parent_id."""
+        old_doc = _entity("d1", "設計文件 v1.0", entity_type=EntityType.DOCUMENT,
+                          parent_id="mod-primary-a", summary="v1.0 舊設計")
+        new_doc = _entity("d2", "設計文件 v3.0", entity_type=EntityType.DOCUMENT,
+                          parent_id="mod-primary-b", summary="v3.0 新設計")
+        secondary = _entity("mod-secondary", "Secondary Module")
+        rels = [
+            Relationship(
+                id="r-doc-1",
+                source_entity_id="d1",
+                target_id="mod-secondary",
+                type=RelationshipType.RELATED_TO,
+                description="document linked to entity",
+            ),
+            Relationship(
+                id="r-doc-2",
+                source_entity_id="d2",
+                target_id="mod-secondary",
+                type=RelationshipType.RELATED_TO,
+                description="document linked to entity",
+            ),
+        ]
+
+        result = detect_stale_documents_from_consistency([old_doc, new_doc, secondary], rels)
+
+        assert any(
+            w["reason"] == "version_lag" and w["linked_entity_id"] == "mod-secondary"
+            for w in result
+        )
+
 
 # ─────────────────────────────────────────────
 # P1-1: task signal pure functions (DC-22)

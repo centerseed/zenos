@@ -666,9 +666,14 @@ class TestUpsertDocumentValidation:
             tags=Tags(what=["api"], why="y", how="h", who=["w"]),
             parent_id="prod-1",
         )
+        stored_entities = {"mod-1": module}
         repos["entity_repo"].get_by_id = AsyncMock(
-            side_effect=lambda eid: {"mod-1": module}.get(eid)
+            side_effect=lambda eid: stored_entities.get(eid)
         )
+        async def upsert_and_store(entity):
+            stored_entities[entity.id] = entity
+            return entity
+        repos["entity_repo"].upsert = AsyncMock(side_effect=upsert_and_store)
         svc = _make_service(repos)
         result = await svc.upsert_document({
             "title": "API Spec",
@@ -684,6 +689,96 @@ class TestUpsertDocumentValidation:
         # upsert_document now returns Entity(type="document")
         assert result.name == "API Spec"
         assert result.type == "document"
+
+    async def test_zenos_native_source_type_is_valid_for_document_write(self):
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        stored_entities = {"mod-1": module}
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: stored_entities.get(eid)
+        )
+        async def upsert_and_store(entity):
+            stored_entities[entity.id] = entity
+            return entity
+        repos["entity_repo"].upsert = AsyncMock(side_effect=upsert_and_store)
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "title": "Native Doc",
+            "source": {
+                "type": "zenos_native",
+                "uri": "/docs/native-doc",
+                "label": "Native markdown",
+            },
+            "tags": {"what": ["api"], "why": "ref", "how": "REST", "who": ["dev"]},
+            "summary": "Native markdown doc",
+            "linked_entity_ids": ["mod-1"],
+        })
+
+        assert result.sources[0]["type"] == "zenos_native"
+
+    async def test_document_patch_can_create_index_with_stable_id_and_source_metadata(self):
+        repos = _mock_repos()
+        module = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        stored_entities = {"mod-1": module}
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: stored_entities.get(eid)
+        )
+        async def upsert_and_store(entity):
+            stored_entities[entity.id] = entity
+            return entity
+        repos["entity_repo"].upsert = AsyncMock(side_effect=upsert_and_store)
+        svc = _make_service(repos)
+
+        result = await svc.upsert_document({
+            "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "allow_create_with_id": True,
+            "title": "Module：文件群索引",
+            "status": "current",
+            "doc_role": "index",
+            "formal_entry": True,
+            "linked_entity_ids": ["mod-1"],
+            "tags": {"what": ["Module"], "why": "routing", "how": "index", "who": ["agent"]},
+            "summary": "Agent 找到 L2 後，先讀這份 retrieval map 再選 source。",
+            "change_summary": "Analyzer 建議建立 current index document。",
+            "sources": [{
+                "source_id": "src-1",
+                "type": "zenos_native",
+                "uri": "/docs/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "label": "GUIDE: Module index",
+                "doc_type": "GUIDE",
+                "doc_status": "current",
+                "is_primary": True,
+                "retrieval_mode": "snapshot",
+                "content_access": "full",
+            }],
+            "bundle_highlights": [{
+                "source_id": "src-1",
+                "headline": "Module index",
+                "reason_to_read": "需要理解 Module 的文件入口時先讀。",
+                "priority": "primary",
+            }],
+        })
+
+        assert result.id == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        assert result.sources[0]["source_id"] == "src-1"
+        assert result.sources[0]["retrieval_mode"] == "snapshot"
+        assert result.sources[0]["content_access"] == "full"
+        assert result.bundle_highlights[0]["source_id"] == "src-1"
 
     async def test_source_uri_is_idempotent_and_reuses_existing_document_entity(self):
         repos = _mock_repos()
@@ -945,6 +1040,63 @@ class TestUpsertDocumentValidation:
             "linked_entity_ids": ["mod-1", "goal-1"],
         })
         assert result.parent_id == "mod-1"
+
+    async def test_secondary_linked_entity_ids_materialize_related_to_relationships(self):
+        repos = _mock_repos()
+        existing = Entity(
+            id="doc-1",
+            name="Spec v1",
+            type="document",
+            summary="old summary",
+            tags=Tags(what=["api"], why="ref", how="rest", who=["dev"]),
+            status="current",
+            parent_id="mod-old",
+        )
+        primary = Entity(
+            id="mod-1",
+            name="Module",
+            type="module",
+            summary="m",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        secondary = Entity(
+            id="mod-2",
+            name="Secondary Module",
+            type="module",
+            summary="m2",
+            tags=Tags(what=["api"], why="y", how="h", who=["w"]),
+            parent_id="prod-1",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {
+                "doc-1": existing,
+                "mod-1": primary,
+                "mod-2": secondary,
+            }.get(eid)
+        )
+        svc = _make_service(repos)
+
+        await svc.upsert_document({
+            "id": "doc-1",
+            "linked_entity_ids": ["mod-1", "mod-2"],
+        })
+
+        added_relationships = [call.args[0] for call in repos["relationship_repo"].add.call_args_list]
+        assert any(
+            rel.source_entity_id == "doc-1"
+            and rel.target_id == "mod-1"
+            and rel.type == "part_of"
+            and rel.description == "document primary linkage"
+            for rel in added_relationships
+        )
+        assert any(
+            rel.source_entity_id == "doc-1"
+            and rel.target_id == "mod-2"
+            and rel.type == "related_to"
+            and rel.description == "document linked to entity"
+            for rel in added_relationships
+        )
 
 
 class TestDocumentSyncGovernance:
@@ -1340,6 +1492,74 @@ class TestFuzzySimilarityCheck:
         assert result.entity.name == "Paceriz"
 
     @pytest.mark.asyncio
+    async def test_module_fuzzy_check_blocks_same_parent_only(self):
+        """Similar module names under the same product should still be blocked."""
+        repos = _mock_repos()
+        product = Entity(
+            name="Product One", type="product", summary="First product",
+            tags=Tags(what="product", why="test", how="app", who="team"),
+            id="product-1", confirmed_by_user=True,
+        )
+        existing = Entity(
+            name="MCP Interface Design", type="module", summary="MCP surface",
+            tags=Tags(what="MCP", why="tools", how="schema", who="agents"),
+            id="module-1", parent_id="product-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: product if eid == "product-1" else None
+        )
+        repos["entity_repo"].list_all = AsyncMock(return_value=[product, existing])
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError, match="similar"):
+            await svc.upsert_entity(
+                _valid_entity_data(
+                    name="MCP Friction Log",
+                    type="module",
+                    parent_id="product-1",
+                    summary="MCP dogfood friction findings",
+                )
+            )
+
+    @pytest.mark.asyncio
+    async def test_module_fuzzy_check_allows_different_parent(self):
+        """Similar module names under different products should not be blocked."""
+        repos = _mock_repos()
+        product_1 = Entity(
+            name="Product One", type="product", summary="First product",
+            tags=Tags(what="product", why="test", how="app", who="team"),
+            id="product-1", confirmed_by_user=True,
+        )
+        product_2 = Entity(
+            name="Product Two", type="product", summary="Second product",
+            tags=Tags(what="product", why="test", how="app", who="team"),
+            id="product-2", confirmed_by_user=True,
+        )
+        existing = Entity(
+            name="MCP Interface Design", type="module", summary="MCP surface",
+            tags=Tags(what="MCP", why="tools", how="schema", who="agents"),
+            id="module-1", parent_id="product-1", confirmed_by_user=True,
+        )
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].get_by_id = AsyncMock(
+            side_effect=lambda eid: {"product-1": product_1, "product-2": product_2}.get(eid)
+        )
+        repos["entity_repo"].list_all = AsyncMock(return_value=[product_1, product_2, existing])
+        svc = _make_service(repos)
+
+        result = await svc.upsert_entity(
+            _valid_entity_data(
+                name="MCP Friction Log",
+                type="module",
+                parent_id="product-2",
+                summary="MCP dogfood friction findings",
+            )
+        )
+
+        assert result.entity.name == "MCP Friction Log"
+
+    @pytest.mark.asyncio
     async def test_completely_different_name_passes(self):
         """'ZenOS' should not be flagged when 'Paceriz' exists."""
         repos = _mock_repos()
@@ -1369,7 +1589,32 @@ class TestRelationshipDedup:
 
     @pytest.mark.asyncio
     async def test_duplicate_relationship_returns_existing(self):
-        """If a relationship with same source+target+type exists, return it."""
+        """If duplicate relationship has same description, return it."""
+        repos = _mock_repos()
+        entity = Entity(
+            id="ent-1", name="A", type="product",
+            summary="X", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        existing_rel = Relationship(
+            id="rel-existing",
+            source_entity_id="ent-1",
+            target_id="ent-2",
+            type="depends_on",
+            description="original",
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=entity)
+        repos["relationship_repo"].find_duplicate = AsyncMock(return_value=existing_rel)
+        repos["relationship_repo"].add = AsyncMock(return_value=existing_rel)
+        svc = _make_service(repos)
+
+        result = await svc.add_relationship("ent-1", "ent-2", "depends_on", "duplicate attempt")
+        assert result.id == "rel-existing"
+        assert result.description == "duplicate attempt"
+        repos["relationship_repo"].add.assert_called_once_with(existing_rel)
+
+    @pytest.mark.asyncio
+    async def test_duplicate_relationship_same_description_returns_existing(self):
+        """If duplicate relationship is unchanged, do not write again."""
         repos = _mock_repos()
         entity = Entity(
             id="ent-1", name="A", type="product",
@@ -1386,10 +1631,30 @@ class TestRelationshipDedup:
         repos["relationship_repo"].find_duplicate = AsyncMock(return_value=existing_rel)
         svc = _make_service(repos)
 
-        result = await svc.add_relationship("ent-1", "ent-2", "depends_on", "duplicate attempt")
+        result = await svc.add_relationship("ent-1", "ent-2", "depends_on", "original")
         assert result.id == "rel-existing"
         assert result.description == "original"
-        # add should NOT have been called
+        repos["relationship_repo"].add.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_impacts_relationship_requires_concrete_description(self):
+        """Impacts relationships must be concrete enough for L2 confirm."""
+        repos = _mock_repos()
+        source = Entity(
+            id="ent-1", name="A", type="module",
+            summary="X", tags=Tags(what="x", why="x", how="x", who="x"),
+        )
+        target = Entity(
+            id="ent-2", name="B", type="module",
+            summary="Y", tags=Tags(what="y", why="y", how="y", who="y"),
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(side_effect=[source, target])
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError, match="impacts relationship description must be concrete"):
+            await svc.add_relationship("ent-1", "ent-2", "impacts", "A affects B")
+
+        repos["relationship_repo"].find_duplicate.assert_not_called()
         repos["relationship_repo"].add.assert_not_called()
 
     @pytest.mark.asyncio

@@ -91,9 +91,9 @@ Architect 確認：
 
 ---
 
-## 寫入 Work Journal（必做）
+## 寫入 Work Journal（只在重大修復時）
 
-修復完成後，記錄本次工作摘要：
+只有 root cause 具有跨 session 復用價值、或修復影響多個模組時，才記錄本次工作摘要。一般 bugfix 結果留在 task.result，不寫 journal。
 
 ```python
 mcp__zenos__journal_write(

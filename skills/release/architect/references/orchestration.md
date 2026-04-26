@@ -49,7 +49,9 @@ todo → in_progress → review → (confirm) → done
 ### 寫入前先查
 
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__recent_updates(product="{產品名}", limit=10)
+# 若 recent_updates / tasks / PLAN 都不足以恢復脈絡，才 fallback：
+mcp__zenos__journal_read(limit=5, project="{專案名}")
 ```
 
 找同主題的近期筆記：
@@ -57,6 +59,8 @@ mcp__zenos__journal_read(limit=20, project="{專案名}")
 - 新的不相關工作 → 正常新增
 
 ### 寫入
+
+只有重大交接、跨 session 狀態、或需要下輪接續的遺留事項才寫 journal。task 完成狀態寫在 task.result；durable knowledge 寫 entries。
 
 summary 必須回答三件事：
 1. **做了什麼**（一句話，git log 有的不重複）

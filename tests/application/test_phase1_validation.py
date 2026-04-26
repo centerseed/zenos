@@ -13,7 +13,7 @@ def _make_uow_factory():
     return lambda: uow
 
 
-def _make_service(entities=None, relationships=None):
+def _make_service(entities=None, relationships=None, governance_ai=None):
     task_repo = AsyncMock()
     task_repo.upsert = AsyncMock(side_effect=lambda t, **kw: t)
     task_repo.get_by_id = AsyncMock(return_value=None)
@@ -40,6 +40,7 @@ def _make_service(entities=None, relationships=None):
         task_repo=task_repo,
         entity_repo=entity_repo,
         blindspot_repo=blindspot_repo,
+        governance_ai=governance_ai,
         relationship_repo=relationships,
         uow_factory=_make_uow_factory(),
     )
@@ -106,6 +107,32 @@ async def test_create_task_accepts_empty_linked_entities():
         "linked_entities": [],
     })
     assert result.task is not None
+
+
+class _BadLinkGovernanceAI:
+    def infer_task_links(self, **kwargs):
+        return ["missing-auto-link"]
+
+
+@pytest.mark.asyncio
+async def test_create_task_ignores_missing_auto_inferred_linked_entities():
+    svc = _make_service(
+        entities={"prod-1": _mock_entity("prod-1", "ZenOS", "product")},
+        governance_ai=_BadLinkGovernanceAI(),
+    )
+
+    result = await svc.create_task({
+        "title": "修復登入流程問題",
+        "created_by": "agent",
+        "product_id": "prod-1",
+        "linked_entities": [],
+    })
+
+    assert result.task is not None
+    assert result.task.linked_entities == []
+    assert result.warnings == [
+        "auto-inferred linked entity IDs were ignored because they no longer exist: missing-auto-link"
+    ]
 
 
 @pytest.mark.asyncio

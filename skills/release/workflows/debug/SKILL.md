@@ -108,11 +108,13 @@ QA 驗收：
 
 ---
 
-## 寫入 Work Journal（必做）
+## 寫入 Work Journal（重大修復才寫）
+
+只有 root cause 具有跨 session 復用價值、或修復影響多個模組時才寫。一般 bugfix 結果留在 task.result，不寫 journal。
 
 **寫入前先查：**
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__journal_read(limit=5, project="{專案名}")
 # 同一個 bug 是否已有舊筆記（例如之前試過但沒修好）
 # → 有：新 summary 包含完整根因脈絡，讓舊筆記變冗餘
 # → 沒有：正常新增

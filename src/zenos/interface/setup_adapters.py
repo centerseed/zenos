@@ -252,6 +252,7 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
     slash_commands = get_slash_commands()
     claude_md_addition = _build_claude_md_addition(selection)
     raw_base = _build_github_raw_base(manifest)
+    ssot = manifest.get("ssot", {})
 
     response: dict = {
         "action": "install",
@@ -272,6 +273,7 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
             "slash_commands": slash_commands,
             "claude_md_addition": claude_md_addition,
             "packages": packages,
+            "ssot": ssot,
         },
         "instructions": [
             (
@@ -280,11 +282,12 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
                 f"{raw_base}/skills/release/zenos-setup/SKILL.md 安裝 zenos-setup 本身。"
             ),
             (
-                f"2. 若使用者選當前目錄：再從 {raw_base}/skills/workflows/*.md 與 "
-                f"{raw_base}/skills/governance/*.md 下載到專案下，並將 payload.slash_commands 寫入 .claude/commands/。"
+                f"2. 若使用者選當前目錄：依 manifest.ssot.governance_files 與 manifest.ssot.workflow_files "
+                f"從 {raw_base}/ 逐檔下載到專案下，並將 payload.slash_commands 寫入 .claude/commands/。"
             ),
-            "3. 把 payload.claude_md_addition 加到對應 target 的 prompt 載入位置；專案模式用 CLAUDE.md。",
-            "4. 完成後執行 /zenos-setup，並用 usage_summary 簡單解釋 setup / capture / sync / governance 的用法。",
+            "3. 驗證 skills/governance/bootstrap-protocol.md 內含 Context Happy Path，且已安裝 skill 不含 manifest.ssot.stale_instruction_gate 的舊指令。",
+            "4. 把 payload.claude_md_addition 加到對應 target 的 prompt 載入位置；專案模式用 CLAUDE.md。",
+            "5. 完成後執行 /zenos-setup，並用 usage_summary 簡單解釋 setup / capture / sync / governance 的用法。",
         ],
         "next_step": "/zenos-setup",
     }
@@ -343,6 +346,7 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
     packages = get_packages()
     agents_md_addition = _build_agents_md_addition(selection)
     raw_base = _build_github_raw_base(manifest)
+    ssot = manifest.get("ssot", {})
 
     response: dict = {
         "action": "install",
@@ -362,6 +366,7 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
         "payload": {
             "agents_md_addition": agents_md_addition,
             "packages": packages,
+            "ssot": ssot,
         },
         "instructions": [
             (
@@ -370,7 +375,7 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
             ),
             (
                 "2. 安裝 skill 文件（addon-aware merge）：\n"
-                "   a. 若使用者選當前目錄：將 skills/governance/ 和 skills/workflows/ 直接寫入專案\n"
+                "   a. 若使用者選當前目錄：依 manifest.ssot.governance_files / workflow_files 從 GitHub raw 逐檔下載到專案的 skills/governance/ 和 skills/workflows/\n"
                 "   b. 對於 skills/release/{role}/SKILL.md：\n"
                 "      - Codex 角色 skill 一律以 `skills/release/{role}/SKILL.codex.md` 為來源，再寫成目標路徑的 `SKILL.md`\n"
                 "      - 當前目錄模式：寫到你目前這個 Codex 專案採用的 project-local skills 路徑\n"
@@ -390,8 +395,9 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
                 "      若 `skills/addons/all/` 目錄存在，也讀取其中所有文件。\n"
                 "      <!-- ZENOS_ADDON_SECTION_END -->"
             ),
-            "3. 當前目錄模式時，在專案根目錄的 AGENTS.md 加入 payload.agents_md_addition；家目錄模式則把同等指示加到全域 Codex system prompt。",
-            "4. 完成後呼叫 mcp__zenos__search(query='ZenOS', collection='entities') 驗證 MCP 連線，並用 usage_summary 向使用者簡單說明後續怎麼用。",
+            "3. 驗證 skills/governance/bootstrap-protocol.md 內含 Context Happy Path，且已安裝 skill 不含 manifest.ssot.stale_instruction_gate 的舊指令。",
+            "4. 當前目錄模式時，在專案根目錄的 AGENTS.md 加入 payload.agents_md_addition；家目錄模式則把同等指示加到全域 Codex system prompt。",
+            "5. 完成後呼叫 mcp__zenos__search(query='ZenOS', collection='entities') 驗證 MCP 連線，並用 usage_summary 向使用者簡單說明後續怎麼用。",
         ],
         "verification_command": "mcp__zenos__search(query='ZenOS', collection='entities')",
     }

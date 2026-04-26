@@ -253,9 +253,10 @@ grep -l "建票前去重\|去重\|linked_entities 不存在" skills/governance/*
 
 若發現問題，**不要直接在本 skill 裡修改 governance 規則**。
 問題應該：
-1. 記入 Journal（`mcp__zenos__journal_write`）作為觀察紀錄
-2. 若需要修改 SSOT skill → 提醒用戶走 SSOT 修改流程（改 `release/` 目錄）
-3. 若是緊急 workaround → 在本 `skills/workflows/` 下建立臨時補丁 skill，標注 `[TEMP]`
+1. 先記到 dogfood plan / task result，保留可追蹤的觀察與驗收結果
+2. 若需要修改 SSOT skill → 直接改 `skills/release/` 與對應治理 SSOT，再跑同步
+3. 只有跨 session 仍需要接續、且不適合放 task/result 時，才寫 `journal_write`
+4. 若是緊急 workaround → 在本 `skills/workflows/` 下建立臨時補丁 skill，標注 `[TEMP]`
 
 ---
 

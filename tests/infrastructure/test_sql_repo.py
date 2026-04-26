@@ -231,6 +231,156 @@ class TestSqlEntityRepository:
 
         result = asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
         assert result.id == "existing_id"
+        assert result.level == 2
+
+    def test_upsert_unknown_type_without_level_rejects_before_db_write(self):
+        """Unknown entity types need an explicit level before entities_base write."""
+        from zenos.infrastructure.knowledge import SqlEntityRepository
+        from zenos.domain.knowledge import Entity, Tags
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlEntityRepository(pool)
+        entity = Entity(
+            id="custom1",
+            name="Custom",
+            type="custom_type",
+            summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+        )
+
+        with pytest.raises(ValueError, match="unknown level"):
+            asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
+        conn.execute.assert_not_called()
+
+    def test_upsert_product_dual_writes_entities_base(self):
+        """Product entities are mirrored into entities_base for relationship FKs."""
+        from zenos.infrastructure.knowledge import SqlEntityRepository
+        from zenos.domain.knowledge import Entity, Tags
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlEntityRepository(pool)
+        entity = Entity(
+            id="product1",
+            name="Product",
+            type="product",
+            level=1,
+            summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+            visibility="restricted",
+            visible_to_roles=["engineering"],
+            visible_to_members=["p-admin"],
+            visible_to_departments=["product"],
+            owner="Alice",
+        )
+
+        asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
+
+        execute_calls = conn.execute.call_args_list
+        sql_calls = [c[0][0] for c in execute_calls]
+        assert any("INSERT INTO zenos.entities" in sql for sql in sql_calls)
+        assert any("INSERT INTO zenos.entities_base" in sql for sql in sql_calls)
+        base_args = next(c[0] for c in execute_calls if "INSERT INTO zenos.entities_base" in c[0][0])
+        assert base_args[1:15] == (
+            "product1",
+            PARTNER_ID,
+            "Product",
+            "product",
+            1,
+            None,
+            "active",
+            "restricted",
+            ["engineering"],
+            ["p-admin"],
+            ["product"],
+            "Alice",
+            entity.created_at,
+            entity.updated_at,
+        )
+
+    def test_upsert_module_dual_writes_entities_base(self):
+        """Module entities are mirrored into entities_base for relationship FKs."""
+        from zenos.infrastructure.knowledge import SqlEntityRepository
+        from zenos.domain.knowledge import Entity, Tags
+        import asyncio
+
+        pool, conn = _make_pool()
+        repo = SqlEntityRepository(pool)
+        entity = Entity(
+            id="module1",
+            name="Module",
+            type="module",
+            level=2,
+            parent_id="product1",
+            summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+        )
+
+        asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
+
+        execute_calls = conn.execute.call_args_list
+        base_args = next(c[0] for c in execute_calls if "INSERT INTO zenos.entities_base" in c[0][0])
+        assert base_args[1:8] == (
+            "module1",
+            PARTNER_ID,
+            "Module",
+            "module",
+            2,
+            "product1",
+            "active",
+        )
+
+    def test_upsert_entities_base_before_relationship_insert_regression_guard(self):
+        """Regression: relationship FK points to entities_base, not zenos.entities."""
+        from zenos.infrastructure.knowledge import SqlEntityRepository, SqlRelationshipRepository
+        from zenos.domain.knowledge import Entity, Relationship, Tags
+        import asyncio
+
+        pool, conn = _make_pool()
+        entity_repo = SqlEntityRepository(pool)
+        relationship_repo = SqlRelationshipRepository(pool)
+        product = Entity(
+            id="product1",
+            name="Product",
+            type="product",
+            level=1,
+            summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+        )
+        module = Entity(
+            id="module1",
+            name="Module",
+            type="module",
+            level=2,
+            parent_id="product1",
+            summary="s",
+            tags=Tags(what=[], why="", how="", who=[]),
+        )
+        rel = Relationship(
+            id="rel1",
+            source_entity_id="product1",
+            target_id="module1",
+            type="contains",
+            description="Product contains module",
+        )
+
+        asyncio.get_event_loop().run_until_complete(entity_repo.upsert(product, conn=conn))
+        asyncio.get_event_loop().run_until_complete(entity_repo.upsert(module, conn=conn))
+        asyncio.get_event_loop().run_until_complete(relationship_repo.add(rel, conn=conn))
+
+        execute_calls = conn.execute.call_args_list
+        sql_calls = [c[0][0] for c in execute_calls]
+        base_indices = [
+            i for i, sql in enumerate(sql_calls) if "INSERT INTO zenos.entities_base" in sql
+        ]
+        relationship_index = next(
+            i for i, sql in enumerate(sql_calls) if "INSERT INTO zenos.relationships" in sql
+        )
+        assert len(base_indices) == 2
+        assert all(i < relationship_index for i in base_indices)
+        base_ids = [execute_calls[i][0][1] for i in base_indices]
+        assert base_ids == ["product1", "module1"]
 
     def test_goal_entity_dual_writes_l3_milestone_tables(self):
         """Phase C04: legacy goal entities are mirrored into L3 milestone tables."""
@@ -1526,8 +1676,12 @@ class TestCrossTenantAndTransaction:
         )
         asyncio.get_event_loop().run_until_complete(repo.upsert(entity))
 
-        execute_sql = conn.execute.call_args[0][0]
-        assert "partner_id = EXCLUDED.partner_id" in execute_sql
+        execute_sqls = [c[0][0] for c in conn.execute.call_args_list]
+        assert any(
+            "INSERT INTO zenos.entities" in sql
+            and "partner_id = EXCLUDED.partner_id" in sql
+            for sql in execute_sqls
+        )
 
     def test_task_upsert_uses_transaction(self):
         """Task upsert acquires transaction protection for main + dual-write syncs."""

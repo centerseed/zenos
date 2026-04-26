@@ -112,7 +112,8 @@ resp = mcp__zenos__setup(platform="<claude_code|claude_web|codex>", skip_overvie
 payload = resp["data"]
 ```
 
-從 `payload["manifest"]["skills"]` 取得 skill 清單。
+從 `payload["manifest"]["skills"]` 取得 role / platform skill 清單。
+從 `payload["manifest"]["ssot"]["governance_files"]` 與 `payload["manifest"]["ssot"]["workflow_files"]` 取得 governance / workflow SSOT 清單；不要靠舊版硬編碼清單。
 
 ### 版本比對
 
@@ -147,19 +148,34 @@ Codex 角色 skill 例外：
 Governance 檔案（`skills/governance/`）每次都重新下載，不比對版本。
 Workflow 檔案（`skills/workflows/`）也必須寫到**專案根目錄**，因為 slash command 與治理 skill 會直接讀這些本地檔案。
 
+來源以 manifest 的 `ssot.governance_files` / `ssot.workflow_files` 為準；若 manifest 尚未含 `ssot`，才 fallback 到下方清單。
+
 必須寫入：
 - `skills/governance/bootstrap-protocol.md`
 - `skills/governance/shared-rules.md`
+- `skills/governance/capture-governance.md`
 - `skills/governance/document-governance.md`
 - `skills/governance/l2-knowledge-governance.md`
 - `skills/governance/task-governance.md`
 - `skills/workflows/knowledge-capture.md`
 - `skills/workflows/knowledge-sync.md`
 - `skills/workflows/setup.md`
+- `skills/workflows/governance-loop.md`
+- `skills/workflows/feature.md`
+- `skills/workflows/debug.md`
+- `skills/workflows/triage.md`
+- `skills/workflows/brainstorm.md`
+- `skills/workflows/marketing-intel.md`
+- `skills/workflows/marketing-plan.md`
+- `skills/workflows/marketing-generate.md`
+- `skills/workflows/marketing-adapt.md`
+- `skills/workflows/marketing-publish.md`
 
 驗證方式：
 - `skills/governance/bootstrap-protocol.md` 必須存在，否則 `/zenos-capture`、`/zenos-sync` 不可繼續
 - `skills/governance/shared-rules.md` 必須存在，否則建票/治理流程不完整
+- `skills/governance/bootstrap-protocol.md` 必須包含 `Context Happy Path`
+- 已安裝的 skill / agent 不得含 manifest `ssot.stale_instruction_gate` 中列出的舊指令
 
 平台 payload key：
 

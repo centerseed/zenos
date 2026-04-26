@@ -237,11 +237,13 @@ mcp__zenos__plan(action="update",
 
 ---
 
-## Phase 7：寫入 Work Journal（必做）
+## Phase 7：寫入 Work Journal（重大 feature 才寫）
+
+只有 feature 真的完成一個跨 session 需要復盤的決策或交付邊界時才寫。一般任務完成狀態留在 task.result / PLAN log，不寫 journal。
 
 **寫入前先查：**
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__journal_read(limit=5, project="{專案名}")
 # 找同功能/同 module 的近期筆記
 # → 延續同一件事：新 summary 包含完整脈絡，讓舊筆記變冗餘
 # → 新的不相關工作：正常新增

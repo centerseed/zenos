@@ -496,6 +496,7 @@ async def _task_handler(
                 },
             )
             create_warnings: list[str] = list(mutation_warnings)
+            create_warnings.extend(task_result.warnings or [])
             if not task_result.task.linked_entities:
                 create_warnings.append(
                     "linked_entities 為空：任務缺少 ontology context，governance_hints 將無法產生有效建議"

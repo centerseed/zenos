@@ -20,13 +20,14 @@ async def journal_write(
     """記錄工作日誌條目。
 
     使用時機：
-    - session 或 flow 結束時呼叫，記錄本次完成的工作、遺留問題、重要決策。
+    - 重大 flow 結束時呼叫，記錄本次完成的工作、遺留問題、重要決策。
     - 讓下次 session 開始時能快速恢復 context，減少用戶重新補充資訊的需要。
+    - 不要在每個 task / handoff / 小修復後都寫；任務結果請放 task.result，長期知識請寫 entries。
 
-    summary 會自動截斷至 100 字。超過 20 則日誌時，會自動觸發壓縮（舊條目合併為摘要）。
+    summary 會自動截斷至 500 字。超過 20 則日誌時，會自動觸發壓縮（舊條目合併為摘要）。
 
     Args:
-        summary: 工作摘要（自動截斷至 100 字）
+        summary: 工作摘要（自動截斷至 500 字）
         project: 相關專案名稱（選填）
         flow_type: 工作類型，例如 feature/bugfix/review/research（選填）
         tags: 標籤列表（選填）
@@ -53,8 +54,10 @@ async def journal_write(
     if not partner_id:
         return _unified_response(status="rejected", data={}, rejection_reason="No authenticated partner context")
 
-    # Truncate summary to 100 chars without rejecting
-    summary = summary[:100]
+    entry_warnings: list[str] = []
+    if len(summary) > 500:
+        summary = summary[:500]
+        entry_warnings.append("journal summary truncated to 500 chars")
 
     # Auto-fill project from partner context if caller omits it
     _partner = _current_partner.get()
@@ -74,7 +77,8 @@ async def journal_write(
         compressed = True
 
     return _unified_response(
-        data={"id": entry_id, "created_at": datetime.now(timezone.utc).isoformat(), "compressed": compressed}
+        data={"id": entry_id, "created_at": datetime.now(timezone.utc).isoformat(), "compressed": compressed},
+        warnings=entry_warnings,
     )
 
 

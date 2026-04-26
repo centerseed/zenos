@@ -9,6 +9,7 @@ from typing import Any
 import asyncpg  # type: ignore[import-untyped]
 
 from zenos.domain.knowledge import Entity, Tags
+from zenos.domain.knowledge.entity_levels import default_level_for_type
 from zenos.infrastructure.sql_common import (
     SCHEMA,
     _acquire,
@@ -88,6 +89,51 @@ class SqlEntityRepository:
 
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
+
+    async def _upsert_entities_base(
+        self, conn: asyncpg.Connection, entity: Entity, pid: str
+    ) -> None:
+        if entity.type == "goal":
+            return
+
+        await conn.execute(
+            f"""
+            INSERT INTO {SCHEMA}.entities_base (
+                id, partner_id, name, type_label, level, parent_id, status,
+                visibility, visible_to_roles, visible_to_members,
+                visible_to_departments, owner, created_at, updated_at
+            ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7,
+                $8, $9, $10, $11, $12, $13, $14
+            )
+            ON CONFLICT (partner_id, id) DO UPDATE SET
+                name=EXCLUDED.name,
+                type_label=EXCLUDED.type_label,
+                level=EXCLUDED.level,
+                parent_id=EXCLUDED.parent_id,
+                status=EXCLUDED.status,
+                visibility=EXCLUDED.visibility,
+                visible_to_roles=EXCLUDED.visible_to_roles,
+                visible_to_members=EXCLUDED.visible_to_members,
+                visible_to_departments=EXCLUDED.visible_to_departments,
+                owner=EXCLUDED.owner,
+                updated_at=EXCLUDED.updated_at
+            """,
+            entity.id,
+            pid,
+            entity.name,
+            entity.type,
+            entity.level,
+            entity.parent_id,
+            entity.status,
+            entity.visibility,
+            entity.visible_to_roles,
+            entity.visible_to_members,
+            entity.visible_to_departments,
+            entity.owner,
+            entity.created_at,
+            entity.updated_at,
+        )
 
     async def _upsert_l3_milestone(
         self, conn: asyncpg.Connection, entity: Entity, pid: str
@@ -220,6 +266,10 @@ class SqlEntityRepository:
         if entity.id is None:
             entity.id = _new_id()
             entity.created_at = now
+        if entity.level is None:
+            entity.level = default_level_for_type(entity.type)
+        if entity.level is None:
+            raise ValueError(f"Cannot upsert entity with unknown level for type '{entity.type}'")
 
         tags_raw = {
             "what": entity.tags.what if isinstance(entity.tags.what, list) else [entity.tags.what],
@@ -272,6 +322,7 @@ class SqlEntityRepository:
                 entity.doc_role, _dumps(entity.bundle_highlights), entity.highlights_updated_at,
                 entity.change_summary, entity.summary_updated_at,
             )
+            await self._upsert_entities_base(_conn, entity, pid)
             await self._upsert_l3_milestone(_conn, entity, pid)
         return entity
 

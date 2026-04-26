@@ -23,6 +23,7 @@ from .knowledge import (
     Tags,
 )
 from .knowledge.collaboration_roots import is_collaboration_root_entity
+from .document_linkage import get_document_linked_entity_ids
 from .shared import (
     QualityCheckItem,
     QualityReport,
@@ -778,11 +779,14 @@ def _broken_impact_reason(target_status: str | None) -> str:
 def check_impacts_target_validity(
     entities: list[Entity],
     relationships: list[Relationship],
+    target_context_entities: list[Entity] | None = None,
 ) -> list[dict]:
     """Check if impacts targets are still valid (exist and active).
 
     For each active L2 module that has outgoing concrete impacts, verify that
     every target entity still exists and is in an acceptable status.
+    `target_context_entities` may include external targets for scoped checks;
+    active source modules are still taken only from `entities`.
 
     Returns a list of dicts describing modules with broken impacts:
     {
@@ -801,7 +805,7 @@ def check_impacts_target_validity(
         "suggested_actions": [...],
     }
     """
-    entity_map = {e.id: e for e in entities if e.id}
+    entity_map = {e.id: e for e in [*entities, *(target_context_entities or [])] if e.id}
     active_modules = {
         e.id: e
         for e in entities
@@ -1049,6 +1053,7 @@ def run_quality_check(
     relationships: list[Relationship],
     tasks: list | None = None,
     entries_by_entity: dict[str, int] | None = None,
+    impact_target_context_entities: list[Entity] | None = None,
 ) -> QualityReport:
     """Run the 21-item quality checklist from REF-ontology-methodology.md.
 
@@ -1064,6 +1069,8 @@ def run_quality_check(
         relationships: Relationship edges between entities.
         tasks: Optional list of Task objects for duplicate task detection.
         entries_by_entity: Optional mapping of entity_id -> entry count for sparsity check.
+        impact_target_context_entities: External target entities used only by
+            impacts target validity in scoped checks.
     """
     items: list[QualityCheckItem] = []
     entity_map = {e.id: e for e in entities if e.id}
@@ -1358,7 +1365,11 @@ def run_quality_check(
 
     # --- 13. L2 impacts targets still valid? ---
     # Check that all concrete impacts relationships point to existing, active entities.
-    broken_impacts_report = check_impacts_target_validity(entities, relationships)
+    broken_impacts_report = check_impacts_target_validity(
+        entities,
+        relationships,
+        target_context_entities=impact_target_context_entities,
+    )
     check13_ok = len(broken_impacts_report) == 0
     broken_module_names = ", ".join(b["source_entity_name"] for b in broken_impacts_report[:5])
     if len(broken_impacts_report) > 5:
@@ -1823,11 +1834,6 @@ def _extract_version(text: str) -> tuple[int, int] | None:
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
-def _get_doc_linked_entity_ids(doc: Entity) -> list[str]:
-    """Get linked entity IDs from a document entity (via parent_id)."""
-    return [doc.parent_id] if doc.parent_id else []
-
-
 def detect_stale_documents_from_consistency(
     entities: list[Entity],
     relationships: list[Relationship],
@@ -1860,17 +1866,10 @@ def detect_stale_documents_from_consistency(
     doc_entities = [e for e in entities if e.type == EntityType.DOCUMENT and e.id]
     entity_map = {e.id: e for e in entities if e.id}
 
-    # Group documents by linked entity (parent_id or via relationships)
+    # Group documents by linked entity (parent_id plus graph relationships).
     docs_by_linked: dict[str, list[Entity]] = {}
     for doc in doc_entities:
-        linked_ids = _get_doc_linked_entity_ids(doc)
-        # Also check part_of relationships
-        for rel in relationships:
-            if rel.source_entity_id == doc.id and rel.type in (
-                RelationshipType.PART_OF,
-            ):
-                if rel.target_id:
-                    linked_ids.append(rel.target_id)
+        linked_ids = get_document_linked_entity_ids(doc, relationships)
         if linked_ids:
             for eid in linked_ids:
                 docs_by_linked.setdefault(eid, []).append(doc)
@@ -2110,6 +2109,128 @@ def detect_invalid_document_titles(entities: list[Entity]) -> list[dict]:
         })
 
     return invalid
+
+
+def detect_document_bundle_governance_issues(
+    documents: list[Entity],
+    relationships_by_doc: dict[str, list[Relationship]] | None = None,
+) -> list[dict]:
+    """Return L3 document bundle issues that block agent retrieval.
+
+    This checks the governance contract that an L2 should lead to a current
+    index document whose summary/highlights act as a retrieval map.
+    """
+    relationships_by_doc = relationships_by_doc or {}
+    issues: list[dict] = []
+    governable_statuses = {"current", "approved", "under_review"}
+    active_docs = [
+        doc for doc in documents
+        if str(getattr(doc, "status", "") or "").lower() in governable_statuses
+    ]
+    docs_by_linked_entity: dict[str, list[Entity]] = {}
+
+    for doc in active_docs:
+        doc_id = doc.id or ""
+        linked_ids = get_document_linked_entity_ids(doc, relationships_by_doc.get(doc_id, []))
+        for linked_id in linked_ids:
+            docs_by_linked_entity.setdefault(linked_id, []).append(doc)
+
+        if getattr(doc, "doc_role", None) != "index":
+            continue
+
+        source_count = len(getattr(doc, "sources", None) or [])
+        highlights = list(getattr(doc, "bundle_highlights", None) or [])
+        summary = (getattr(doc, "summary", "") or "").strip()
+        change_summary = (getattr(doc, "change_summary", "") or "").strip()
+
+        if source_count == 0:
+            issues.append({
+                "issue_type": "index_missing_sources",
+                "entity_id": doc.id,
+                "title": doc.name,
+                "linked_entity_ids": linked_ids,
+                "severity": "red",
+                "suggested_action": "先補至少 1 個 source；current index 可先補 zenos_native delivery source，再建立 bundle_highlights。",
+            })
+        elif not highlights:
+            issues.append({
+                "issue_type": "index_missing_bundle_highlights",
+                "entity_id": doc.id,
+                "title": doc.name,
+                "linked_entity_ids": linked_ids,
+                "severity": "red",
+                "suggested_action": "補至少 1 筆 priority=primary 的 bundle_highlights，指出 agent 應先讀哪個 source。",
+            })
+        elif not any(item.get("priority") == "primary" for item in highlights if isinstance(item, dict)):
+            issues.append({
+                "issue_type": "index_missing_primary_highlight",
+                "entity_id": doc.id,
+                "title": doc.name,
+                "linked_entity_ids": linked_ids,
+                "severity": "red",
+                "suggested_action": "將最重要的 source 標為 priority=primary。",
+            })
+
+        if not _summary_looks_like_retrieval_map(summary):
+            issues.append({
+                "issue_type": "index_summary_not_retrieval_map",
+                "entity_id": doc.id,
+                "title": doc.name,
+                "linked_entity_ids": linked_ids,
+                "severity": "yellow",
+                "suggested_action": "把 summary 改成文件群 retrieval map：說明 bundle 可回答哪些問題、primary source、各 source 用途與閱讀邊界。",
+            })
+
+        if source_count > 1 and not change_summary:
+            issues.append({
+                "issue_type": "index_missing_change_summary",
+                "entity_id": doc.id,
+                "title": doc.name,
+                "linked_entity_ids": linked_ids,
+                "severity": "yellow",
+                "suggested_action": "補 change_summary，說明文件群近期變化，而不是單一檔案 diff。",
+            })
+
+    for linked_entity_id, linked_docs in sorted(docs_by_linked_entity.items()):
+        current_index_docs = [
+            doc for doc in linked_docs
+            if getattr(doc, "doc_role", None) == "index"
+            and getattr(doc, "status", None) == "current"
+        ]
+        if current_index_docs:
+            continue
+        issues.append({
+            "issue_type": "l2_missing_current_index_document",
+            "linked_entity_id": linked_entity_id,
+            "document_ids": [doc.id for doc in linked_docs if doc.id],
+            "severity": "red",
+            "suggested_action": "將此 L2 的正式文件收斂到 current doc_role=index 文件，並補 summary / bundle_highlights。",
+        })
+
+    return issues
+
+
+def _summary_looks_like_retrieval_map(summary: str) -> bool:
+    text = (summary or "").strip()
+    if len(text) < 80:
+        return False
+
+    lower = text.lower()
+    generic_templates = (
+        "此主題有哪些正式文件",
+        "此主題有哪些正式資料",
+        "哪份 source 應先讀",
+        "which source to read first",
+        "what official documents",
+    )
+    if any(template in lower or template in text for template in generic_templates):
+        return False
+
+    answers_scope = any(marker in text for marker in ("主要回答", "用來回答", "可以回答")) or "answers" in lower
+    points_to_primary = "primary source" in lower or "主要入口" in text or "先讀" in text
+    routes_sources = "source routing" in lower or "bundle_highlights" in lower or "依任務選讀" in text or "sources" in lower
+    states_boundary = any(marker in text for marker in ("閱讀邊界", "治理邊界", "source 邊界")) or "boundar" in lower
+    return answers_scope and points_to_primary and routes_sources and states_boundary
 
 
 # ──────────────────────────────────────────────

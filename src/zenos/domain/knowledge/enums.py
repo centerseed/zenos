@@ -48,6 +48,8 @@ class SourceType(str, Enum):
     UPLOAD = "upload"
     WIKI = "wiki"
     URL = "url"
+    ZENOS_NATIVE = "zenos_native"
+    LOCAL = "local"
 
 
 class DocumentStatus(str, Enum):

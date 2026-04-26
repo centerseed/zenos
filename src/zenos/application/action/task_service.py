@@ -134,6 +134,7 @@ class TaskResult:
     task: Task
     cascade_updates: list[CascadeUpdate]
     suggested_entity_updates: list[dict] | None = None
+    warnings: list[str] | None = None
 
 
 class TaskService:
@@ -246,6 +247,9 @@ class TaskService:
 
         # Build linked context for priority recommendation
         linked_entity_ids = data.get("linked_entities", [])
+        caller_provided_linked_entity_ids = bool(linked_entity_ids)
+        auto_inferred_linked_entity_ids = False
+        warnings: list[str] = []
 
         # GovernanceAI: auto-infer entity links if none provided
         if not linked_entity_ids and self._governance_ai:
@@ -261,7 +265,8 @@ class TaskService:
                     title=data.get("title", ""),
                     description=data.get("description", ""),
                     existing_entities=entity_dicts,
-                )
+                ) or []
+                auto_inferred_linked_entity_ids = bool(linked_entity_ids)
 
         filtered_linked_entity_ids: list[str] = []
         linked_entities = []
@@ -275,10 +280,15 @@ class TaskService:
                 linked_entities.append(entity)
             else:
                 missing_ids.append(eid)
-        if missing_ids:
+        if missing_ids and caller_provided_linked_entity_ids:
             raise ValueError(
                 f"linked_entities 包含不存在的 entity ID: {', '.join(missing_ids)}。"
                 f"請先建立這些 entity 或移除無效 ID。"
+            )
+        if missing_ids and auto_inferred_linked_entity_ids:
+            warnings.append(
+                "auto-inferred linked entity IDs were ignored because they no longer exist: "
+                + ", ".join(missing_ids)
             )
 
         linked_blindspot_id = data.get("linked_blindspot")
@@ -369,7 +379,7 @@ class TaskService:
         )
 
         saved = await self._save_task(task, conn=conn)
-        return TaskResult(task=saved, cascade_updates=[])
+        return TaskResult(task=saved, cascade_updates=[], warnings=warnings)
 
     # ──────────────────────────────────────────
     # Update

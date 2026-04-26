@@ -447,6 +447,11 @@ write(collection="documents", data={
 - `reason_to_read` 要回答「為什麼現在先讀它」
 - 不得只建立 document metadata 而不補 `bundle_highlights`
 
+Helper / connector 來源（Notion、GDrive、local、upload、wiki、url）必須盡量帶 `snapshot_summary`：
+- `snapshot_summary` 是 10KB 內的語意摘要，不是全文 mirror。
+- 新建 bundle 使用 `sources: [...]` 時也要保留 `snapshot_summary`、`external_id`、`external_updated_at`、`last_synced_at`、`retrieval_mode`、`content_access`。
+- 若沒有 `snapshot_summary`，後續 analyzer 只能產 metadata-aware summary，不能產 content-aware source routing。
+
 若找到同主題既有 document：
 - 已是 `index` → `add_source` 到既有 bundle，並更新 `bundle_highlights`
 - 是 `single` 且屬同一主題 → 優先升級為 `index`，不要再新增平行 single
@@ -600,11 +605,13 @@ write(collection="entries", id="{舊 entry ID}", data={
 待確認：呼叫 search(confirmed_only=false) 查看
 ```
 
-**寫入 Work Journal（模式 A/B/C 完成後都要做）：**
+**寫入 Work Journal（有實質知識變更或待補事項才寫）：**
 
-先查：
+只有這次有新增/更新 entity、document、entry，或留下 TBD / blindspot 需要下輪接續時才寫 journal。純掃描、無變更、或只有任務完成狀態時不要寫。
+
+寫入前先查同來源/同產品的近期 capture 筆記：
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__journal_read(limit=5, project="{專案名}", flow_type="capture")
 # 同來源/同產品是否已有 capture 筆記
 # → 有：新 summary 整合兩次的知識狀態，讓舊筆記變冗餘
 # → 沒有：正常新增

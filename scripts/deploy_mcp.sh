@@ -60,7 +60,128 @@ fi
 gcloud "${DEPLOY_CMD[@]}"
 
 echo ""
-echo "[2/3] Resolving service URL..."
+echo "[2/3] Verifying Cloud Run traffic..."
+TARGET_REVISION="$(gcloud run services describe "$SERVICE_NAME" \
+  --project="$PROJECT_ID" \
+  --region="$REGION" \
+  --format='value(status.latestCreatedRevisionName)')"
+
+if [ -z "$TARGET_REVISION" ]; then
+  TARGET_REVISION="$(gcloud run services describe "$SERVICE_NAME" \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
+    --format='value(status.latestReadyRevisionName)')"
+fi
+
+if [ -z "$TARGET_REVISION" ]; then
+  echo "Unable to resolve latest Cloud Run revision."
+  exit 1
+fi
+
+echo "  target revision: $TARGET_REVISION"
+
+_service_traffic_json() {
+  gcloud run services describe "$SERVICE_NAME" \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
+    --format='json(status.traffic)'
+}
+
+_parse_service_traffic() {
+  local mode="$1"
+  local expected_revision="${2:-}"
+  _service_traffic_json | TRAFFIC_PARSE_MODE="$mode" TARGET_TRAFFIC_REVISION="$expected_revision" python3 -c '
+import json
+import os
+import sys
+
+
+def traffic_entries(payload):
+    if isinstance(payload, dict):
+        traffic = payload.get("traffic")
+        if isinstance(traffic, list):
+            return traffic
+        status = payload.get("status")
+        if isinstance(status, dict):
+            traffic = status.get("traffic")
+            if isinstance(traffic, list):
+                return traffic
+        return []
+    if isinstance(payload, list):
+        if all(isinstance(item, dict) and ("revisionName" in item or "percent" in item or "tag" in item) for item in payload):
+            return payload
+        entries = []
+        for item in payload:
+            entries.extend(traffic_entries(item))
+        return entries
+    return []
+
+
+mode = os.environ["TRAFFIC_PARSE_MODE"]
+expected_revision = os.environ.get("TARGET_TRAFFIC_REVISION", "")
+payload = json.load(sys.stdin)
+for entry in traffic_entries(payload):
+    if mode == "rows":
+        revision = entry.get("revisionName", "")
+        percent = entry.get("percent", "")
+        tag = entry.get("tag", "")
+        print(f"{revision} {percent} {tag}")
+        continue
+
+    if mode == "has_100":
+        if entry.get("revisionName") != expected_revision:
+            continue
+        try:
+            percent = int(entry.get("percent", 0))
+        except (TypeError, ValueError):
+            percent = -1
+        if percent == 100:
+            sys.exit(0)
+
+if mode == "has_100":
+    sys.exit(1)
+
+if mode != "rows":
+    raise SystemExit(f"unknown traffic parse mode: {mode}")
+'
+}
+
+_service_traffic_rows() {
+  _parse_service_traffic rows
+}
+
+_print_service_traffic() {
+  echo "  traffic:"
+  _service_traffic_rows | sed 's/^/    /'
+}
+
+_revision_has_100_percent_traffic() {
+  local expected_revision="$1"
+  _parse_service_traffic has_100 "$expected_revision"
+}
+
+_print_service_traffic
+
+if ! _revision_has_100_percent_traffic "$TARGET_REVISION"; then
+  echo "  updating traffic to route 100% to $TARGET_REVISION..."
+  gcloud run services update-traffic "$SERVICE_NAME" \
+    --project="$PROJECT_ID" \
+    --region="$REGION" \
+    --to-revisions="${TARGET_REVISION}=100"
+fi
+
+echo "  validating serving revision..."
+_print_service_traffic
+
+if ! _revision_has_100_percent_traffic "$TARGET_REVISION"; then
+  echo "Traffic validation failed: $TARGET_REVISION is not serving 100% traffic."
+  exit 1
+fi
+
+echo "  serving revision: $TARGET_REVISION"
+echo ""
+
+echo "[3/4] Resolving service URL..."
 SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
   --project="$PROJECT_ID" \
   --region="$REGION" \
@@ -74,7 +195,8 @@ fi
 echo "  service URL: $SERVICE_URL"
 echo ""
 
-echo "[3/3] Deploy complete"
+echo "[4/4] Deploy complete"
+echo "  serving revision: $TARGET_REVISION"
 echo "  SSE endpoint: $SERVICE_URL/sse?api_key=YOUR_API_KEY"
 echo "  Streamable HTTP endpoint: $SERVICE_URL/mcp?api_key=YOUR_API_KEY"
 echo ""

@@ -4,7 +4,7 @@ description: >
   ZenOS 初始化與更新設定——偵測 MCP 連線狀態，安裝/更新 skills，設定專案。
   當使用者明確說「/zenos-setup」「初次設定 ZenOS」「我還沒設定 MCP token」
   「幫我連接 ZenOS 服務」「更新 ZenOS skills」時使用。
-version: 2.1.1
+version: 2.1.2
 ---
 
 # /zenos-setup — Bootstrap（MCP 連線前的首次安裝）
@@ -107,7 +107,8 @@ curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/
 curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/manifest.json
 ```
 
-從回傳的 `skills` 陣列取得 skill 清單。
+從回傳的 `skills` 陣列取得 role / platform skill 清單。
+從 `ssot.governance_files` 與 `ssot.workflow_files` 取得 governance / workflow SSOT 清單；不要靠舊版硬編碼清單。
 
 ### 版本比對
 
@@ -142,19 +143,34 @@ Codex 角色 skill 例外：
 Governance 檔案（`skills/governance/`）每次都重新下載，不比對版本。
 Workflow 檔案（`skills/workflows/`）也必須寫到**專案根目錄**，因為 slash command 與治理 skill 會直接讀這些本地檔案。
 
+來源以 manifest 的 `ssot.governance_files` / `ssot.workflow_files` 為準；若 manifest 尚未含 `ssot`，才 fallback 到下方清單。
+
 必須寫入：
 - `skills/governance/bootstrap-protocol.md`
 - `skills/governance/shared-rules.md`
+- `skills/governance/capture-governance.md`
 - `skills/governance/document-governance.md`
 - `skills/governance/l2-knowledge-governance.md`
 - `skills/governance/task-governance.md`
 - `skills/workflows/knowledge-capture.md`
 - `skills/workflows/knowledge-sync.md`
 - `skills/workflows/setup.md`
+- `skills/workflows/governance-loop.md`
+- `skills/workflows/feature.md`
+- `skills/workflows/debug.md`
+- `skills/workflows/triage.md`
+- `skills/workflows/brainstorm.md`
+- `skills/workflows/marketing-intel.md`
+- `skills/workflows/marketing-plan.md`
+- `skills/workflows/marketing-generate.md`
+- `skills/workflows/marketing-adapt.md`
+- `skills/workflows/marketing-publish.md`
 
 驗證方式：
 - `skills/governance/bootstrap-protocol.md` 必須存在，否則 `/zenos-capture`、`/zenos-sync` 不可繼續
 - `skills/governance/shared-rules.md` 必須存在，否則建票/治理流程不完整
+- `skills/governance/bootstrap-protocol.md` 必須包含 `Context Happy Path`
+- 已安裝的 skill / agent 不得含 manifest `ssot.stale_instruction_gate` 中列出的舊指令
 
 若後續已能呼叫 `mcp__zenos__setup(...)`，一律依 `response["data"]` 解析，不要讀 top-level。
 
@@ -224,13 +240,15 @@ mcp__zenos__search(collection="entities", entity_level="L1")
 
 ### 安裝 agents
 
-執行 release 同步腳本，將 `skills/release/*` 安裝到 `~/.claude/skills/` 與 `~/.codex/skills/`：
+若當前機器有完整 ZenOS repo，執行 release 同步腳本，將 `skills/release/*` 安裝到 `~/.claude/skills/` 與 `~/.codex/skills/`，並同步 workflow aliases / platform agents：
 
 ```bash
 python3 scripts/sync_skills_from_release.py
 ```
 
-> Agent skills 是 generic 的，不需要注入 project name；workflow skills 也一併由 release 安裝。
+若不是完整 repo，只能從 GitHub raw URL 依 manifest 逐檔下載；不要假設 `scripts/sync_skills_from_release.py` 存在。
+
+> Agent skills 是 generic 的，不需要注入 project name；workflow skills 也一併由 release / manifest 安裝。
 
 ---
 

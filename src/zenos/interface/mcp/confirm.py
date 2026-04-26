@@ -17,6 +17,7 @@ from zenos.interface.mcp._common import (
     _enrich_task_result,
 )
 from zenos.interface.mcp._audit import _audit_log
+from zenos.interface.mcp._entry_quality import VALID_ENTRY_TYPES, entry_quality_issue
 
 logger = logging.getLogger(__name__)
 
@@ -104,17 +105,22 @@ async def confirm(
                 partner_department = str(
                     partner_ctx.get("department") or current_partner_department.get() or "all"
                 )
-                valid_entry_types = {"decision", "insight", "limitation", "change", "context"}
                 for entry_data in entity_entries:
                     entity_id = entry_data.get("entity_id")
                     if not entity_id:
+                        warnings.append("entity_entries skipped: missing entity_id")
                         continue
                     content = entry_data.get("content", "")
                     if not content or len(content) > 200:
+                        warnings.append(f"entity_entries skipped for {entity_id}: content must be 1-200 chars")
                         continue
                     entry_type = entry_data.get("type", "insight")
-                    if entry_type not in valid_entry_types:
+                    if entry_type not in VALID_ENTRY_TYPES:
                         entry_type = "insight"
+                    quality_issue = entry_quality_issue(content, entry_type)
+                    if quality_issue:
+                        warnings.append(f"entity_entries skipped for {entity_id}: {quality_issue}")
+                        continue
                     entry = EntityEntry(
                         id=_new_id(),
                         partner_id=pid,

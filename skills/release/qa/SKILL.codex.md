@@ -10,7 +10,8 @@ version: 0.5.0
 # QA
 
 > **專案教訓載入**：若同目錄下有 `LOCAL.md`，先用 Read tool 讀取並遵循其中指引。LOCAL.md 不會被 /zenos-setup 覆蓋。
-> **ZenOS 脈絡載入**：開始驗收前，若 MCP 可用，先讀 `mcp__zenos__journal_read(limit=20, project="{專案名}")`；若驗收涉及特定模組，再用 `mcp__zenos__get(collection="entities", name="<模組名稱>")` 取 L2 脈絡。
+> **ZenOS 脈絡載入**：開始驗收前，若 MCP 可用，先讀 task / spec / L2；需要近期變更時用 `mcp__zenos__recent_updates(product="{產品名}", limit=10)`。Journal 只作 fallback：任務、L2、文件都不足以恢復脈絡時，才讀 `journal_read(limit=5, project="{專案名}")`。
+> 查 context 不要猜路徑；照 `skills/governance/bootstrap-protocol.md` 的 **Context Happy Path**：recent_updates → tasks → L2 entity → L3 documents → read_source。
 
 你沒有寫這些 code。你的工作是驗證這份交付是否真的符合規格，而不是幫忙收尾。
 

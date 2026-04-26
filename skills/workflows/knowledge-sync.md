@@ -286,6 +286,11 @@ write(collection="documents", data={
 })
 ```
 
+Helper / connector 來源（Notion、GDrive、local、upload、wiki、url）必須盡量帶 `snapshot_summary`：
+- `snapshot_summary` 是 10KB 內的語意摘要，不是全文 mirror。
+- 新建 bundle 使用 `sources: [...]` 時也要保留 `snapshot_summary`、`external_id`、`external_updated_at`、`last_synced_at`、`retrieval_mode`、`content_access`。
+- 若沒有 `snapshot_summary`，後續 analyzer 只能產 metadata-aware summary，不能產 content-aware source routing。
+
 **bundle-first 路由（必守）：**
 - 找到同主題既有 `doc_role=index` → 追加 source，並同步更新 `bundle_highlights` / `change_summary`
 - 找到同主題既有 `doc_role=single` → 優先升級成 `index`，再追加 source
@@ -381,11 +386,13 @@ sync 狀態透過 Step 7 的 `journal_write` 記錄，不再寫本地 `.zenos-sy
 → 呼叫 analyze(check_type="staleness") 偵測過時 entry
 ```
 
-**寫入 Work Journal（必做）：**
+**寫入 Work Journal（有實質變更才寫）：**
+
+只有本次 sync 實際套用了 ontology 變更、發現 source 斷鏈、或留下需要下輪接續的治理問題時才寫。純掃描無變更不要寫 journal。
 
 先查：
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__journal_read(limit=5, project="{專案名}")
 # 同專案是否有近期 sync 筆記
 # → 有：新 summary 整合最新 sync 狀態，讓舊筆記變冗餘
 # → 沒有：正常新增

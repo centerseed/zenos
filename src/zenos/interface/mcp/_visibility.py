@@ -102,13 +102,22 @@ async def _guest_allowed_entity_ids() -> set[str]:
         return set()
 
 
-def _is_document_like_entity_visible_for_guest(item: object, allowed_ids: set[str]) -> bool:
+def _is_document_like_entity_visible_for_guest(
+    item: object,
+    allowed_ids: set[str],
+    relationships: list | None = None,
+) -> bool:
     """Check guest subtree membership for entity/document-like items."""
     item_id = str(getattr(item, "id", "") or "").strip()
     if item_id and item_id in allowed_ids:
         return True
 
-    linked_entity_ids = getattr(item, "linked_entity_ids", None) or []
+    if relationships is not None:
+        from zenos.domain.document_linkage import get_document_linked_entity_ids
+
+        linked_entity_ids = get_document_linked_entity_ids(item, relationships)
+    else:
+        linked_entity_ids = getattr(item, "linked_entity_ids", None) or []
     for linked_id in linked_entity_ids:
         if str(linked_id).strip() in allowed_ids:
             return True

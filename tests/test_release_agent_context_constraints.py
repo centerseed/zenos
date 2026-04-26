@@ -20,4 +20,7 @@ def test_release_agent_skills_require_project_context_loading():
     for path in AGENT_SKILLS:
         content = path.read_text(encoding="utf-8")
         assert "LOCAL.md" in content, f"{path} should mention LOCAL.md loading"
-        assert "mcp__zenos__journal_read" in content, f"{path} should require journal context loading"
+        assert (
+            "recent_updates" in content or "tasks / entries" in content
+        ), f"{path} should require durable ontology context before journal fallback"
+        assert "journal 只" in content.lower(), f"{path} should keep journal as fallback, not primary context"

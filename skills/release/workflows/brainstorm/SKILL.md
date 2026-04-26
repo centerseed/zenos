@@ -83,11 +83,13 @@ Challenger 執行完整流程：
 
 ---
 
-## Phase 4：寫入 Work Journal（必做）
+## Phase 4：寫入 Work Journal（重大結論才寫）
+
+只有 brainstorm 產生會影響後續產品/技術方向的重大結論時才寫。一般討論不要寫 journal。
 
 **寫入前先查：**
 ```python
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+mcp__zenos__journal_read(limit=5, project="{專案名}")
 # 同主題是否已有舊的 brainstorm 筆記
 # → 有：新 summary 要整合新舊洞察，讓舊筆記變冗餘
 # → 沒有：正常新增

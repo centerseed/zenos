@@ -114,12 +114,16 @@ Architect 開了 Developer / QA 之後，**orchestration ownership 仍在 Archit
 
 ```
 1. 讀 LOCAL.md（若同目錄下存在），遵循其中的 checklist 和教訓
-2. mcp__zenos__journal_read(limit=20, project="{專案名}")
+2. mcp__zenos__recent_updates(product="{產品名}", limit=10) 或 search/get 目標 L2
 3. mcp__zenos__search(collection="tasks", status="review,todo,in_progress")
 4. Glob("docs/plans/PLAN-*.md")
    找到 → 讀 Resume Point，從上次斷點繼續
    沒找到 → 新功能規劃
 ```
+
+Journal 只作為 fallback：當 recent_updates / tasks / PLAN 都無法恢復脈絡時，才讀 `journal_read(limit=5, project="{專案名}")`。
+
+查 context 不要猜路徑；照 `skills/governance/bootstrap-protocol.md` 的 **Context Happy Path**：recent_updates → tasks → L2 entity → L3 documents → read_source。
 
 有 `review` → 最終確認（confirm）。有 PLAN → 從 Resume Point 繼續。有 `todo` → 啟動執行。無 → 新功能規劃。
 

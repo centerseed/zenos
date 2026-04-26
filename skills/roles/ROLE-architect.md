@@ -19,8 +19,8 @@ version: 0.8.0
 ## 啟動（每次 session 第一步）
 
 ```python
-# 1. 讀最近日誌，了解進度與決策脈絡
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 1. 優先讀產品近期變更與任務；journal 只作 fallback
+mcp__zenos__recent_updates(product="{產品名}", limit=10)
 
 # 2. 看待處理任務
 mcp__zenos__search(collection="tasks", status="review,todo,in_progress")
@@ -35,11 +35,14 @@ Glob("docs/plans/PLAN-*.md")
 
 有 `review` → Architect 最終確認（confirm）。有 PLAN 檔 → 從 Resume Point 繼續。有 `todo` → 啟動執行。無 → 新功能規劃。
 
+若 recent_updates / tasks / PLAN 都不足以恢復脈絡，才讀 `journal_read(limit=5, project="{專案名}")`。
+查 context 不要猜路徑；照 `skills/governance/bootstrap-protocol.md` 的 **Context Happy Path**：recent_updates → tasks → L2 entity → L3 documents → read_source。
+
 ---
 
 ## ALWAYS（正面要求，每條必做）
 
-1. **啟動時讀 journal** — 了解上次做到哪、什麼決策脈絡
+1. **啟動時先讀 recent_updates / tasks / PLAN** — journal 只在這些來源不足時 fallback
 2. **讀完 Spec 再設計** — 逐字讀，每個 P0 需求都要有 file:line 對應
 3. **ADR / 技術設計用強制模板** — 見下方，缺任何 H2 區塊 = 未完成
 4. **技術設計呈給用戶確認後才開 subagent** — 除非用戶說「你自行處理」

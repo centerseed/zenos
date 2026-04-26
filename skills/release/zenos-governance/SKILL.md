@@ -76,9 +76,11 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - `analyze(check_type="quality")`
    - `analyze(check_type="staleness")`
    - `analyze(check_type="blindspot")`
+   - 文件治理優先用 scoped：`analyze(check_type="invalid_documents", entity_id="<L1/L2 id>")`
    - **若 `analyze(quality)` timeout**（已知限制：entity active entries 接近或超過 20 時 LLM consolidate 會超時），走第 6 節「Entry 飽和手動稽核 protocol」
 2. 分類問題
    - 結構問題：命名混亂、L1/L2 掛錯、孤兒節點、關聯缺失。
+   - 文件問題：legacy `single` 過多、缺少 `bundle_highlights`、L2 找不到 doc bundle、source 重複或入口錯誤。
    - 內容問題：summary 技術噪音、tags 不完整、文件重複。
    - 流程問題：治理動作沒 task、完成後沒 confirm。
 3. 轉任務
@@ -86,7 +88,9 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - **必須先走第 5 節「Task 治理規範」再建票**。
 4. 執行修復
    - 結構修復：`write(entities/relationships)`
-   - 文件修復：`write(documents)` 或 append_sources
+   - 文件修復：優先採用 analyzer 的 `suggested_write_patch`
+   - 批次文件修復固定順序：`write(collection="patches", data={dry_run=true, patches=[...]})` → 檢查 `validated_count` → `write(collection="patches", data={patches=[...]}, source="governance-loop")`
+   - 若 analyzer 無 patch，再手動 `write(documents)` 或 append_sources
 5. 驗收回寫
    - task 進 review 後 `confirm(collection="tasks", accepted=True)`
    - 必要時 `mark_stale_entity_ids` 或新增 blindspot。
@@ -103,7 +107,10 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - 每個核心 L2 至少一條高價值 relationship（優先 impacts/depends_on）。
 4. 文件降噪
    - 低價值文件轉 stale 或只保留 source，不建立獨立節點。
-5. 最後才修文案
+5. 文件 bundle 重整
+   - 先跑 scoped `analyze(check_type="invalid_documents", entity_id="<id>")`，有 `suggested_write_patch` 就先 dry-run / batch apply。
+   - L3 index summary 必須是 source-aware retrieval map：優先使用 source metadata 與 `snapshot_summary`，不要只列檔名。
+6. 最後才修文案
    - 統一 summary/tags 語言，避免先改文案後又被結構改動推翻。
 
 ### 4.2 驗收門檻（預設）

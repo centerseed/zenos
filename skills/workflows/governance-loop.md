@@ -77,6 +77,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - `analyze(check_type="quality")`
    - `analyze(check_type="staleness")`
    - `analyze(check_type="blindspot")`
+   - 文件治理優先用 scoped：`analyze(check_type="invalid_documents", entity_id="<L1/L2 id>")`
 2. 分類問題
    - 結構問題：命名混亂、L1/L2 掛錯、孤兒節點、關聯缺失。
    - 文件問題：legacy `single` 過多、缺少 `bundle_highlights`、L2 找不到 doc bundle、source 重複或入口錯誤。
@@ -87,7 +88,9 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - **必須先走第 5 節「Task 治理規範」再建票**。
 4. 執行修復
    - 結構修復：`write(entities/relationships)`
-   - 文件修復：`write(documents)` 做 bundle-first 重整；必要時批量升級 legacy `single` → `index`
+   - 文件修復：優先採用 analyzer 的 `suggested_write_patch`
+   - 批次文件修復固定順序：`write(collection="patches", data={dry_run=true, patches=[...]})` → 檢查 `validated_count` → `write(collection="patches", data={patches=[...]}, source="governance-loop")`
+   - 若 analyzer 無 patch，再手動 `write(documents)` 做 bundle-first 重整
 5. 驗收回寫
    - task 進 review 後 `confirm(collection="tasks", accepted=True)`
    - 必要時 `mark_stale_entity_ids` 或新增 blindspot。
@@ -126,11 +129,13 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
 - agent 常常搜到文件名，但不知道先讀哪份
 
 執行順序：
-1. 先盤點當前產品所有 document entity，按 `parent_id + 主題` 分群
-2. 將 legacy `single` 優先升級成 `index`
-3. 對每個 bundle 補最少 1 筆 `primary` highlight
-4. 標記 merge candidates，人工或後續 task 決定是否合併 entity
-5. 重整後再跑 `analyze(check_type="quality")` 與 L2 spot-check
+1. 先針對 L1/L2 跑 scoped `analyze(check_type="invalid_documents", entity_id="<id>")`
+2. 若回傳 `suggested_write_patch`，先 dry-run，再批次 apply
+3. 對無 patch 的問題，才手動盤點 document entity，按 `parent_id + 主題` 分群
+4. 將 legacy `single` 優先升級成 `index`
+5. 對每個 bundle 補最少 1 筆 `primary` highlight
+6. 標記 merge candidates，人工或後續 task 決定是否合併 entity
+7. 重整後 rerun scoped `invalid_documents`，確認 `bundle_issue_count=0`
 
 完成定義：
 - 新建 document 不再預設 `single`

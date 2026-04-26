@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import re
 import uuid
+import inspect
 from dataclasses import asdict
 from datetime import datetime
 
@@ -108,6 +109,52 @@ def _serialize(obj: object) -> dict:
         if "attachments" in data and data["attachments"]:
             data["attachments"] = _add_proxy_urls(data["attachments"])
     return data
+
+
+def _document_linkage_fields(
+    doc_obj,
+    relationships: list | None = None,
+    entity_map: dict[str, object] | None = None,
+) -> dict:
+    """Build canonical L3 document linkage fields for MCP responses."""
+    from zenos.domain.document_linkage import get_document_linked_entity_ids
+
+    linked_ids = get_document_linked_entity_ids(doc_obj, relationships or [])
+    fields: dict = {
+        "linked_entity_ids": linked_ids,
+        "primary_linked_entity_id": linked_ids[0] if linked_ids else None,
+        "related_entity_ids": linked_ids[1:],
+    }
+    if entity_map is not None:
+        linked_entities = []
+        for entity_id in linked_ids:
+            entity = entity_map.get(entity_id)
+            if entity is None:
+                continue
+            linked_entities.append({
+                "id": getattr(entity, "id", None),
+                "name": getattr(entity, "name", None),
+                "type": getattr(entity, "type", None),
+                "level": getattr(entity, "level", None),
+            })
+        fields["linked_entities"] = linked_entities
+    return fields
+
+
+async def _load_document_relationships(doc_id: str | None) -> list:
+    """Load relationships for a document entity if the relationship repo is available."""
+    if not doc_id:
+        return []
+    import zenos.interface.mcp as _mcp
+
+    rel_repo = getattr(getattr(_mcp, "ontology_service", None), "_relationships", None)
+    loader = getattr(rel_repo, "list_by_entity", None)
+    if loader is None:
+        return []
+    result = loader(doc_id)
+    if inspect.isawaitable(result):
+        result = await result
+    return list(result or [])
 
 
 def _convert_datetimes(data: dict) -> dict:

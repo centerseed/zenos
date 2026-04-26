@@ -36,11 +36,39 @@ EXISTING_DOCS = mcp__zenos__search(
     product_id=PRODUCT_ID
 )
 
-# 讀最近 journal（了解其他 session 的進度）
-RECENT_JOURNALS = mcp__zenos__journal_read(limit=10, project=PROJECT_NAME)
+# 讀產品近期變更；journal 只作 fallback
+RECENT_UPDATES = mcp__zenos__recent_updates(product_id=PRODUCT_ID, limit=10)
+RECENT_JOURNALS = mcp__zenos__journal_read(limit=5, project=PROJECT_NAME)  # optional fallback only
 ```
 
 **目的：** 讓 Agent 在開始操作前就知道「這個產品已經有什麼」。不載入就開始操作 = 盲目操作。
+
+### Context Happy Path（不要猜查法）
+
+當使用者只給「功能 / 模組 / 問題」關鍵字時，照以下順序拿 context：
+
+```python
+# 1. 近期變更：先看最近真正改過什麼
+mcp__zenos__recent_updates(product_id=PRODUCT_ID, topic="{關鍵字}", limit=10)
+
+# 2. 任務：若是交付/修復/驗收，先找可執行單位
+mcp__zenos__search(collection="tasks", query="{關鍵字}", status="todo,in_progress,review", product_id=PRODUCT_ID)
+
+# 3. L2：找穩定概念入口
+mcp__zenos__search(collection="entities", query="{關鍵字}", product_id=PRODUCT_ID, entity_level="L2", include=["summary", "tags"])
+
+# 4. L2 詳情：拿 relationships / entries，確認上下游與 durable knowledge
+mcp__zenos__get(collection="entities", name="{最相關 L2}", include=["summary", "relationships", "entries"])
+
+# 5. L3 文件入口：從 L2 找文件群 summary，不直接亂搜全文
+mcp__zenos__search(collection="documents", entity_name="{最相關 L2}", include=["summary"], limit=10)
+
+# 6. 需要原文時才讀 source
+mcp__zenos__get(collection="documents", id="{doc_id}")
+mcp__zenos__read_source(doc_id="{doc_id}")
+```
+
+只在以上來源仍不足以恢復脈絡時，才讀 `journal_read(limit=5, project=PROJECT_NAME)`。
 
 **載入後輸出摘要（可選，建議對新用戶顯示）：**
 
@@ -48,7 +76,7 @@ RECENT_JOURNALS = mcp__zenos__journal_read(limit=10, project=PROJECT_NAME)
 產品：{PRODUCT_NAME}（ID: {PRODUCT_ID}）
 現有 L2 entity：{n} 個
 現有 Documents：{n} 個
-上次操作：{最近 journal 的 summary 摘要}
+近期變更：{recent_updates 摘要；若不足再看 journal fallback}
 ```
 
 ---

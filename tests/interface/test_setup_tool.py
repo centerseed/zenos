@@ -50,13 +50,40 @@ def skills_root(tmp_path: Path) -> Path:
     (governance / "task-governance.md").write_text("# Task Governance\ncontent here", encoding="utf-8")
 
     # workflow skills
-    for name in ["knowledge-capture.md", "knowledge-sync.md", "setup.md", "governance-loop.md",
-                  "feature.md", "debug.md", "triage.md"]:
+    for name in [
+        "knowledge-capture.md", "knowledge-sync.md", "setup.md", "governance-loop.md",
+        "feature.md", "debug.md", "triage.md", "brainstorm.md",
+        "marketing-intel.md", "marketing-plan.md", "marketing-generate.md",
+        "marketing-adapt.md", "marketing-publish.md",
+    ]:
         (workflows / name).write_text(f"# {name}\ncontent", encoding="utf-8")
 
     # manifest
     manifest = {
         "schema_version": 1,
+        "ssot": {
+            "governance_version": "2026.04.26.2",
+            "governance_files": [
+                "skills/governance/bootstrap-protocol.md",
+                "skills/governance/shared-rules.md",
+                "skills/governance/capture-governance.md",
+                "skills/governance/document-governance.md",
+                "skills/governance/l2-knowledge-governance.md",
+                "skills/governance/task-governance.md",
+            ],
+            "workflow_files": [
+                "skills/workflows/knowledge-capture.md",
+                "skills/workflows/knowledge-sync.md",
+                "skills/workflows/setup.md",
+                "skills/workflows/governance-loop.md",
+                "skills/workflows/feature.md",
+                "skills/workflows/debug.md",
+                "skills/workflows/triage.md",
+                "skills/workflows/brainstorm.md",
+            ],
+            "context_happy_path": "Context Happy Path: recent_updates → tasks → L2 entity → L3 documents → read_source → journal fallback",
+            "stale_instruction_gate": ["journal_read(limit=20"],
+        },
         "skills": [
             {"name": "zenos-setup", "version": "1.0.0", "path": "zenos-setup", "files": ["SKILL.md"], "owner": "Barry"},
             {"name": "zenos-capture", "version": "2.1.0", "path": "zenos-capture", "files": ["SKILL.md"], "owner": "Barry"},
@@ -160,11 +187,12 @@ class TestGetSkillFiles:
         assert "skills/workflows/knowledge-sync.md" in files
         assert "skills/workflows/setup.md" in files
         assert "skills/workflows/governance-loop.md" in files
+        assert "skills/workflows/brainstorm.md" in files
 
     def test_full_selection_returns_expected_file_count(self):
         from zenos.interface.setup_content import get_skill_files
         files = get_skill_files("full")
-        assert len(files) == 13  # 6 governance + 7 workflow (agent roles optional, skipped when missing)
+        assert len(files) == 19  # 6 governance + 13 workflow (fixture has no role skill dirs)
 
     def test_task_only_excludes_document_governance(self):
         from zenos.interface.setup_content import get_skill_files
@@ -612,6 +640,29 @@ class TestSetupManifestOnly:
             assert "path" in skill, f"Skill {skill.get('name')} missing 'path'"
             assert "version" in skill, f"Skill {skill.get('name')} missing 'version'"
             assert "content" not in skill, f"Skill {skill.get('name')} should not have 'content'"
+
+    async def test_manifest_exposes_governance_ssot_files_and_guards(self):
+        """Manifest must publish governance/workflow SSOT so other machines can sync the same rules."""
+        from zenos.interface.mcp import setup
+        result = await setup(platform="codex", skip_overview=True)
+        manifest = _ok_data(result)["manifest"]
+        ssot = manifest["ssot"]
+        assert "skills/governance/bootstrap-protocol.md" in ssot["governance_files"]
+        assert "skills/governance/capture-governance.md" in ssot["governance_files"]
+        assert "skills/workflows/brainstorm.md" in ssot["workflow_files"]
+        assert "Context Happy Path" in ssot["context_happy_path"]
+        assert "journal_read(limit=20" in ssot["stale_instruction_gate"]
+
+    async def test_setup_payload_instructions_use_manifest_ssot(self):
+        """Install instructions should tell agents to follow manifest.ssot, not stale hardcoded lists."""
+        from zenos.interface.mcp import setup
+        result = await setup(platform="codex", skip_overview=True)
+        data = _ok_data(result)
+        instructions_text = " ".join(data["instructions"])
+        assert "manifest.ssot.governance_files" in instructions_text
+        assert "Context Happy Path" in instructions_text
+        assert "stale_instruction_gate" in instructions_text
+        assert "ssot" in data["payload"]
 
     async def test_codex_manifest_skills_no_content(self):
         from zenos.interface.mcp import setup

@@ -54,10 +54,12 @@ version: 3.0.0
 - 所有 `search` / `write` 都帶 product scope。
 - document 一律帶 `linked_entity_ids`。
 - `doc_role=index` 預設成立；同主題第二份文件不要再建平行 single。
+- Helper / connector 來源（Notion、GDrive、local、upload、wiki、url）要盡量帶 `snapshot_summary`；它是 10KB 內語意摘要，不是全文 mirror。
+- 新建 bundle 使用 `sources: [...]` 時，要保留 `snapshot_summary`、`external_id`、`external_updated_at`、`last_synced_at`、`retrieval_mode`、`content_access`，否則後續 analyzer 只能產 metadata-aware summary。
 - 需要具體治理規則時，回頭再 call `governance_guide`，不要靠這份檔案腦補。
 
 ## 完成後
 
 - 回報這次新增 / 更新了哪些 entity、document、entry。
 - 若發現規則缺口、資料不完整、或需要後續修復，建 blindspot 或 task。
-- 寫一筆 journal，留下這次 capture 的結果與待補項。
+- 只有實際新增/更新知識，或留下 TBD / blindspot 需要下輪接續時才寫 journal；純掃描無變更不要寫。

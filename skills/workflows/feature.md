@@ -139,9 +139,9 @@ Architect 是實作階段的主控角色，按 plan_order 逐張 task 執行：
 
 ---
 
-## Phase 6：寫入 Work Journal（必做）
+## Phase 6：寫入 Work Journal（重大 feature 才寫）
 
-流程結束時，記錄本次工作摘要：
+只有 feature 真的完成一個跨 session 需要復盤的決策或交付邊界時才寫。一般任務完成狀態留在 task.result / PLAN log，不寫 journal。
 
 ```python
 mcp__zenos__journal_write(

@@ -74,11 +74,11 @@ async def test_journal_write_returns_ok_status():
     assert result["data"]["compressed"] is False
 
 
-async def test_journal_write_truncates_summary_to_100_chars():
-    """journal_write silently truncates summary exceeding 100 chars."""
+async def test_journal_write_truncates_summary_to_500_chars_with_warning():
+    """journal_write truncates only at repository limit and warns."""
     from zenos.interface.mcp.journal import journal_write
 
-    long_summary = "x" * 200
+    long_summary = "x" * 600
     repo = _make_journal_repo()
     mock_pid, mock_partner = _make_partner_ctx()
 
@@ -88,11 +88,11 @@ async def test_journal_write_truncates_summary_to_100_chars():
         patch("zenos.infrastructure.context.current_partner_id", mock_pid),
         patch("zenos.interface.mcp.journal._current_partner", mock_partner),
     ):
-        await journal_write(summary=long_summary)
+        result = await journal_write(summary=long_summary)
 
-    # The summary passed to repo.create must be at most 100 chars
     call_kwargs = repo.create.call_args[1]
-    assert len(call_kwargs["summary"]) == 100
+    assert len(call_kwargs["summary"]) == 500
+    assert "journal summary truncated to 500 chars" in result["warnings"]
 
 
 async def test_journal_write_triggers_compress_when_over_20():

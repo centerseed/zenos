@@ -759,6 +759,14 @@ class TestCheckImpactsTargetValidity:
         result = check_impacts_target_validity([m1, m2], [rel])
         assert result == []
 
+    def test_valid_external_target_context_returns_empty(self):
+        """Scoped checks can validate cross-scope targets without making them sources."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        external = _make_entity(name="External", entity_type=EntityType.MODULE, entity_id="external-1")
+        rel = _make_impacts_rel("m1", "external-1")
+        result = check_impacts_target_validity([m1], [rel], target_context_entities=[external])
+        assert result == []
+
     def test_detects_not_found_target(self):
         """Impacts pointing to a non-existent entity → reason='target_missing'."""
         m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
@@ -871,6 +879,22 @@ class TestCheckImpactsTargetValidity:
         m2 = _make_entity(name="M2", entity_type=EntityType.MODULE, entity_id="m2")
         rel = _make_impacts_rel("m1", "m2")
         report = run_quality_check([m1, m2], [], [], [], [rel])
+        passed_names = [i.name for i in report.passed]
+        assert "l2_impacts_target_validity" in passed_names
+
+    def test_run_quality_check_item_13_uses_external_target_context(self):
+        """Scoped quality can validate cross-scope impacts targets."""
+        m1 = _make_entity(name="M1", entity_type=EntityType.MODULE, entity_id="m1")
+        external = _make_entity(name="External", entity_type=EntityType.MODULE, entity_id="external-1")
+        rel = _make_impacts_rel("m1", "external-1")
+        report = run_quality_check(
+            [m1],
+            [],
+            [],
+            [],
+            [rel],
+            impact_target_context_entities=[external],
+        )
         passed_names = [i.name for i in report.passed]
         assert "l2_impacts_target_validity" in passed_names
 

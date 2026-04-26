@@ -554,7 +554,45 @@ class GovernanceService:
 
         return quality_report
 
-    async def compute_health_signal(self) -> dict:
+    @staticmethod
+    def _scope_entity_ids(all_entities: list[Entity], root_entity_id: str) -> set[str]:
+        """Return root + descendants by parent_id."""
+        by_parent: dict[str, list[Entity]] = {}
+        for entity in all_entities:
+            if entity.parent_id:
+                by_parent.setdefault(entity.parent_id, []).append(entity)
+
+        scoped: set[str] = set()
+        stack = [root_entity_id]
+        while stack:
+            current = stack.pop()
+            if current in scoped:
+                continue
+            scoped.add(current)
+            stack.extend(child.id for child in by_parent.get(current, []) if child.id)
+        return scoped
+
+    async def _load_relationships_for_scope(self, scoped_entity_ids: set[str]) -> list:
+        """Load relationships touching scoped entities, de-duplicated by id/edge."""
+        relationships = []
+        seen: set[tuple] = set()
+        for entity_id in scoped_entity_ids:
+            for rel in await self._relationships.list_by_entity(entity_id):
+                key = (
+                    rel.id,
+                    rel.source_entity_id,
+                    rel.target_id,
+                    rel.type,
+                    rel.description,
+                )
+                if key in seen:
+                    continue
+                seen.add(key)
+                if rel.source_entity_id in scoped_entity_ids or rel.target_id in scoped_entity_ids:
+                    relationships.append(rel)
+        return relationships
+
+    async def compute_health_signal(self, entity_id: str | None = None) -> dict:
         """Compute lightweight health signal (ADR-020).
 
         Queries repos, runs quality check for score + l2 repairs,
@@ -562,10 +600,28 @@ class GovernanceService:
 
         Returns dict with kpis, overall_level, recommended_action, red_reasons.
         """
-        all_entities = await self._entities.list_all()
+        all_entities_unscoped = await self._entities.list_all()
+        scope_root = None
+        scope_ids: set[str] | None = None
+        if entity_id:
+            scope_root = next((e for e in all_entities_unscoped if e.id == entity_id), None)
+            if scope_root is None:
+                raise ValueError(f"Entity '{entity_id}' not found")
+            scope_ids = self._scope_entity_ids(all_entities_unscoped, entity_id)
+            all_entities = [e for e in all_entities_unscoped if e.id in scope_ids]
+        else:
+            all_entities = all_entities_unscoped
+
         entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
         documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
-        blindspots = await self._blindspots.list_all()
+        all_blindspots = await self._blindspots.list_all()
+        if scope_ids is not None:
+            blindspots = [
+                bs for bs in all_blindspots
+                if any(eid in scope_ids for eid in bs.related_entity_ids)
+            ]
+        else:
+            blindspots = all_blindspots
 
         # Collect protocols
         protocols = []
@@ -576,13 +632,31 @@ class GovernanceService:
                     protocols.append(protocol)
 
         # Get quality_score and l2_repairs via existing run_quality_check
-        relationships = await self._load_all_relationships(all_entities)
+        relationships = (
+            await self._load_relationships_for_scope(scope_ids)
+            if scope_ids is not None
+            else await self._load_all_relationships(all_entities)
+        )
+        impact_target_context_entities: list[Entity] | None = None
+        if scope_ids is not None:
+            endpoint_ids = {
+                endpoint_id
+                for rel in relationships
+                if rel.type == "impacts"
+                for endpoint_id in (rel.source_entity_id, rel.target_id)
+            }
+            external_endpoint_ids = endpoint_ids - scope_ids
+            impact_target_context_entities = [
+                e for e in all_entities_unscoped
+                if e.id in external_endpoint_ids
+            ]
         quality_report = run_quality_check(
             entities=entities,
             documents=documents,
             protocols=protocols,
             blindspots=blindspots,
             relationships=relationships,
+            impact_target_context_entities=impact_target_context_entities,
         )
         quality_score = quality_report.score
 
@@ -602,6 +676,19 @@ class GovernanceService:
             bundle_highlights_coverage=self._compute_bundle_highlights_coverage(documents),
             bootstrap=bootstrap,
         )
+        if scope_root is not None:
+            signal["scope"] = {
+                "entity_id": scope_root.id,
+                "entity_name": scope_root.name,
+                "entity_type": scope_root.type,
+                "mode": "subtree",
+                "entity_count": len(all_entities),
+                "relationship_count": len(relationships),
+                "blindspot_count": len(blindspots),
+                "global_signals_excluded": ["llm_health"],
+            }
+            return signal
+
         try:
             from zenos.infrastructure.context import current_partner_id as _current_partner_id
 

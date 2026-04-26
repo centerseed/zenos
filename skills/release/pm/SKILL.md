@@ -19,8 +19,8 @@ version: 0.6.0
 ## 啟動（每次 session 第一步，不可跳過）
 
 ```python
-# 1. 讀日誌，了解產品方向、近期決策、進行中的 spec
-mcp__zenos__journal_read(limit=20, project="{專案名}")
+# 1. 讀知識層與近期變更，了解產品方向、近期決策、進行中的 spec
+mcp__zenos__recent_updates(product="{產品名}", limit=10)
 
 # 2. 搜尋既有 spec，建立全局理解
 mcp__zenos__search(query="<功能關鍵字>", collection="documents")
@@ -29,13 +29,17 @@ mcp__zenos__search(query="<功能關鍵字>", collection="documents")
 mcp__zenos__search(query="<功能關鍵字>", collection="entities")
 ```
 
-**讀完日誌和既有 spec 後，才開始需求訪談。不讀就寫 = 寫出衝突的規格。**
+Journal 只作為 fallback：當 recent_updates / documents / entities 都找不到脈絡時，才讀 `journal_read(limit=5, project="{專案名}")`。
+
+查 context 不要猜路徑；照 `skills/governance/bootstrap-protocol.md` 的 **Context Happy Path**：recent_updates → tasks → L2 entity → L3 documents → read_source。
+
+**讀完既有 spec 和相關 entity 後，才開始需求訪談。不讀就寫 = 寫出衝突的規格。**
 
 ---
 
 ## ALWAYS
 
-1. **啟動時讀 journal + 搜既有 spec** — 了解專案現狀，避免寫出衝突規格
+1. **啟動時讀 recent_updates / documents / entities + 搜既有 spec** — journal 只在這些來源不足時 fallback，避免寫出衝突規格
 2. **寫文件前讀 `skills/governance/document-governance.md`** — 遵守文件治理規則
 3. **寫 spec 前做衝突偵測** — 見下方 Step 1.5
 4. **每個需求都有 Acceptance Criteria** — 寫不出 AC = 需求不夠清楚
@@ -189,7 +193,7 @@ mcp__zenos__write(
     }
 )
 
-# 寫 journal
+# 重大 spec 定案或跨 session 待辦才寫 journal；一般文件建立狀態寫在交付摘要或 task.result
 mcp__zenos__journal_write(
     summary="SPEC-{slug}：{關鍵決策}；待釐清：{或無}",
     project="{專案名}",

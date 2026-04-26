@@ -15,6 +15,7 @@ from zenos.application.identity.source_access_policy import (
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
     _serialize,
+    _load_document_relationships,
     _unified_response,
     _build_governance_hints,
     _error_response,
@@ -96,9 +97,10 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                 message=_format_not_found("Document", doc_id),
             )
         partner = _current_partner.get() or {}
+        relationships = await _load_document_relationships(doc_record.id)
         if partner and is_guest(partner):
             allowed_ids = await _guest_allowed_entity_ids()
-            if not allowed_ids or not _is_document_like_entity_visible_for_guest(doc_record, allowed_ids):
+            if not allowed_ids or not _is_document_like_entity_visible_for_guest(doc_record, allowed_ids, relationships):
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
@@ -380,6 +382,36 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                 error_code="SOURCE_UNAVAILABLE",
                 message=f"Source '{current_sid or uri}' is currently {source_status}",
                 extra_data=extra,
+            )
+
+        if source_type == "zenos_native":
+            snapshot_reader = getattr(_mcp.source_service, "read_source_with_snapshot", None)
+            snapshot_result = None
+            if snapshot_reader is not None:
+                maybe = snapshot_reader(doc_id, source_id=current_sid, source_uri=uri)
+                snapshot_result = await maybe if inspect.isawaitable(maybe) else maybe
+            if isinstance(snapshot_result, dict) and "content" in snapshot_result:
+                resp = {
+                    "doc_id": doc_id,
+                    "content": snapshot_result["content"],
+                    "content_type": snapshot_result.get("content_type", "full"),
+                }
+                if current_sid:
+                    resp["source_id"] = current_sid
+                if alternative_sources:
+                    resp["alternative_sources"] = alternative_sources
+                return _unified_response(data=resp)
+            return _error_response(
+                error_code="SNAPSHOT_UNAVAILABLE",
+                message=f"zenos_native source '{current_sid or uri}' has no readable revision",
+                extra_data={
+                    "doc_id": doc_id,
+                    "source_id": current_sid,
+                    "source_type": source_type,
+                    "uri": uri,
+                    "setup_hint": "zenos_native source 尚未有 revision。請先在 Dashboard 儲存文件。",
+                    "alternative_sources": alternative_sources,
+                },
             )
 
         # Read the actual content via adapter — pass selected URI so the

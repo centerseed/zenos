@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 
 from zenos.application.knowledge.ontology_service import DocumentLinkageValidationError, SnapshotTooLargeError
+from zenos.domain.doc_types import is_known_doc_type
+from zenos.domain.source_uri_validator import validate_source_uri
 from zenos.infrastructure.github_adapter import GitHubAdapter
 from zenos.infrastructure.context import current_partner_id
 from zenos.infrastructure.sql_common import SCHEMA, get_pool
@@ -17,6 +19,8 @@ from zenos.infrastructure.context import (
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
     _serialize,
+    _document_linkage_fields,
+    _load_document_relationships,
     _new_id,
     _unified_response,
     _error_response,
@@ -30,8 +34,336 @@ from zenos.interface.mcp._visibility import (
     _guest_write_rejection,
 )
 from zenos.interface.mcp._audit import _audit_log
+from zenos.interface.mcp._entry_quality import VALID_ENTRY_TYPES, entry_quality_issue
 
 logger = logging.getLogger(__name__)
+
+_PATCH_BATCH_MAX = 20
+_DOCUMENT_REPAIR_PATCH_ALLOWED_FIELDS = {
+    "id",
+    "create_index_document",
+    "title",
+    "status",
+    "doc_role",
+    "linked_entity_ids",
+    "sources",
+    "add_source",
+    "bundle_highlights",
+    "summary",
+    "change_summary",
+    "tags",
+    "details",
+    "formal_entry",
+}
+_DOCUMENT_CREATE_SOURCE_PATCH_ALLOWED_FIELDS = {
+    "source_id",
+    "type",
+    "uri",
+    "label",
+    "doc_type",
+    "doc_status",
+    "note",
+    "is_primary",
+    "retrieval_mode",
+    "content_access",
+}
+_DOCUMENT_SOURCE_REPAIR_PATCH_ALLOWED_FIELDS = {
+    "type",
+    "uri",
+    "label",
+    "doc_type",
+    "doc_status",
+    "note",
+    "is_primary",
+    "retrieval_mode",
+    "content_access",
+}
+
+
+def _validate_create_index_sources(
+    patch_data: dict,
+    *,
+    doc_id: str,
+    index: int,
+) -> dict | None:
+    sources = patch_data.get("sources")
+    if not isinstance(sources, list) or not sources:
+        return {"index": index, "reason": "patch_create_index_sources_required"}
+
+    source_ids: set[str] = set()
+    primary_count = 0
+    for source_index, source in enumerate(sources):
+        if not isinstance(source, dict):
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_must_be_object",
+                "source_index": source_index,
+            }
+        disallowed = sorted(set(source) - _DOCUMENT_CREATE_SOURCE_PATCH_ALLOWED_FIELDS)
+        if disallowed:
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_has_disallowed_fields",
+                "source_index": source_index,
+                "fields": disallowed,
+            }
+        if source.get("type") != "zenos_native":
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_must_be_zenos_native",
+                "source_index": source_index,
+            }
+        expected_uri = f"/docs/{doc_id}"
+        if source.get("uri") != expected_uri:
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_uri_must_match_document",
+                "source_index": source_index,
+                "expected_uri": expected_uri,
+            }
+        is_valid_uri, uri_error = validate_source_uri("zenos_native", str(source.get("uri") or ""))
+        if not is_valid_uri:
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_invalid_uri",
+                "source_index": source_index,
+                "message": uri_error,
+            }
+        if source.get("is_primary") is True:
+            primary_count += 1
+        retrieval_mode = source.get("retrieval_mode")
+        if retrieval_mode is not None and retrieval_mode not in {
+            "direct",
+            "snapshot",
+            "per_user_live",
+        }:
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_invalid_retrieval_mode",
+                "source_index": source_index,
+            }
+        content_access = source.get("content_access")
+        if content_access is not None and content_access not in {"summary", "full", "none"}:
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_invalid_content_access",
+                "source_index": source_index,
+            }
+        doc_type = source.get("doc_type")
+        if doc_type is not None and not is_known_doc_type(str(doc_type)):
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_invalid_doc_type",
+                "source_index": source_index,
+            }
+        source_id = str(source.get("source_id") or "").strip()
+        if not source_id:
+            return {
+                "index": index,
+                "reason": "patch_create_index_source_id_required",
+                "source_index": source_index,
+            }
+        source_ids.add(source_id)
+
+    if primary_count != 1:
+        return {
+            "index": index,
+            "reason": "patch_create_index_requires_one_primary_source",
+        }
+
+    highlights = patch_data.get("bundle_highlights")
+    if not isinstance(highlights, list) or not highlights:
+        return {"index": index, "reason": "patch_create_index_highlights_required"}
+    if not any(isinstance(item, dict) and item.get("priority") == "primary" for item in highlights):
+        return {"index": index, "reason": "patch_create_index_primary_highlight_required"}
+    for highlight_index, item in enumerate(highlights):
+        if not isinstance(item, dict):
+            return {
+                "index": index,
+                "reason": "patch_create_index_highlight_must_be_object",
+                "highlight_index": highlight_index,
+            }
+        source_id = str(item.get("source_id") or "").strip()
+        if source_id and source_id not in source_ids:
+            return {
+                "index": index,
+                "reason": "patch_create_index_highlight_source_id_not_found",
+                "highlight_index": highlight_index,
+            }
+        if not str(item.get("headline") or "").strip():
+            return {
+                "index": index,
+                "reason": "patch_create_index_highlight_headline_required",
+                "highlight_index": highlight_index,
+            }
+        if not str(item.get("reason_to_read") or "").strip():
+            return {
+                "index": index,
+                "reason": "patch_create_index_highlight_reason_required",
+                "highlight_index": highlight_index,
+            }
+    return None
+
+
+def _normalize_repair_patch(item: object) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    suggested = item.get("suggested_write_patch")
+    if isinstance(suggested, dict):
+        return suggested
+    return item
+
+
+def _validate_document_repair_patch(item: object, index: int) -> tuple[dict | None, dict | None]:
+    patch = _normalize_repair_patch(item)
+    if not isinstance(patch, dict):
+        return None, {"index": index, "reason": "patch_must_be_object"}
+
+    if patch.get("tool") != "write":
+        return None, {"index": index, "reason": "patch_tool_must_be_write"}
+    if patch.get("collection") != "documents":
+        return None, {"index": index, "reason": "patch_collection_must_be_documents"}
+    if patch.get("needs_agent_review") is not True:
+        return None, {"index": index, "reason": "patch_must_be_analyzer_reviewable"}
+
+    patch_data = patch.get("data")
+    if not isinstance(patch_data, dict):
+        return None, {"index": index, "reason": "patch_data_must_be_object"}
+    doc_id = str(patch_data.get("id") or "").strip()
+    if not doc_id:
+        return None, {"index": index, "reason": "patch_data_id_required"}
+
+    disallowed = sorted(set(patch_data) - _DOCUMENT_REPAIR_PATCH_ALLOWED_FIELDS)
+    if disallowed:
+        return None, {
+            "index": index,
+            "reason": "patch_data_has_disallowed_fields",
+            "fields": disallowed,
+        }
+
+    create_index_document = patch_data.get("create_index_document") is True
+    if "sources" in patch_data and not create_index_document:
+        return None, {"index": index, "reason": "patch_sources_only_allowed_for_index_create"}
+    if create_index_document:
+        if patch_data.get("doc_role") != "index":
+            return None, {"index": index, "reason": "patch_create_index_doc_role_must_be_index"}
+        if patch_data.get("status") != "current":
+            return None, {"index": index, "reason": "patch_create_index_status_must_be_current"}
+        linked_ids = patch_data.get("linked_entity_ids")
+        if not isinstance(linked_ids, list) or not linked_ids:
+            return None, {"index": index, "reason": "patch_create_index_linked_entity_ids_required"}
+        for field in ("title", "summary", "change_summary", "tags"):
+            if not patch_data.get(field):
+                return None, {"index": index, "reason": f"patch_create_index_{field}_required"}
+        source_error = _validate_create_index_sources(patch_data, doc_id=doc_id, index=index)
+        if source_error is not None:
+            return None, source_error
+
+    add_source = patch_data.get("add_source")
+    if add_source is not None:
+        if not isinstance(add_source, dict):
+            return None, {"index": index, "reason": "patch_add_source_must_be_object"}
+        disallowed_source_fields = sorted(
+            set(add_source) - _DOCUMENT_SOURCE_REPAIR_PATCH_ALLOWED_FIELDS
+        )
+        if disallowed_source_fields:
+            return None, {
+                "index": index,
+                "reason": "patch_add_source_has_disallowed_fields",
+                "fields": disallowed_source_fields,
+            }
+        if add_source.get("type") != "zenos_native":
+            return None, {"index": index, "reason": "patch_add_source_must_be_zenos_native"}
+        expected_uri = f"/docs/{doc_id}"
+        if add_source.get("uri") != expected_uri:
+            return None, {
+                "index": index,
+                "reason": "patch_add_source_uri_must_match_document",
+                "expected_uri": expected_uri,
+            }
+        if add_source.get("is_primary") is not True:
+            return None, {"index": index, "reason": "patch_add_source_must_be_primary"}
+        retrieval_mode = add_source.get("retrieval_mode")
+        if retrieval_mode is not None and retrieval_mode not in {
+            "direct",
+            "snapshot",
+            "per_user_live",
+        }:
+            return None, {"index": index, "reason": "patch_add_source_invalid_retrieval_mode"}
+        content_access = add_source.get("content_access")
+        if content_access is not None and content_access not in {"summary", "full", "none"}:
+            return None, {"index": index, "reason": "patch_add_source_invalid_content_access"}
+        doc_type = add_source.get("doc_type")
+        if doc_type is not None and not is_known_doc_type(str(doc_type)):
+            return None, {"index": index, "reason": "patch_add_source_invalid_doc_type"}
+
+    return {
+        "tool": "write",
+        "collection": "documents",
+        "data": dict(patch_data),
+        "needs_agent_review": True,
+    }, None
+
+
+def _validate_document_repair_patch_batch(data: dict) -> tuple[list[dict], list[dict]]:
+    patches = data.get("patches")
+    if not isinstance(patches, list):
+        return [], [{"index": None, "reason": "patches_must_be_list"}]
+    if not patches:
+        return [], [{"index": None, "reason": "patches_must_not_be_empty"}]
+    if len(patches) > _PATCH_BATCH_MAX:
+        return [], [{
+            "index": None,
+            "reason": "patch_batch_too_large",
+            "max_patches": _PATCH_BATCH_MAX,
+            "received": len(patches),
+        }]
+
+    validated: list[dict] = []
+    errors: list[dict] = []
+    for index, item in enumerate(patches):
+        patch, error = _validate_document_repair_patch(item, index)
+        if error is not None:
+            errors.append(error)
+        elif patch is not None:
+            validated.append(patch)
+    return validated, errors
+
+
+def _patch_batch_error_suggestions(errors: list[dict]) -> list[str]:
+    suggestions: list[str] = []
+    reasons = {str(error.get("reason") or "") for error in errors}
+    if reasons & {
+        "patch_must_be_object",
+        "patch_tool_must_be_write",
+        "patch_collection_must_be_documents",
+        "patch_data_must_be_object",
+        "patch_data_id_required",
+    }:
+        suggestions.append(
+            "請直接傳 analyze 回傳的 suggested_write_patch；patch 必須是 tool=write、collection=documents，且 data.id 必填。"
+        )
+    if "patch_must_be_analyzer_reviewable" in reasons:
+        suggestions.append(
+            "請保留 analyze 回傳 patch 的 needs_agent_review=true；不要手動重組時漏掉這個欄位。"
+        )
+    if "patch_data_has_disallowed_fields" in reasons:
+        suggestions.append(
+            "patch.data 只能包含 analyzer repair 允許欄位；請直接使用 analyze 回傳的 suggested_write_patch。"
+        )
+    if "patches_must_be_list" in reasons or "patches_must_not_be_empty" in reasons:
+        suggestions.append(
+            "請用 data={dry_run=true, patches=[analyze 回傳的 suggested_write_patch, ...]} 先做 dry-run。"
+        )
+    if any(reason.startswith("patch_create_index_") for reason in reasons):
+        suggestions.append(
+            "create-index patch 只能使用 analyzer 產生的安全格式：current index、/docs/{doc_id} zenos_native primary source、對應 primary highlight。"
+        )
+    if any(reason.startswith("patch_add_source_") for reason in reasons):
+        suggestions.append(
+            "add_source repair patch 目前只允許 analyzer 產生的 zenos_native primary source；外部 Git/Drive/Notion source 請改走 write(collection='documents') 的人工更新路徑。"
+        )
+    return suggestions
 
 
 def _snapshot_too_large_rejection(exc: SnapshotTooLargeError) -> dict:
@@ -69,6 +401,23 @@ def _document_linkage_rejection(exc: DocumentLinkageValidationError) -> dict:
         suggestions=suggestions,
         rejection_reason=str(exc),
     )
+
+
+def _agent_friendly_entity_data(serialized: dict) -> dict:
+    """Mirror core entity fields at data top-level while preserving data.entity."""
+    entity = serialized.get("entity")
+    if not isinstance(entity, dict):
+        return serialized
+
+    data = dict(serialized)
+    for key in ("id", "name", "type", "level", "status", "parent_id"):
+        if key in entity:
+            data[key] = entity.get(key)
+    if entity.get("id") is not None:
+        data["entity_id"] = entity.get("id")
+    if entity.get("name") is not None:
+        data["entity_name"] = entity.get("name")
+    return data
 
 
 def _payload_explicit_formal_entry(data: dict) -> bool:
@@ -267,6 +616,7 @@ async def write(
     id: str | None = None,
     id_prefix: str | None = None,
     workspace_id: str | None = None,
+    source: str | None = None,
 ) -> dict:
     """建立或更新 ontology 中的知識條目。
 
@@ -280,6 +630,7 @@ async def write(
     - 記錄盲點 → collection="blindspots"
     - 建立關係 → collection="relationships"
     - 記錄 entity 知識條目 → collection="entries"
+    - 批次套用 analyze 產出的文件修復 patch → collection="patches"
 
     不要用這個工具的情境：
     - 管理任務（建立/更新） → 用 task
@@ -334,6 +685,9 @@ async def write(
                  - supersede: 被新版取代
                  - sync_repair: 修復同步問題
                搭配 dry_run=true 可先預覽變更。
+    patches: patches[{tool="write", collection="documents", data{...}, needs_agent_review=true}]
+             只接受 analyze(check_type="invalid_documents") 產出的文件治理修復 patch。
+             預設會實際套用；搭配 dry_run=true 只驗證不寫入。
     protocols: entity_id, entity_name, content({what, why, how, who})
     blindspots: description, severity(red/yellow/green), suggested_action
     relationships: source_entity_id, target_entity_id, type(depends_on/serves/
@@ -354,10 +708,11 @@ async def write(
                 data={status="superseded", superseded_by=<新 entry id>}
 
     Args:
-        collection: entities/documents/protocols/blindspots/relationships/entries
+        collection: entities/documents/protocols/blindspots/relationships/entries/patches
         data: 集合對應的欄位（見上方說明）
         id: entries 更新 status 時提供既有 entry ID；其他集合新增時不提供
         workspace_id: 選填。切換到指定 workspace 執行寫入（必須在你的可用列表內）。
+        source: 選填。批次 patch 來源標記；等同 data.source，方便 agent 傳遞 audit metadata。
     """
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
@@ -483,6 +838,7 @@ async def write(
                     pass  # never block write
             if policy_suggestion is not None:
                 serialized["policy_suggestion"] = policy_suggestion
+            response_data = _agent_friendly_entity_data(serialized)
             # Detect rejected fields and set response status accordingly
             _warnings = result.warnings or []
             _rejected = [w for w in _warnings if w.startswith("REJECTED_FIELDS:")]
@@ -490,7 +846,7 @@ async def write(
             _rejection_reason = _rejected[0] if _rejected else None
             return _unified_response(
                 status=_resp_status,
-                data=serialized,
+                data=response_data,
                 warnings=_warnings,
                 similar_items=result.similar_items or [],
                 context_bundle=context_bundle,
@@ -546,6 +902,12 @@ async def write(
             except DocumentLinkageValidationError as exc:
                 return _document_linkage_rejection(exc)
             serialized = _serialize(result)
+            serialized.update(
+                _document_linkage_fields(
+                    result,
+                    await _load_document_relationships(result.id),
+                )
+            )
             _audit_log(
                 event_type="ontology.document.upsert",
                 target={"collection": collection, "id": serialized.get("id")},
@@ -570,6 +932,79 @@ async def write(
                 suggestions=(bundle_suggestions + delivery_suggestions + auto_publish_suggestions) or None,
                 context_bundle=await _build_context_bundle(linked_entity_ids=linked_ids),
                 governance_hints=_build_governance_hints(warnings=all_warnings),
+            )
+
+        elif collection == "patches":
+            validated, errors = _validate_document_repair_patch_batch(data)
+            dry_run = bool(data.get("dry_run"))
+            if errors:
+                return _unified_response(
+                    status="rejected",
+                    data={
+                        "dry_run": dry_run,
+                        "validated_count": len(validated),
+                        "errors": errors,
+                    },
+                    suggestions=_patch_batch_error_suggestions(errors) or None,
+                    rejection_reason="invalid_patch_batch",
+                )
+
+            if dry_run:
+                return _unified_response(
+                    data={
+                        "dry_run": True,
+                        "validated_count": len(validated),
+                        "patches": validated,
+                    },
+                    suggestions=["dry_run=true，未套用任何 patch；確認後可用 dry_run=false 批次套用。"],
+                )
+
+            applied: list[dict] = []
+            rejected: list[dict] = []
+            for index, patch in enumerate(validated):
+                patch_data = dict(patch["data"])
+                if patch_data.pop("create_index_document", False):
+                    patch_data["allow_create_with_id"] = True
+                result = await write(
+                    collection="documents",
+                    data=patch_data,
+                    workspace_id=workspace_id,
+                )
+                row = {
+                    "index": index,
+                    "document_id": patch["data"].get("id"),
+                    "status": result.get("status"),
+                }
+                if result.get("status") == "ok":
+                    applied.append(row)
+                else:
+                    rejected.append({
+                        **row,
+                        "rejection_reason": result.get("rejection_reason"),
+                        "data": result.get("data"),
+                    })
+
+            _audit_log(
+                event_type="ontology.patch_batch.apply",
+                target={"collection": "patches"},
+                changes={
+                    "source": source or data.get("source") or "manual",
+                    "applied_count": len(applied),
+                    "rejected_count": len(rejected),
+                },
+            )
+            return _unified_response(
+                status="partial" if rejected else "ok",
+                data={
+                    "dry_run": False,
+                    "applied_count": len(applied),
+                    "rejected_count": len(rejected),
+                    "applied": applied,
+                    "rejected": rejected,
+                },
+                warnings=[
+                    f"{len(rejected)} 個 patch 未套用，請查看 rejected"
+                ] if rejected else None,
             )
 
         elif collection == "protocols":
@@ -786,9 +1221,22 @@ async def write(
                 return _unified_response(status="rejected", data={}, rejection_reason="entries 必填：entity_id, type, content")
             if not (1 <= len(content) <= 200):
                 return _unified_response(status="rejected", data={}, rejection_reason="content 必須 1-200 字元")
-            valid_types = {"decision", "insight", "limitation", "change", "context"}
-            if entry_type not in valid_types:
-                return _unified_response(status="rejected", data={}, rejection_reason=f"type 必須是 {valid_types} 之一")
+            if entry_type not in VALID_ENTRY_TYPES:
+                return _unified_response(status="rejected", data={}, rejection_reason=f"type 必須是 {VALID_ENTRY_TYPES} 之一")
+            quality_issue = entry_quality_issue(content, entry_type)
+            if quality_issue:
+                return _unified_response(
+                    status="rejected",
+                    data={"error": "LOW_VALUE_ENTRY", "reason": quality_issue},
+                    rejection_reason=(
+                        "entry 應記錄 code/git log 讀不出的決策、限制、取捨或重要脈絡；"
+                        f"目前內容被判定為 {quality_issue}"
+                    ),
+                    suggestions=[
+                        "不要把 QA PASS、pytest、AC 通過、部署完成寫成 entry；這些留在 task result / journal / plan log。",
+                        "改寫成可長期復用的原因、約束或決策邊界後再寫入。",
+                    ],
+                )
             context = data.get("context")
             if context and len(context) > 200:
                 return _unified_response(status="rejected", data={}, rejection_reason="context 最多 200 字元")
@@ -843,7 +1291,7 @@ async def write(
                 data={},
                 rejection_reason=(
                     f"Unknown collection '{collection}'. "
-                    f"Use: entities, documents, protocols, blindspots, relationships, entries"
+                    f"Use: entities, documents, protocols, blindspots, relationships, entries, patches"
                 ),
             )
     except PermissionError as e:

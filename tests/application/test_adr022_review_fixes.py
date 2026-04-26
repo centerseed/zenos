@@ -181,13 +181,33 @@ class TestFinding1_SourcesPayload:
             "doc_role": "index",
             "linked_entity_ids": ["parent-1"],
             "sources": [
-                {"uri": "https://github.com/o/r/blob/main/a.md", "type": "github", "label": "a.md", "doc_type": "SPEC"},
-                {"uri": "https://github.com/o/r/blob/main/b.md", "type": "github", "label": "b.md", "doc_type": "DECISION"},
+                {
+                    "uri": "https://github.com/o/r/blob/main/a.md",
+                    "type": "github",
+                    "label": "a.md",
+                    "doc_type": "SPEC",
+                    "snapshot_summary": "Spec source summary.",
+                    "external_updated_at": "2026-04-25T00:00:00+00:00",
+                    "last_synced_at": "2026-04-25T01:00:00+00:00",
+                    "retrieval_mode": "snapshot",
+                    "content_access": "summary",
+                },
+                {
+                    "uri": "https://github.com/o/r/blob/main/b.md",
+                    "type": "github",
+                    "label": "b.md",
+                    "doc_type": "DECISION",
+                },
             ],
         })
         assert len(result.sources) == 2
         assert result.sources[0]["uri"] == "https://github.com/o/r/blob/main/a.md"
         assert result.sources[0]["doc_type"] == "SPEC"
+        assert result.sources[0]["snapshot_summary"] == "Spec source summary."
+        assert result.sources[0]["external_updated_at"] == "2026-04-25T00:00:00+00:00"
+        assert result.sources[0]["last_synced_at"] == "2026-04-25T01:00:00+00:00"
+        assert result.sources[0]["retrieval_mode"] == "snapshot"
+        assert result.sources[0]["content_access"] == "summary"
         assert result.sources[1]["uri"] == "https://github.com/o/r/blob/main/b.md"
         assert result.sources[1]["doc_type"] == "DECISION"
         # Each source should have a generated source_id
@@ -214,6 +234,32 @@ class TestFinding1_SourcesPayload:
         })
         assert len(result.sources) == 1
         assert result.sources[0]["uri"] == "https://github.com/o/r/blob/main/single.md"
+
+    @pytest.mark.asyncio
+    async def test_sparse_document_update_reuses_existing_linkage(self):
+        """Updating one field should not require resending tags/linkage."""
+        parent = Entity(
+            id="parent-1", name="Parent", type="module",
+            summary="Parent", tags=Tags(what=["x"], why="", how="", who=[""]),
+            level=2,
+        )
+        existing = _make_index_entity(entity_id="doc-1", name="Sparse Update Doc")
+        entity_repo = _make_entity_repo()
+        entity_repo.get_by_id = AsyncMock(
+            side_effect=lambda eid: {"doc-1": existing, "parent-1": parent}.get(eid)
+        )
+        entity_repo.list_all = AsyncMock(return_value=[existing])
+        svc = _make_service(entity_repo=entity_repo)
+
+        result = await svc.upsert_document({
+            "id": "doc-1",
+            "summary": "Updated summary only.",
+        })
+
+        assert result.id == "doc-1"
+        assert result.summary == "Updated summary only."
+        assert result.parent_id == "parent-1"
+        assert result.tags == existing.tags
 
     @pytest.mark.asyncio
     async def test_plural_sources_takes_priority_over_singular(self):

@@ -83,9 +83,9 @@ Challenger 執行完整流程：
 
 ---
 
-## Phase 4：寫入 Work Journal（必做）
+## Phase 4：寫入 Work Journal（只在重大結論時）
 
-brainstorm 結束後，記錄本次工作摘要：
+只有當 brainstorm 產生會影響後續產品/技術方向的重大結論時，才記錄工作摘要。一般討論不要寫 journal。
 
 ```python
 mcp__zenos__journal_write(
