@@ -77,6 +77,7 @@ export function buildProjectRecapEntry(options: {
         "Use the workspace .claude/mcp.json and settings.local.json instead of assuming a global helper profile.",
         "Obey USER_INPUT first. If USER_INPUT asks to write, save, capture, sync, or put content into ZenOS, do that action instead of producing a recap.",
         "For document capture/write requests, persist into ZenOS ontology via MCP write or /zenos-capture; local files alone do not satisfy the request.",
+        "When writing a ZenOS document, use collection=documents with data.title/name, summary, tags={what,why,how,who}, linked_entity_ids including scope.product_id, and verify the saved document by MCP search/get before reporting success.",
         "Before any task mutation, call mcp__zenos__governance_guide for topic=task and read local task governance files when they exist.",
         "Treat the first prompt as plan-level context only; if you need task, blocker, or subtask detail, fetch it via ZenOS MCP instead of assuming it is already embedded in the prompt.",
         "For any multi-step workstream, create a real plan first; do not use a parent task as a substitute for a plan.",
@@ -112,7 +113,9 @@ export function buildProjectRecapEntry(options: {
       [
         `User request: ${userInput.trim() || "(empty)"}`,
         "Primary rule: answer or execute the user request above before any default recap.",
+        "If USER_INPUT references prior content, resolve it from RECENT_CONVERSATION before acting.",
         "If the user asks to write/save/capture/register a document, create or update a ZenOS document entity linked to this root workspace and verify it with MCP get/search before claiming success.",
+        "For MCP write(collection=\"documents\"), include at minimum: title/name, summary, tags {what, why, how, who}, and linked_entity_ids containing the current root entity id.",
         "If you also create a local Markdown file, clearly say it is local-only until the ZenOS document write succeeds.",
         `You are acting as the task copilot for ${progress.project.name} in ${preset === "claude_code" ? "Claude Code" : "Codex"}.`,
         "Treat the provided context as the current milestone / plan / task snapshot for this root workspace.",

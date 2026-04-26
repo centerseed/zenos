@@ -55,6 +55,7 @@ describe("project copilot entry", () => {
     expect(envelope).toContain("[USER_INPUT]\n當然要入zenos啊，幫我寫文件");
     expect(envelope).toContain("Primary rule: answer or execute the user request above before any default recap.");
     expect(envelope).toContain("create or update a ZenOS document entity");
+    expect(envelope).toContain("tags {what, why, how, who}");
     expect(envelope).toContain("For document capture/write requests, persist into ZenOS ontology");
     expect(envelope).not.toContain("suggested_skill=/triage");
   });

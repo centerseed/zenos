@@ -117,6 +117,11 @@ export function useCopilotChat(
   const lastSubmittedInputRef = useRef<string>("");
   const isRunningRef = useRef<boolean>(false);
   const didHydrateRef = useRef<boolean>(false);
+  const messagesRef = useRef<CopilotChatMessage[]>([]);
+
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -247,6 +252,11 @@ export function useCopilotChat(
       isRunningRef.current = true;
       lastSubmittedInputRef.current = userInput;
 
+      const recentConversation = messagesRef.current.map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
+
       if (userInput.trim()) {
         pushMessage("user", userInput);
       }
@@ -268,7 +278,7 @@ export function useCopilotChat(
         Boolean(readFreshSessionStartedAt(getStartedKey(conversationKey)));
       const mode: "start" | "continue" = alreadyStarted ? "continue" : "start";
 
-      const prompt = buildCopilotPromptEnvelope(entry, userInput);
+      const prompt = buildCopilotPromptEnvelope(entry, userInput, recentConversation);
 
       const abortController = new AbortController();
       abortControllerRef.current = abortController;

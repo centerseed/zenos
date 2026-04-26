@@ -40,6 +40,7 @@ describe("task hub copilot entry", () => {
     expect(envelope).toContain("[USER_INPUT]\n把這份文件寫進 ZenOS");
     expect(envelope).toContain("Obey USER_INPUT first");
     expect(envelope).toContain("persist into ZenOS ontology");
+    expect(envelope).toContain("tags {what, why, how, who}");
     expect(envelope).not.toContain("suggested_skill=/triage");
   });
 });

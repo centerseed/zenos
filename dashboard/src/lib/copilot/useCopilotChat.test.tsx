@@ -60,6 +60,7 @@ function Probe({ entry }: { entry: CopilotEntryConfig | null }) {
       <div data-testid="messages">{chat.messages.map((message) => message.content).join(" | ")}</div>
       <div data-testid="streaming">{chat.streamingText}</div>
       <button onClick={() => void chat.send("請整理")}>send</button>
+      <button onClick={() => void chat.send("當然要入 ZenOS")}>send followup</button>
       <button onClick={() => chat.reset()}>reset</button>
     </div>
   );
@@ -155,5 +156,37 @@ describe("useCopilotChat", () => {
       expect(screen.getByTestId("messages").textContent).toContain("文件已儲存。現在給你快照。");
     });
     expect(screen.getByTestId("messages").textContent).not.toContain("文件已儲存。文件已儲存。");
+  });
+
+  it("sends recent visible messages with follow-up prompts in ephemeral sessions", async () => {
+    streamCoworkChatMock.mockImplementation(async ({ onEvent }) => {
+      const response =
+        streamCoworkChatMock.mock.calls.length === 1
+          ? "已建立本機文件 panel-pricing-reference.md，內容是 Panel 報價文件。"
+          : "ok";
+      onEvent({
+        type: "message",
+        line: JSON.stringify({
+          type: "assistant",
+          message: { content: [{ type: "text", text: response }] },
+        }),
+      });
+      onEvent({ type: "done" });
+    });
+
+    render(<Probe entry={makeEntry({ session_policy: "ephemeral" })} />);
+    fireEvent.click(screen.getByText("send"));
+    await waitFor(() => {
+      expect(screen.getByTestId("messages").textContent).toContain("panel-pricing-reference.md");
+    });
+    fireEvent.click(screen.getByText("send followup"));
+
+    await waitFor(() => {
+      expect(streamCoworkChatMock).toHaveBeenCalledTimes(2);
+    });
+    const call = streamCoworkChatMock.mock.calls[1]?.[0] as { prompt: string };
+    expect(call.prompt).toContain("[RECENT_CONVERSATION]");
+    expect(call.prompt).toContain("panel-pricing-reference.md");
+    expect(call.prompt).toContain("[USER_INPUT]\n當然要入 ZenOS");
   });
 });

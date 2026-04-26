@@ -32,6 +32,7 @@ export function buildTaskHubCopilotEntry(params: {
       execution_contract: [
         "Obey USER_INPUT first. If USER_INPUT asks to write, save, capture, sync, or put content into ZenOS, do that action instead of producing a recap.",
         "For document capture/write requests, persist into ZenOS ontology via MCP write or /zenos-capture; local files alone do not satisfy the request.",
+        "When writing a ZenOS document, use collection=documents with data.title/name, summary, tags={what,why,how,who}, linked_entity_ids when a target root entity is known, and verify the saved document by MCP search/get before reporting success.",
       ],
     },
     scope: {
@@ -59,6 +60,8 @@ export function buildTaskHubCopilotEntry(params: {
       [
         `User request: ${userInput.trim() || "(empty)"}`,
         "Primary rule: answer or execute the user request above before any default recap.",
+        "If USER_INPUT references prior content, resolve it from RECENT_CONVERSATION before acting.",
+        "For MCP write(collection=\"documents\"), include at minimum: title/name, summary, tags {what, why, how, who}, and linked_entity_ids when the target root entity is known.",
         "You are acting as the task copilot for the ZenOS Task Hub.",
         "Use the portfolio recap as the source of truth for current milestone / plan progress across workspaces.",
         "For recap requests, answer in this order:",

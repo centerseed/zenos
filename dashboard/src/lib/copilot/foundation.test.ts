@@ -68,6 +68,19 @@ describe("copilot envelope", () => {
     expect(envelope).toContain("[TASK_PROMPT]");
   });
 
+  it("includes recent visible conversation so follow-up requests have context", () => {
+    const envelope = buildCopilotPromptEnvelope(makeEntry(), "當然要入 ZenOS", [
+      {
+        role: "assistant",
+        content: "我剛剛建立了 panel-pricing-reference.md，內容是 Panel 報價文件。",
+      },
+    ]);
+
+    expect(envelope).toContain("[RECENT_CONVERSATION]");
+    expect(envelope).toContain("panel-pricing-reference.md");
+    expect(envelope).toContain("[USER_INPUT]\n當然要入 ZenOS");
+  });
+
   it("includes claude code bootstrap instructions when provided", () => {
     const envelope = buildCopilotPromptEnvelope(
       makeEntry({
