@@ -192,6 +192,37 @@ class TestSearchTool:
             result = await search(collection="entities", confirmed_only=True)
             assert len(_ok_data(result)["entities"]) == 1
 
+    async def test_list_entities_with_lifecycle_status_filter(self):
+        from zenos.interface.mcp import search
+
+        entities = [
+            _make_entity(id="ent-active", status="active"),
+            _make_entity(id="ent-paused", status="paused"),
+        ]
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=entities)
+
+            result = await search(collection="entities", status="active")
+            ids = [e["id"] for e in _ok_data(result)["entities"]]
+
+            assert ids == ["ent-active"]
+
+    async def test_list_entities_status_keeps_legacy_type_filter(self):
+        from zenos.interface.mcp import search
+
+        entities = [
+            _make_entity(id="prod-1", type="product", level=1),
+            _make_entity(id="mod-1", type="module", level=2),
+        ]
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.list_entities = AsyncMock(return_value=entities)
+
+            result = await search(collection="entities", status="product")
+            ids = [e["id"] for e in _ok_data(result)["entities"]]
+
+            assert ids == ["prod-1"]
+            mock_os.list_entities.assert_called_once_with(type_filter="product")
+
     async def test_list_tasks_with_assignee(self):
         from zenos.interface.mcp import search
 

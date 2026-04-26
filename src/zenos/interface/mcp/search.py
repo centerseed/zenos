@@ -6,6 +6,7 @@ import logging
 import inspect
 
 from zenos.application.knowledge.ontology_service import _collect_subtree_ids
+from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS
 from zenos.domain.partner_access import describe_partner_access, is_guest
 from zenos.infrastructure.context import (
     current_partner_department,
@@ -39,6 +40,39 @@ from zenos.domain.task_rules import normalize_task_status
 from zenos.domain.document_linkage import get_document_linked_entity_ids
 
 logger = logging.getLogger(__name__)
+
+_ENTITY_STATUS_FILTERS = {
+    "active",
+    "paused",
+    "completed",
+    "planned",
+    "draft",
+    "stale",
+    "archived",
+    "current",
+    "approved",
+    "under_review",
+    "superseded",
+}
+_ENTITY_TYPE_FILTERS = set(DEFAULT_TYPE_LEVELS)
+
+
+def _parse_entity_status_type_filters(status: str | None) -> tuple[set[str], set[str]]:
+    """Split the legacy entity ``status`` argument into type and lifecycle filters."""
+    if not status or status.lower() == "all":
+        return set(), set()
+
+    type_filters: set[str] = set()
+    status_filters: set[str] = set()
+    for raw in status.split(","):
+        token = raw.strip().lower()
+        if not token:
+            continue
+        if token in _ENTITY_TYPE_FILTERS:
+            type_filters.add(token)
+        elif token in _ENTITY_STATUS_FILTERS:
+            status_filters.add(token)
+    return type_filters, status_filters
 
 
 def _normalize_project_scope(value: object) -> str:
@@ -518,6 +552,7 @@ async def search(
 
     for col in collections:
         if col == "entities":
+            entity_type_filters, entity_status_filters = _parse_entity_status_type_filters(status)
             # mode parameter is only relevant for collection="entities".
             # For all other collections, mode is silently ignored.
             if _mcp.search_service is not None:
@@ -547,12 +582,17 @@ async def search(
                         _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
                     entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.id in _allowed]
 
-                # Apply type filter (status used as type for entities)
-                type_filter = status if status in (
-                    "product", "module", "goal", "role", "project"
-                ) else None
-                if type_filter is not None:
-                    entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.type == type_filter]
+                # Apply legacy type filter (status="product") and lifecycle status filter.
+                if entity_type_filters:
+                    entities_with_scores = [
+                        (e, sc, bd) for e, sc, bd in entities_with_scores
+                        if str(e.type or "").lower() in entity_type_filters
+                    ]
+                if entity_status_filters:
+                    entities_with_scores = [
+                        (e, sc, bd) for e, sc, bd in entities_with_scores
+                        if str(e.status or "").lower() in entity_status_filters
+                    ]
 
                 # Apply level filter
                 if max_level is not None:
@@ -570,10 +610,10 @@ async def search(
                 # pattern documents collection already uses at line 424).
                 # Archived L2 should not pollute discovery / listing flows but
                 # stays retrievable via get(id=X).
-                if status != "archived":
+                if "archived" not in entity_status_filters:
                     entities_with_scores = [
                         (e, sc, bd) for e, sc, bd in entities_with_scores
-                        if e.status != "archived"
+                        if str(e.status or "").lower() != "archived"
                     ]
 
                 if confirmed_only is not None:
@@ -614,11 +654,13 @@ async def search(
                         items.append(item)
             else:
                 # Fallback path when search_service is not yet wired (should not happen in production)
-                type_filter = status if status in (
-                    "product", "module", "goal", "role", "project"
-                ) else None
+                type_filter = next(iter(entity_type_filters)) if len(entity_type_filters) == 1 else None
                 entities = await _mcp.ontology_service.list_entities(type_filter=type_filter)
                 entities = [e for e in entities if _is_entity_visible(e)]
+                if entity_type_filters:
+                    entities = [e for e in entities if str(e.type or "").lower() in entity_type_filters]
+                if entity_status_filters:
+                    entities = [e for e in entities if str(e.status or "").lower() in entity_status_filters]
                 _partner_ctx = _current_partner.get() or {}
                 _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
                 if _access and _access["is_guest"]:
@@ -634,6 +676,8 @@ async def search(
                     entity_map = {e.id: e for e in entities if e.id}
                     subtree_ids = _collect_subtree_ids(product_id, entity_map)
                     entities = [e for e in entities if e.id in subtree_ids]
+                if "archived" not in entity_status_filters:
+                    entities = [e for e in entities if str(e.status or "").lower() != "archived"]
                 if confirmed_only is not None:
                     entities = [e for e in entities if e.confirmed_by_user == confirmed_only]
                 paginated_entities = entities[offset:offset + limit]
