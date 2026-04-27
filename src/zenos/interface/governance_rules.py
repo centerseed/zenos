@@ -331,7 +331,17 @@ L3 document entity 是正式文件的語意索引入口。
 2. 已有 index → `add_source`
 3. 已有 single → 預設升級為 index 再加 source
 4. 無既有 entity → 預設建新 index
-5. rename / delete → 更新 `source_status`，必要時 archive""",
+5. rename / delete → 更新 `source_status`，必要時 archive
+
+## MCP write(initial_content=...) — 一次呼叫建 entity + 寫 GCS（P0-5）
+- `write(collection="documents", data={..., initial_content="..."})` 建新 doc 時同時把 markdown 寫進 GCS revision
+- Server 自動建立 `zenos_native` source（is_primary=true），agent / Dashboard 立即可讀
+- response data 含 `doc_id`、`revision_id`、`source_id`
+- 限制：
+  - 只支援 create（新建 doc）；update 既有 doc 內容走 `POST /api/docs/{doc_id}/content`
+  - 與 `sources` 互斥（同時傳 → 400 `INITIAL_CONTENT_REQUIRES_NO_SOURCES`）
+  - 上限 1 MB（1048576 bytes）；超過 → 413 `INITIAL_CONTENT_TOO_LARGE`
+- 適用場景：zenos-capture skill、Helper ingestion、任何需要一次完成 entity + 內容上傳的 MCP caller""",
 
         2: """# L3 文件治理規則 v2.2（完整版）
 
@@ -506,7 +516,39 @@ approved → superseded（被新版取代時，保留原文件，建立追溯）
 - `unresolvable`：source 確認不可達
 
 ### 稽核觸發時機
-每次 `/zenos-sync` 時，Step 0 預設先做 Source Audit；只做稽核可用 `/zenos-sync --audit`。""",
+每次 `/zenos-sync` 時，Step 0 預設先做 Source Audit；只做稽核可用 `/zenos-sync --audit`。
+
+## MCP write(initial_content=...) — 一次呼叫建 entity + 寫 GCS（P0-5）
+
+### 用途
+讓 zenos-capture skill / Helper / 任何 MCP caller 一次呼叫同時完成 entity 建立 + markdown 內容上傳，不需要額外走 `POST /api/docs/{doc_id}/content`。
+
+### 呼叫格式
+```python
+write(collection="documents", data={
+    "title": "文件標題",
+    "summary": "文件摘要",
+    "tags": {"what": [...], "why": "...", "how": "...", "who": [...]},
+    "linked_entity_ids": ["<parent-entity-id>"],
+    "initial_content": "# 文件標題\n\n正文 markdown...",
+})
+```
+
+### Server 行為
+1. 驗證 initial_content（互斥 / 大小 / 只支援 create）
+2. 建立 doc entity
+3. 自動建立 zenos_native source（is_primary=true, source_status=valid）
+4. 把 markdown 寫進 GCS private revision
+5. response data 含 doc_id、revision_id、source_id
+
+### 限制
+- 只支援 **create**（新建 doc）；update 既有 doc 內容請走 `POST /api/docs/{doc_id}/content`
+- 與 `sources` **互斥**（同時傳 → 400 `INITIAL_CONTENT_REQUIRES_NO_SOURCES`）
+- 上限 **1 MB**（1048576 bytes）；超過 → 413 `INITIAL_CONTENT_TOO_LARGE`
+- update 既有 doc_id 時傳入 → 400 `INITIAL_CONTENT_CREATE_ONLY`
+
+### 讀取
+建立後可直接 `read_source(doc_id)` 取得完整 markdown（content_type="full"）。""",
 
         3: """# L3 文件治理規則 v2.2（含完整範例）
 

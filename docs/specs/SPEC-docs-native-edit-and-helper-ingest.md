@@ -194,6 +194,34 @@ ZenOS 的 L3 document entity 已在 `SPEC-doc-governance §3` 定義為多源語
   - `AC-DNH-21` Given 使用者點 `zenos_native` source，When 觸發，Then 導航到 Dashboard 內 reader / editor（**不開新分頁**）
   - `AC-DNH-22` Given 使用者點外部 source（github/notion/gdrive），When 觸發，Then 開新分頁到 external URL
 
+#### P0-5: MCP `write` 原生 capture 寫 GCS（initial_content）
+
+- **背景**：今天 `write(collection="documents")` 只建 entity metadata；要把 markdown 內容寫進 GCS 必須額外呼叫 `POST /api/docs/{doc_id}/content`（dashboard REST API），這條路徑只有 dashboard frontend 用，MCP agent 走不到。zenos-capture skill 對 local md 檔因此只能走 `local` source + `snapshot_summary`（≤10KB 摘要），造成「Dashboard 點進去看不到完整內容」的 UX 缺口。
+
+- **描述**：`write(collection="documents")` 擴展接受 `initial_content` 參數，server 端建立 doc entity 時同時：
+  1. 建立 `zenos_native` source，`uri=/docs/{doc_id}`、`is_primary=true`、`source_status=valid`
+  2. 把 markdown 內容寫進 GCS private revision（重用 `_publish_document_snapshot_internal` 的 GCS write 邏輯，但跳過 GitHub adapter 讀取段）
+  3. 設 doc entity 的 `primary_snapshot_revision_id`
+  讓 zenos-capture skill / Helper / 任何 MCP caller 一次呼叫完成 entity 建立 + 內容上傳，agent 與 Dashboard 立即可讀。
+
+- **接口擴展**：
+  | 欄位 | 型別 | 說明 |
+  |------|------|------|
+  | `initial_content` | string? | markdown 內容；上限 1 MB（1048576 bytes，與 snapshot_summary 10 KB 摘要上限不同——這是真實文件 storage 的合理上限） |
+
+- **Server 行為**：
+  - 接受 `initial_content` 後，內部走 GCS write 路徑（不呼叫 GitHub adapter）
+  - 自動產生並寫入 zenos_native source 進 sources 列表
+  - 只支援 create（新建 doc 時）；update 既有 doc 內容請走既有 `POST /api/docs/{doc_id}/content`
+  - 與 `initial_content` 互斥：傳 `initial_content` 時不可同時傳 `sources`（避免 primary 衝突；要混合外部 source 走後續 `add_source` 加入）
+
+- **Acceptance Criteria**：
+  - `AC-DNH-29` Given `write(collection="documents", data={..., initial_content="...md..."})` 建新 doc，When write 執行，Then 建立 doc entity + zenos_native source + GCS revision，response data 含 doc_id、revision_id、source_id
+  - `AC-DNH-30` Given write 帶 `initial_content` 成功建立後，When agent 呼叫 `read_source(doc_id)`，Then 回傳完整 markdown 內容（`content_type="full"`，內容 = 原 initial_content）
+  - `AC-DNH-31` Given `initial_content` 大小超過 1 MB（1048576 bytes），When write 執行，Then 回傳 413 with code `INITIAL_CONTENT_TOO_LARGE`
+  - `AC-DNH-32` Given write 同時傳 `initial_content` 和 `sources`，When write 執行，Then 回傳 400 with code `INITIAL_CONTENT_REQUIRES_NO_SOURCES`，message 提示二選一
+  - `AC-DNH-33` Given update 既有 `doc_id` 時傳入 `initial_content`，When write 執行，Then 回傳 400 with code `INITIAL_CONTENT_CREATE_ONLY`，message 提示更新內容走 `POST /api/docs/{doc_id}/content`
+
 ---
 
 ### P1（應該有）

@@ -621,6 +621,37 @@ async def _publish_document_snapshot_internal(
     finally:
         current_partner_id.reset(token)
 
+    stored_revision_id = await _write_native_snapshot(
+        partner_id=effective_id,
+        doc_id=doc_id,
+        source_id=source_id,
+        content=content,
+    )
+    return {
+        "doc_id": doc_id,
+        "canonical_path": f"/docs/{doc_id}",
+        "revision_id": stored_revision_id,
+        "delivery_status": "ready",
+        "source_id": source_id,
+        "source_uri": source_uri,
+    }
+
+
+async def _write_native_snapshot(
+    *,
+    partner_id: str,
+    doc_id: str,
+    source_id: str | None,
+    content: str,
+) -> str:
+    """Write markdown content to a GCS private revision for a zenos_native source.
+
+    This is the shared GCS write helper used by both
+    _publish_document_snapshot_internal (GitHub-backed docs) and the
+    MCP write(initial_content=...) path.  It does NOT touch GitHub adapters.
+
+    Returns the stored revision_id.
+    """
     from zenos.infrastructure.gcs_client import get_documents_bucket, upload_blob
 
     revision_id = uuid.uuid4().hex
@@ -631,24 +662,17 @@ async def _publish_document_snapshot_internal(
     content_hash = hashlib.sha256(payload).hexdigest()
 
     stored_revision_id = await _create_revision_and_mark_ready(
-        partner_id=effective_id,
+        partner_id=partner_id,
         doc_id=doc_id,
         source_id=source_id,
-        source_version_ref=source_uri,
+        source_version_ref=None,
         snapshot_bucket=bucket,
         snapshot_object_path=snapshot_path,
         content_hash=content_hash,
         content_type="text/markdown; charset=utf-8",
-        created_by=effective_id,
+        created_by=partner_id,
     )
-    return {
-        "doc_id": doc_id,
-        "canonical_path": f"/docs/{doc_id}",
-        "revision_id": stored_revision_id,
-        "delivery_status": "ready",
-        "source_id": source_id,
-        "source_uri": source_uri,
-    }
+    return stored_revision_id
 
 
 async def _create_revision_and_mark_ready(

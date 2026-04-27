@@ -745,3 +745,276 @@ async def test_ac_dnh_18_helper_resync_clears_stale_in_storage():
         f"last_synced_at ({new_last_synced}) should be updated to now, "
         f"was previously stale ({old_synced})"
     )
+
+
+# ---------------------------------------------------------------------------
+# P0-5: MCP write 原生 capture 寫 GCS（initial_content）
+# AC-DNH-29 ~ AC-DNH-33
+# ---------------------------------------------------------------------------
+
+@pytest.mark.spec("AC-DNH-29")
+@pytest.mark.asyncio
+async def test_ac_dnh_29_write_with_initial_content_creates_doc_and_gcs_revision():
+    """AC-DNH-29: Given write(collection="documents", data={..., initial_content="...md..."}) 建新 doc,
+    When write 執行, Then 建立 doc entity + zenos_native source + GCS revision,
+    response data 含 doc_id、revision_id、source_id."""
+    from zenos.interface.mcp.write import write
+    from zenos.interface.mcp._auth import _current_partner
+    from zenos.infrastructure.context import current_partner_id
+
+    markdown = "# My Document\n\nHello from initial_content."
+    fake_doc_id = "a" * 32
+    fake_source_id = "src-" + "b" * 28
+    fake_revision_id = "rev-" + "c" * 28
+
+    created_entity = _make_entity(
+        entity_id=fake_doc_id,
+        name="My Initial Content Doc",
+        sources=[{
+            "source_id": fake_source_id,
+            "uri": "",  # placeholder; updated after creation
+            "type": "zenos_native",
+            "status": "valid",
+            "source_status": "valid",
+            "is_primary": True,
+        }],
+    )
+
+    # upsert_document is called twice: once to create, once to update URI
+    mock_upsert = AsyncMock(return_value=created_entity)
+
+    mock_ontology_svc = MagicMock()
+    mock_ontology_svc.upsert_document = mock_upsert
+    mock_ontology_svc.get_document = AsyncMock(return_value=created_entity)
+
+    import zenos.interface.mcp as _mcp
+    original_ontology = getattr(_mcp, "ontology_service", None)
+    original_ensure = getattr(_mcp, "_ensure_services", None)
+    _mcp.ontology_service = mock_ontology_svc
+    _mcp._ensure_services = AsyncMock()
+    _current_partner.set({"id": "partner-test", "isAdmin": False, "sharedPartnerId": None})
+    current_partner_id.set("partner-test")
+
+    # Mock _write_native_snapshot to avoid real GCS calls
+    import unittest.mock as _mock
+    with _mock.patch(
+        "zenos.interface.dashboard_api._write_native_snapshot",
+        new=AsyncMock(return_value=fake_revision_id),
+    ):
+        try:
+            resp = await write(
+                collection="documents",
+                data={
+                    "title": "My Initial Content Doc",
+                    "summary": "A test document.",
+                    "tags": {"what": ["test"], "why": "testing", "how": "unit", "who": ["dev"]},
+                    "linked_entity_ids": ["parent-entity-1"],
+                    "initial_content": markdown,
+                },
+            )
+        finally:
+            _mcp.ontology_service = original_ontology
+            _mcp._ensure_services = original_ensure
+
+    assert resp.get("status") == "ok", f"Expected status=ok, got: {resp}"
+    data_out = resp.get("data", {})
+    assert "doc_id" in data_out, f"response data missing doc_id: {data_out}"
+    assert "revision_id" in data_out, f"response data missing revision_id: {data_out}"
+    assert "source_id" in data_out, f"response data missing source_id: {data_out}"
+    assert data_out["doc_id"] == fake_doc_id
+    assert data_out["revision_id"] == fake_revision_id
+    assert data_out["source_id"] == fake_source_id
+
+
+@pytest.mark.spec("AC-DNH-30")
+@pytest.mark.asyncio
+async def test_ac_dnh_30_read_source_returns_initial_content_full():
+    """AC-DNH-30: Given write 帶 initial_content 成功建立後,
+    When agent 呼叫 read_source(doc_id),
+    Then 回傳完整 markdown 內容 (content_type='full', 內容 = 原 initial_content)."""
+    from zenos.interface.mcp.source import read_source
+    from zenos.interface.mcp._auth import _current_partner
+    from zenos.application.knowledge.source_service import SourceService
+
+    markdown = "# My Initial Content\n\nFull text stored in GCS."
+    fake_doc_id = "d" * 32
+    fake_source_id = "src-" + "e" * 28
+
+    # Entity has a zenos_native source with valid URI (as would exist after write)
+    entity = _make_entity(
+        entity_id=fake_doc_id,
+        name="Initial Content Doc",
+        sources=[{
+            "source_id": fake_source_id,
+            "uri": f"/docs/{fake_doc_id}",
+            "type": "zenos_native",
+            "status": "valid",
+            "source_status": "valid",
+            "is_primary": True,
+        }],
+    )
+
+    # read_source_with_snapshot returns the markdown via adapter
+    mock_ontology_svc = MagicMock()
+    mock_ontology_svc.get_document = AsyncMock(return_value=entity)
+
+    # source_service.read_source_with_snapshot should return the full content
+    mock_source_svc = MagicMock()
+    mock_source_svc.read_source_with_snapshot = AsyncMock(return_value={
+        "content": markdown,
+        "source_id": fake_source_id,
+        "content_type": "full",
+    })
+
+    import zenos.interface.mcp as _mcp
+    original_ontology = getattr(_mcp, "ontology_service", None)
+    original_source = getattr(_mcp, "source_service", None)
+    original_ensure = getattr(_mcp, "_ensure_services", None)
+    _mcp.ontology_service = mock_ontology_svc
+    _mcp.source_service = mock_source_svc
+    _mcp._ensure_services = AsyncMock()
+    _current_partner.set({"id": "partner-test", "isAdmin": False, "sharedPartnerId": None})
+
+    try:
+        resp = await read_source(fake_doc_id)
+    finally:
+        _mcp.ontology_service = original_ontology
+        _mcp.source_service = original_source
+        _mcp._ensure_services = original_ensure
+
+    assert resp.get("status") == "ok", f"Expected status=ok, got: {resp}"
+    data_out = resp.get("data", {})
+    assert data_out.get("content") == markdown, (
+        f"Expected full markdown content, got: {data_out.get('content')!r}"
+    )
+    assert data_out.get("content_type") == "full", (
+        f"Expected content_type='full', got: {data_out.get('content_type')!r}"
+    )
+    assert data_out.get("doc_id") == fake_doc_id
+
+
+@pytest.mark.spec("AC-DNH-31")
+@pytest.mark.asyncio
+async def test_ac_dnh_31_initial_content_over_1mb_rejected():
+    """AC-DNH-31: Given initial_content 大小超過 1 MB (1048576 bytes),
+    When write 執行,
+    Then 回傳 413 with code 'INITIAL_CONTENT_TOO_LARGE'."""
+    from zenos.interface.mcp.write import write
+    from zenos.interface.mcp._auth import _current_partner
+
+    # 1048577 bytes — 1 byte over the limit
+    oversized_content = "x" * 1_048_577
+
+    import zenos.interface.mcp as _mcp
+    original_ensure = getattr(_mcp, "_ensure_services", None)
+    _mcp._ensure_services = AsyncMock()
+    _current_partner.set({"id": "partner-test", "isAdmin": False, "sharedPartnerId": None})
+
+    try:
+        resp = await write(
+            collection="documents",
+            data={
+                "title": "Too Large Doc",
+                "summary": "Should be rejected.",
+                "tags": {"what": ["test"], "why": "test", "how": "test", "who": ["dev"]},
+                "linked_entity_ids": ["parent-entity-1"],
+                "initial_content": oversized_content,
+            },
+        )
+    finally:
+        _mcp._ensure_services = original_ensure
+
+    assert resp.get("status") == "rejected", f"Expected status=rejected, got: {resp}"
+    data_out = resp.get("data", {})
+    error = data_out.get("error", {})
+    assert error.get("code") == "INITIAL_CONTENT_TOO_LARGE", (
+        f"Expected INITIAL_CONTENT_TOO_LARGE, got: {error}"
+    )
+    assert error.get("http_status") == 413
+
+
+@pytest.mark.spec("AC-DNH-32")
+@pytest.mark.asyncio
+async def test_ac_dnh_32_initial_content_with_sources_rejected():
+    """AC-DNH-32: Given write 同時傳 initial_content 和 sources,
+    When write 執行,
+    Then 回傳 400 with code 'INITIAL_CONTENT_REQUIRES_NO_SOURCES',
+    message 提示二選一."""
+    from zenos.interface.mcp.write import write
+    from zenos.interface.mcp._auth import _current_partner
+
+    import zenos.interface.mcp as _mcp
+    original_ensure = getattr(_mcp, "_ensure_services", None)
+    _mcp._ensure_services = AsyncMock()
+    _current_partner.set({"id": "partner-test", "isAdmin": False, "sharedPartnerId": None})
+
+    try:
+        resp = await write(
+            collection="documents",
+            data={
+                "title": "Conflicting Doc",
+                "summary": "Should be rejected.",
+                "tags": {"what": ["test"], "why": "test", "how": "test", "who": ["dev"]},
+                "linked_entity_ids": ["parent-entity-1"],
+                "initial_content": "# Markdown content",
+                "sources": [{"type": "github", "uri": "https://github.com/foo/bar/blob/main/README.md"}],
+            },
+        )
+    finally:
+        _mcp._ensure_services = original_ensure
+
+    assert resp.get("status") == "rejected", f"Expected status=rejected, got: {resp}"
+    data_out = resp.get("data", {})
+    error = data_out.get("error", {})
+    assert error.get("code") == "INITIAL_CONTENT_REQUIRES_NO_SOURCES", (
+        f"Expected INITIAL_CONTENT_REQUIRES_NO_SOURCES, got: {error}"
+    )
+    assert error.get("http_status") == 400
+    # message should hint at two options
+    message = resp.get("data", {}).get("message", "")
+    assert message, "Expected non-empty message"
+
+
+@pytest.mark.spec("AC-DNH-33")
+@pytest.mark.asyncio
+async def test_ac_dnh_33_initial_content_on_update_rejected():
+    """AC-DNH-33: Given update 既有 doc_id 時傳入 initial_content,
+    When write 執行,
+    Then 回傳 400 with code 'INITIAL_CONTENT_CREATE_ONLY',
+    message 提示更新內容走 POST /api/docs/{doc_id}/content."""
+    from zenos.interface.mcp.write import write
+    from zenos.interface.mcp._auth import _current_partner
+
+    import zenos.interface.mcp as _mcp
+    original_ensure = getattr(_mcp, "_ensure_services", None)
+    _mcp._ensure_services = AsyncMock()
+    _current_partner.set({"id": "partner-test", "isAdmin": False, "sharedPartnerId": None})
+
+    existing_doc_id = "f" * 32
+
+    try:
+        resp = await write(
+            collection="documents",
+            data={
+                "id": existing_doc_id,
+                "title": "Existing Doc",
+                "summary": "Should be rejected on update.",
+                "tags": {"what": ["test"], "why": "test", "how": "test", "who": ["dev"]},
+                "linked_entity_ids": ["parent-entity-1"],
+                "initial_content": "# Updated content",
+            },
+        )
+    finally:
+        _mcp._ensure_services = original_ensure
+
+    assert resp.get("status") == "rejected", f"Expected status=rejected, got: {resp}"
+    data_out = resp.get("data", {})
+    error = data_out.get("error", {})
+    assert error.get("code") == "INITIAL_CONTENT_CREATE_ONLY", (
+        f"Expected INITIAL_CONTENT_CREATE_ONLY, got: {error}"
+    )
+    assert error.get("http_status") == 400
+    message = resp.get("data", {}).get("message", "")
+    assert "/api/docs/" in message or "POST" in message, (
+        f"Message should mention POST /api/docs/{{doc_id}}/content, got: {message!r}"
+    )

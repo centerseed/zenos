@@ -677,6 +677,11 @@ async def write(
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary, linked_entity_ids（必填）。更新語意為 merge update（未提供欄位不清空）。
                linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
+               選填：initial_content（string）— 建立新 doc 時同時把 markdown 寫進 GCS revision。
+                 - 只支援 create（新建 doc）；update 既有 doc 請走 POST /api/docs/{doc_id}/content
+                 - 與 sources 互斥（同時傳 → 400 INITIAL_CONTENT_REQUIRES_NO_SOURCES）
+                 - 上限 1 MB（1048576 bytes）；超過 → 413 INITIAL_CONTENT_TOO_LARGE
+                 - 成功時 response data 含 doc_id、revision_id、source_id
                選填：material_change（bool）；當 true 時，change_summary 必填，否則視為未完成。
                可用 sync_mode 做文件治理批次同步：
                  - rename: 文件改名
@@ -856,6 +861,57 @@ async def write(
 
         elif collection == "documents":
             # Backward compat: collection="documents" now creates entity(type="document")
+
+            # --- initial_content validation (P0-5) ---
+            initial_content = data.get("initial_content")
+            if initial_content is not None:
+                initial_content = str(initial_content)
+                # AC-DNH-32: initial_content + sources are mutually exclusive
+                if data.get("sources"):
+                    return _unified_response(
+                        status="rejected",
+                        data={
+                            "error": {
+                                "code": "INITIAL_CONTENT_REQUIRES_NO_SOURCES",
+                                "http_status": 400,
+                            },
+                            "message": (
+                                "initial_content 與 sources 互斥：建立時只能二選一。"
+                                " 若需要混合外部 source，請先建立 doc 再用 add_source 加入。"
+                            ),
+                        },
+                        rejection_reason="initial_content_requires_no_sources",
+                    )
+                # AC-DNH-33: initial_content only allowed on create, not update
+                if data.get("id"):
+                    return _unified_response(
+                        status="rejected",
+                        data={
+                            "error": {
+                                "code": "INITIAL_CONTENT_CREATE_ONLY",
+                                "http_status": 400,
+                            },
+                            "message": (
+                                "initial_content 只能用於建立新文件，不可用於更新。"
+                                " 若要更新既有文件的內容，請走 POST /api/docs/{doc_id}/content。"
+                            ),
+                        },
+                        rejection_reason="initial_content_create_only",
+                    )
+                # AC-DNH-31: size limit 1 MB
+                if len(initial_content.encode("utf-8")) > 1_048_576:
+                    return _unified_response(
+                        status="rejected",
+                        data={
+                            "error": {
+                                "code": "INITIAL_CONTENT_TOO_LARGE",
+                                "http_status": 413,
+                            },
+                            "message": "initial_content 超過 1 MB 上限（1048576 bytes）。",
+                        },
+                        rejection_reason="initial_content_too_large",
+                    )
+
             material_change = bool(data.get("material_change"))
             change_summary = str(data.get("change_summary") or "").strip()
             if material_change and not change_summary:
@@ -892,9 +948,29 @@ async def write(
                     governance_hints=_build_governance_hints(warnings=preflight_warnings),
                     rejection_reason=rejection_reason,
                 )
+
+            # --- AC-DNH-29: Prepare data for initial_content create path ---
+            # Strip initial_content from data before upsert; inject zenos_native source.
+            upsert_data = data
+            if initial_content is not None:
+                # We don't know doc_id yet; URI will be filled in after entity creation.
+                # Inject a placeholder source; ontology_service normalises source_ids.
+                upsert_data = {
+                    k: v for k, v in data.items() if k != "initial_content"
+                }
+                # Override source to zenos_native (no GitHub validation needed)
+                upsert_data["source"] = {
+                    "type": "zenos_native",
+                    "uri": "",  # placeholder; updated after entity creation
+                    "label": data.get("title") or "ZenOS 原生文件",
+                    "is_primary": True,
+                    "source_status": "valid",
+                    "status": "valid",
+                }
+
             try:
                 result = await _mcp.ontology_service.upsert_document(
-                    data,
+                    upsert_data,
                     partner=_current_partner.get(),
                 )
             except SnapshotTooLargeError as exc:
@@ -926,6 +1002,65 @@ async def write(
             resp_data = dict(serialized)
             if helper_meta.get("noop"):
                 resp_data["noop"] = True
+
+            # --- AC-DNH-29: GCS write for initial_content ---
+            if initial_content is not None:
+                doc_id_created = result.id
+                # Resolve the source_id assigned during entity creation
+                created_sources = getattr(result, "sources", None) or []
+                native_src = next(
+                    (s for s in created_sources if s.get("type") == "zenos_native"),
+                    created_sources[0] if created_sources else {},
+                )
+                native_source_id = native_src.get("source_id")
+
+                # Update the source URI to the canonical doc path now that we have doc_id
+                native_uri = f"/docs/{doc_id_created}"
+                try:
+                    await _mcp.ontology_service.upsert_document(
+                        {
+                            "id": doc_id_created,
+                            "linked_entity_ids": linked_ids or data.get("linked_entity_ids") or [],
+                            "update_source": {
+                                "source_id": native_source_id,
+                                "uri": native_uri,
+                            },
+                        },
+                        partner=_current_partner.get(),
+                    )
+                except Exception:
+                    logger.warning(
+                        "initial_content: failed to update zenos_native URI for doc %s",
+                        doc_id_created,
+                        exc_info=True,
+                    )
+
+                partner_id = current_partner_id.get() or str(
+                    (_current_partner.get() or {}).get("id") or ""
+                ).strip()
+                revision_id_created: str | None = None
+                delivery_status_native = "error"
+                try:
+                    from zenos.interface.dashboard_api import _write_native_snapshot
+                    revision_id_created = await _write_native_snapshot(
+                        partner_id=partner_id,
+                        doc_id=doc_id_created,
+                        source_id=native_source_id,
+                        content=initial_content,
+                    )
+                    delivery_status_native = "ready"
+                except Exception:
+                    logger.error(
+                        "initial_content: GCS write failed for doc %s",
+                        doc_id_created,
+                        exc_info=True,
+                    )
+
+                resp_data["doc_id"] = doc_id_created
+                resp_data["source_id"] = native_source_id
+                resp_data["revision_id"] = revision_id_created
+                resp_data["delivery_status"] = delivery_status_native
+
             return _unified_response(
                 data=resp_data,
                 warnings=all_warnings or None,
