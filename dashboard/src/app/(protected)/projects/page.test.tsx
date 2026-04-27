@@ -8,6 +8,8 @@ const getProjectProgressMock = vi.hoisted(() => vi.fn());
 const getTasksByEntityMock = vi.hoisted(() => vi.fn());
 const getEntityContextMock = vi.hoisted(() => vi.fn());
 const getChildEntitiesMock = vi.hoisted(() => vi.fn());
+const getAllEntitiesMock = vi.hoisted(() => vi.fn());
+const listDocsMock = vi.hoisted(() => vi.fn());
 const getAllBlindspotsMock = vi.hoisted(() => vi.fn());
 const createTaskMock = vi.hoisted(() => vi.fn());
 const createPlanMock = vi.hoisted(() => vi.fn());
@@ -42,6 +44,8 @@ vi.mock("@/lib/api", () => ({
   getTasksByEntity: (...args: unknown[]) => getTasksByEntityMock(...args),
   getEntityContext: (...args: unknown[]) => getEntityContextMock(...args),
   getChildEntities: (...args: unknown[]) => getChildEntitiesMock(...args),
+  getAllEntities: (...args: unknown[]) => getAllEntitiesMock(...args),
+  listDocs: (...args: unknown[]) => listDocsMock(...args),
   getAllBlindspots: (...args: unknown[]) => getAllBlindspotsMock(...args),
   createTask: (...args: unknown[]) => createTaskMock(...args),
   createPlan: (...args: unknown[]) => createPlanMock(...args),
@@ -135,6 +139,8 @@ describe("ProjectsPage", () => {
     getTasksByEntityMock.mockReset();
     getEntityContextMock.mockReset();
     getChildEntitiesMock.mockReset();
+    getAllEntitiesMock.mockReset();
+    listDocsMock.mockReset();
     getAllBlindspotsMock.mockReset();
     createTaskMock.mockReset();
     createPlanMock.mockReset();
@@ -142,6 +148,8 @@ describe("ProjectsPage", () => {
     getProjectEntitiesInWorkspaceMock.mockReset();
     applyHomeWorkspaceBootstrapMock.mockReset();
     refetchPartnerMock.mockReset();
+    getAllEntitiesMock.mockResolvedValue([]);
+    listDocsMock.mockResolvedValue([]);
     Object.assign(mockPartner, {
       id: "guest-home-id",
       email: "guest@test.com",
@@ -322,9 +330,9 @@ describe("ProjectsPage", () => {
     expect(screen.getByText("本週到期")).toBeInTheDocument();
     expect(screen.getByText("待分派任務")).toBeInTheDocument();
 
-    expect(screen.queryByText("Paused Product")).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "顯示暫停" }));
     expect(await screen.findByText("Paused Product")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "只看進行中" }));
+    expect(screen.queryByText("Paused Product")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Agent 盤點" }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -1192,27 +1200,48 @@ describe("ProjectsPage", () => {
     expect(getProjectProgressMock).toHaveBeenCalledWith("token-1", "entity-1");
   });
 
-  it("loads shareable L1 roots so company entities also appear in projects list", async () => {
+  it("loads portfolio roots so paused/company entities also appear in projects list", async () => {
+    const company = {
+      id: "company-1",
+      name: "原心生技",
+      type: "company" as const,
+      summary: "client root",
+      tags: { what: ["company"], why: "", how: "crm", who: [] },
+      status: "paused" as const,
+      parentId: null,
+      details: null,
+      confirmedByUser: true,
+      owner: "Owner",
+      sources: [],
+      visibility: "public" as const,
+      lastReviewedAt: null,
+      createdAt: new Date("2026-04-19T00:00:00Z"),
+      updatedAt: new Date("2026-04-19T00:00:00Z"),
+      level: 1,
+    };
+    const module = {
+      ...company,
+      id: "module-1",
+      name: "原料知識庫",
+      type: "module" as const,
+      status: "active" as const,
+      parentId: "company-1",
+      level: 2,
+    };
+    const doc = {
+      ...company,
+      id: "doc-1",
+      name: "FloraGLO 葉黃素知識庫",
+      type: "document" as const,
+      status: "active" as const,
+      parentId: "module-1",
+      level: 3,
+    };
     getProjectEntitiesMock.mockResolvedValue([
-      {
-        id: "company-1",
-        name: "原心生技",
-        type: "company",
-        summary: "client root",
-        tags: { what: ["company"], why: "", how: "crm", who: [] },
-        status: "active",
-        parentId: null,
-        details: null,
-        confirmedByUser: true,
-        owner: "Owner",
-        sources: [],
-        visibility: "public",
-        lastReviewedAt: null,
-        createdAt: new Date("2026-04-19T00:00:00Z"),
-        updatedAt: new Date("2026-04-19T00:00:00Z"),
-        level: 1,
-      },
+      company,
     ]);
+    getAllEntitiesMock.mockResolvedValue([company, module]);
+    listDocsMock.mockResolvedValue([doc]);
     getTasksByEntityMock.mockResolvedValue([]);
     getAllBlindspotsMock.mockResolvedValue([]);
 
@@ -1220,6 +1249,7 @@ describe("ProjectsPage", () => {
     render(<ProjectsPage />);
 
     expect(await screen.findByRole("button", { name: /原心生技/ })).toBeInTheDocument();
-    expect(getProjectEntitiesMock).toHaveBeenCalledWith("token-1", { scope: "shareableRoots" });
+    expect(await screen.findByText((_, element) => element?.textContent === "文件1")).toBeInTheDocument();
+    expect(getProjectEntitiesMock).toHaveBeenCalledWith("token-1");
   });
 });

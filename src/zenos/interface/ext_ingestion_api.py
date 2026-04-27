@@ -659,6 +659,7 @@ async def upload_document(request: Request) -> JSONResponse:
       summary           Short document summary
       linked_entity_ids JSON array string of linked entity IDs (default: [])
       tags              JSON object string (default: {})
+      allow_l2_direct_document  true only when the upload itself is a new L3 index/root
 
     Example (curl — file content never enters LLM context):
       curl -F "file=@README.md" -F "title=My Doc" \\
@@ -717,6 +718,9 @@ async def upload_document(request: Request) -> JSONResponse:
     doc_type = str(form.get("type") or "REFERENCE").strip().upper()
     doc_role = str(form.get("doc_role") or "index").strip()
     summary = str(form.get("summary") or "").strip()
+    allow_l2_direct_document = str(
+        form.get("allow_l2_direct_document") or ""
+    ).strip().lower() in {"1", "true", "yes"}
 
     try:
         linked_entity_ids = _json.loads(form.get("linked_entity_ids") or "[]")
@@ -744,6 +748,7 @@ async def upload_document(request: Request) -> JSONResponse:
             "linked_entity_ids": linked_entity_ids,
             "tags": tags,
             "initial_content": content,
+            "allow_l2_direct_document": allow_l2_direct_document,
         },
         workspace_id=workspace_id,
     )

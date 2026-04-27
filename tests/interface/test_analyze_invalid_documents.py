@@ -75,6 +75,17 @@ def _make_index_doc(
     )
 
 
+def _make_module(entity_id: str = "module-1", name: str = "Raw Material Knowledge") -> Entity:
+    return Entity(
+        id=entity_id,
+        name=name,
+        type=EntityType.MODULE,
+        summary="A module",
+        tags=Tags(what=["module"], why="test", how="manual", who=[]),
+        level=2,
+    )
+
+
 # ---------------------------------------------------------------------------
 # DC-7 / DC-6: no invalid entities → empty list
 # ---------------------------------------------------------------------------
@@ -210,14 +221,20 @@ class TestDocumentBundleGovernanceIssues:
     def test_valid_current_index_returns_no_bundle_issues(self):
         doc = _make_index_doc()
 
-        result = detect_document_bundle_governance_issues([doc])
+        result = detect_document_bundle_governance_issues(
+            [doc],
+            entity_map={"module-1": _make_module()},
+        )
 
         assert result == []
 
     def test_index_missing_sources_is_red_issue(self):
         doc = _make_index_doc(bundle_highlights=[], source_count=0)
 
-        result = detect_document_bundle_governance_issues([doc])
+        result = detect_document_bundle_governance_issues(
+            [doc],
+            entity_map={"module-1": _make_module()},
+        )
 
         assert result[0]["issue_type"] == "index_missing_sources"
         assert result[0]["severity"] == "red"
@@ -283,7 +300,10 @@ class TestDocumentBundleGovernanceIssues:
         doc.doc_role = "single"
         doc.status = "current"
 
-        result = detect_document_bundle_governance_issues([doc])
+        result = detect_document_bundle_governance_issues(
+            [doc],
+            entity_map={"module-1": _make_module()},
+        )
 
         assert result == [{
             "issue_type": "l2_missing_current_index_document",
@@ -292,6 +312,44 @@ class TestDocumentBundleGovernanceIssues:
             "severity": "red",
             "suggested_action": "將此 L2 的正式文件收斂到 current doc_role=index 文件，並補 summary / bundle_highlights。",
         }]
+
+    def test_l3_bundle_children_do_not_require_nested_index(self):
+        bundle = _make_index_doc(entity_id="bundle-1", parent_id="module-1")
+        support_doc = _make_doc_entity("doc-support", "rsc_01_raw-note", parent_id="bundle-1")
+        support_doc.doc_role = "single"
+        support_doc.status = "current"
+
+        result = detect_document_bundle_governance_issues(
+            [bundle, support_doc],
+            entity_map={
+                "module-1": _make_module(),
+                "bundle-1": bundle,
+            },
+        )
+
+        issue_types = {item["issue_type"] for item in result}
+        assert "l2_missing_current_index_document" not in issue_types
+
+    def test_l2_flat_document_fanout_is_reported_when_index_exists(self):
+        index_doc = _make_index_doc(entity_id="doc-index", parent_id="module-1")
+        support_docs = [
+            _make_doc_entity(f"doc-support-{idx}", f"rsc_{idx:02d}_raw-note", parent_id="module-1")
+            for idx in range(8)
+        ]
+        for doc in support_docs:
+            doc.doc_role = "single"
+            doc.status = "current"
+
+        result = detect_document_bundle_governance_issues(
+            [index_doc, *support_docs],
+            entity_map={"module-1": _make_module()},
+        )
+
+        fanout = next(item for item in result if item["issue_type"] == "l2_flat_document_fanout")
+        assert fanout["linked_entity_id"] == "module-1"
+        assert fanout["direct_document_count"] == 9
+        assert fanout["index_document_ids"] == ["doc-index"]
+        assert fanout["severity"] == "red"
 
     def test_draft_index_is_not_reported_as_governance_failure(self):
         doc = _make_index_doc(status="draft", bundle_highlights=[], change_summary=None)

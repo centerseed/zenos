@@ -1452,6 +1452,96 @@ class TestWriteTool:
             assert "context_bundle" in result
             assert "governance_hints" in result
 
+    async def test_write_document_rejects_raw_upload_directly_under_l2_with_existing_index(self):
+        from zenos.interface.mcp import write
+
+        module = _make_entity(id="module-1", name="原料知識庫", type="module", level=2)
+        existing_index = _make_entity(
+            id="doc-index-1",
+            name="FloraGLO 葉黃素知識庫",
+            type="document",
+            level=3,
+            status="current",
+            parent_id="module-1",
+        )
+        existing_index.doc_role = "index"
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._normalize_linked_entity_ids = lambda raw: list(raw or [])
+            mock_os._entities.get_by_id = AsyncMock(return_value=module)
+            mock_os._entities.list_all = AsyncMock(return_value=[existing_index])
+            mock_os.upsert_document = AsyncMock()
+
+            result = await write(
+                collection="documents",
+                data={
+                    "title": "rsc_02_chew-2022_are ds2-report",
+                    "summary": "supporting markdown file",
+                    "tags": {"what": ["raw"], "why": "research", "how": "upload", "who": ["agent"]},
+                    "linked_entity_ids": ["module-1"],
+                    "initial_content": "# raw support doc",
+                },
+            )
+
+        assert result["status"] == "rejected"
+        assert result["data"]["error"]["code"] == "L2_DIRECT_DOCUMENT_REQUIRES_BUNDLE"
+        assert result["data"]["index_candidates"] == [{
+            "id": "doc-index-1",
+            "title": "FloraGLO 葉黃素知識庫",
+        }]
+        mock_os.upsert_document.assert_not_called()
+
+    async def test_write_document_allows_new_bundle_root_title_under_l2(self):
+        from zenos.interface.mcp import write
+
+        module = _make_entity(id="module-1", name="原料知識庫", type="module", level=2)
+        existing_index = _make_entity(
+            id="doc-index-1",
+            name="FloraGLO 葉黃素知識庫",
+            type="document",
+            level=3,
+            status="current",
+            parent_id="module-1",
+        )
+        existing_index.doc_role = "index"
+        new_index = _make_entity(
+            id="doc-index-2",
+            name="PureWay-C 維生素C知識庫",
+            type="document",
+            level=3,
+            status="current",
+            parent_id="module-1",
+        )
+        new_index.doc_role = "index"
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.write._load_document_relationships", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._document_delivery_suggestions", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._maybe_auto_publish_document", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+            patch("zenos.interface.dashboard_api._write_native_snapshot", new=AsyncMock(return_value="rev-1")),
+            patch("zenos.interface.mcp.write._audit_log"),
+        ):
+            mock_os._normalize_linked_entity_ids = lambda raw: list(raw or [])
+            mock_os._entities.get_by_id = AsyncMock(return_value=module)
+            mock_os._entities.list_all = AsyncMock(return_value=[existing_index])
+            mock_os.upsert_document = AsyncMock(return_value=new_index)
+
+            result = await write(
+                collection="documents",
+                data={
+                    "title": "PureWay-C 維生素C知識庫",
+                    "summary": "new bundle root",
+                    "tags": {"what": ["raw"], "why": "routing", "how": "index", "who": ["agent"]},
+                    "linked_entity_ids": ["module-1"],
+                    "initial_content": "# PureWay-C index",
+                },
+            )
+
+        assert result["status"] == "ok"
+        assert mock_os.upsert_document.await_count >= 1
+
     async def test_guest_write_entity_is_rejected(self):
         """Guest attempting L1 entity write → application-layer guard raises PermissionError,
         interface layer converts it to status=rejected response."""

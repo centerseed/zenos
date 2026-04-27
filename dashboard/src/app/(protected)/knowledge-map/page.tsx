@@ -60,6 +60,7 @@ export default function KnowledgeMapPage() {
   // focusedId drives graph dim/highlight — only set after user interacts.
   // selectedId drives the Inspector and can auto-init without dimming.
   const [focusedId, setFocusedId] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -89,6 +90,14 @@ export default function KnowledgeMapPage() {
 
   const entityMap = useMemo(() => new Map(entities.map((e) => [e.id, e])), [entities]);
 
+  useEffect(() => {
+    if (entities.length === 0 || typeof window === "undefined") return;
+    const entityId = new URLSearchParams(window.location.search).get("entity");
+    if (!entityId || !entityMap.has(entityId)) return;
+    setSelectedId(entityId);
+    setFocusedId(entityId);
+  }, [entities.length, entityMap]);
+
   const blindspotsByEntity = useMemo(() => {
     const map = new Map<string, Blindspot[]>();
     for (const b of blindspots) {
@@ -112,20 +121,63 @@ export default function KnowledgeMapPage() {
     [selectedId, relationships],
   );
 
+  const selectedHierarchy = useMemo(() => {
+    if (!selectedId) return [];
+    const selected = entityMap.get(selectedId);
+    const parent = selected?.parentId ? entityMap.get(selected.parentId) ?? null : null;
+    const children = entities.filter((entity) => entity.parentId === selectedId);
+    return [
+      ...(parent ? [{ entity: parent, relation: "parent" as const }] : []),
+      ...children.map((entity) => ({ entity, relation: "child" as const })),
+    ];
+  }, [entities, entityMap, selectedId]);
+
   // Visible counts (KnowledgeGraph hides document + project internally)
   const visibleCount = useMemo(
     () => entities.filter((e) => e.type !== "document" && e.type !== "project").length,
     [entities],
   );
 
+  const searchableEntities = useMemo(
+    () => entities.filter((e) => e.type !== "document" && e.type !== "project"),
+    [entities],
+  );
+
+  const searchResults = useMemo(() => {
+    const normalized = query.trim().toLowerCase();
+    if (!normalized) return searchableEntities.slice(0, 12);
+    return searchableEntities
+      .filter((entity) => {
+        const haystack = [
+          entity.name,
+          entity.summary,
+          entity.type,
+          entity.owner ?? "",
+        ].join(" ").toLowerCase();
+        return haystack.includes(normalized);
+      })
+      .slice(0, 20);
+  }, [query, searchableEntities]);
+
+  const selectEntity = useCallback((entityId: string) => {
+    if (!entityMap.has(entityId)) return;
+    setSelectedId(entityId);
+    setFocusedId(entityId);
+    const url = new URL(window.location.href);
+    url.searchParams.set("entity", entityId);
+    window.history.replaceState({}, "", url.toString());
+  }, [entityMap]);
+
   const handleNodeClick = useCallback((entity: Entity) => {
-    setSelectedId(entity.id);
-    setFocusedId(entity.id);
-  }, []);
+    selectEntity(entity.id);
+  }, [selectEntity]);
 
   const handleBackgroundClick = useCallback(() => {
     setFocusedId(null);
     setSelectedId(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("entity");
+    window.history.replaceState({}, "", url.toString());
   }, []);
 
   const handleCopyLink = useCallback(() => {
@@ -319,6 +371,86 @@ export default function KnowledgeMapPage() {
             gap: 14,
           }}
         >
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <label
+              htmlFor="knowledge-map-search"
+              style={{
+                fontFamily: fontMono,
+                fontSize: 10,
+                color: c.inkFaint,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+              }}
+            >
+              搜尋節點
+            </label>
+            <input
+              id="knowledge-map-search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="輸入產品、客戶、模組名稱"
+              style={{
+                width: "100%",
+                boxSizing: "border-box",
+                border: `1px solid ${c.inkHair}`,
+                borderRadius: 2,
+                background: c.paper,
+                color: c.ink,
+                fontFamily: fontBody,
+                fontSize: 13,
+                padding: "8px 10px",
+                outline: "none",
+              }}
+            />
+            {query.trim() ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: 3, maxHeight: 180, overflow: "auto" }}>
+                {searchResults.length > 0 ? (
+                  searchResults.map((entity) => (
+                    <button
+                      key={entity.id}
+                      type="button"
+                      onClick={() => selectEntity(entity.id)}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                        width: "100%",
+                        border: "none",
+                        background: selectedId === entity.id ? c.paperWarm : "transparent",
+                        color: c.ink,
+                        cursor: "pointer",
+                        padding: "6px 8px",
+                        textAlign: "left",
+                        fontFamily: fontBody,
+                        fontSize: 12,
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 7,
+                          height: 7,
+                          borderRadius: "50%",
+                          background: inkNodeColors[entity.type] ?? c.inkMuted,
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {entity.name}
+                      </span>
+                      <span style={{ fontFamily: fontMono, fontSize: 9, color: c.inkFaint }}>
+                        {TYPE_LABEL[entity.type] ?? entity.type.toUpperCase()}
+                      </span>
+                    </button>
+                  ))
+                ) : (
+                  <div style={{ fontFamily: fontMono, fontSize: 11, color: c.inkFaint, padding: "6px 8px" }}>
+                    找不到節點
+                  </div>
+                )}
+              </div>
+            ) : null}
+          </div>
+
           {selectedEntity ? (
             <>
               {/* Header */}
@@ -446,7 +578,7 @@ export default function KnowledgeMapPage() {
                 >
                   相關 · Relations
                 </div>
-                {selectedRelations.length === 0 ? (
+                {selectedRelations.length === 0 && selectedHierarchy.length === 0 ? (
                   <div
                     style={{
                       fontSize: 12,
@@ -464,6 +596,49 @@ export default function KnowledgeMapPage() {
                       gap: 4,
                     }}
                   >
+                    {selectedHierarchy.map(({ entity: related, relation }) => (
+                      <button
+                        key={`${relation}:${related.id}`}
+                        onClick={() => selectEntity(related.id)}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "6px 8px",
+                          borderRadius: 2,
+                          background: "transparent",
+                          border: "none",
+                          color: c.ink,
+                          cursor: "pointer",
+                          fontSize: 12,
+                          textAlign: "left",
+                          fontFamily: fontBody,
+                          width: "100%",
+                        }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.background = c.surfaceHi;
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: inkNodeColors[related.type] ?? c.ink,
+                            flexShrink: 0,
+                          }}
+                        />
+                        <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {related.name}
+                        </span>
+                        <span style={{ fontFamily: fontMono, fontSize: 10, color: c.inkFaint, letterSpacing: "0.08em", flexShrink: 0 }}>
+                          {relation === "parent" ? "PARENT" : "CHILD"}
+                        </span>
+                      </button>
+                    ))}
                     {selectedRelations.map((rel) => {
                       const otherId =
                         rel.sourceEntityId === selectedId
@@ -477,8 +652,7 @@ export default function KnowledgeMapPage() {
                           key={rel.id}
                           onClick={() => {
                             if (!otherEntity) return;
-                            setSelectedId(otherId);
-                            setFocusedId(otherId);
+                            selectEntity(otherId);
                           }}
                           style={{
                             display: "flex",

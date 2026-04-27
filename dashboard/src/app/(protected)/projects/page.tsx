@@ -25,6 +25,7 @@ import {
   createPlan,
   createTask,
   getAllBlindspots,
+  getAllEntities,
   getProjectEntities,
   getProjectEntitiesInWorkspace,
   getProjectProgress,
@@ -32,6 +33,7 @@ import {
   getEntityContext,
   getChildEntities,
   handoffTask,
+  listDocs,
   updateTask,
 } from "@/lib/api";
 import { resolveActiveWorkspace } from "@/lib/partner";
@@ -151,6 +153,65 @@ function computeProjectListStats(entity: Entity, tasks: Task[]): ProjectListStat
     sourceCount: entity.sources.length,
     updatedAt: latestTaskUpdate ? new Date(latestTaskUpdate) : entity.updatedAt ?? null,
   };
+}
+
+function collectDescendants(rootId: string, entities: Entity[]): Entity[] {
+  const childrenByParent = new Map<string, Entity[]>();
+  for (const entity of entities) {
+    if (!entity.parentId) continue;
+    childrenByParent.set(entity.parentId, [...(childrenByParent.get(entity.parentId) ?? []), entity]);
+  }
+
+  const descendants: Entity[] = [];
+  const stack = [...(childrenByParent.get(rootId) ?? [])];
+  const seen = new Set<string>();
+  while (stack.length > 0) {
+    const entity = stack.shift();
+    if (!entity || seen.has(entity.id)) continue;
+    seen.add(entity.id);
+    descendants.push(entity);
+    stack.push(...(childrenByParent.get(entity.id) ?? []));
+  }
+  return descendants;
+}
+
+function entityChainIncludes(
+  startEntityId: string | null,
+  targetEntityId: string,
+  entitiesById: Map<string, Entity>,
+): boolean {
+  const seen = new Set<string>();
+  let currentId = startEntityId;
+  while (currentId && !seen.has(currentId)) {
+    if (currentId === targetEntityId) return true;
+    seen.add(currentId);
+    currentId = entitiesById.get(currentId)?.parentId ?? null;
+  }
+  return false;
+}
+
+function getDocumentLinkedEntityIds(doc: Entity): string[] {
+  return [
+    ...(doc.parentId ? [doc.parentId] : []),
+    ...(doc.linkedEntityIds ?? []),
+    ...(doc.primaryLinkedEntityId ? [doc.primaryLinkedEntityId] : []),
+    ...(doc.relatedEntityIds ?? []),
+  ].filter((value, index, all) => value && all.indexOf(value) === index);
+}
+
+function documentBelongsToScope(doc: Entity, rootId: string, entitiesById: Map<string, Entity>): boolean {
+  return getDocumentLinkedEntityIds(doc).some((entityId) =>
+    entityId === rootId || entityChainIncludes(entityId, rootId, entitiesById),
+  );
+}
+
+function collectScopedDocuments(rootId: string, entities: Entity[], docs: Entity[]): Entity[] {
+  const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
+  return docs.filter((doc) => documentBelongsToScope(doc, rootId, entitiesById));
+}
+
+function countScopedDocuments(rootId: string, entities: Entity[], docs: Entity[]): number {
+  return collectScopedDocuments(rootId, entities, docs).length;
 }
 
 function formatShortDate(date: Date | null | undefined): string {
@@ -701,7 +762,7 @@ function InkProjectsList({
                   </span>
                   <span>
                     <span style={{ color: c.inkFaint, marginRight: 4 }}>
-                      來源
+                      文件
                     </span>
                     {stats?.sourceCount ?? "…"}
                   </span>
@@ -732,6 +793,7 @@ interface DetailData {
   progress: ProjectProgressResponse;
   tasks: Task[];
   children: Entity[];
+  descendants: Entity[];
   blindspots: Blindspot[];
 }
 
@@ -767,14 +829,25 @@ function InkProjectDetail({
     }
     try {
       const token = await user.getIdToken();
-      const [context, progress, tasks, children, blindspots] = await Promise.all([
+      const [context, progress, tasks, children, allEntities, docs, blindspots] = await Promise.all([
         getEntityContext(token, entityId),
         getProjectProgress(token, entityId),
         getTasksByEntity(token, entityId),
         getChildEntities(token, entityId),
+        getAllEntities(token),
+        listDocs(token),
         getAllBlindspots(token).catch(() => [] as Blindspot[]),
       ]);
-      setDetail({ context, progress, tasks, children, blindspots });
+      const descendants = collectDescendants(entityId, allEntities);
+      const scopedDocs = collectScopedDocuments(entityId, allEntities, docs);
+      setDetail({
+        context,
+        progress,
+        tasks,
+        children,
+        descendants: [...descendants, ...scopedDocs],
+        blindspots,
+      });
     } catch (err) {
       console.error("[ProjectDetail] fetch failed:", err);
       setError(err instanceof Error ? err.message : "載入失敗");
@@ -819,6 +892,7 @@ function InkProjectDetail({
   const progressDetail = detail?.progress ?? null;
   const tasks = detail?.tasks ?? [];
   const children = detail?.children ?? [];
+  const descendants = detail?.descendants ?? [];
   const blindspots = detail?.blindspots ?? [];
   const progress = computeProgress(tasks);
   const h = entity ? entityStatusToHealth(entity.status) : { tone: "muted" as HealthTone, zh: "—" };
@@ -826,30 +900,30 @@ function InkProjectDetail({
   const code = entity ? entity.id.slice(0, 8).toUpperCase() : "—";
   const ownerLetter = entity?.owner ? entity.owner[0] : "—";
   const documents = useMemo(
-    () => children.filter((child) => child.type === "document"),
-    [children],
+    () => descendants.filter((child) => child.type === "document"),
+    [descendants],
   );
   const relatedEntities = useMemo(
-    () => children.filter((child) => child.type !== "document"),
-    [children],
+    () => descendants.filter((child) => child.type !== "document"),
+    [descendants],
   );
   const entityNames = useMemo(
     () =>
       Object.fromEntries(
-        [entity, ...children]
+        [entity, ...descendants]
           .filter((value): value is Entity => Boolean(value))
           .map((value) => [value.id, value.name]),
       ),
-    [children, entity],
+    [descendants, entity],
   );
   const entitiesById = useMemo(
     () =>
       Object.fromEntries(
-        [entity, ...children]
+        [entity, ...descendants]
           .filter((value): value is Entity => Boolean(value))
           .map((value) => [value.id, value]),
       ),
-    [children, entity],
+    [descendants, entity],
   );
   const members = useMemo(() => {
     const seen = new Set<string>();
@@ -1549,7 +1623,7 @@ function InkProjectDetail({
         isOpen={createKind === "task"}
         onClose={() => setCreateKind(null)}
         onCreateTask={handleCreateTask}
-        entities={[entity, ...children].filter((value): value is Entity => Boolean(value))}
+        entities={[entity, ...descendants].filter((value): value is Entity => Boolean(value))}
         blindspots={blindspots}
       />
       <PlanCreateDialog
@@ -1587,7 +1661,7 @@ export default function ProjectsPage() {
   const [bootstrapNames, setBootstrapNames] = useState<string[]>([]);
   const [bootstrapLoading, setBootstrapLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
-  const [showDormantProducts, setShowDormantProducts] = useState(false);
+  const [showDormantProducts, setShowDormantProducts] = useState(true);
   const [showAgentInventory, setShowAgentInventory] = useState(false);
   const [showCreateProductGuide, setShowCreateProductGuide] = useState(false);
 
@@ -1647,7 +1721,11 @@ export default function ProjectsPage() {
     setError(null);
     try {
       const token = await user.getIdToken();
-      const fetched = await getProjectEntities(token, { scope: "shareableRoots" });
+      const [fetched, allEntities, docs] = await Promise.all([
+        getProjectEntities(token),
+        getAllEntities(token),
+        listDocs(token),
+      ]);
       const visibleProjects = fetched.filter((entity) => !isPlaceholderCompletedProject(entity));
       setEntities(visibleProjects);
 
@@ -1674,7 +1752,10 @@ export default function ProjectsPage() {
           });
           setStatsMap((prev) => {
             const next = new Map(prev);
-            next.set(e.id, stats);
+            next.set(e.id, {
+              ...stats,
+              sourceCount: countScopedDocuments(e.id, allEntities, docs),
+            });
             return next;
           });
         } catch {
@@ -1690,7 +1771,7 @@ export default function ProjectsPage() {
               dueThisWeek: 0,
               unassignedCount: 0,
               memberCount: e.owner?.trim() ? 1 : 0,
-              sourceCount: e.sources.length,
+              sourceCount: countScopedDocuments(e.id, allEntities, docs),
               updatedAt: e.updatedAt ?? null,
             });
             return next;

@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useInk } from "@/lib/zen-ink/tokens";
 import { useAuth } from "@/lib/auth";
 import { Icon, ICONS } from "@/components/zen/Icons";
@@ -16,6 +15,7 @@ import { ReSyncPromptDialog } from "@/features/docs/ReSyncPromptDialog";
 import {
   listDocs,
   createDoc,
+  getAllEntities,
   getDocumentDelivery,
   getDocumentContent,
 } from "@/lib/api";
@@ -42,17 +42,64 @@ interface DocContent {
   revision_id: string | null;  // null = no revision yet (new doc or pre-existing without Delivery Snapshot)
 }
 
+function buildEntityChainLabel(entityId: string, entitiesById: Map<string, Entity>): string {
+  const chain: string[] = [];
+  const seen = new Set<string>();
+  let current = entitiesById.get(entityId) ?? null;
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    chain.unshift(current.name);
+    current = current.parentId ? entitiesById.get(current.parentId) ?? null : null;
+  }
+  return chain.join(" / ") || entityId;
+}
+
+function entityChainIncludes(
+  startEntityId: string | null,
+  targetEntityId: string,
+  entitiesById: Map<string, Entity>,
+): boolean {
+  const seen = new Set<string>();
+  let currentId = startEntityId;
+  while (currentId && !seen.has(currentId)) {
+    if (currentId === targetEntityId) return true;
+    seen.add(currentId);
+    currentId = entitiesById.get(currentId)?.parentId ?? null;
+  }
+  return false;
+}
+
+function getDocumentLinkedEntityIds(doc: Entity): string[] {
+  return [
+    ...(doc.parentId ? [doc.parentId] : []),
+    ...(doc.linkedEntityIds ?? []),
+    ...(doc.primaryLinkedEntityId ? [doc.primaryLinkedEntityId] : []),
+    ...(doc.relatedEntityIds ?? []),
+  ].filter((value, index, all) => value && all.indexOf(value) === index);
+}
+
+function documentBelongsToScope(
+  doc: Entity,
+  scopeEntityId: string,
+  entitiesById: Map<string, Entity>,
+): boolean {
+  return getDocumentLinkedEntityIds(doc).some(
+    (entityId) => entityId === scopeEntityId || entityChainIncludes(entityId, scopeEntityId, entitiesById),
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export default function DocsPage() {
   const t = useInk();
   const { c } = t;
   const { user } = useAuth();
-  const router = useRouter();
 
   // Doc list
   const [docs, setDocs] = useState<Entity[]>([]);
+  const [entities, setEntities] = useState<Entity[]>([]);
   const [docsLoading, setDocsLoading] = useState(true);
+  const [selectedScopeId, setSelectedScopeId] = useState<string>("all");
 
   // Selected doc
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
@@ -71,14 +118,73 @@ export default function DocsPage() {
     setDocsLoading(true);
     try {
       const token = await user.getIdToken();
-      const list = await listDocs(token);
+      const [list, allEntities] = await Promise.all([
+        listDocs(token),
+        getAllEntities(token),
+      ]);
       setDocs(list);
+      setEntities(allEntities);
+      const params = new URLSearchParams(window.location.search);
+      const scope = params.get("scope");
+      if (scope && (scope === "all" || allEntities.some((entity) => entity.id === scope))) {
+        setSelectedScopeId(scope);
+      }
     } catch (err) {
       console.error("[DocsPage] loadDocs error:", err);
     } finally {
       setDocsLoading(false);
     }
   }, [user]);
+
+  const entityIndex = useMemo(() => new Map(entities.map((entity) => [entity.id, entity])), [entities]);
+
+  const scopeOptions = useMemo(() => {
+    const docCountByEntity = new Map<string, number>();
+    for (const doc of docs) {
+      for (const linkedId of getDocumentLinkedEntityIds(doc)) {
+        let currentId: string | null = linkedId;
+        const seen = new Set<string>();
+        while (currentId && !seen.has(currentId)) {
+          seen.add(currentId);
+          docCountByEntity.set(currentId, (docCountByEntity.get(currentId) ?? 0) + 1);
+          currentId = entityIndex.get(currentId)?.parentId ?? null;
+        }
+      }
+    }
+
+    return entities
+      .filter((entity) => entity.type !== "document" && (docCountByEntity.get(entity.id) ?? 0) > 0)
+      .map((entity) => ({
+        id: entity.id,
+        label: buildEntityChainLabel(entity.id, entityIndex),
+        count: docCountByEntity.get(entity.id) ?? 0,
+        level: entity.level ?? null,
+      }))
+      .sort((left, right) => {
+        const levelDelta = (left.level ?? 99) - (right.level ?? 99);
+        if (levelDelta !== 0) return levelDelta;
+        return left.label.localeCompare(right.label, "zh-Hant");
+      });
+  }, [docs, entities, entityIndex]);
+
+  const scopedDocs = useMemo(() => {
+    if (selectedScopeId === "all") return docs;
+    return docs.filter((doc) => documentBelongsToScope(doc, selectedScopeId, entityIndex));
+  }, [docs, entityIndex, selectedScopeId]);
+
+  const handleScopeChange = useCallback((scopeId: string) => {
+    setSelectedScopeId(scopeId);
+    setSelectedDocId(null);
+    setDocMeta(null);
+    setDocContent(null);
+    const url = new URL(window.location.href);
+    if (scopeId === "all") {
+      url.searchParams.delete("scope");
+    } else {
+      url.searchParams.set("scope", scopeId);
+    }
+    window.history.replaceState({}, "", url.toString());
+  }, []);
 
   useEffect(() => {
     loadDocs();
@@ -177,7 +283,12 @@ export default function DocsPage() {
     }}>
       {/* Left sidebar — doc list */}
       <DocListSidebar
-        docs={docs}
+        docs={scopedDocs}
+        entities={entities}
+        scopeOptions={scopeOptions}
+        selectedScopeId={selectedScopeId}
+        totalDocCount={docs.length}
+        onScopeChange={handleScopeChange}
         selectedId={selectedDocId}
         onSelect={setSelectedDocId}
         onCreateNew={handleCreateNew}

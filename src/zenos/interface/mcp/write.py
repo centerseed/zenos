@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 
 from zenos.application.knowledge.ontology_service import DocumentLinkageValidationError, SnapshotTooLargeError
 from zenos.domain.doc_types import is_known_doc_type
@@ -513,6 +514,83 @@ async def _preflight_document_remote_visibility(data: dict) -> tuple[str | None,
     return None, warnings
 
 
+def _looks_like_bundle_root_title(title: str) -> bool:
+    lowered = (title or "").strip().lower()
+    return any(token in lowered for token in ("知識庫", "索引", "index", "bundle", "文件群"))
+
+
+async def _preflight_document_bundle_target(data: dict, ontology_service) -> dict | None:
+    """Block raw uploaded files from becoming flat direct L2 document fanout."""
+    if data.get("id") or data.get("sync_mode"):
+        return None
+    if data.get("add_source") or data.get("update_source") or data.get("remove_source"):
+        return None
+    if data.get("allow_l2_direct_document"):
+        return None
+
+    linked_ids = data.get("linked_entity_ids") or []
+    try:
+        linked_ids = ontology_service._normalize_linked_entity_ids(linked_ids)
+    except Exception:
+        return None
+    if inspect.isawaitable(linked_ids):
+        close = getattr(linked_ids, "close", None)
+        if callable(close):
+            close()
+        return None
+    if len(linked_ids) != 1:
+        return None
+
+    target_id = linked_ids[0]
+    target = await ontology_service._entities.get_by_id(target_id)
+    if target is None or str(getattr(target, "type", "")) != "module":
+        return None
+
+    title = str(data.get("title") or data.get("name") or "").strip()
+    doc_role = str(data.get("doc_role") or "index").strip().lower()
+    is_raw_file_upload = data.get("initial_content") is not None
+    if doc_role == "index" and _looks_like_bundle_root_title(title):
+        return None
+    if not is_raw_file_upload and doc_role != "single":
+        return None
+
+    all_docs = await ontology_service._entities.list_all(type_filter="document")
+    existing_indexes = [
+        doc for doc in all_docs
+        if getattr(doc, "parent_id", None) == target_id
+        and str(getattr(doc, "doc_role", "") or "").lower() == "index"
+        and str(getattr(doc, "status", "") or "").lower() == "current"
+    ]
+    if not existing_indexes:
+        return None
+
+    index_candidates = [
+        {
+            "id": doc.id,
+            "title": doc.name,
+        }
+        for doc in existing_indexes[:8]
+    ]
+    return _unified_response(
+        status="rejected",
+        data={
+            "error": {
+                "code": "L2_DIRECT_DOCUMENT_REQUIRES_BUNDLE",
+                "linked_entity_id": target_id,
+                "linked_entity_name": target.name,
+            },
+            "index_candidates": index_candidates,
+        },
+        suggestions=[
+            "這看起來是支援文件，不能再直接掛到 L2。請選一個既有 L3 index bundle，改用該 bundle 的 document id 做 parent/link。",
+            "若你確定這份文件本身就是新的 L3 index 入口，title 請包含「知識庫」或「索引」，或明確傳 allow_l2_direct_document=true。",
+        ],
+        rejection_reason=(
+            "raw/support document cannot be written directly under an L2 that already has current index bundles"
+        ),
+    )
+
+
 def _is_formal_entry_document(serialized: dict) -> bool:
     details = serialized.get("details")
     if isinstance(details, dict) and details.get("formal_entry") is not None:
@@ -677,6 +755,10 @@ async def write(
     documents: title, source({type, uri, adapter}), tags({what[], why, how, who[]}),
                summary, linked_entity_ids（必填）。更新語意為 merge update（未提供欄位不清空）。
                linked_entity_ids canonical 格式為 list[str]，也接受 JSON array 字串（會正規化）。
+               Bundle-first 硬規則：若 L2 已有 current doc_role=index 入口，
+               支援文件/原始 md 不可再直接 linked 到該 L2；必須改掛正確 L3 index bundle。
+               只有新的 bundle root（title 含「知識庫」/「索引」/index/bundle）
+               或明確 allow_l2_direct_document=true 才允許直接掛 L2。
                選填：initial_content（string）— 建立新 doc 時同時把 markdown 寫進 GCS revision。
                  - 只支援 create（新建 doc）；update 既有 doc 請走 POST /api/docs/{doc_id}/content
                  - 與 sources 互斥（同時傳 → 400 INITIAL_CONTENT_REQUIRES_NO_SOURCES）
@@ -947,6 +1029,12 @@ async def write(
                     changes={"input": data},
                 )
                 return _unified_response(data=serialized)
+            bundle_target_rejection = await _preflight_document_bundle_target(
+                data,
+                _mcp.ontology_service,
+            )
+            if bundle_target_rejection is not None:
+                return bundle_target_rejection
             rejection_reason, preflight_warnings = await _preflight_document_remote_visibility(data)
             if rejection_reason is not None:
                 return _unified_response(

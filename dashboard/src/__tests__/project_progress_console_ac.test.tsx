@@ -28,6 +28,8 @@ const getProjectProgressMock = vi.hoisted(() => vi.fn());
 const getTasksByEntityMock = vi.hoisted(() => vi.fn());
 const getEntityContextMock = vi.hoisted(() => vi.fn());
 const getChildEntitiesMock = vi.hoisted(() => vi.fn());
+const getAllEntitiesMock = vi.hoisted(() => vi.fn());
+const listDocsMock = vi.hoisted(() => vi.fn());
 const getAllBlindspotsMock = vi.hoisted(() => vi.fn());
 const mockUser = { getIdToken: vi.fn().mockResolvedValue("token-1") };
 
@@ -46,6 +48,8 @@ vi.mock("@/lib/api", async () => {
     getTasksByEntity: (...args: unknown[]) => getTasksByEntityMock(...args),
     getEntityContext: (...args: unknown[]) => getEntityContextMock(...args),
     getChildEntities: (...args: unknown[]) => getChildEntitiesMock(...args),
+    getAllEntities: (...args: unknown[]) => getAllEntitiesMock(...args),
+    listDocs: (...args: unknown[]) => listDocsMock(...args),
     getAllBlindspots: (...args: unknown[]) => getAllBlindspotsMock(...args),
     createTask: vi.fn(),
     updateTask: vi.fn(),
@@ -282,7 +286,11 @@ describe("SPEC-project-progress-console acceptance tests", () => {
     getTasksByEntityMock.mockReset();
     getEntityContextMock.mockReset();
     getChildEntitiesMock.mockReset();
+    getAllEntitiesMock.mockReset();
+    listDocsMock.mockReset();
     getAllBlindspotsMock.mockReset();
+    getAllEntitiesMock.mockResolvedValue([]);
+    listDocsMock.mockResolvedValue([]);
     vi.restoreAllMocks();
     Object.assign(navigator, {
       clipboard: {

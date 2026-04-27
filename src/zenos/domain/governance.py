@@ -2114,6 +2114,7 @@ def detect_invalid_document_titles(entities: list[Entity]) -> list[dict]:
 def detect_document_bundle_governance_issues(
     documents: list[Entity],
     relationships_by_doc: dict[str, list[Relationship]] | None = None,
+    entity_map: dict[str, Entity] | None = None,
 ) -> list[dict]:
     """Return L3 document bundle issues that block agent retrieval.
 
@@ -2121,6 +2122,7 @@ def detect_document_bundle_governance_issues(
     index document whose summary/highlights act as a retrieval map.
     """
     relationships_by_doc = relationships_by_doc or {}
+    entity_map = entity_map or {}
     issues: list[dict] = []
     governable_statuses = {"current", "approved", "under_review"}
     active_docs = [
@@ -2197,6 +2199,33 @@ def detect_document_bundle_governance_issues(
             if getattr(doc, "doc_role", None) == "index"
             and getattr(doc, "status", None) == "current"
         ]
+        direct_doc_ids = [
+            doc.id
+            for doc in linked_docs
+            if doc.id and getattr(doc, "parent_id", None) == linked_entity_id
+        ]
+        linked_entity = entity_map.get(linked_entity_id)
+        is_l2_module = (
+            linked_entity is not None
+            and getattr(linked_entity, "type", None) == EntityType.MODULE
+        )
+        if not is_l2_module:
+            continue
+        if is_l2_module and len(direct_doc_ids) >= 8 and len(current_index_docs) >= 1:
+            issues.append({
+                "issue_type": "l2_flat_document_fanout",
+                "linked_entity_id": linked_entity_id,
+                "linked_entity_name": linked_entity.name,
+                "direct_document_count": len(direct_doc_ids),
+                "sample_document_ids": direct_doc_ids[:20],
+                "index_document_ids": [doc.id for doc in current_index_docs if doc.id],
+                "severity": "red",
+                "suggested_action": (
+                    "此 L2 底下有大量 direct document fanout。"
+                    "請把 support docs 改掛到正確 L3 index bundle，"
+                    "L2 預設只顯示 current doc_role=index 入口。"
+                ),
+            })
         if current_index_docs:
             continue
         issues.append({

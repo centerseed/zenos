@@ -222,6 +222,35 @@ describe("SPEC-docs-native-edit-and-helper-ingest — frontend ACs", () => {
     expect(project?.groupLabel).toContain("ZenOS 2.0");
   });
 
+  it("groups module-scoped docs under the root/module chain instead of exposing raw parent IDs", () => {
+    const root = makeEntity({
+      id: "company-001",
+      name: "原心生技",
+      type: "company",
+      status: "active",
+      level: 1,
+      parentId: null,
+    });
+    const module = makeEntity({
+      id: "module-001",
+      name: "原料知識庫",
+      type: "module",
+      status: "active",
+      level: 2,
+      parentId: "company-001",
+    });
+    const doc = makeEntity({
+      id: "doc-001",
+      name: "FloraGLO 葉黃素知識庫",
+      parentId: "module-001",
+    });
+
+    const groups = buildDocGroups([doc], [root, module]);
+    expect(groups.find((g) => g.groupKey === "project")?.groupLabel).toBe(
+      "專案 · 原心生技 / 原料知識庫",
+    );
+  });
+
   it("AC-DNH-07: editor header shows L2 breadcrumb and doc_type", () => {
     /**
      * DocEditor renders breadcrumb from docMeta synchronously on initial render.

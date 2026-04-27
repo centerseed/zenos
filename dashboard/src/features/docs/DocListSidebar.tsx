@@ -14,8 +14,18 @@ interface DocGroupItem {
   items: Entity[];
 }
 
+interface PreparedDocGroup extends DocGroupItem {
+  indexItems: Entity[];
+  supportingItems: Entity[];
+}
+
 interface DocListSidebarProps {
   docs: Entity[];
+  entities?: Entity[];
+  scopeOptions?: Array<{ id: string; label: string; count: number }>;
+  selectedScopeId?: string;
+  totalDocCount?: number;
+  onScopeChange?: (scopeId: string) => void;
   selectedId: string | null;
   onSelect: (id: string) => void;
   onCreateNew?: () => void;
@@ -30,27 +40,56 @@ interface DocListSidebarProps {
  *  - team: visibility == "public" and no product parent
  *  - project·{name}: entity has parentId pointing to a product entity
  */
-function classifyDoc(doc: Entity): { group: DocGroup; productName?: string } {
+function buildScopeLabel(entityId: string, entitiesById: Map<string, Entity>): string | null {
+  const chain: Entity[] = [];
+  const seen = new Set<string>();
+  let current = entitiesById.get(entityId) ?? null;
+
+  while (current && !seen.has(current.id)) {
+    chain.unshift(current);
+    seen.add(current.id);
+    current = current.parentId ? entitiesById.get(current.parentId) ?? null : null;
+  }
+
+  if (chain.length === 0) return null;
+  return chain.map((entity) => entity.name).join(" / ");
+}
+
+function classifyDoc(
+  doc: Entity,
+  entitiesById: Map<string, Entity> = new Map(),
+): { group: DocGroup; productName?: string } {
   const details = (doc.details ?? {}) as Record<string, unknown>;
   if (details.pinned === true) return { group: "pinned" };
 
-  // If parentId exists we treat it as a "project" doc
+  // If parentId exists we treat it as a workspace-scoped doc. Resolve the full
+  // root/module chain when the caller provides the entity index; falling back to
+  // legacy product_name keeps older tests and payloads working.
   if (doc.parentId) {
-    return { group: "project", productName: String(details.product_name ?? doc.parentId) };
+    return {
+      group: "project",
+      productName:
+        buildScopeLabel(doc.parentId, entitiesById) ??
+        String(details.product_name ?? doc.parentId),
+    };
   }
 
   if (doc.visibility === "public") return { group: "team" };
   return { group: "personal" };
 }
 
-export function buildDocGroups(docs: Entity[]): DocGroupItem[] {
+export function buildDocGroups(
+  docs: Entity[],
+  entities: Entity[] = [],
+): DocGroupItem[] {
   const pinned: Entity[] = [];
   const personal: Entity[] = [];
   const team: Entity[] = [];
   const projectMap: Map<string, Entity[]> = new Map();
+  const entitiesById = new Map(entities.map((entity) => [entity.id, entity]));
 
   for (const doc of docs) {
-    const { group, productName } = classifyDoc(doc);
+    const { group, productName } = classifyDoc(doc, entitiesById);
     if (group === "pinned") {
       pinned.push(doc);
     } else if (group === "personal") {
@@ -77,6 +116,11 @@ export function buildDocGroups(docs: Entity[]): DocGroupItem[] {
 
 export function DocListSidebar({
   docs,
+  entities = [],
+  scopeOptions = [],
+  selectedScopeId = "all",
+  totalDocCount,
+  onScopeChange,
   selectedId,
   onSelect,
   onCreateNew,
@@ -85,6 +129,8 @@ export function DocListSidebar({
   const t = useInk();
   const { c, fontHead, fontMono, fontBody } = t;
   const [query, setQuery] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const hasQuery = query.trim().length > 0;
 
   const filteredDocs = useMemo(() => {
     if (!query.trim()) return docs;
@@ -96,7 +142,31 @@ export function DocListSidebar({
     );
   }, [docs, query]);
 
-  const groups = useMemo(() => buildDocGroups(filteredDocs), [filteredDocs]);
+  const groups = useMemo(() => buildDocGroups(filteredDocs, entities), [filteredDocs, entities]);
+  const preparedGroups = useMemo<PreparedDocGroup[]>(
+    () =>
+      groups.map((group) => {
+        const indexItems = group.items.filter((doc) => doc.docRole === "index");
+        return {
+          ...group,
+          indexItems,
+          supportingItems: group.items.filter((doc) => doc.docRole !== "index"),
+        };
+      }),
+    [groups],
+  );
+
+  function toggleGroup(groupLabel: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupLabel)) {
+        next.delete(groupLabel);
+      } else {
+        next.add(groupLabel);
+      }
+      return next;
+    });
+  }
 
   return (
     <aside
@@ -133,6 +203,48 @@ export function DocListSidebar({
       </div>
 
       {/* Search */}
+      {onScopeChange ? (
+        <div style={{ marginBottom: 14 }}>
+          <label
+            htmlFor="doc-scope-select"
+            style={{
+              display: "block",
+              fontFamily: fontMono,
+              fontSize: 9,
+              color: c.inkFaint,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+              marginBottom: 6,
+            }}
+          >
+            Scope
+          </label>
+          <select
+            id="doc-scope-select"
+            value={selectedScopeId}
+            onChange={(event) => onScopeChange(event.target.value)}
+            style={{
+              width: "100%",
+              border: `1px solid ${c.inkHair}`,
+              borderRadius: 2,
+              background: c.surface,
+              color: c.ink,
+              fontFamily: fontBody,
+              fontSize: 12,
+              padding: "8px 10px",
+              outline: "none",
+            }}
+          >
+            <option value="all">全部文件 ({totalDocCount ?? docs.length})</option>
+            {scopeOptions.map((scope) => (
+              <option key={scope.id} value={scope.id}>
+                {scope.label} ({scope.count})
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
         padding: "7px 10px", marginBottom: 14,
@@ -164,23 +276,45 @@ export function DocListSidebar({
       )}
 
       {/* Groups */}
-      {groups.map((grp) => (
+      {preparedGroups.map((grp) => {
+        const expanded = hasQuery || expandedGroups.has(grp.groupLabel);
+        const primaryItems = grp.indexItems.length > 0 ? grp.indexItems : grp.items.slice(0, 3);
+        const visibleItems = expanded ? grp.items : primaryItems;
+        const hiddenCount = Math.max(grp.items.length - visibleItems.length, 0);
+
+        return (
         <div key={grp.groupLabel} style={{ marginTop: 16 }}>
-          <div
+          <button
+            type="button"
+            onClick={() => toggleGroup(grp.groupLabel)}
             data-testid={`doc-group-${grp.groupKey}`}
             style={{
               fontFamily: fontMono, fontSize: 9,
               color: c.inkFaint, letterSpacing: "0.2em", textTransform: "uppercase",
               padding: "0 4px 8px", display: "flex", alignItems: "center", gap: 8,
+              width: "100%", border: "none", background: "transparent", cursor: "pointer",
+              textAlign: "left",
             }}
           >
-            <span>{grp.groupLabel}</span>
+            <Icon
+              d={ICONS.chev}
+              size={10}
+              style={{
+                color: c.inkFaint,
+                transform: expanded ? "rotate(90deg)" : "rotate(0deg)",
+                transition: "transform 120ms ease",
+              }}
+            />
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {grp.groupLabel}
+            </span>
             <div style={{ flex: 1, height: 1, background: c.inkHair }} />
             <span style={{ color: c.inkFaint }}>{grp.items.length}</span>
-          </div>
+          </button>
 
-          {grp.items.map((doc) => {
+          {visibleItems.map((doc) => {
             const active = selectedId === doc.id;
+            const isIndex = doc.docRole === "index";
             return (
               <button
                 key={doc.id}
@@ -188,8 +322,8 @@ export function DocListSidebar({
                 data-testid={`doc-item-${doc.id}`}
                 style={{
                   display: "grid", gridTemplateColumns: "12px 1fr auto",
-                  alignItems: "center", gap: 8, width: "100%",
-                  padding: "6px 8px",
+                  alignItems: "start", gap: 8, width: "100%",
+                  padding: "8px 8px",
                   background: active ? c.surface : "transparent",
                   border: "none",
                   borderLeft: active ? `2px solid ${c.vermillion}` : "2px solid transparent",
@@ -199,17 +333,55 @@ export function DocListSidebar({
                 }}
               >
                 <Icon d={ICONS.doc} size={11} style={{ color: c.inkFaint }} />
-                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {doc.name}
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: isIndex ? 600 : 400 }}>
+                    {doc.name}
+                  </span>
+                  {doc.summary ? (
+                    <span
+                      style={{
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                        marginTop: 3,
+                        color: c.inkFaint,
+                        fontSize: 11,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {doc.summary}
+                    </span>
+                  ) : null}
                 </span>
-                <span style={{ fontFamily: fontMono, fontSize: 9, color: c.inkFaint }}>
-                  {formatDate(doc.updatedAt)}
+                <span style={{ fontFamily: fontMono, fontSize: 9, color: isIndex ? c.vermillion : c.inkFaint }}>
+                  {isIndex ? "INDEX" : formatDate(doc.updatedAt)}
                 </span>
               </button>
             );
           })}
+          {!expanded && hiddenCount > 0 ? (
+            <button
+              type="button"
+              onClick={() => toggleGroup(grp.groupLabel)}
+              style={{
+                width: "100%",
+                border: "none",
+                background: "transparent",
+                padding: "6px 8px 6px 28px",
+                cursor: "pointer",
+                textAlign: "left",
+                fontFamily: fontMono,
+                fontSize: 10,
+                color: c.inkFaint,
+              }}
+            >
+              展開 {hiddenCount} 份支援文件
+            </button>
+          ) : null}
         </div>
-      ))}
+        );
+      })}
     </aside>
   );
 }

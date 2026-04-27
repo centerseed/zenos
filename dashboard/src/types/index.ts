@@ -129,6 +129,9 @@ export interface Entity {
   highlightsUpdatedAt?: Date | null;
   changeSummary?: string | null;
   summaryUpdatedAt?: Date | null;
+  linkedEntityIds?: string[];
+  primaryLinkedEntityId?: string | null;
+  relatedEntityIds?: string[];
 }
 
 export interface Relationship {

@@ -1121,10 +1121,14 @@ async def analyze(
                 "entity_count": len(scope_ids),
                 "document_count": len(all_doc_entities),
             }
+        else:
+            all_entities_for_scope = await _mcp.ontology_service._entities.list_all()
+            entity_map = {e.id: e for e in all_entities_for_scope if e.id}
         invalid_docs = detect_invalid_document_titles(all_doc_entities)
         bundle_issues = detect_document_bundle_governance_issues(
             all_doc_entities,
             relationships_by_doc=relationships_by_doc,
+            entity_map=entity_map,
         )
         doc_by_id = {doc.id: doc for doc in all_doc_entities if doc.id}
         entity_map_for_patches = locals().get("entity_map")

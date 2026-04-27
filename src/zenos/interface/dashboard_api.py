@@ -53,6 +53,7 @@ from zenos.application.knowledge.ontology_service import OntologyService, _colle
 from zenos.application.knowledge.source_service import SourceService
 from zenos.domain.governance import compute_search_unused_signals, score_summary_quality
 from zenos.domain.action import Task
+from zenos.domain.document_linkage import get_document_linked_entity_ids
 from zenos.domain.knowledge import Blindspot, Entity, EntityType, Relationship, SourceType, Tags
 from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.application.identity.workspace_context import (
@@ -897,7 +898,12 @@ async def _is_blindspot_visible_for_partner(
 # ──────────────────────────────────────────────
 
 
-def _entity_to_dict(e: Entity, partner: dict | None = None) -> dict:
+def _entity_to_dict(
+    e: Entity,
+    partner: dict | None = None,
+    *,
+    linked_entity_ids: list[str] | None = None,
+) -> dict:
     visible_sources = filter_sources_for_partner(e.sources, partner)
     return {
         "id": e.id,
@@ -925,6 +931,9 @@ def _entity_to_dict(e: Entity, partner: dict | None = None) -> dict:
         "highlightsUpdatedAt": e.highlights_updated_at,
         "changeSummary": e.change_summary,
         "summaryUpdatedAt": e.summary_updated_at,
+        "linkedEntityIds": linked_entity_ids or [],
+        "primaryLinkedEntityId": linked_entity_ids[0] if linked_entity_ids else None,
+        "relatedEntityIds": linked_entity_ids[1:] if linked_entity_ids else [],
     }
 
 
@@ -1433,7 +1442,35 @@ async def list_entities(request: Request) -> Response:
     else:
         entities = [e for e in entities if OntologyService.is_entity_visible_for_partner(e, partner)]
 
-    return _json_response({"entities": [_entity_to_dict(e, partner) for e in entities]}, request=request)
+    linked_entity_ids_by_doc: dict[str, list[str]] = {}
+    doc_entities = [e for e in entities if e.id and e.type == EntityType.DOCUMENT]
+    if doc_entities and _relationship_repo is not None:
+        token = current_partner_id.set(effective_id)
+        try:
+            relationships = await _relationship_repo.list_all()
+        finally:
+            current_partner_id.reset(token)
+        relationships_by_doc: dict[str, list[Relationship]] = {}
+        doc_ids = {e.id for e in doc_entities if e.id}
+        for rel in relationships:
+            if rel.source_entity_id in doc_ids:
+                relationships_by_doc.setdefault(rel.source_entity_id, []).append(rel)
+        linked_entity_ids_by_doc = {
+            doc.id: get_document_linked_entity_ids(doc, relationships_by_doc.get(doc.id or "", []))
+            for doc in doc_entities
+            if doc.id
+        }
+
+    return _json_response({
+        "entities": [
+            _entity_to_dict(
+                e,
+                partner,
+                linked_entity_ids=linked_entity_ids_by_doc.get(e.id or ""),
+            )
+            for e in entities
+        ]
+    }, request=request)
 
 
 # ──────────────────────────────────────────────
