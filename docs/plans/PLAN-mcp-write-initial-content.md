@@ -1,7 +1,7 @@
 ---
 spec: SPEC-docs-native-edit-and-helper-ingest.md
 created: 2026-04-27
-status: in-progress
+status: done
 ---
 
 # PLAN: MCP `write(collection="documents")` 加 `initial_content`
