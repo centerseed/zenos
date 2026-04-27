@@ -637,11 +637,133 @@ def _clear_service_cache() -> None:
     _service = None
 
 
+# ──────────────────────────────────────────────
+# Document file upload — zero LLM token cost
+# ──────────────────────────────────────────────
+
+_MAX_UPLOAD_BYTES = 1_048_576  # 1 MB
+
+
+async def upload_document(request: Request) -> JSONResponse:
+    """Create a new document from a multipart file upload (file bytes never touch LLM context).
+
+    POST /api/ext/docs
+    Content-Type: multipart/form-data
+
+    Fields:
+      file              Markdown file (required)
+      title             Document title (required)
+      workspace_id      Partner workspace ID (required)
+      type              Entity type, e.g. REFERENCE (default: REFERENCE)
+      doc_role          index | single (default: index)
+      summary           Short document summary
+      linked_entity_ids JSON array string of linked entity IDs (default: [])
+      tags              JSON object string (default: {})
+
+    Example (curl — file content never enters LLM context):
+      curl -F "file=@README.md" -F "title=My Doc" \\
+           -F "workspace_id=<id>" -F "linked_entity_ids=[\"<entity-id>\"]" \\
+           "https://zenos-mcp-xxx.run.app/api/ext/docs?api_key=KEY"
+
+    Returns: {status, data: {doc_id, revision_id, source_id}}
+    """
+    import json as _json
+
+    auth_err = _ensure_authenticated()
+    if auth_err:
+        return auth_err
+
+    try:
+        form = await request.form()
+    except Exception:
+        return _invalid("Expected multipart/form-data request")
+
+    workspace_id = str(form.get("workspace_id") or "").strip()
+    ws_err = _require_workspace(workspace_id)
+    if ws_err:
+        return ws_err
+
+    scope_err = _require_scope("write")
+    if scope_err:
+        return scope_err
+
+    # --- file field ---
+    upload = form.get("file")
+    if upload is None:
+        return _invalid("file field is required")
+
+    if hasattr(upload, "read"):
+        content_bytes: bytes = await upload.read()
+    else:
+        content_bytes = str(upload).encode("utf-8")
+
+    if len(content_bytes) > _MAX_UPLOAD_BYTES:
+        return _response(
+            status_code=413,
+            status="rejected",
+            rejection_reason="INITIAL_CONTENT_TOO_LARGE",
+            data={"error": "INITIAL_CONTENT_TOO_LARGE", "max_bytes": _MAX_UPLOAD_BYTES},
+        )
+
+    try:
+        content = content_bytes.decode("utf-8")
+    except UnicodeDecodeError:
+        return _invalid("file must be UTF-8 encoded text")
+
+    title = str(form.get("title") or "").strip()
+    if not title:
+        return _invalid("title is required")
+
+    doc_type = str(form.get("type") or "REFERENCE").strip().upper()
+    doc_role = str(form.get("doc_role") or "index").strip()
+    summary = str(form.get("summary") or "").strip()
+
+    try:
+        linked_entity_ids = _json.loads(form.get("linked_entity_ids") or "[]")
+        if not isinstance(linked_entity_ids, list):
+            linked_entity_ids = []
+    except Exception:
+        linked_entity_ids = []
+
+    try:
+        tags = _json.loads(form.get("tags") or "{}")
+        if not isinstance(tags, dict):
+            tags = {}
+    except Exception:
+        tags = {}
+
+    from zenos.interface.mcp.write import write as write_tool
+
+    result = await write_tool(
+        collection="documents",
+        data={
+            "title": title,
+            "type": doc_type,
+            "doc_role": doc_role,
+            "summary": summary,
+            "linked_entity_ids": linked_entity_ids,
+            "tags": tags,
+            "initial_content": content,
+        },
+        workspace_id=workspace_id,
+    )
+
+    rejection = result.get("rejection_reason") or ""
+    if "too_large" in rejection.lower():
+        http_status = 413
+    elif result.get("status") in ("rejected", "error"):
+        http_status = 400
+    else:
+        http_status = 200
+    return JSONResponse(result, status_code=http_status)
+
+
 routes = [
     Route("/signals/ingest", endpoint=ingest_signal, methods=["POST"]),
     Route("/signals/distill", endpoint=distill_signals, methods=["POST"]),
     Route("/candidates/commit", endpoint=commit_candidates, methods=["POST"]),
     Route("/review-queue", endpoint=list_review_queue, methods=["GET"]),
+    Route("/docs", endpoint=upload_document, methods=["POST"]),
 ]
 
 app = Starlette(routes=routes)

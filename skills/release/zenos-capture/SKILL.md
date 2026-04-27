@@ -37,7 +37,7 @@ version: 3.0.0
 
 #### 本地 md 檔的 source 類型決策樹
 
-建立 document entity 時，source 應該是 GitHub URI 還是直接寫 GCS？按以下順序判斷：
+建立 document entity 時，source 應該是 GitHub URI、GCS 直傳、還是 multipart 上傳？按以下順序判斷：
 
 ```
 1. 判斷執行環境
@@ -47,20 +47,27 @@ version: 3.0.0
    └─ CLI 環境（claude-code 或 terminal）
        ↓
 2. 偵測 git remote（`git remote -v`）
-   ├─ 無 remote
-   │   → 直接走 initial_content（GCS only）
+   ├─ 無 remote 或檔案不在 git 管理下
+   │   → 優先走 (a) curl 上傳（零 token 消耗）
    │
    └─ 有 remote
        ↓
-3. 詢問用戶（呈現兩個選項）：
-   (a) 寫入 GCS — 立即在 Dashboard 可見，不依賴 git push
-       → write(collection="documents", data={..., "initial_content": "<md 內容>"})
+3. 詢問用戶（呈現三個選項）：
+   (a) curl 上傳 — 零 token 消耗，檔案直接從磁碟傳到 GCS ★ 首選
+       → Bash: curl -F "file=@<path>" -F "title=<title>" \
+                    -F "workspace_id=<id>" -F "linked_entity_ids=[\"<id>\"]" \
+                    "https://zenos-mcp-xxx.run.app/api/ext/docs?api_key=KEY"
+       回傳 {doc_id, revision_id, source_id}，不需要 Read 檔案
    (b) 用 GitHub URI — 先確認檔案已 push，build 出 github: URI
        → write(collection="documents", data={..., "source": {"uri": "github:docs/...", "type": "github"}})
        ⚠️ 必須先確認 commit 已 push 到 remote，否則其他人找不到
+   (c) initial_content（有 token 成本，作為 fallback）
+       → write(collection="documents", data={..., "initial_content": "<md 內容>"})
+       ⚠️ 整份 md 內容會進 LLM context，大檔案浪費 token
 ```
 
-**預設選項**：偵測到 remote 時，建議用戶選 (a) GCS，因為不受 push 狀態影響，Dashboard 立即可讀。
+**首選**：CLI 環境一律推薦 (a) curl 上傳，agent 完全不需要讀取檔案內容。
+**fallback 順序**：(b) GitHub URI（若已 push）→ (c) initial_content（最後手段）。
 
 ### 3. 目錄：首次建構
 
