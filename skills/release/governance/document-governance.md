@@ -342,7 +342,9 @@ write(collection="documents", data={
     → 同時判斷 `git only / git + gcs / gcs only`
     ↓
 2d. 使用者明確要求「直接把 markdown 寫進 ZenOS 文件（不經 Git）」
-    → 走 Document Delivery 內容寫入流程（POST /api/docs/{doc_id}/content）
+    → 新建文件：write(collection="documents", data={..., "initial_content": "..."})
+        一次呼叫完成：建 entity + 寫 GCS revision（MCP-native，1MB 上限）
+    → 既有文件更新：POST /api/docs/{doc_id}/content
     → 產生/更新 snapshot revision（GCS private）
     → Reader 走 /docs permalink，不依賴外部 source 可用性
 2e. 文件已是 current / 正式入口，但還沒有 snapshot
@@ -442,9 +444,36 @@ write(
 - 用戶明確要求「不要經 git，直接更新文件內容」
 - 目標是快速發布可讀版本，而非多人重度協作編輯
 
-流程：
-1. 先確認 document entity 存在（沒有就先 `write(collection="documents")` 建 metadata）。
-2. 呼叫 Delivery 內容寫入 API（`POST /api/docs/{doc_id}/content`）提交 markdown。
+### 路徑 A：MCP-native（新建文件 + 一次寫入）
+
+適用場景：新建 document entity，同時把 markdown 寫入 GCS revision，讓 Dashboard 可立即顯示完整內容。
+
+```python
+write(
+  collection="documents",
+  data={
+    "title": "文件標題",
+    "type": "SPEC",
+    "doc_role": "index",
+    "ontology_entity": "對應 L2 名稱",
+    "initial_content": "# 文件標題\n\n完整 markdown 內容..."   # 最多 1MB
+  }
+)
+# server 自動：建 doc entity → 加 zenos_native source（is_primary=true）→ 寫 GCS revision
+# response 含 doc_id、revision_id、source_id
+```
+
+限制：
+- `initial_content` 只能在 **create** 時使用；update 既有文件走路徑 B
+- `initial_content` 與 `sources` **互斥**；要混合外部 source 請先 create，再用 `add_source` 追加
+- 超過 1MB → 413 `INITIAL_CONTENT_TOO_LARGE`
+
+### 路徑 B：既有文件更新（追加 revision）
+
+適用場景：document entity 已存在，需更新內容。
+
+1. 先確認 document entity 存在（search → 取得 doc_id）。
+2. 呼叫 Dashboard API `POST /api/docs/{doc_id}/content` 提交 markdown。
 3. 系統建立新 revision 並更新 `primary_snapshot_revision_id`。
 4. 分享與閱讀使用 `/docs` 與 share-link，不直接暴露 GCS object URL。
 
