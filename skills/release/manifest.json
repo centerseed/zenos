@@ -5,9 +5,9 @@
     "owner": "Barry",
     "repository": "https://github.com/centerseed/zenos"
   },
-  "published_at": "2026-04-26",
+  "published_at": "2026-04-28",
   "ssot": {
-    "governance_version": "2026.04.26.2",
+    "governance_version": "2026.04.28.1",
     "governance_files": [
       "skills/governance/bootstrap-protocol.md",
       "skills/governance/shared-rules.md",
@@ -50,7 +50,7 @@
     },
     {
       "name": "zenos-capture",
-      "version": "2.2.2",
+      "version": "3.0.1",
       "path": "zenos-capture",
       "files": ["SKILL.md"],
       "owner": "Barry"
