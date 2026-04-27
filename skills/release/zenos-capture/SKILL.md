@@ -3,7 +3,7 @@ name: zenos-capture
 description: >
   從對話、單一文件、或目錄擷取知識並寫入 ZenOS ontology。
   這份 release skill 只保留 runtime 骨架；治理規則 SSOT 在 governance_guide。
-version: 3.0.0
+version: 3.0.1
 ---
 
 # /zenos-capture
