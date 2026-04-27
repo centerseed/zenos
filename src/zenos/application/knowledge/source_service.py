@@ -459,32 +459,55 @@ class SourceService:
                 ),
             }
 
-        # zenos_native: read via adapter (GCS) — adapter handles the /docs/{id} URI
-        uri = target.get("uri", "")
-        if not uri and self._adapter is None:
-            return {
-                "error": "SNAPSHOT_UNAVAILABLE",
-                "source_id": sid,
-                "setup_hint": "zenos_native source 尚未有 revision。請先在 Dashboard 儲存文件。",
-            }
-
+        # zenos_native: read from GCS via document_revisions table.
+        # The GitHubAdapter cannot handle /docs/{id} URIs; read the stored
+        # revision directly using primary_snapshot_revision_id from the entity.
         try:
-            content = await self._adapter.read_content(uri)
-            staleness = _compute_staleness_hint(target)
-            result = {
-                "content": content,
-                "source_id": sid,
-                "content_type": "full",
-            }
-            if staleness:
-                result["staleness_hint"] = staleness
-            return result
-        except FileNotFoundError:
-            return {
-                "error": "SNAPSHOT_UNAVAILABLE",
-                "source_id": sid,
-                "setup_hint": "zenos_native source 尚未有 revision。請先在 Dashboard 儲存文件。",
-            }
+            from zenos.infrastructure.context import current_partner_id
+            from zenos.infrastructure.sql_common import get_pool, SCHEMA
+            from zenos.infrastructure.gcs_client import download_blob
+
+            partner_id = current_partner_id.get() or ""
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                rev_id_row = await conn.fetchrow(
+                    f"SELECT primary_snapshot_revision_id FROM {SCHEMA}.entities "
+                    f"WHERE partner_id = $1 AND id = $2",
+                    partner_id, doc_id,
+                )
+                primary_rev_id = rev_id_row["primary_snapshot_revision_id"] if rev_id_row else None
+                if primary_rev_id:
+                    rev_row = await conn.fetchrow(
+                        f"SELECT snapshot_bucket, snapshot_object_path FROM {SCHEMA}.document_revisions "
+                        f"WHERE partner_id = $1 AND id = $2",
+                        partner_id, primary_rev_id,
+                    )
+                else:
+                    rev_row = await conn.fetchrow(
+                        f"SELECT snapshot_bucket, snapshot_object_path FROM {SCHEMA}.document_revisions "
+                        f"WHERE partner_id = $1 AND doc_id = $2 "
+                        f"ORDER BY created_at DESC LIMIT 1",
+                        partner_id, doc_id,
+                    )
+            if rev_row:
+                raw, _ = download_blob(rev_row["snapshot_bucket"], rev_row["snapshot_object_path"])
+                staleness = _compute_staleness_hint(target)
+                result = {
+                    "content": raw.decode("utf-8"),
+                    "source_id": sid,
+                    "content_type": "full",
+                }
+                if staleness:
+                    result["staleness_hint"] = staleness
+                return result
+        except Exception:
+            logger.warning("zenos_native GCS read failed for doc %s", doc_id, exc_info=True)
+
+        return {
+            "error": "SNAPSHOT_UNAVAILABLE",
+            "source_id": sid,
+            "setup_hint": "zenos_native source 尚未有 revision。請先在 Dashboard 儲存文件。",
+        }
 
     async def check_google_workspace_connector_health(
         self,

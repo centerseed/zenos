@@ -681,7 +681,19 @@ async def write(
                  - 只支援 create（新建 doc）；update 既有 doc 請走 POST /api/docs/{doc_id}/content
                  - 與 sources 互斥（同時傳 → 400 INITIAL_CONTENT_REQUIRES_NO_SOURCES）
                  - 上限 1 MB（1048576 bytes）；超過 → 413 INITIAL_CONTENT_TOO_LARGE
+                 - update 既有 doc_id 時傳入 → 400 INITIAL_CONTENT_CREATE_ONLY
                  - 成功時 response data 含 doc_id、revision_id、source_id
+                 呼叫範例：
+                   write(collection="documents", data={
+                     "title": "FloraGLO® 研究文獻索引",
+                     "type": "REFERENCE",
+                     "doc_role": "index",
+                     "linked_entity_ids": ["<L2 entity id>"],
+                     "initial_content": "# FloraGLO® 研究文獻\n\n完整 markdown 內容..."
+                   })
+                   # response["data"] 含：
+                   # { "doc_id": "abc123", "revision_id": "rev456", "source_id": "src789" }
+                   # 建立後可直接呼叫 read_source(doc_id="abc123") 取得完整 markdown
                選填：material_change（bool）；當 true 時，change_summary 必填，否則視為未完成。
                可用 sync_mode 做文件治理批次同步：
                  - rename: 文件改名

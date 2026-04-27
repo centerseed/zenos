@@ -35,6 +35,33 @@ version: 3.0.0
 - 正式文件建 document metadata，不把整份原文塞進 ontology。
 - `linked_entity_ids` 必填，找不到對應 L2 就先停下來做關聯判斷。
 
+#### 本地 md 檔的 source 類型決策樹
+
+建立 document entity 時，source 應該是 GitHub URI 還是直接寫 GCS？按以下順序判斷：
+
+```
+1. 判斷執行環境
+   ├─ Web Copilot（claude.ai 或類似非 CLI 環境）
+   │   → 直接走 initial_content（GCS only），不需要問用戶
+   │
+   └─ CLI 環境（claude-code 或 terminal）
+       ↓
+2. 偵測 git remote（`git remote -v`）
+   ├─ 無 remote
+   │   → 直接走 initial_content（GCS only）
+   │
+   └─ 有 remote
+       ↓
+3. 詢問用戶（呈現兩個選項）：
+   (a) 寫入 GCS — 立即在 Dashboard 可見，不依賴 git push
+       → write(collection="documents", data={..., "initial_content": "<md 內容>"})
+   (b) 用 GitHub URI — 先確認檔案已 push，build 出 github: URI
+       → write(collection="documents", data={..., "source": {"uri": "github:docs/...", "type": "github"}})
+       ⚠️ 必須先確認 commit 已 push 到 remote，否則其他人找不到
+```
+
+**預設選項**：偵測到 remote 時，建議用戶選 (a) GCS，因為不受 push 狀態影響，Dashboard 立即可讀。
+
 ### 3. 目錄：首次建構
 
 - 這是冷啟動模式，不是增量 sync。
