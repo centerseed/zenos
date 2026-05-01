@@ -218,6 +218,15 @@ def _unified_response(
     from zenos.infrastructure.context import current_partner_id as _current_partner_id
     from zenos.application.identity.workspace_context import build_workspace_context_sync
 
+    if status == "partial":
+        status = "ok"
+        warnings = [
+            *(warnings or []),
+            "legacy status=partial normalized to status=ok; inspect partial_failures/rejected fields",
+        ]
+    if status not in {"ok", "rejected", "error"}:
+        raise ValueError(f"status must be ok/rejected/error, got {status!r}")
+
     resp: dict = {
         "status": status,
         "data": data,
@@ -310,14 +319,17 @@ def _parse_entity_level(entity_level: str | None) -> int | None:
         None  — no filtering (caller explicitly asked for "all" or "L1,L2,L3")
         1     — L1 only
         2     — L1+L2 (default when entity_level is not provided)
+        3     — L3 only is handled by search after parsing
     """
     if entity_level is None:
         # Default: L1+L2 only
         return 2
 
     normalized = entity_level.strip().lower()
-    if normalized in ("all", "l1,l2,l3", "l3"):
+    if normalized in ("all", "l1,l2,l3"):
         return None
+    if normalized == "l3":
+        return 3
     if normalized == "l1":
         return 1
     if normalized in ("l2", "l1,l2"):

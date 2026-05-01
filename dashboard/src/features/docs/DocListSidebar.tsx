@@ -130,7 +130,20 @@ export function DocListSidebar({
   const { c, fontHead, fontMono, fontBody } = t;
   const [query, setQuery] = useState("");
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [expandedDocIds, setExpandedDocIds] = useState<Set<string>>(new Set());
   const hasQuery = query.trim().length > 0;
+
+  function toggleDocExpand(docId: string) {
+    setExpandedDocIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(docId)) {
+        next.delete(docId);
+      } else {
+        next.add(docId);
+      }
+      return next;
+    });
+  }
 
   const filteredDocs = useMemo(() => {
     if (!query.trim()) return docs;
@@ -315,49 +328,162 @@ export function DocListSidebar({
           {visibleItems.map((doc) => {
             const active = selectedId === doc.id;
             const isIndex = doc.docRole === "index";
+            const isDocExpanded = expandedDocIds.has(doc.id);
+            const sourceCount = doc.sources?.length ?? 0;
+
             return (
-              <button
-                key={doc.id}
-                onClick={() => onSelect(doc.id)}
-                data-testid={`doc-item-${doc.id}`}
-                style={{
-                  display: "grid", gridTemplateColumns: "12px 1fr auto",
-                  alignItems: "start", gap: 8, width: "100%",
-                  padding: "8px 8px",
-                  background: active ? c.surface : "transparent",
-                  border: "none",
-                  borderLeft: active ? `2px solid ${c.vermillion}` : "2px solid transparent",
-                  cursor: "pointer", textAlign: "left",
-                  color: active ? c.ink : c.inkSoft,
-                  fontFamily: fontBody, fontSize: 12.5, marginBottom: 1,
-                }}
-              >
-                <Icon d={ICONS.doc} size={11} style={{ color: c.inkFaint }} />
-                <span style={{ minWidth: 0 }}>
-                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: isIndex ? 600 : 400 }}>
-                    {doc.name}
-                  </span>
-                  {doc.summary ? (
-                    <span
+              <div key={doc.id}>
+                <div
+                  data-testid={`doc-item-${doc.id}`}
+                  style={{
+                    display: "grid", gridTemplateColumns: "12px 1fr auto auto",
+                    alignItems: "start", gap: 8, width: "100%",
+                    padding: "8px 8px",
+                    background: active ? c.surface : "transparent",
+                    borderLeft: active ? `2px solid ${c.vermillion}` : "2px solid transparent",
+                    marginBottom: 1,
+                  }}
+                >
+                  {/* Chevron (only for index docs) */}
+                  {isIndex ? (
+                    <button
+                      type="button"
+                      data-testid={`doc-expand-chevron-${doc.id}`}
+                      onClick={() => toggleDocExpand(doc.id)}
                       style={{
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
-                        overflow: "hidden",
-                        marginTop: 3,
-                        color: c.inkFaint,
-                        fontSize: 11,
-                        lineHeight: 1.45,
+                        background: "transparent",
+                        border: "none",
+                        cursor: "pointer",
+                        padding: 0,
+                        display: "flex",
+                        alignItems: "center",
+                        marginTop: 1,
                       }}
                     >
-                      {doc.summary}
+                      <Icon
+                        d={ICONS.chev}
+                        size={10}
+                        style={{
+                          color: c.inkFaint,
+                          transform: isDocExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                          transition: "transform 120ms ease",
+                        }}
+                      />
+                    </button>
+                  ) : (
+                    <Icon d={ICONS.doc} size={11} style={{ color: c.inkFaint, marginTop: 1 }} />
+                  )}
+
+                  {/* Name button */}
+                  <button
+                    onClick={() => {
+                      if (isIndex) {
+                        toggleDocExpand(doc.id);
+                      } else {
+                        onSelect(doc.id);
+                      }
+                    }}
+                    style={{
+                      background: "transparent",
+                      border: "none",
+                      cursor: "pointer",
+                      textAlign: "left",
+                      padding: 0,
+                      minWidth: 0,
+                      color: active ? c.ink : c.inkSoft,
+                      fontFamily: fontBody,
+                      fontSize: 12.5,
+                    }}
+                  >
+                    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: isIndex ? 600 : 400 }}>
+                      {doc.name}
                     </span>
-                  ) : null}
-                </span>
-                <span style={{ fontFamily: fontMono, fontSize: 9, color: isIndex ? c.vermillion : c.inkFaint }}>
-                  {isIndex ? "INDEX" : formatDate(doc.updatedAt)}
-                </span>
-              </button>
+                    {doc.summary ? (
+                      <span
+                        style={{
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                          marginTop: 3,
+                          color: c.inkFaint,
+                          fontSize: 11,
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        {doc.summary}
+                      </span>
+                    ) : null}
+                  </button>
+
+                  {/* Source count badge */}
+                  <span
+                    data-testid={`doc-source-count-${doc.id}`}
+                    style={{ fontFamily: fontMono, fontSize: 9, color: c.inkFaint, marginTop: 2 }}
+                  >
+                    {sourceCount > 0 ? `${sourceCount}` : ""}
+                  </span>
+
+                  {/* doc_role / date badge */}
+                  <span style={{ fontFamily: fontMono, fontSize: 9, color: isIndex ? c.vermillion : c.inkFaint, marginTop: 2 }}>
+                    {isIndex ? "INDEX" : formatDate(doc.updatedAt)}
+                  </span>
+                </div>
+
+                {/* Sources sub-list (index docs only, when expanded) */}
+                {isIndex && isDocExpanded && (
+                  <div style={{ paddingLeft: 28 }}>
+                    {doc.sources && doc.sources.length > 0 ? (
+                      doc.sources.map((source, idx) => (
+                        <button
+                          key={source.source_id ?? `source-${idx}`}
+                          data-testid={`sidebar-source-item-${source.source_id}`}
+                          onClick={() => onSelect(doc.id)}
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 6,
+                            width: "100%",
+                            padding: "5px 8px",
+                            background: "transparent",
+                            border: "none",
+                            cursor: "pointer",
+                            textAlign: "left",
+                            fontFamily: fontBody,
+                            fontSize: 11,
+                            color: c.inkFaint,
+                            marginBottom: 1,
+                          }}
+                        >
+                          <span
+                            style={{
+                              display: "inline-block",
+                              width: 6,
+                              height: 6,
+                              borderRadius: "50%",
+                              background: c.inkFaint,
+                              flexShrink: 0,
+                            }}
+                          />
+                          <span
+                            style={{
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {source.label || source.uri}
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div style={{ fontSize: 11, color: c.inkFaint, padding: "5px 8px", fontFamily: fontBody }}>
+                        尚無來源
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
           {!expanded && hiddenCount > 0 ? (

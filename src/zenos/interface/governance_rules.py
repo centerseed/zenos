@@ -333,15 +333,26 @@ L3 document entity 是正式文件的語意索引入口。
 4. 無既有 entity → 預設建新 index
 5. rename / delete → 更新 `source_status`，必要時 archive
 
-## MCP write(initial_content=...) — 一次呼叫建 entity + 寫 GCS（P0-5）
+## Source URI 雲端可達性（Cloud Reachability Invariant）
+- **禁止本機路徑（`file://`）**：ZenOS 後端在雲端，讀不到本機路徑，寫進去的 source 讓文件對搜尋完全不可見。**Server 會 reject。**
+- **合法 scheme**：`https://`（GitHub / Notion / Drive / Wiki）、`/docs/{doc_id}`（zenos_native）、`local:{sha256}`（upload）
+- **正確做法**：用 `write(initial_content="...")` 把 markdown 傳進 ZenOS；不要把本機路徑塞進 `source.uri`
+- **禁止用 `upload_attachment` 上傳 MD 文件內容**：`upload_attachment` 是 task 附件工具，存在 `tasks/.../attachments/` 路徑，與 document entity 無關，`read_source` 找不到。MD 原文必須走 `write(initial_content="...")`。
+
+## MCP write — 文件內容寫入（initial_content / update_content）
+
+### 建新文件並帶入內容（initial_content）
 - `write(collection="documents", data={..., initial_content="..."})` 建新 doc 時同時把 markdown 寫進 GCS revision
 - Server 自動建立 `zenos_native` source（is_primary=true），agent / Dashboard 立即可讀
-- response data 含 `doc_id`、`revision_id`、`source_id`
-- 限制：
-  - 只支援 create（新建 doc）；update 既有 doc 內容走 `POST /api/docs/{doc_id}/content`
-  - 與 `sources` 互斥（同時傳 → 400 `INITIAL_CONTENT_REQUIRES_NO_SOURCES`）
-  - 上限 1 MB（1048576 bytes）；超過 → 413 `INITIAL_CONTENT_TOO_LARGE`
-- 適用場景：zenos-capture skill、Helper ingestion、任何需要一次完成 entity + 內容上傳的 MCP caller""",
+- response data 含 `doc_id`、`revision_id`、`source_id`、`delivery_status`
+- 限制：create only（不可帶 id）；與 `sources` 互斥；上限 1 MB
+
+### 更新既有文件內容（update_content）
+- `write(collection="documents", data={"id": "<doc_id>", "update_content": "..."})` 為既有 doc 寫新 GCS revision
+- 若 doc 尚無 `zenos_native` source，server 自動補建一個（is_primary=true）
+- response data 含 `doc_id`、`revision_id`、`source_id`、`delivery_status`
+- 限制：update only（必須帶 id）；上限 1 MB
+- 建立後 `read_source(doc_id)` 可取得全文（content_type="full"）""",
 
         2: """# L3 文件治理規則 v2.2（完整版）
 
@@ -497,6 +508,12 @@ approved → superseded（被新版取代時，保留原文件，建立追溯）
     → 更新 source_status（stale / unresolvable）
     → 唯一 source 且 unresolvable → 文件 status 改為 archived
 ```
+
+## Source URI 雲端可達性（Cloud Reachability Invariant）
+- **禁止本機路徑（`file://`）**：`source.uri` 不可使用 `file://` 或任何本機路徑 scheme。ZenOS 後端在雲端，讀不到本機路徑，寫進去的 source 讓文件對 `read_source` 與搜尋完全不可見。**Server 會 reject 此類 URI。**
+- **合法 scheme**：`https://`（GitHub / Notion / Drive / Wiki）、`/docs/{doc_id}`（zenos_native）、`local:{sha256}`（upload）
+- **正確做法**：有 markdown 要上傳 → 用 `write(initial_content="...")`；絕對不要把本機路徑塞進 `source.uri`
+- **禁止用 `upload_attachment` 上傳 MD 文件內容**：`upload_attachment` 是 task 附件工具，把檔案存在 `tasks/{task_id}/attachments/` 路徑，與任何 document entity 完全無關。`read_source` 永遠找不到那個路徑，文件全文對 ZenOS 隱形。MD 原文必須走 `write(initial_content="...")`，server 才會建立 `zenos_native` source（`content_access: "full"`）並存 GCS revision。
 
 ## Source 稽核規則
 
@@ -1323,7 +1340,7 @@ bundle_highlights:
     },
 
     "capture": {
-        1: """# 知識捕獲分層路由規則 v1.0
+        1: """# 知識捕獲分層路由規則 v1.1
 
 ## 分層路由四步
 1. 是否是治理規則或跨角色共識？→ 是：L2 候選（走三問+impacts gate）
@@ -1340,6 +1357,17 @@ write(collection="entities", data={type="module", ...}) 時必須附帶 layer_de
 
 三問未全通過 → 系統回傳 LAYER_DOWNGRADE_REQUIRED
 三問通過但 impacts_draft 空 → 系統回傳 IMPACTS_DRAFT_REQUIRED
+
+## 本地 md 檔 source 類型決策樹
+建立 document entity 時，source 類型按以下順序決定：
+1. Web Copilot（claude.ai 非 CLI）→ 直接走 initial_content，不問用戶
+2. CLI + 無 git remote → 優先走 curl 上傳（零 token 消耗）
+3. CLI + 有 git remote → 呈現三選項讓用戶選：
+   (a) curl 上傳 — 零 token，檔案從磁碟直傳 GCS  ★首選
+   (b) GitHub URI — 須確認檔案已 push 到 remote
+   (c) initial_content — fallback，有 token 成本
+
+禁止用 file:// 本機路徑或 local source type；ZenOS 雲端無法讀取本機路徑，embedding 永遠失敗。
 
 ## 冷啟動（首次捕獲一批文件）
 Step 1: 讀完所有文件（先全局，後切割）
@@ -1359,7 +1387,7 @@ Step 6: 全局確認後，批量 write（帶 layer_decision）
 - 純掃描無變更不要寫 journal
 - task 完成狀態寫在 task.result；durable knowledge 才寫 entries""",
 
-        2: """# 知識捕獲分層路由規則 v1.0（完整版）
+        2: """# 知識捕獲分層路由規則 v1.1（完整版）
 
 ## 分層路由四步
 1. 是否是治理規則或跨角色共識？→ 是：L2 候選（走三問+impacts gate）
@@ -1389,6 +1417,37 @@ write(collection="entities", data={type="module", ...}) 時必須附帶 layer_de
 1. 問自己：「這個概念改了，哪個其他概念要跟著看？」
 2. 如果真的想不出任何 impacts → 強烈訊號此概念不夠 L2
 3. 補充至少一條具體 impacts 後重試
+
+## 本地 md 檔 source 類型決策樹
+建立 document entity 時，source 類型按以下順序決定：
+
+```
+1. 判斷執行環境
+   ├─ Web Copilot（claude.ai 或類似非 CLI 環境）
+   │   → 直接走 initial_content（GCS），不需要問用戶
+   │
+   └─ CLI 環境（claude-code 或 terminal）
+       ↓
+2. 偵測 git remote（git remote -v）
+   ├─ 無 remote 或檔案不在 git 管理下
+   │   → 優先走 (a) curl 上傳（零 token 消耗）
+   │
+   └─ 有 remote
+       ↓
+3. 詢問用戶（呈現三個選項）：
+   (a) curl 上傳 — 零 token，磁碟直傳 GCS  ★首選
+       → Bash: curl -F "file=@<path>" -F "title=<title>" \
+                    -F "workspace_id=<id>" -F "linked_entity_ids=[\"<id>\"]" \
+                    "https://zenos-mcp-s5oifosv3a-de.a.run.app/api/ext/docs?api_key=KEY"
+       回傳 {doc_id, revision_id, source_id}
+   (b) GitHub URI — 須先確認檔案已 push 到 remote
+       → write(collection="documents", data={..., source: {uri: "github:docs/...", type: "github"}})
+   (c) initial_content — fallback，有 token 成本
+       → write(collection="documents", data={..., initial_content: "<md 內容>"})
+```
+
+⚠️ 禁止用 file:// 本機路徑：ZenOS 雲端無法讀取，embedding 永遠失敗，文件對向量搜尋隱形。
+⚠️ 禁止用 upload_attachment：那是 task 附件路徑，read_source 找不到。
 
 ## 增量捕獲 vs 全局統合模式
 
@@ -1433,7 +1492,7 @@ write(collection="entities", data={type="module", ...}) 時必須附帶 layer_de
 - 不要把 QA PASS、pytest passed、部署完成、AC 通過等 task completion report 寫成 entry
 - task 完成狀態寫在 task.result；durable knowledge 才寫 entries""",
 
-        3: """# 知識捕獲分層路由規則 v1.0（含完整範例）
+        3: """# 知識捕獲分層路由規則 v1.1（含完整範例）
 
 ## 分層路由四步
 1. 是否是治理規則或跨角色共識？→ 是：L2 候選（走三問+impacts gate）
@@ -1561,6 +1620,50 @@ layer_decision={
 - 不要把 QA PASS、pytest passed、部署完成、AC 通過等 task completion report 寫成 entry
 - task 完成狀態寫在 task.result；durable knowledge 才寫 entries
 
+## 本地 md 檔 source 類型決策樹（含範例）
+
+建立 document entity 時，source 類型按以下順序決定：
+
+```
+1. Web Copilot（claude.ai）→ 直接走 initial_content，不問用戶
+2. CLI + 無 git remote → 優先走 curl 上傳
+3. CLI + 有 git remote → 呈現三選項：curl / GitHub URI / initial_content
+```
+
+### (a) curl 上傳 ★首選（CLI 環境）
+```bash
+# 回傳 {doc_id, revision_id, source_id}，agent 不需要讀取檔案內容
+curl -F "file=@docs/research.md" \\
+     -F "title=FloraGLO® 研究文獻" \\
+     -F "workspace_id=<workspace_id>" \\
+     -F "linked_entity_ids=[\\"<entity_id>\\"]" \\
+     "https://zenos-mcp-s5oifosv3a-de.a.run.app/api/ext/docs?api_key=KEY"
+```
+
+### (b) initial_content（Web Copilot 或 fallback）
+```python
+write(collection="documents", data={
+    "title": "FloraGLO® 研究文獻索引",
+    "type": "REFERENCE",
+    "doc_role": "index",
+    "linked_entity_ids": ["<entity_id>"],
+    "initial_content": "# FloraGLO® 研究文獻\\n\\n完整 markdown 內容..."
+})
+# response["data"] 含：{"doc_id": "...", "revision_id": "...", "source_id": "..."}
+```
+
+### (c) GitHub URI（檔案已 push 時）
+```python
+write(collection="documents", data={
+    "title": "FloraGLO® 研究文獻索引",
+    "linked_entity_ids": ["<entity_id>"],
+    "source": {"uri": "github:docs/research.md", "type": "github"}
+})
+```
+
+⚠️ 禁止用 file:// 路徑：ZenOS 雲端無法讀取，embedding 失敗，向量搜尋隱形。
+⚠️ 禁止用 upload_attachment：task 附件路徑，read_source 找不到。
+
 ## 常見錯誤與修正
 
 錯誤 1：「每個文件都應該有對應的 L2」
@@ -1570,6 +1673,9 @@ layer_decision={
 → 不對。說不出 impacts 是 L3 降級的強烈訊號。強行建立沒有 impacts 的 L2 只會讓 ontology 膨脹卻沒有治理價值。
 
 錯誤 3：「全局讀完再 capture 太慢，邊讀邊 write 比較快」
-→ 冷啟動時不要邊讀邊 write。全局視野建立後才能正確判斷 L2 邊界。增量模式才邊讀邊 write。""",
+→ 冷啟動時不要邊讀邊 write。全局視野建立後才能正確判斷 L2 邊界。增量模式才邊讀邊 write。
+
+錯誤 4：「本地 md 用 local source type 就好」
+→ local source 對 ZenOS 雲端服務等同隱形，embedding 永遠 null，搜什麼都找不到。必須走 curl/initial_content/GitHub URI 其中之一。""",
     },
 }

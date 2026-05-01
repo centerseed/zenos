@@ -85,6 +85,7 @@ export interface Source {
   source_id?: string;
   source_status?: SourceStatus;
   doc_type?: string;
+  snapshot_summary?: string | null;
 }
 
 export interface BundleHighlight {

@@ -202,6 +202,24 @@ class TestAddSource:
             })
 
     @pytest.mark.asyncio
+    async def test_add_source_rejects_file_uri_even_for_upload_type(self):
+        existing = _make_doc_entity(doc_role="index")
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+
+        with pytest.raises(ValueError, match="file://"):
+            await svc.upsert_document({
+                "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
+                "add_source": {
+                    "uri": "file:///Users/me/docs/private.md",
+                    "type": "upload",
+                    "label": "private.md",
+                },
+            })
+
+    @pytest.mark.asyncio
     async def test_add_source_generates_suggestion(self):
         """Bundle operations should produce deterministic highlight suggestion."""
         existing = _make_doc_entity(doc_role="index")
@@ -365,6 +383,32 @@ class TestUpdateSource:
                 "id": "doc-test-1",
                 "linked_entity_ids": ["parent-1"],
                 "update_source": {"label": "new-label"},
+            })
+
+    @pytest.mark.asyncio
+    async def test_update_source_rejects_localhost_url(self):
+        existing = _make_doc_entity(
+            doc_role="index",
+            sources=[{
+                "source_id": "src-1",
+                "uri": "https://example.com/current.md",
+                "type": "url",
+                "label": "current.md",
+                "status": "valid",
+            }],
+        )
+        repo = _make_entity_repo()
+        repo.get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(entity_repo=repo)
+
+        with pytest.raises(ValueError, match="localhost"):
+            await svc.upsert_document({
+                "id": "doc-test-1",
+                "linked_entity_ids": ["parent-1"],
+                "update_source": {
+                    "source_id": "src-1",
+                    "uri": "http://localhost:3000/current.md",
+                },
             })
 
 

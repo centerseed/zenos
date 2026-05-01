@@ -181,19 +181,67 @@ class TestWikiValidation:
 
 
 # ---------------------------------------------------------------------------
-# Upload (no validation)
+# URL
+# ---------------------------------------------------------------------------
+
+
+class TestUrlValidation:
+    def test_https_url_passes(self):
+        ok, msg = validate_source_uri("url", "https://example.com/docs/file.md")
+        assert ok is True
+        assert msg == ""
+
+    def test_file_url_rejected(self):
+        ok, msg = validate_source_uri("url", "file:///Users/me/docs/file.md")
+        assert ok is False
+        assert "file://" in msg
+
+    def test_localhost_url_rejected(self):
+        ok, msg = validate_source_uri("url", "http://localhost:3000/docs/file.md")
+        assert ok is False
+        assert "localhost" in msg
+
+    def test_http_url_rejected(self):
+        ok, msg = validate_source_uri("url", "http://example.com/docs/file.md")
+        assert ok is False
+        assert "https://" in msg
+
+
+# ---------------------------------------------------------------------------
+# Upload (global local/dead URI guard only)
 # ---------------------------------------------------------------------------
 
 
 class TestUploadValidation:
-    def test_upload_any_value_passes(self):
-        """Type 'upload' is not validated; any URI passes."""
+    def test_upload_attachment_proxy_rejected(self):
+        ok, msg = validate_source_uri("upload", "/attachments/abc123")
+        assert ok is False
+        assert "task attachment proxy" in msg
+        assert "write(initial_content=...)" in msg
+
+    def test_upload_internal_reference_passes(self):
+        """Type 'upload' allows internal references after global dead-URI checks."""
         ok, msg = validate_source_uri("upload", "some-internal-reference")
         assert ok is True
 
     def test_upload_empty_uri_passes(self):
         ok, msg = validate_source_uri("upload", "")
         assert ok is True
+
+    def test_upload_file_uri_rejected(self):
+        ok, msg = validate_source_uri("upload", "file:///Users/me/docs/file.md")
+        assert ok is False
+        assert "file://" in msg
+
+    def test_upload_local_path_rejected(self):
+        ok, msg = validate_source_uri("upload", "/Users/me/docs/file.md")
+        assert ok is False
+        assert "local filesystem path" in msg
+
+    def test_upload_localhost_url_rejected(self):
+        ok, msg = validate_source_uri("upload", "http://127.0.0.1:8000/file.md")
+        assert ok is False
+        assert "localhost" in msg or "loopback" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -205,3 +253,8 @@ class TestUnknownTypeValidation:
     def test_unknown_type_passes(self):
         ok, msg = validate_source_uri("custom_source", "https://example.com")
         assert ok is True
+
+    def test_unknown_type_still_rejects_file_uri(self):
+        ok, msg = validate_source_uri("custom_source", "file:///tmp/source.md")
+        assert ok is False
+        assert "file://" in msg

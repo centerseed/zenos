@@ -629,6 +629,8 @@ caller 不應假設：
 **`write(documents)`**：
 - `AC-MCP-18` Given `write(collection="documents")` 缺 `linked_entity_ids` 或空陣列，When server 處理（`ontology_service.py:751` raise `DocumentLinkageValidationError` → `write.py:50-66` `_document_linkage_rejection`），Then `status="rejected"` + `data.error = {"code": "LINKED_ENTITY_IDS_REQUIRED"}` + `data.message`（**Shape C nested**）
 - `AC-MCP-19` Given `linked_entity_ids` 含不存在 ID，When server 處理（`ontology_service.py:763`），Then `status="rejected"` + `data.error = {"code": "LINKED_ENTITY_NOT_FOUND", "missing_entity_ids": [...]}`（Shape C nested，`missing_entity_ids` 在 `data.error` 內）
+- `AC-MCP-19a` Given `write(collection="documents")` 的 `source` / `sources[]` / `add_source` / `update_source` 帶 `uri="file://..."`、本機絕對路徑、或 `http://localhost...` / loopback URI，When server 處理（`source_uri_validator.py` global reachability guard → `ontology_service.py` source validation），Then `status="rejected"` + `rejection_reason` 含 `Invalid source URI` 與具體原因（**Shape B**）；不得寫入 document source。
+- `AC-MCP-19b` Given `write(collection="documents")` 的 `source.type="url"` 或 source item `type="url"` 且 URI 不是 `https://...`，When server 處理，Then `status="rejected"` + `rejection_reason` 含 `url source_uri must be a backend-reachable https:// URL`（**Shape B**）。
 
 > **Gap note**：以下 doc-governance AC 在本 SPEC v2 被我早先誤標為 runtime-emit 結構化 error code，實際 runtime 只拋 `ValueError` 走 Shape B。先保留 governance intent，但 AC 降級為「rejected with reason 字串」，等對應 runtime 升級為 typed error 再恢復 code 比對：
 >
@@ -646,6 +648,7 @@ caller 不應假設：
 - `AC-MCP-27` Given `batch_update_sources(updates=[...101 筆...])`，When server 處理，Then reject（超過 100 筆）
 - `AC-MCP-28` Given `batch_update_sources(atomic=true)` 且中有一筆失敗，When server 處理，Then 整批回滾，無任何 document 被修改
 - `AC-MCP-29` Given 某筆的 URI 已等於 `new_uri`，When server 處理，Then 視為冪等成功，列入 `updated`
+- `AC-MCP-29a` Given `batch_update_sources(updates=[{document_id, new_uri:"file://..."}])`、本機絕對路徑、或 loopback URI，When server 處理，Then `status="rejected"` + `rejection_reason` 含 `Invalid source URI for batch_update_sources`（**Shape B**）；不得更新任何 source URI。
 
 **`read_source`**（helper vs adapter 路徑 error code 矩陣見 §8.3）：
 - `AC-MCP-30a` Given `_HELPER_SOURCE_TYPES` source（notion / gdrive / local / upload / wiki / url）且無 `snapshot_summary`，When `read_source` 執行，Then `status="error"` + `data.error="SNAPSHOT_UNAVAILABLE"`（Shape A，`mcp/source.py:243-258`）+ `data.setup_hint` + `data.alternative_sources`

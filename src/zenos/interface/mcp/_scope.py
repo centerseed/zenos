@@ -34,6 +34,7 @@ TOOL_SCOPE_MAP: dict[str, str] = {
     "confirm": "write",
     "batch_update_sources": "write",
     "upload_attachment": "write",
+    "upload_document_file": "write",
     "journal_write": "write",
     # task scope
     "task": "task",

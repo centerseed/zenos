@@ -53,21 +53,31 @@ version: 3.0.1
    └─ 有 remote
        ↓
 3. 詢問用戶（呈現三個選項）：
-   (a) curl 上傳 — 零 token 消耗，檔案直接從磁碟傳到 GCS ★ 首選
+   (a) MCP upload_document_file — 零 token 消耗，僅限 MCP server 看得到該本機 path 時 ★ local MCP 首選
+       → upload_document_file(
+            path="<local-md-path>",
+            title="<title>",
+            linked_entity_ids=["<id>"],
+            type="REFERENCE",
+            doc_role="index",
+            workspace_id="<id>"
+         )
+       回傳 {doc_id, revision_id, source_id}，不需要把全文放進 prompt
+   (b) curl multipart 上傳 — hosted MCP / 遠端 server 首選，檔案直接從 agent 機器傳到 ZenOS
        → Bash: curl -F "file=@<path>" -F "title=<title>" \
                     -F "workspace_id=<id>" -F "linked_entity_ids=[\"<id>\"]" \
                     "https://zenos-mcp-xxx.run.app/api/ext/docs?api_key=KEY"
        回傳 {doc_id, revision_id, source_id}，不需要 Read 檔案
-   (b) 用 GitHub URI — 先確認檔案已 push，build 出 github: URI
+   (c) 用 GitHub URI — 先確認檔案已 push，build 出 github: URI
        → write(collection="documents", data={..., "source": {"uri": "github:docs/...", "type": "github"}})
        ⚠️ 必須先確認 commit 已 push 到 remote，否則其他人找不到
-   (c) initial_content（有 token 成本，作為 fallback）
+   (d) initial_content（有 token 成本，作為 fallback）
        → write(collection="documents", data={..., "initial_content": "<md 內容>"})
        ⚠️ 整份 md 內容會進 LLM context，大檔案浪費 token
 ```
 
-**首選**：CLI 環境一律推薦 (a) curl 上傳，agent 完全不需要讀取檔案內容。
-**fallback 順序**：(b) GitHub URI（若已 push）→ (c) initial_content（最後手段）。
+**首選**：local MCP 用 (a) `upload_document_file`；hosted MCP 用 (b) curl multipart。agent 完全不需要讀取檔案內容。
+**fallback 順序**：(c) GitHub URI（若已 push）→ (d) initial_content（最後手段）。
 
 ### 3. 目錄：首次建構
 

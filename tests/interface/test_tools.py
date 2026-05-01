@@ -51,6 +51,17 @@ def _non_ok_data(result: dict, status: str) -> dict:
     return result["data"]
 
 
+def test_unified_response_normalizes_legacy_partial_status():
+    """MCP envelope status is limited to ok/rejected/error."""
+    from zenos.interface.mcp._common import _unified_response
+
+    result = _unified_response(status="partial", data={"partial_failures": [{"id": "x"}]})
+
+    assert result["status"] == "ok"
+    assert result["data"]["partial_failures"] == [{"id": "x"}]
+    assert any("legacy status=partial normalized" in warning for warning in result["warnings"])
+
+
 class _Acquire:
     def __init__(self, conn):
         self._conn = conn
@@ -1402,6 +1413,39 @@ class TestReadSourceTool:
             assert data["content"] == "# Native"
             assert data["content_type"] == "full"
 
+    async def test_read_source_upload_attachment_snapshot_includes_reingest_hint(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-upload",
+            name="Upload Doc",
+            type="document",
+            sources=[{
+                "source_id": "src-upload",
+                "uri": "/attachments/att-1",
+                "type": "upload",
+                "status": "valid",
+                "source_status": "valid",
+                "snapshot_summary": "Short semantic summary.",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service"):
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await read_source(doc_id="doc-upload", source_id="src-upload")
+            data = _ok_data(result)
+
+            assert data["content"] == "Short semantic summary."
+            assert data["content_type"] == "snapshot_summary"
+            assert data["source_type"] == "upload"
+            assert data["content_access"] == "summary"
+            assert "task attachment proxy" in data["setup_hint"]
+            assert "write(initial_content=...)" in data["setup_hint"]
+
 
 # ---------------------------------------------------------------------------
 # Tool 4: write
@@ -1582,6 +1626,62 @@ class TestWriteTool:
             assert "Guest" in result["rejection_reason"]
         finally:
             _current_partner.reset(token)
+
+    async def test_write_document_rejects_file_uri_source_shape_b(self):
+        from zenos.interface.mcp import write
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.upsert_document = AsyncMock(
+                side_effect=ValueError(
+                    "Invalid source URI for source: source_uri must be reachable by ZenOS backend; "
+                    "file:// URIs point to the caller's local filesystem and are not accepted."
+                )
+            )
+
+            result = await write(
+                collection="documents",
+                data={
+                    "title": "Local file source",
+                    "summary": "Should be rejected",
+                    "tags": {"what": ["doc"], "why": "test", "how": "upload", "who": ["agent"]},
+                    "linked_entity_ids": ["module-1"],
+                    "source": {
+                        "type": "upload",
+                        "uri": "file:///Users/me/private.md",
+                    },
+                },
+            )
+
+        assert result["status"] == "rejected"
+        assert "Invalid source URI" in result["rejection_reason"]
+        assert "file://" in result["rejection_reason"]
+
+    async def test_write_document_rejects_url_non_https_shape_b(self):
+        from zenos.interface.mcp import write
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.upsert_document = AsyncMock(
+                side_effect=ValueError(
+                    "Invalid source URI for source: url source_uri must be a backend-reachable https:// URL."
+                )
+            )
+
+            result = await write(
+                collection="documents",
+                data={
+                    "title": "HTTP source",
+                    "summary": "Should be rejected",
+                    "tags": {"what": ["doc"], "why": "test", "how": "url", "who": ["agent"]},
+                    "linked_entity_ids": ["module-1"],
+                    "source": {
+                        "type": "url",
+                        "uri": "http://example.com/private.md",
+                    },
+                },
+            )
+
+        assert result["status"] == "rejected"
+        assert "url source_uri must be a backend-reachable https:// URL" in result["rejection_reason"]
 
     async def test_write_module_without_parent_id_returns_warning(self):
         from zenos.interface.mcp import write
@@ -2587,12 +2687,14 @@ class TestConfirmTool:
         from zenos.interface.mcp import confirm
         from zenos.application.action.task_service import TaskResult
 
-        t = _make_task(id="task-review", status="done")
+        t = _make_task(id="task-review", status="done", linked_entities=["ent-1", "ent-2"])
         confirm_result = TaskResult(task=t, cascade_updates=[])
 
         with patch("zenos.interface.mcp.task_service") as mock_ts, \
+             patch("zenos.interface.mcp.task_repo") as mock_task_repo, \
              patch("zenos.interface.mcp.entry_repo") as mock_entry_repo:
             mock_ts.confirm_task = AsyncMock(return_value=confirm_result)
+            mock_task_repo.get_by_id = AsyncMock(return_value=t)
             mock_entry_repo.create = AsyncMock(side_effect=lambda e: e)
 
             entries = [
@@ -2613,6 +2715,28 @@ class TestConfirmTool:
 
             # entry_repo.create should be called for each entry
             assert mock_entry_repo.create.call_count == 2
+
+    async def test_confirm_task_rejects_entity_entries_to_unlinked_entity(self):
+        from zenos.interface.mcp import confirm
+
+        task = _make_task(id="task-review", status="review", linked_entities=["ent-linked"])
+
+        with patch("zenos.interface.mcp.task_repo") as mock_task_repo, \
+             patch("zenos.interface.mcp.task_service") as mock_ts:
+            mock_task_repo.get_by_id = AsyncMock(return_value=task)
+
+            result = await confirm(
+                collection="tasks",
+                id="task-review",
+                accepted=True,
+                entity_entries=[
+                    {"entity_id": "ent-other", "type": "insight", "content": "Some valuable insight"},
+                ],
+            )
+
+            assert result["status"] == "rejected"
+            assert result["data"]["error"] == "ENTRY_TARGET_NOT_LINKED"
+            mock_ts.confirm_task.assert_not_called()
 
     async def test_confirm_task_entity_entries_not_written_when_rejected(self):
         from zenos.interface.mcp import confirm
@@ -3434,6 +3558,50 @@ class TestAnalyzeTool:
             assert "主要回答" in summary_patch
             assert "Primary source 類型判定為 SPEC" in summary_patch
             assert "delayed binding behavior" in summary_patch
+
+    async def test_analyze_invalid_documents_reports_file_source_uri(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-file-source",
+            name="Local File Source",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            doc_role="index",
+            summary=(
+                "This document bundle explains sources, source routing, primary source, "
+                "and the current reading boundary for this module."
+            ),
+            sources=[{
+                "source_id": "src-local",
+                "type": "upload",
+                "uri": "file:///Users/me/private/spec.md",
+                "label": "spec.md",
+                "is_primary": True,
+            }],
+            bundle_highlights=[],
+            change_summary="Initial source import.",
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            data = _ok_data(result)["invalid_documents"]
+
+            source_issue = next(
+                item for item in data["items"]
+                if item.get("issue_type") == "invalid_source_uri"
+            )
+            assert source_issue["entity_id"] == "doc-file-source"
+            assert source_issue["source_id"] == "src-local"
+            assert source_issue["source_type"] == "upload"
+            assert source_issue["source_uri"].startswith("file://")
+            assert source_issue["action"] == "mark_unresolvable_or_reupload"
 
     async def test_analyze_invalid_documents_omits_unactionable_highlight_patch(self):
         from zenos.interface.mcp import analyze
@@ -4581,6 +4749,24 @@ class TestBatchUpdateSources:
 
             assert result["status"] == "rejected"
             assert "100" in result["rejection_reason"]
+
+    async def test_rejects_file_uri(self):
+        from zenos.interface.mcp import batch_update_sources
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os.batch_update_document_sources = AsyncMock(
+                side_effect=ValueError(
+                    "Invalid source URI for batch_update_sources[0]: source_uri must be reachable by ZenOS backend; file:// URIs point to the caller's local filesystem and are not accepted."
+                )
+            )
+
+            result = await batch_update_sources(
+                updates=[{"document_id": "doc-1", "new_uri": "file:///Users/me/new.md"}],
+            )
+
+            assert result["status"] == "rejected"
+            assert "Invalid source URI for batch_update_sources" in result["rejection_reason"]
+            assert "file://" in result["rejection_reason"]
 
     async def test_atomic_mode_passed_to_service(self):
         from zenos.interface.mcp import batch_update_sources

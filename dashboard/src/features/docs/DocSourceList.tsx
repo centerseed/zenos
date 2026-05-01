@@ -18,6 +18,7 @@ export interface DocSource {
   external_id?: string;
   external_updated_at?: string | null;
   last_synced_at?: string | null;
+  snapshot_summary?: string | null;
 }
 
 interface DocSourceListProps {

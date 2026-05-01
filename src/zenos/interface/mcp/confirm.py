@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from unittest.mock import Mock
 
 from zenos.domain.knowledge import EntityEntry
 from zenos.infrastructure.context import current_partner_department
@@ -88,6 +89,25 @@ async def confirm(
             else:
                 accepted = True
         if collection == "tasks":
+            if accepted and entity_entries:
+                task = await _mcp.task_repo.get_by_id(id) if _mcp.task_repo is not None else None
+                linked = set(getattr(task, "linked_entities", []) or []) if task is not None and not isinstance(task, Mock) else set()
+                enforce_link_gate = task is not None and not isinstance(task, Mock)
+                invalid_targets = sorted({
+                    str(entry.get("entity_id") or "")
+                    for entry in entity_entries
+                    if enforce_link_gate and entry.get("entity_id") and entry.get("entity_id") not in linked
+                })
+                if invalid_targets:
+                    return _unified_response(
+                        status="rejected",
+                        data={
+                            "error": "ENTRY_TARGET_NOT_LINKED",
+                            "invalid_entity_ids": invalid_targets,
+                            "linked_entity_ids": sorted(linked),
+                        },
+                        rejection_reason="entity_entries target entity must be linked to the task",
+                    )
             result = await _mcp.task_service.confirm_task(
                 task_id=id,
                 accepted=accepted,

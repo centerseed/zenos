@@ -81,6 +81,15 @@ def _validate_source_access_fields(source_data: dict) -> None:
             raise ValueError("content_access must be one of: summary, full, none")
 
 
+def _validate_document_source_uri(source: dict, *, context: str = "source") -> None:
+    source_type = str(source.get("type", "") or "").strip()
+    source_uri = str(source.get("uri", "") or "").strip()
+    if source_type and source_uri:
+        is_valid, error_msg = validate_source_uri(source_type, source_uri)
+        if not is_valid:
+            raise ValueError(f"Invalid source URI for {context}: {error_msg}")
+
+
 # ──────────────────────────────────────────────
 # Helper types
 # ──────────────────────────────────────────────
@@ -2587,6 +2596,12 @@ class OntologyService:
                             updated_src["external_updated_at"] = add_source_data["external_updated_at"]
                         if "snapshot_summary" in add_source_data:
                             updated_src["snapshot_summary"] = add_source_data["snapshot_summary"]
+                        if (
+                            "uri" in add_source_data
+                            and str(add_source_data.get("uri", "")).strip()
+                            != str(existing_src.get("uri", "")).strip()
+                        ):
+                            _validate_document_source_uri(updated_src, context="add_source")
                         sources[existing_idx] = updated_src
                         suggestion_source_ids = [preserved_sid]
                         # Detect no-op
@@ -2607,10 +2622,10 @@ class OntologyService:
                             )
                         new_src_uri = str(add_source_data.get("uri", "")).strip()
                         new_src_type = add_source_data.get("type", "")
-                        if new_src_type and new_src_uri:
-                            is_valid, error_msg = validate_source_uri(new_src_type, new_src_uri)
-                            if not is_valid:
-                                raise ValueError(f"Invalid source URI: {error_msg}")
+                        _validate_document_source_uri(
+                            {"type": new_src_type, "uri": new_src_uri},
+                            context="add_source",
+                        )
                         new_sid = generate_source_id()
                         new_source = {
                             "source_id": new_sid,
@@ -2656,10 +2671,10 @@ class OntologyService:
                     # Validate URI if provided
                     new_src_uri = str(add_source_data.get("uri", "")).strip()
                     new_src_type = add_source_data.get("type", "")
-                    if new_src_type and new_src_uri:
-                        is_valid, error_msg = validate_source_uri(new_src_type, new_src_uri)
-                        if not is_valid:
-                            raise ValueError(f"Invalid source URI: {error_msg}")
+                    _validate_document_source_uri(
+                        {"type": new_src_type, "uri": new_src_uri},
+                        context="add_source",
+                    )
                     new_source = {
                         "source_id": generate_source_id(),
                         "uri": new_src_uri,
@@ -2731,10 +2746,8 @@ class OntologyService:
                         if "status" in update_source_data or "source_status" in update_source_data:
                             _sync_bundle_source_status(src, _bundle_source_status(update_source_data))
                         # Re-validate URI if changed
-                        if "uri" in update_source_data and src.get("type"):
-                            is_valid, error_msg = validate_source_uri(src["type"], src["uri"])
-                            if not is_valid:
-                                raise ValueError(f"Invalid source URI: {error_msg}")
+                        if "uri" in update_source_data:
+                            _validate_document_source_uri(src, context="update_source")
                         # Helper ingest fields
                         if upd_external_id is not None:
                             src["external_id"] = upd_external_id
@@ -2813,6 +2826,10 @@ class OntologyService:
                         ):
                             if optional_key in src:
                                 normalized_source[optional_key] = src[optional_key]
+                        _validate_document_source_uri(
+                            normalized_source,
+                            context="sources[]",
+                        )
                         sources.append(normalized_source)
             else:
                 # Legacy path: build sources from singular source field
@@ -2830,6 +2847,7 @@ class OntologyService:
                         "status": source_status,
                         "source_status": source_status,
                     }
+                    _validate_document_source_uri(merged_source)
                     sources = [merged_source]
 
         # Ensure all sources have source_ids (backfill for legacy sources)
@@ -3450,6 +3468,25 @@ class OntologyService:
                     f"updates[{i}] must have 'document_id' and 'new_uri' keys. "
                     f"Got: {list(item.keys())}"
                 )
+            doc_id = str(item["document_id"]).strip()
+            existing = await self._entities.get_by_id(doc_id)
+            if existing is None:
+                continue
+            sources = list(existing.sources or [])
+            target_source = None
+            target_source_id = item.get("source_id")
+            if target_source_id:
+                target_source = next(
+                    (src for src in sources if src.get("source_id") == target_source_id),
+                    None,
+                )
+            elif sources:
+                target_source = next((src for src in sources if src.get("is_primary")), sources[0])
+            source_type = str((target_source or {}).get("type") or "github").strip()
+            _validate_document_source_uri(
+                {"type": source_type, "uri": item["new_uri"]},
+                context=f"batch_update_sources[{i}]",
+            )
 
         return await self._entities.batch_update_source_uris(
             updates, atomic=atomic

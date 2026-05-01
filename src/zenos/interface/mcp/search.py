@@ -448,13 +448,17 @@ async def search(
         2: ["product", "module"],
         3: ["product", "module", "document", "goal", "role", "project"],
     }
+    _exact_level = 3 if str(entity_level or "").strip().lower() == "l3" else None
     applied_filters: dict = {
         "collection": collection,
         "entity_level": {
             "input": entity_level,
             "effective_max_level": max_level,
+            "exact_level": _exact_level,
             "included_types": (
-                _TYPES_AT_OR_BELOW_LEVEL.get(max_level) if max_level is not None else None
+                ["document", "goal", "role", "project"]
+                if _exact_level == 3
+                else _TYPES_AT_OR_BELOW_LEVEL.get(max_level) if max_level is not None else None
             ),
             "excluded_types": (
                 [
@@ -596,7 +600,10 @@ async def search(
 
                 # Apply level filter
                 if max_level is not None:
-                    entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if (e.level or 1) <= max_level]
+                    if _exact_level == 3:
+                        entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if (e.level or 1) == 3]
+                    else:
+                        entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if (e.level or 1) <= max_level]
 
                 # Apply product_id filter
                 if product_id is not None:
@@ -671,7 +678,10 @@ async def search(
                         _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
                     entities = [e for e in entities if e.id in _allowed]
                 if max_level is not None:
-                    entities = [e for e in entities if (e.level or 1) <= max_level]
+                    if _exact_level == 3:
+                        entities = [e for e in entities if (e.level or 1) == 3]
+                    else:
+                        entities = [e for e in entities if (e.level or 1) <= max_level]
                 if product_id is not None:
                     entity_map = {e.id: e for e in entities if e.id}
                     subtree_ids = _collect_subtree_ids(product_id, entity_map)

@@ -36,6 +36,14 @@ _HELPER_SOURCE_TYPES = frozenset({"notion", "gdrive", "local", "upload", "wiki",
 _VALID_CONTENT_ACCESS = frozenset({"summary", "full", "none"})
 
 
+def _audit_source_unavailable(doc_id: str, source_id: str | None, error_code: str) -> None:
+    _audit_log(
+        event_type="ontology.document.source_unavailable",
+        target={"collection": "documents", "id": doc_id},
+        changes={"source_id": source_id, "error": error_code},
+    )
+
+
 def _normalized_content_access(source: dict) -> str:
     """Resolve source content exposure policy with safe defaults.
 
@@ -233,15 +241,26 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                     "doc_id": doc_id,
                     "content": snapshot,
                     "content_type": "snapshot_summary",
+                    "source_type": source_type,
+                    "content_access": content_access,
+                    "retrieval_mode": retrieval_mode,
                 }
                 if current_sid:
                     resp["source_id"] = current_sid
+                if source_type == "upload" and str(uri).startswith("/attachments/"):
+                    resp["setup_hint"] = (
+                        "This source points to a task attachment proxy. Task attachments are not "
+                        "document delivery snapshots, so read_source can only return snapshot_summary. "
+                        "Re-ingest the markdown with write(initial_content=...) to create a zenos_native "
+                        "source with full-content access."
+                    )
                 if staleness:
                     resp["staleness_hint"] = staleness
                 if alternative_sources:
                     resp["alternative_sources"] = alternative_sources
                 return _unified_response(data=resp)
             # No snapshot_summary available
+            _audit_source_unavailable(doc_id, current_sid, "SNAPSHOT_UNAVAILABLE")
             return _error_response(
                 error_code="SNAPSHOT_UNAVAILABLE",
                 message=f"Source '{current_sid or uri}' has no snapshot_summary",
@@ -401,6 +420,7 @@ async def read_source(doc_id: str, source_id: str | None = None) -> dict:
                 if alternative_sources:
                     resp["alternative_sources"] = alternative_sources
                 return _unified_response(data=resp)
+            _audit_source_unavailable(doc_id, current_sid, "SNAPSHOT_UNAVAILABLE")
             return _error_response(
                 error_code="SNAPSHOT_UNAVAILABLE",
                 message=f"zenos_native source '{current_sid or uri}' has no readable revision",

@@ -74,6 +74,81 @@ async def test_journal_write_returns_ok_status():
     assert result["data"]["compressed"] is False
 
 
+async def test_journal_write_rejects_empty_summary():
+    """journal_write rejects empty summaries instead of normalizing them."""
+    from zenos.interface.mcp.journal import journal_write
+
+    repo = _make_journal_repo()
+    mock_pid, mock_partner = _make_partner_ctx()
+
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_write(summary="   ")
+
+    assert result["status"] == "rejected"
+    assert result["data"]["error"] == "EMPTY_SUMMARY"
+    repo.create.assert_not_called()
+
+
+async def test_journal_write_capture_requires_ref_and_change_kind():
+    """capture/sync journals must carry enough provenance to audit."""
+    from zenos.interface.mcp.journal import journal_write
+
+    repo = _make_journal_repo()
+    mock_pid, mock_partner = _make_partner_ctx()
+
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_write(summary="captured docs", source_type="capture")
+
+    assert result["status"] == "rejected"
+    assert result["data"]["error"] == "MISSING_JOURNAL_GOVERNANCE_FIELDS"
+    repo.create.assert_not_called()
+
+
+async def test_journal_write_rejects_recent_duplicate_governance_key():
+    """Repeated source_type/source_ref/change_kind writes are rejected."""
+    from zenos.interface.mcp.journal import journal_write
+
+    repo = _make_journal_repo(list_recent_return=([
+        {
+            "id": "j1",
+            "created_at": _FIXED_TS,
+            "project": None,
+            "flow_type": None,
+            "summary": "previous",
+            "tags": ["source_type:capture", "source_ref:doc-1", "change_kind:knowledge_changed"],
+            "is_summary": False,
+        }
+    ], 1))
+    mock_pid, mock_partner = _make_partner_ctx()
+
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_write(
+            summary="captured docs again",
+            source_type="capture",
+            source_ref="doc-1",
+            change_kind="knowledge_changed",
+        )
+
+    assert result["status"] == "rejected"
+    assert result["data"]["error"] == "DUPLICATE_JOURNAL_WRITE"
+    repo.create.assert_not_called()
+
+
 async def test_journal_write_truncates_summary_to_500_chars_with_warning():
     """journal_write truncates only at repository limit and warns."""
     from zenos.interface.mcp.journal import journal_write

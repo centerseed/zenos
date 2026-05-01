@@ -16,6 +16,9 @@ async def journal_write(
     project: str | None = None,
     flow_type: str | None = None,
     tags: list[str] | None = None,
+    source_type: str | None = None,
+    source_ref: str | None = None,
+    change_kind: str | None = None,
 ) -> dict:
     """記錄工作日誌條目。
 
@@ -39,6 +42,7 @@ async def journal_write(
     from zenos.interface.mcp import _ensure_journal_repo, _compress_journal
     import zenos.interface.mcp as _mcp
     from zenos.infrastructure.context import current_partner_id as _current_partner_id
+    from zenos.interface.mcp._audit import _audit_log
 
     # Coerce tags: agent 有時會傳 JSON 字串而非 list
     if isinstance(tags, str):
@@ -55,6 +59,57 @@ async def journal_write(
         return _unified_response(status="rejected", data={}, rejection_reason="No authenticated partner context")
 
     entry_warnings: list[str] = []
+    summary = str(summary or "").strip()
+    if not summary:
+        return _unified_response(
+            status="rejected",
+            data={"error": "EMPTY_SUMMARY"},
+            rejection_reason="journal summary is required",
+        )
+    valid_source_types = {"capture", "sync", "feature", "debug", "governance", "manual"}
+    valid_change_kinds = {"knowledge_changed", "handoff_resume", "unresolved_gap"}
+    if source_type is not None and source_type not in valid_source_types:
+        return _unified_response(
+            status="rejected",
+            data={"error": "INVALID_SOURCE_TYPE", "allowed": sorted(valid_source_types)},
+            rejection_reason="invalid journal source_type",
+        )
+    if change_kind is not None and change_kind not in valid_change_kinds:
+        return _unified_response(
+            status="rejected",
+            data={"error": "INVALID_CHANGE_KIND", "allowed": sorted(valid_change_kinds)},
+            rejection_reason="invalid journal change_kind",
+        )
+    if source_type in {"capture", "sync"} and (not source_ref or not change_kind):
+        return _unified_response(
+            status="rejected",
+            data={"error": "MISSING_JOURNAL_GOVERNANCE_FIELDS"},
+            rejection_reason="source_type=capture|sync requires source_ref and change_kind",
+        )
+    governance_tags = list(tags or [])
+    if source_type:
+        governance_tags.append(f"source_type:{source_type}")
+    if source_ref:
+        governance_tags.append(f"source_ref:{source_ref}")
+    if change_kind:
+        governance_tags.append(f"change_kind:{change_kind}")
+
+    if source_type and source_ref and change_kind:
+        recent_entries, _ = await jr.list_recent(partner_id=partner_id, limit=20)
+        required = {f"source_type:{source_type}", f"source_ref:{source_ref}", f"change_kind:{change_kind}"}
+        for entry in recent_entries:
+            if required.issubset(set(entry.get("tags") or [])):
+                _audit_log(
+                    event_type="journal.write.rejected",
+                    target={"collection": "journal", "id": None},
+                    changes={"source_type": source_type, "source_ref": source_ref, "change_kind": change_kind},
+                    governance={"reason": "duplicate_recent_journal"},
+                )
+                return _unified_response(
+                    status="rejected",
+                    data={"error": "DUPLICATE_JOURNAL_WRITE"},
+                    rejection_reason="duplicate source_type/source_ref/change_kind journal write",
+                )
     if len(summary) > 500:
         summary = summary[:500]
         entry_warnings.append("journal summary truncated to 500 chars")
@@ -68,17 +123,27 @@ async def journal_write(
         summary=summary,
         project=effective_project,
         flow_type=flow_type,
-        tags=tags or [],
+        tags=governance_tags,
     )
-    count = await jr.count(partner_id=partner_id)
     compressed = False
-    if count > 20:
-        await _compress_journal(partner_id)
-        compressed = True
+    count_originals = getattr(jr, "count_originals", None) if hasattr(type(jr), "count_originals") else None
+    raw_count = await count_originals(partner_id=partner_id) if count_originals is not None else await jr.count(partner_id=partner_id)
+    if raw_count > 20:
+        compressed = bool(await _compress_journal(partner_id))
+        if compressed:
+            _audit_log(
+                event_type="journal.write.compressed",
+                target={"collection": "journal", "id": entry_id},
+                changes={"raw_count": raw_count},
+            )
 
     return _unified_response(
         data={"id": entry_id, "created_at": datetime.now(timezone.utc).isoformat(), "compressed": compressed},
         warnings=entry_warnings,
+        governance_hints={
+            "distillation_required": compressed,
+            "message": "compressed journal is Tier-2 material; distill into entries only after review" if compressed else "",
+        },
     )
 
 

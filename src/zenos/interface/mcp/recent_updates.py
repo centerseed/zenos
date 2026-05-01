@@ -41,14 +41,16 @@ def _parse_since(since: str | None, since_days: int | None) -> datetime:
         value = since.strip()
         if re.fullmatch(r"\d+d", value.lower()):
             days = int(value[:-1])
-            return now - timedelta(days=days)
+            cutoff = now - timedelta(days=days)
+            return cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
         normalized = value.replace("Z", "+00:00")
         parsed = datetime.fromisoformat(normalized)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
     days = since_days if since_days is not None else _DEFAULT_RECENT_WINDOW_DAYS
-    return now - timedelta(days=max(0, days))
+    cutoff = now - timedelta(days=max(0, days))
+    return cutoff.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def _normalize_limit(limit: int | None) -> int:

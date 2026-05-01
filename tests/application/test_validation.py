@@ -877,7 +877,7 @@ class TestUpsertDocumentValidation:
             owner="Barry",
             visibility="restricted",
             details={"k": "v"},
-            sources=[{"uri": "/old.md", "label": "old", "type": "github"}],
+            sources=[{"uri": "https://github.com/org/repo/blob/main/docs/old.md", "label": "old.md", "type": "github"}],
         )
         module = Entity(
             id="mod-1",
@@ -892,9 +892,10 @@ class TestUpsertDocumentValidation:
         )
         svc = _make_service(repos)
 
+        new_uri = "https://github.com/org/repo/blob/main/docs/new.md"
         result = await svc.upsert_document({
             "id": "doc-1",
-            "source": {"uri": "/new.md"},
+            "source": {"uri": new_uri},
             "linked_entity_ids": ["mod-1"],
         })
 
@@ -903,7 +904,7 @@ class TestUpsertDocumentValidation:
         assert result.owner == "Barry"
         assert result.visibility == "restricted"
         assert result.details == {"k": "v"}
-        assert result.sources[0]["uri"] == "/new.md"
+        assert result.sources[0]["uri"] == new_uri
 
     async def test_linked_entity_ids_accepts_single_string(self):
         repos = _mock_repos()

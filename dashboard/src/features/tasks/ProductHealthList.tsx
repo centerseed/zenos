@@ -40,6 +40,9 @@ export function ProductHealthList({
   const t = useInk("light");
   const { c, fontHead, fontMono } = t;
 
+  const visibleProducts = snapshot.products.filter((product) => product.openTaskCount > 0);
+  if (visibleProducts.length === 0) return null;
+
   return (
     <section
       data-testid="product-health-list"
@@ -63,7 +66,7 @@ export function ProductHealthList({
       </div>
 
       <div style={{ display: "grid", gap: 12 }}>
-        {snapshot.products.map((product) => {
+        {visibleProducts.map((product) => {
           const tone = toneStyles(product.riskLevel, c);
           const primaryPlan = product.plans[0] ?? null;
           const primaryMilestone = product.currentMilestone;

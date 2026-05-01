@@ -20,6 +20,7 @@ Architecture:
   governance.py    — governance_guide, find_gaps, common_neighbors tools
   source.py        — read_source, batch_update_sources tools
   attachment.py    — upload_attachment tool
+  document_upload.py — upload_document_file tool
   setup.py         — setup tool
   suggest_policy.py — suggest_policy tool
 """
@@ -140,7 +141,7 @@ async def _ensure_journal_repo() -> None:
     _journal_repo = SqlWorkJournalRepository(pool)
 
 
-async def _compress_journal(partner_id: str) -> None:
+async def _compress_journal(partner_id: str) -> bool:
     """Compress old non-summary journal entries into a single summary row.
 
     Keeps the most recent 9 originals intact; compresses any older originals
@@ -160,12 +161,12 @@ async def _compress_journal(partner_id: str) -> None:
             )
         to_compress = total_originals - 9
         if to_compress <= 0:
-            return
+            return False
         entries = await _journal_repo.list_oldest_originals(
             partner_id=partner_id, limit=to_compress
         )
         if not entries:
-            return
+            return False
 
         formatted = "\n\n".join(
             f"[{e['created_at']}] project={e['project']} flow={e['flow_type']}\n{e['summary']}"
@@ -209,8 +210,10 @@ async def _compress_journal(partner_id: str) -> None:
             as_of=as_of,
         )
         await _journal_repo.delete_by_ids(partner_id=partner_id, ids=ids)
+        return True
     except Exception:
         logger.warning("_compress_journal failed, skipping compression", exc_info=True)
+        return False
 
 
 # Services wired lazily after _ensure_repos() runs.
@@ -332,6 +335,7 @@ from zenos.interface.mcp.governance import (
 )
 from zenos.interface.mcp.source import read_source as _read_source_fn, batch_update_sources as _batch_update_sources_fn
 from zenos.interface.mcp.attachment import upload_attachment as _upload_attachment_fn
+from zenos.interface.mcp.document_upload import upload_document_file as _upload_document_file_fn
 from zenos.interface.mcp.setup import setup as _setup_fn
 from zenos.interface.mcp.suggest_policy import suggest_policy as _suggest_policy_fn
 from zenos.interface.mcp.workspace import list_workspaces as _list_workspaces_fn
@@ -355,6 +359,7 @@ common_neighbors = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(r
 read_source = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_read_source_fn))
 batch_update_sources = mcp.tool(tags={"write"}, annotations={"idempotentHint": True})(require_scope("write")(_batch_update_sources_fn))
 upload_attachment = mcp.tool(tags={"write"})(require_scope("write")(_upload_attachment_fn))
+upload_document_file = mcp.tool(tags={"write"})(require_scope("write")(_upload_document_file_fn))
 setup = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_setup_fn))
 suggest_policy = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_suggest_policy_fn))
 list_workspaces = mcp.tool(tags={"read"}, annotations={"readOnlyHint": True})(require_scope("read")(_list_workspaces_fn))
@@ -430,6 +435,7 @@ __all__ = [
     "read_source",
     "batch_update_sources",
     "upload_attachment",
+    "upload_document_file",
     "setup",
     "suggest_policy",
 ]

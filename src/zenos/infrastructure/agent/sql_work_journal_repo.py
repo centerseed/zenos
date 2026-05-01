@@ -67,6 +67,15 @@ class SqlWorkJournalRepository:
                 partner_id,
             )
 
+    async def count_originals(self, *, partner_id: str) -> int:
+        """Return non-summary journal entries for compression gating."""
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(
+                f"SELECT COUNT(*) FROM {SCHEMA}.work_journal"
+                f" WHERE partner_id = $1 AND is_summary = FALSE",
+                partner_id,
+            )
+
     async def list_recent(
         self,
         *,

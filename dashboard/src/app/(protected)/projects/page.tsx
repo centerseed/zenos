@@ -4,6 +4,7 @@
 // Wired to getProjectEntities + getTasksByEntity + getEntityContext + getChildEntities
 
 import { useEffect, useState, useCallback, useMemo, type ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
 import { useInk } from "@/lib/zen-ink/tokens";
 import { Icon, ICONS } from "@/components/zen/Icons";
 import { Section } from "@/components/zen/Section";
@@ -15,6 +16,7 @@ import { TaskCreateDialog } from "@/components/TaskCreateDialog";
 import { PlanCreateDialog } from "@/components/PlanCreateDialog";
 import { MilestoneCreateDialog } from "@/components/MilestoneCreateDialog";
 import { ProjectProgressConsole } from "@/features/projects/ProjectProgressConsole";
+import { DocListSidebar } from "@/features/docs/DocListSidebar";
 import { ROOT_SURFACE_LABEL_EN, ROOT_SURFACE_LABEL_ZH } from "@/features/projects/rootLabels";
 import type { TaskHubFocus } from "@/features/tasks/taskHub";
 import { useAuth } from "@/lib/auth";
@@ -32,6 +34,7 @@ import {
   getTasksByEntity,
   getEntityContext,
   getChildEntities,
+  getDocumentContent,
   handoffTask,
   listDocs,
   updateTask,
@@ -811,6 +814,9 @@ function InkProjectDetail({
   const { user } = useAuth();
   const [tab, setTab] = useState("overview");
   const [loading, setLoading] = useState(true);
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [docContent, setDocContent] = useState<string>("");
+  const [docLoading, setDocLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<DetailData | null>(null);
@@ -869,7 +875,28 @@ function InkProjectDetail({
     setCreateKind(null);
     setMutationError(null);
     setProjectRecapOpen(false);
+    setSelectedDocId(null);
+    setDocContent("");
   }, [entityId, focus]);
+
+  const loadDoc = useCallback(async (docId: string) => {
+    if (!user) return;
+    setDocLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await getDocumentContent(token, docId);
+      setDocContent(res?.content ?? "");
+    } catch (err) {
+      console.error("[ProjectDetail] loadDoc error:", err);
+      setDocContent("");
+    } finally {
+      setDocLoading(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (selectedDocId) void loadDoc(selectedDocId);
+  }, [selectedDocId, loadDoc]);
 
   const replaceTask = useCallback((nextTask: Task) => {
     setDetail((prev) => {
@@ -1478,46 +1505,70 @@ function InkProjectDetail({
         {tab === "docs" ? (
           <div
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-              gap: 14,
+              display: "flex",
+              border: `1px solid ${c.inkHair}`,
+              height: "calc(100vh - 380px)",
+              minHeight: 480,
+              margin: "0 -48px -60px",
+              overflow: "hidden",
             }}
           >
-            {documents.length === 0 ? (
-              <div
-                style={{
-                  minHeight: 180,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  background: c.surface,
-                  border: `1px solid ${c.inkHair}`,
-                  color: c.inkFaint,
-                  fontFamily: fontMono,
-                }}
-              >
-                尚未掛上文件
-              </div>
-            ) : (
-              documents.map((doc) => (
+            {/* Left — document tree */}
+            <div
+              style={{
+                width: 280,
+                flexShrink: 0,
+                borderRight: `1px solid ${c.inkHair}`,
+                overflowY: "auto",
+                background: c.surface,
+              }}
+            >
+              <DocListSidebar
+                docs={documents}
+                selectedId={selectedDocId}
+                onSelect={setSelectedDocId}
+              />
+            </div>
+            {/* Right — document content */}
+            <div style={{ flex: 1, overflowY: "auto", background: c.paper }}>
+              {!selectedDocId && (
                 <div
-                  key={doc.id}
                   style={{
-                    background: c.surface,
-                    border: `1px solid ${c.inkHair}`,
-                    padding: 18,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    height: "100%",
+                    color: c.inkFaint,
+                    fontFamily: fontBody,
+                    fontSize: 13,
                   }}
                 >
-                  <div style={{ fontSize: 14, color: c.ink, fontWeight: 500 }}>{doc.name}</div>
-                  <div style={{ fontSize: 11, color: c.inkMuted, marginTop: 4 }}>
-                    {doc.status} · {formatShortDate(doc.updatedAt)}
-                  </div>
-                  <div style={{ fontSize: 12, color: c.inkMuted, marginTop: 10, lineHeight: 1.6 }}>
-                    {doc.summary || "—"}
-                  </div>
+                  選擇一份文件開始閱讀
                 </div>
-              ))
-            )}
+              )}
+              {selectedDocId && docLoading && (
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    height: "100%",
+                    color: c.inkFaint,
+                    fontFamily: fontBody,
+                    fontSize: 13,
+                  }}
+                >
+                  載入中…
+                </div>
+              )}
+              {selectedDocId && !docLoading && (
+                <DocReadView
+                  doc={documents.find((d) => d.id === selectedDocId) ?? null}
+                  content={docContent}
+                  t={t}
+                />
+              )}
+            </div>
           </div>
         ) : null}
 
@@ -1638,6 +1689,57 @@ function InkProjectDetail({
         onCreateMilestone={handleCreateMilestone}
       />
     </>
+  );
+}
+
+// ─── DocReadView ─────────────────────────────────────────────────────────────
+
+function DocReadView({
+  doc,
+  content,
+  t,
+}: {
+  doc: Entity | null;
+  content: string;
+  t: ReturnType<typeof import("@/lib/zen-ink/tokens").useInk>;
+}) {
+  const { c, fontHead, fontBody, fontMono } = t;
+
+  return (
+    <div style={{ padding: "40px 48px", maxWidth: 860 }}>
+      {doc && (
+        <h1
+          style={{
+            fontFamily: fontHead,
+            fontSize: 28,
+            fontWeight: 500,
+            color: c.ink,
+            marginBottom: 24,
+            lineHeight: 1.3,
+          }}
+        >
+          {doc.name}
+        </h1>
+      )}
+      {!content && (
+        <div style={{ color: c.inkFaint, fontFamily: fontBody, fontSize: 13 }}>
+          尚無內容
+        </div>
+      )}
+      {content && (
+        <div
+          style={{
+            fontFamily: fontBody,
+            fontSize: 14,
+            lineHeight: 1.85,
+            color: c.inkSoft,
+          }}
+          className="doc-read-prose"
+        >
+          <ReactMarkdown>{content}</ReactMarkdown>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -1862,9 +1964,24 @@ export default function ProjectsPage() {
     progress: progressMap.get(e.id) ?? null,
     stats: statsMap.get(e.id) ?? null,
   }));
-  const visibleProjects = showDormantProducts
-    ? projects
-    : projects.filter(({ entity }) => entity.status === "active" || entity.status === "current");
+  function projectStatusTier(p: ProjectWithProgress): number {
+    const s = p.entity.status;
+    if (s === "active" || s === "current") return 0;
+    return 1;
+  }
+
+  function projectActivityScore(p: ProjectWithProgress): number {
+    return p.stats?.updatedAt?.getTime() ?? p.entity.updatedAt?.getTime() ?? 0;
+  }
+
+  const visibleProjects = (
+    showDormantProducts
+      ? projects
+      : projects.filter(({ entity }) => entity.status === "active" || entity.status === "current")
+  ).slice().sort((a, b) =>
+    projectStatusTier(a) - projectStatusTier(b) ||
+    projectActivityScore(b) - projectActivityScore(a)
+  );
   const ownerRows = Array.from(
     visibleProjects.reduce((acc, project) => {
       const owner = project.entity.owner?.trim() || "未指派";

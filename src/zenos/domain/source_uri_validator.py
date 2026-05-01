@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import urlparse
 
 # Titles that are bare source-type domain names — not valid as document titles.
 BARE_DOMAIN_BLACKLIST: frozenset[str] = frozenset({
@@ -46,15 +47,84 @@ GDRIVE_FILE_PATTERN = re.compile(
     r"^https://drive\.google\.com/(file/d/[^/]+/|open\?id=)"
 )
 
+LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
+def _reject_unreachable_uri(source_type: str, uri: str) -> tuple[bool, str]:
+    """Reject local-only URIs before source-type-specific validation.
+
+    Document sources must be resolvable by ZenOS server-side governance paths.
+    A caller's local filesystem or loopback web server is not reachable from
+    Cloud Run and becomes silent dead metadata if accepted.
+    """
+    if not uri:
+        return (True, "")
+
+    if source_type == "upload" and uri.startswith("/attachments/"):
+        return (
+            False,
+            (
+                "upload source_uri must not point at task attachment proxy URLs "
+                "(/attachments/{attachment_id}). Task attachments are not document "
+                "delivery snapshots and cannot be read as document source content. "
+                "Use write(initial_content=...) to create a zenos_native source for "
+                "markdown content, or attach a snapshot_summary for helper-ingest sources."
+            ),
+        )
+
+    lowered = uri.lower()
+    if lowered.startswith("file://"):
+        return (
+            False,
+            (
+                "source_uri must be reachable by ZenOS backend; file:// URIs "
+                "point to the caller's local filesystem and are not accepted. "
+                "Use initial_content for markdown content, zenos_native /docs/{doc_id}, "
+                "or attach a helper snapshot_summary for helper-ingest sources."
+            ),
+        )
+
+    if source_type != "zenos_native" and (
+        uri.startswith("/")
+        or uri.startswith("~/")
+        or re.match(r"^[A-Za-z]:[\\/]", uri)
+    ):
+        return (
+            False,
+            (
+                "source_uri must not be a local filesystem path. "
+                "Use initial_content, zenos_native /docs/{doc_id}, or a backend-reachable https:// URL."
+            ),
+        )
+
+    parsed = urlparse(uri)
+    if parsed.scheme in {"http", "https"} and (parsed.hostname or "").lower() in LOCALHOST_HOSTS:
+        return (
+            False,
+            (
+                "source_uri must not point to localhost or loopback addresses; "
+                "ZenOS backend cannot resolve caller-local services."
+            ),
+        )
+
+    return (True, "")
+
 
 def validate_source_uri(source_type: str, uri: str) -> tuple[bool, str]:
     """Validate source URI format for document entities.
 
-    Only validates types: github, notion, gdrive, wiki.
-    Type 'upload' is not validated.
+    All source types first pass a global reachability guard that rejects local-only
+    schemes/paths. Type-specific validators then enforce each platform contract.
 
     Returns (is_valid, error_message). error_message is empty string when valid.
     """
+    source_type = str(source_type or "").strip()
+    uri = str(uri or "").strip()
+
+    ok, error = _reject_unreachable_uri(source_type, uri)
+    if not ok:
+        return (False, error)
+
     if source_type == "github":
         if GITHUB_TREE_PATTERN.match(uri):
             return (
@@ -150,6 +220,17 @@ def validate_source_uri(source_type: str, uri: str) -> tuple[bool, str]:
             )
         return (True, "")
 
+    if source_type == "url":
+        if not uri.startswith("https://"):
+            return (
+                False,
+                (
+                    "url source_uri must be a backend-reachable https:// URL. "
+                    f"Got: {uri!r}"
+                ),
+            )
+        return (True, "")
+
     if source_type == "zenos_native":
         if not ZENOS_NATIVE_URI_PATTERN.match(uri):
             return (
@@ -174,7 +255,8 @@ def validate_source_uri(source_type: str, uri: str) -> tuple[bool, str]:
             )
         return (True, "")
 
-    # Unknown or unvalidated types (e.g. 'upload') pass through
+    # Unknown or unvalidated types (e.g. 'upload') pass through after the
+    # global local/dead URI guard above.
     return (True, "")
 
 

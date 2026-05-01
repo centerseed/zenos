@@ -2104,7 +2104,7 @@ async def get_project_progress(request: Request) -> Response:
                 "tasks": task_tree,
             })
 
-        if plan_payload and plan_status == "active":
+        if plan_payload and plan_status == "active" and counts["open_count"] > 0:
             plan_milestones = _derive_plan_milestones(
                 project_id=project_id,
                 plan_tasks=plan_tasks,

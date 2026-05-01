@@ -33,6 +33,7 @@ from zenos.interface.mcp._common import (
 from zenos.interface.mcp._visibility import (
     _check_write_visibility,
     _guest_write_rejection,
+    _is_entity_visible,
 )
 from zenos.interface.mcp._audit import _audit_log
 from zenos.interface.mcp._entry_quality import VALID_ENTRY_TYPES, entry_quality_issue
@@ -79,6 +80,78 @@ _DOCUMENT_SOURCE_REPAIR_PATCH_ALLOWED_FIELDS = {
     "retrieval_mode",
     "content_access",
 }
+
+
+def _document_contract_rejection(data: dict) -> dict | None:
+    """Validate MCP-level document invariants before mutating metadata."""
+    sources = data.get("sources")
+    if isinstance(sources, list):
+        primary_count = sum(1 for src in sources if isinstance(src, dict) and bool(src.get("is_primary")))
+        if primary_count > 1:
+            return _unified_response(
+                status="rejected",
+                data={"error": "MULTIPLE_PRIMARY_SOURCES"},
+                rejection_reason="multiple primary sources are not allowed",
+            )
+
+    source_ids = {
+        str(src.get("source_id")).strip()
+        for src in (sources or [])
+        if isinstance(src, dict) and src.get("source_id")
+    }
+    add_source = data.get("add_source")
+    if isinstance(add_source, dict) and add_source.get("source_id"):
+        source_ids.add(str(add_source["source_id"]).strip())
+    update_source = data.get("update_source")
+    if isinstance(update_source, dict) and update_source.get("source_id"):
+        source_ids.add(str(update_source["source_id"]).strip())
+
+    highlights = data.get("bundle_highlights")
+    if highlights:
+        if not isinstance(highlights, list):
+            return _unified_response(
+                status="rejected",
+                data={"error": "INVALID_BUNDLE_HIGHLIGHTS"},
+                rejection_reason="bundle_highlights must be a list",
+            )
+        has_primary = False
+        for item in highlights:
+            if not isinstance(item, dict):
+                return _unified_response(
+                    status="rejected",
+                    data={"error": "INVALID_BUNDLE_HIGHLIGHTS"},
+                    rejection_reason="bundle_highlights items must be objects",
+                )
+            if item.get("priority") == "primary":
+                has_primary = True
+            sid = str(item.get("source_id") or "").strip()
+            if source_ids and sid and sid not in source_ids:
+                return _unified_response(
+                    status="rejected",
+                    data={"error": "BUNDLE_HIGHLIGHT_SOURCE_NOT_FOUND", "source_id": sid},
+                    rejection_reason="bundle_highlights source_id must belong to this document",
+                )
+        if not has_primary:
+            return _unified_response(
+                status="rejected",
+                data={"error": "BUNDLE_HIGHLIGHTS_PRIMARY_REQUIRED"},
+                rejection_reason="bundle_highlights requires at least one priority=primary item",
+            )
+
+    doc_role = str(data.get("doc_role") or "").strip()
+    status = str(data.get("status") or "").strip()
+    formal_entry = bool(data.get("formal_entry") or (isinstance(data.get("details"), dict) and data["details"].get("formal_entry")))
+    if doc_role == "index" and status == "current" and formal_entry and not highlights:
+        return _unified_response(
+            status="rejected",
+            data={"error": "CURRENT_INDEX_REQUIRES_PRIMARY_HIGHLIGHT"},
+            suggestions=[{
+                "type": "bundle_highlights_suggestion",
+                "message": "current formal-entry index document requires bundle_highlights with priority=primary",
+            }],
+            rejection_reason="current index document requires bundle_highlights",
+        )
+    return None
 
 
 def _validate_create_index_sources(
@@ -941,7 +1014,7 @@ async def write(
             # Detect rejected fields and set response status accordingly
             _warnings = result.warnings or []
             _rejected = [w for w in _warnings if w.startswith("REJECTED_FIELDS:")]
-            _resp_status = "partial" if _rejected else "ok"
+            _resp_status = "ok"
             _rejection_reason = _rejected[0] if _rejected else None
             return _unified_response(
                 status=_resp_status,
@@ -987,7 +1060,8 @@ async def write(
                             },
                             "message": (
                                 "initial_content 只能用於建立新文件，不可用於更新。"
-                                " 若要更新既有文件的內容，請走 POST /api/docs/{doc_id}/content。"
+                                " 若要更新既有文件的內容，請用 update_content 參數（需同時提供 id）"
+                                " 或呼叫 POST /api/docs/{doc_id}/content。"
                             ),
                         },
                         rejection_reason="initial_content_create_only",
@@ -1006,6 +1080,38 @@ async def write(
                         rejection_reason="initial_content_too_large",
                     )
 
+            # --- update_content: write GCS revision for existing document ---
+            update_content = data.get("update_content")
+            if update_content is not None:
+                update_content = str(update_content)
+                if not data.get("id"):
+                    return _unified_response(
+                        status="rejected",
+                        data={
+                            "error": {
+                                "code": "UPDATE_CONTENT_REQUIRES_ID",
+                                "http_status": 400,
+                            },
+                            "message": (
+                                "update_content 只能用於更新既有文件，必須同時提供 id。"
+                                " 若要建立新文件並帶入內容，請用 initial_content（不需要帶 id）。"
+                            ),
+                        },
+                        rejection_reason="update_content_requires_id",
+                    )
+                if len(update_content.encode("utf-8")) > 1_048_576:
+                    return _unified_response(
+                        status="rejected",
+                        data={
+                            "error": {
+                                "code": "UPDATE_CONTENT_TOO_LARGE",
+                                "http_status": 413,
+                            },
+                            "message": "update_content 超過 1 MB 上限（1048576 bytes）。",
+                        },
+                        rejection_reason="update_content_too_large",
+                    )
+
             material_change = bool(data.get("material_change"))
             change_summary = str(data.get("change_summary") or "").strip()
             if material_change and not change_summary:
@@ -1020,6 +1126,9 @@ async def write(
                     },
                     rejection_reason="material_change_requires_change_summary",
                 )
+            contract_rejection = _document_contract_rejection(data)
+            if contract_rejection is not None:
+                return contract_rejection
             if data.get("sync_mode"):
                 result = await _mcp.ontology_service.sync_document_governance(data)
                 serialized = _serialize(result)
@@ -1155,11 +1264,115 @@ async def write(
                         doc_id_created,
                         exc_info=True,
                     )
+                    _audit_log(
+                        event_type="ontology.document.delivery_failure",
+                        target={"collection": collection, "id": doc_id_created},
+                        changes={"operation": "initial_content", "source_id": native_source_id},
+                    )
 
                 resp_data["doc_id"] = doc_id_created
                 resp_data["source_id"] = native_source_id
                 resp_data["revision_id"] = revision_id_created
                 resp_data["delivery_status"] = delivery_status_native
+                if delivery_status_native != "ready":
+                    return _unified_response(
+                        status="error",
+                        data=resp_data,
+                        warnings=[*all_warnings, "initial_content metadata was created but delivery snapshot failed"],
+                        suggestions=[{
+                            "type": "retry_delivery_snapshot",
+                            "message": "retry write(initial_content=...) after fixing snapshot storage; do not treat this document as ready",
+                        }],
+                        governance_hints=_build_governance_hints(warnings=all_warnings),
+                    )
+
+            # --- update_content: GCS write for existing document ---
+            if update_content is not None:
+                doc_id_updated = result.id
+                existing_sources = getattr(result, "sources", None) or []
+                native_src = next(
+                    (s for s in existing_sources if s.get("type") == "zenos_native"),
+                    None,
+                )
+                # If no zenos_native source exists, add one
+                if native_src is None:
+                    native_uri = f"/docs/{doc_id_updated}"
+                    try:
+                        _updated = await _mcp.ontology_service.upsert_document(
+                            {
+                                "id": doc_id_updated,
+                                "linked_entity_ids": linked_ids or [],
+                                "add_source": {
+                                    "type": "zenos_native",
+                                    "uri": native_uri,
+                                    "label": getattr(result, "title", None) or "ZenOS 原生文件",
+                                    "is_primary": True,
+                                    "source_status": "valid",
+                                },
+                            },
+                            partner=_current_partner.get(),
+                        )
+                        native_src = next(
+                            (s for s in (getattr(_updated, "sources", None) or [])
+                             if s.get("type") == "zenos_native"),
+                            None,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "update_content: failed to add zenos_native source for doc %s",
+                            doc_id_updated,
+                            exc_info=True,
+                        )
+                native_source_id = (native_src or {}).get("source_id")
+                partner_id = current_partner_id.get() or str(
+                    (_current_partner.get() or {}).get("id") or ""
+                ).strip()
+                had_readable_revision = False
+                snapshot_reader = getattr(_mcp.source_service, "read_source_with_snapshot", None)
+                if snapshot_reader is not None and native_source_id:
+                    try:
+                        maybe = snapshot_reader(doc_id_updated, source_id=native_source_id, source_uri=f"/docs/{doc_id_updated}")
+                        previous_snapshot = await maybe if inspect.isawaitable(maybe) else maybe
+                        had_readable_revision = isinstance(previous_snapshot, dict) and bool(previous_snapshot.get("content"))
+                    except Exception:
+                        had_readable_revision = False
+                revision_id_updated: str | None = None
+                delivery_status_updated = "error"
+                try:
+                    from zenos.interface.dashboard_api import _write_native_snapshot
+                    revision_id_updated = await _write_native_snapshot(
+                        partner_id=partner_id,
+                        doc_id=doc_id_updated,
+                        source_id=native_source_id,
+                        content=update_content,
+                    )
+                    delivery_status_updated = "ready"
+                except Exception:
+                    logger.error(
+                        "update_content: GCS write failed for doc %s",
+                        doc_id_updated,
+                        exc_info=True,
+                    )
+                    _audit_log(
+                        event_type="ontology.document.delivery_failure",
+                        target={"collection": collection, "id": doc_id_updated},
+                        changes={"operation": "update_content", "source_id": native_source_id},
+                    )
+                resp_data["doc_id"] = doc_id_updated
+                resp_data["source_id"] = native_source_id
+                resp_data["revision_id"] = revision_id_updated
+                resp_data["delivery_status"] = delivery_status_updated
+                if delivery_status_updated != "ready":
+                    if had_readable_revision:
+                        resp_data["delivery_status"] = "stale"
+                        all_warnings.append("update_content snapshot failed; previous readable revision remains active")
+                    else:
+                        return _unified_response(
+                            status="error",
+                            data=resp_data,
+                            warnings=[*all_warnings, "update_content failed and no previous readable revision was found"],
+                            governance_hints=_build_governance_hints(warnings=all_warnings),
+                        )
 
             return _unified_response(
                 data=resp_data,
@@ -1229,13 +1442,14 @@ async def write(
                 },
             )
             return _unified_response(
-                status="partial" if rejected else "ok",
+                status="ok",
                 data={
                     "dry_run": False,
                     "applied_count": len(applied),
                     "rejected_count": len(rejected),
                     "applied": applied,
                     "rejected": rejected,
+                    "partial_failures": rejected,
                 },
                 warnings=[
                     f"{len(rejected)} 個 patch 未套用，請查看 rejected"
@@ -1260,6 +1474,14 @@ async def write(
             )
 
         elif collection == "blindspots":
+            for eid in data.get("related_entity_ids", []) or []:
+                entity = await _mcp.entity_repo.get_by_id(eid)
+                if entity is None or not _is_entity_visible(entity):
+                    return _unified_response(
+                        status="rejected",
+                        data={"error": "RELATED_ENTITY_NOT_VISIBLE", "entity_id": eid},
+                        rejection_reason="related_entity_ids must exist and be visible",
+                    )
             result = await _mcp.ontology_service.add_blindspot(data)
             serialized = _serialize(result)
 
@@ -1317,8 +1539,14 @@ async def write(
 
                 # Infer assignee from related entities' who tag
                 assignee = None
+                auto_product_id = None
                 for eid in (result.related_entity_ids or []):
                     entity = await _mcp.entity_repo.get_by_id(eid)
+                    if entity and auto_product_id is None:
+                        if getattr(entity, "type", None) == "product":
+                            auto_product_id = entity.id
+                        else:
+                            auto_product_id = getattr(entity, "parent_id", None)
                     if entity and entity.tags.who:
                         who = entity.tags.who
                         if isinstance(who, list):
@@ -1329,7 +1557,16 @@ async def write(
 
                 creator_id = (_partner_ctx or {}).get("id") or "system"
                 auto_task_data = {
-                    "title": f"處理盲點：{result.description[:30]}",
+                    "title": f"修復治理盲點：{result.description[:40]}",
+                    "description": (
+                        f"Blindspot: {result.description}\n\n"
+                        f"Suggested action: {result.suggested_action}"
+                    ),
+                    "acceptance_criteria": [
+                        "Root cause is identified and documented in task result.",
+                        "Suggested action is implemented or a concrete follow-up task is linked.",
+                        "Blindspot status can be moved toward acknowledged/resolved with evidence.",
+                    ],
                     "source_type": "blindspot",
                     "source_metadata": {
                         "created_via_agent": True,
@@ -1338,6 +1575,7 @@ async def write(
                     },
                     "linked_blindspot": result.id,
                     "linked_entities": result.related_entity_ids or [],
+                    "product_id": auto_product_id,
                     "status": "todo",
                     "created_by": creator_id,
                     "updated_by": creator_id,

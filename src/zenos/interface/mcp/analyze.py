@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 
 from zenos.application.knowledge.ontology_service import _collect_subtree_ids
 from zenos.domain.doc_types import canonical_type, generate_source_id
 from zenos.domain.document_linkage import get_document_linked_entity_ids
+from zenos.domain.source_uri_validator import validate_source_uri
 from zenos.domain.governance import (
     compute_search_unused_signals,
     detect_document_bundle_governance_issues,
@@ -16,10 +18,22 @@ from zenos.domain.governance import (
 )
 
 from zenos.interface.mcp._common import _serialize, _unified_response, _error_response, _format_not_found, _new_id
+from zenos.interface.mcp._audit import _audit_log
 
 logger = logging.getLogger(__name__)
 
 _INVALID_DOCUMENT_BUNDLE_ISSUE_LIMIT = 50
+
+
+def _blindspot_suggestion_id(item: dict) -> str:
+    related = ",".join(sorted(str(eid) for eid in item.get("related_entity_ids", []) or []))
+    raw = "|".join([
+        str(item.get("severity") or ""),
+        " ".join(str(item.get("description") or "").lower().split()),
+        " ".join(str(item.get("suggested_action") or "").lower().split()),
+        related,
+    ])
+    return "bsug_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:16]
 
 
 def _bundle_issue_sort_key(issue: dict) -> tuple:
@@ -44,6 +58,40 @@ def _doc_primary_source(doc: object) -> dict | None:
     if not sources:
         return None
     return next((src for src in sources if src.get("is_primary")), sources[0])
+
+
+def _detect_invalid_document_sources(docs: list[object]) -> list[dict]:
+    issues: list[dict] = []
+    for doc in docs:
+        doc_id = str(getattr(doc, "id", "") or "").strip()
+        title = str(getattr(doc, "name", "") or "").strip()
+        for source in list(getattr(doc, "sources", None) or []):
+            if not isinstance(source, dict):
+                continue
+            source_type = str(source.get("type") or "").strip()
+            source_uri = str(source.get("uri") or "").strip()
+            if not source_type or not source_uri:
+                continue
+            ok, error = validate_source_uri(source_type, source_uri)
+            if ok:
+                continue
+            issues.append({
+                "entity_id": doc_id,
+                "current_title": title,
+                "source_id": source.get("source_id"),
+                "source_type": source_type,
+                "source_uri": source_uri,
+                "issue_type": "invalid_source_uri",
+                "severity": "red",
+                "reason": error,
+                "action": "mark_unresolvable_or_reupload",
+                "suggested_action": (
+                    "Replace this source with a backend-reachable https:// URL, "
+                    "a zenos_native /docs/{doc_id} source via initial_content, "
+                    "or a helper-ingest source with snapshot_summary."
+                ),
+            })
+    return issues
 
 
 def _compact_text(value: object, *, limit: int = 120) -> str:
@@ -1049,18 +1097,36 @@ async def analyze(
 
     if check_type in ("all", "blindspot"):
         blindspots = await _mcp.governance_service.run_blindspot_analysis()
+        blindspot_suggestions = []
+        for b in blindspots:
+            item = _serialize(b)
+            item["suggestion_id"] = _blindspot_suggestion_id(item)
+            item["suggestion_status"] = "suggested"
+            blindspot_suggestions.append(item)
         results["blindspots"] = {
-            "blindspots": [_serialize(b) for b in blindspots],
+            "blindspots": blindspot_suggestions,
+            "suggestions": blindspot_suggestions,
             "count": len(blindspots),
         }
         try:
             task_signal_suggestions = await _mcp.governance_service.infer_blindspots_from_tasks()
+            for item in task_signal_suggestions:
+                if isinstance(item, dict):
+                    item.setdefault("suggestion_id", _blindspot_suggestion_id(item))
             results["blindspots"]["task_signal_suggestions"] = task_signal_suggestions
             results["blindspots"]["task_signal_count"] = len(task_signal_suggestions)
         except Exception:
             logger.warning("Task signal blindspot inference failed", exc_info=True)
             results["blindspots"]["task_signal_suggestions"] = []
             results["blindspots"]["task_signal_count"] = 0
+        _audit_log(
+            event_type="governance.blindspot.suggestions",
+            target={"collection": "blindspot_suggestions", "id": None},
+            changes={
+                "suggestion_count": len(blindspot_suggestions),
+                "task_signal_count": results["blindspots"].get("task_signal_count", 0),
+            },
+        )
 
     if check_type == "impacts":
         try:
@@ -1125,6 +1191,7 @@ async def analyze(
             all_entities_for_scope = await _mcp.ontology_service._entities.list_all()
             entity_map = {e.id: e for e in all_entities_for_scope if e.id}
         invalid_docs = detect_invalid_document_titles(all_doc_entities)
+        invalid_docs.extend(_detect_invalid_document_sources(all_doc_entities))
         bundle_issues = detect_document_bundle_governance_issues(
             all_doc_entities,
             relationships_by_doc=relationships_by_doc,
@@ -1160,6 +1227,9 @@ async def analyze(
         # Task 40: enrich each item with proposed_title and action
         from zenos.domain.source_uri_validator import GITHUB_BLOB_PATTERN
         for doc in invalid_docs:
+            if doc.get("issue_type") == "invalid_source_uri":
+                doc.setdefault("proposed_title", None)
+                continue
             source_uri = doc["source_uri"]
             if source_uri and GITHUB_BLOB_PATTERN.match(source_uri):
                 try:

@@ -1602,7 +1602,7 @@ class TestGetProjectProgress:
         assert body["recent_progress"][0]["id"] == "task-4"
         assert any(item["kind"] == "plan" and item["id"] == "plan-1" for item in body["recent_progress"])
 
-    async def test_keeps_active_plan_and_milestone_when_open_work_is_zero(self):
+    async def test_hides_active_plan_from_breakdown_when_open_work_is_zero(self):
         from zenos.interface.dashboard_api import get_project_progress
 
         request = _make_request(
@@ -1663,22 +1663,7 @@ class TestGetProjectProgress:
 
         body = json.loads(resp.body)
         assert resp.status_code == 200
-        assert body["active_plans"] == [
-            {
-                "id": "plan-empty",
-                "goal": "Already shipped plan",
-                "status": "active",
-                "owner": "Barry",
-                "milestones": [],
-                "tasks_summary": {"total": 1, "by_status": {"done": 1}},
-                "open_count": 0,
-                "blocked_count": 0,
-                "review_count": 0,
-                "overdue_count": 0,
-                "updated_at": empty_plan.updated_at.isoformat(),
-                "next_tasks": [],
-            }
-        ]
+        assert body["active_plans"] == []
         assert body["open_work_groups"] == []
         assert body["milestones"] == [
             {"id": "goal-1", "name": "Milestone Alpha", "open_count": 0}

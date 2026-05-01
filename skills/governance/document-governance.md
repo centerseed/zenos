@@ -521,6 +521,14 @@ search(collection="documents", query="主題關鍵字", product_id=PRODUCT_ID)
 陷阱 5：index 文件不設 doc_type
 → index 文件的每個 source 應設 doc_type，讓 Dashboard 能正確分組顯示。
 
+陷阱 6：用本機路徑 `file://` 當 source URI
+→ ZenOS 後端在雲端，讀不到 `file:///Users/...`。此文件對搜尋與 `read_source` 完全隱形，且 server 會 reject。
+→ 正確做法：local MCP 用 `upload_document_file(path="...")`；hosted MCP 用 multipart upload；非 CLI fallback 才把 markdown 內容用 `write(initial_content="...")` 一次傳進 ZenOS。
+
+陷阱 7：用 `upload_attachment` 上傳 MD 文件內容
+→ `upload_attachment` 是 **task 附件工具**，把檔案存在 `tasks/{task_id}/attachments/` 路徑，與任何 document entity 完全無關。`read_source` 永遠找不到那個路徑，文件全文對 ZenOS 隱形。
+→ 正確做法：local MCP 用 `upload_document_file`；hosted MCP 用 multipart upload；非 CLI fallback 用 `write(collection="documents", data={..., initial_content="..."})` 把 markdown 寫進 ZenOS，server 才會建立 `zenos_native` source（`content_access: "full"`）並存 GCS revision，`read_source` 才能讀到全文。
+
 ## Source 稽核規則
 
 ### source.label 規範
@@ -536,6 +544,9 @@ search(collection="documents", query="主題關鍵字", product_id=PRODUCT_ID)
 ### source.uri 規範
 
 - 必須指向**有效的檔案位置**，不可指向已刪除或已改名的路徑
+- **禁止本機路徑（`file://`）**：ZenOS 後端在雲端，永遠無法讀取 `file:///Users/...` 或任何 `file://` 開頭的 URI。用 `file://` 寫進去的 source 會讓文件對 `read_source` 與向量搜尋完全不可見，且 embedding 無法從 source 內容建立索引。Server 會 reject 此類 URI。
+- **合法 URI scheme**：`https://`（GitHub / Notion / Drive / Wiki）、`/docs/{doc_id}`（zenos_native）、`local:{sha256}`（upload content-addressed）
+- **正確做法**：有本機 markdown 要寫進 ZenOS → local MCP 用 `upload_document_file(path="...")`；hosted MCP 用 multipart upload；非 CLI fallback 用 `write(initial_content="...")` 一次完成 entity + GCS revision。**絕對不要把本機路徑塞進 `source.uri`，也不要用 `upload_attachment` 當文件內容路徑。**
 - 對 `type=github` 的 source，可用 `git ls-files` 驗證路徑是否存在
 - 若檔案已改名，應更新 URI 為新路徑（可用 `git log --follow --diff-filter=R` 追蹤）
 - 若檔案已刪除且無改名記錄，應**標記為 broken 並等用戶確認後才移除**（不同裝置的本地 repo 狀態可能不同，見 ADR-016）；若用戶確認刪除且為文件的唯一 source，將文件 status 改為 `archived`

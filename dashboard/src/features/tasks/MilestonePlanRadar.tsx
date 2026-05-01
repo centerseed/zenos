@@ -13,6 +13,8 @@ export function MilestonePlanRadar({
   const t = useInk("light");
   const { c, fontMono } = t;
 
+  if (snapshot.radar.length === 0) return null;
+
   return (
     <section
       data-testid="milestone-plan-radar"

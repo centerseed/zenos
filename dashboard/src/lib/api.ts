@@ -323,7 +323,8 @@ function normalizeProjectProgress(
       ...plan,
       milestones: Array.isArray(plan.milestones) ? plan.milestones : [],
       next_tasks: Array.isArray(plan.next_tasks) ? plan.next_tasks : [],
-    }));
+    }))
+    .filter((plan) => plan.open_count > 0);
   const visiblePlanIds = new Set(activePlans.map((plan) => plan.id));
   const openWorkGroups = (response.open_work_groups ?? [])
     .map((group) => ({

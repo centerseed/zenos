@@ -350,7 +350,7 @@ export function buildTaskHubSnapshot(params: {
     .slice(0, 6);
 
   const recentChanges = productRecaps
-    .filter((product) => product.lastUpdatedAt)
+    .filter((product) => product.lastUpdatedAt && product.openTaskCount > 0)
     .sort((left, right) => (right.lastUpdatedAt?.getTime() ?? 0) - (left.lastUpdatedAt?.getTime() ?? 0))
     .slice(0, 6)
     .map((product) => ({

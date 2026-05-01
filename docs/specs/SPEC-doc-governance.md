@@ -125,11 +125,17 @@ CHECK (doc_role = 'single' OR bundle_highlights_json != '[]')
 | `notion` | `https://www.notion.so/...` 含 UUID | 是 | 基本 | adapter 待補 | Later |
 | `wiki` | 完整 `https://...`，禁 `/edit` | 是 | 基本 | adapter 待補 | Later |
 | `url` | 完整 `https://...` | 是 | 基本 | 預設 metadata only | Later |
+| `upload` | server-side upload reference 或 helper snapshot metadata；不得是本機路徑 | 是 | 基本 | snapshot_summary only | Later |
+| `local` | `local:{sha256_hex}` | 是 | 基本 | snapshot_summary only | Phase 1.5 |
+| `zenos_native` | `/docs/{doc_id}` | 是 | 正式 | GCS revision | Phase 1.5 |
 
 **規則**：
 1. multi-source contract 先定案，不必等所有 adapter 完成
 2. 未落地 adapter 的 `read_source` 必須回傳結構化 `unavailable` + `setup_hint`，不得偽造內容
 3. `source.type` 由 server 從 URI pattern 推斷，caller 不信任
+4. Source URI 必須是 ZenOS backend 可治理的 URI；caller-local filesystem 或 loopback URI 是死資料，server 必須在 write/batch update schema gate hard reject。
+5. `file://`、本機絕對路徑（含 `/Users/...`、`~/...`、`C:\...`）、`localhost`、`127.0.0.1`、`::1`、`0.0.0.0` 一律禁止作為 document source URI。
+6. 若 caller 要把本機 markdown 寫進 ZenOS，必須使用 `initial_content` 建立 `zenos_native` delivery snapshot，或使用 helper source + `snapshot_summary`；不得把 local path 包成 `upload` 或 `url`。
 
 ### 4.3 URI 嚴格驗證
 
@@ -140,6 +146,9 @@ CHECK (doc_role = 'single' OR bundle_highlights_json != '[]')
 | `notion` | 不含 UUID 段（reject 400） |
 | `wiki` | `/edit` 結尾（reject 400） |
 | `url` | 裸字串 / 相對路徑（reject 400） |
+| `upload` | `file://...` / `/Users/...` / `http://localhost:...`（reject 400） |
+| `local` | 非 `local:{64 lowercase hex}`（reject 400） |
+| `zenos_native` | 非 `/docs/{doc_id}`（reject 400） |
 
 ### 4.4 read_source 合約
 

@@ -13,7 +13,7 @@ from typing import Any
 
 from zenos.domain.action import DISPATCHER_PATTERN, HandoffEvent, Task, TaskPriority, TaskStatus
 from zenos.domain.action.models import L3TaskEntity
-from zenos.domain.knowledge import Blindspot, EntityType
+from zenos.domain.knowledge import Blindspot, EntityStatus, EntityType
 from zenos.domain.knowledge.collaboration_roots import is_collaboration_root_entity
 from zenos.domain.action import TaskRepository
 from zenos.domain.action.repositories import PlanRepository
@@ -503,6 +503,14 @@ class TaskService:
                     plan.status = "active"
                     plan.updated_at = datetime.utcnow()
                     await self._plans.upsert(plan)
+
+            # Auto-reactivate paused entity when a task becomes in_progress
+            if new_status == TaskStatus.IN_PROGRESS and effective_product_id:
+                product = await self._entities.get_by_id(effective_product_id)
+                if product is not None and product.status == EntityStatus.PAUSED:
+                    product.status = EntityStatus.ACTIVE
+                    product.updated_at = datetime.utcnow()
+                    await self._entities.upsert(product)
 
             # Cascade unblocking when done or cancelled
             if new_status in (TaskStatus.DONE, TaskStatus.CANCELLED):
