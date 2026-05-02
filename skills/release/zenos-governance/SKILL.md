@@ -5,7 +5,7 @@ description: >
   「掃描結果不滿意，請自動修復」時使用。此 skill 會編排 zenos-setup、
   zenos-capture、zenos-sync 與 MCP tools（search/get/write/task/confirm/analyze），
   以最少人工介入完成治理閉環。適用於 Claude/ChatGPT/Gemini 等 agent 流程。
-version: 2.1.1
+version: 2.1.2
 ---
 
 # zenos-governance

@@ -4,7 +4,7 @@ description: >
   ZenOS 初始化與更新設定——偵測 MCP 連線狀態，安裝/更新 skills，設定專案。
   當使用者明確說「/zenos-setup」「初次設定 ZenOS」「我還沒設定 MCP token」
   「幫我連接 ZenOS 服務」「更新 ZenOS skills」時使用。
-version: 2.1.2
+version: 2.1.3
 ---
 
 # /zenos-setup — Bootstrap（MCP 連線前的首次安裝）
@@ -117,11 +117,18 @@ curl -sL https://raw.githubusercontent.com/centerseed/zenos/main/skills/release/
 ```json
 {
   "zenos-setup": "1.0.0",
-  "zenos-capture": "2.1.0"
+  "zenos-capture": "2.1.0",
+  "_ssot": {
+    "governance_version": "2026.04.26.2",
+    "workflow_version": "2026.05.02.1"
+  }
 }
 ```
 
 - 存在 → 只更新版本號有變的 skills
+- `manifest.ssot.governance_version` 與 ledger `_ssot.governance_version` 相同 → governance 檔案不重抓
+- `manifest.ssot.workflow_version` 與 ledger `_ssot.workflow_version` 相同 → workflow 檔案不重抓
+- 只有當對應 ssot version 變更時，才更新 governance / workflow 檔案
 - 不存在 → 全部安裝
 
 ### 下載 skills
@@ -140,8 +147,13 @@ Codex 角色 skill 例外：
 
 ### Governance 檔案
 
-Governance 檔案（`skills/governance/`）每次都重新下載，不比對版本。
-Workflow 檔案（`skills/workflows/`）也必須寫到**專案根目錄**，因為 slash command 與治理 skill 會直接讀這些本地檔案。
+Governance 檔案（`skills/governance/`）與 workflow 檔案（`skills/workflows/`）都必須寫到**專案根目錄**，因為 slash command 與治理 skill 會直接讀這些本地檔案。
+
+但它們不應該再被視為「永遠重抓」：
+- governance 檔案用 `manifest.ssot.governance_version` 判斷是否更新
+- workflow 檔案用 `manifest.ssot.workflow_version` 判斷是否更新
+- 只有對應 version 改變時，才下載 / 覆蓋該組檔案
+- 若 version 沒變，訊息應顯示「版本一致，無需更新」，不要再說每次都要重新下載
 
 來源以 manifest 的 `ssot.governance_files` / `ssot.workflow_files` 為準；若 manifest 尚未含 `ssot`，才 fallback 到下方清單。
 
@@ -221,7 +233,10 @@ cp .claude/skills/zenos-setup/SKILL.md ~/.claude/skills/zenos-setup/SKILL.md
 
 ### 寫入版本記錄
 
-安裝完成後，將所有 skill 的 name → version 寫入 `.claude/zenos-versions.json`。
+安裝完成後，將所有 skill 的 name → version 寫入 `~/.claude/zenos-versions.json` / `~/.codex/zenos-versions.json`。
+此外，必須一併寫入：
+- `_ssot.governance_version`
+- `_ssot.workflow_version`
 
 ---
 

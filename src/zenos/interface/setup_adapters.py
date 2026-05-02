@@ -283,7 +283,9 @@ def build_claude_code_payload(selection: str, skip_overview: bool) -> dict:
             ),
             (
                 f"2. 若使用者選當前目錄：依 manifest.ssot.governance_files 與 manifest.ssot.workflow_files "
-                f"從 {raw_base}/ 逐檔下載到專案下，並將 payload.slash_commands 寫入 .claude/commands/。"
+                f"從 {raw_base}/ 逐檔下載到專案下；但先比對 `.claude/zenos-versions.json` 的 "
+                f"`_ssot.governance_version` / `_ssot.workflow_version`，只有版本變更時才更新。"
+                f" 然後將 payload.slash_commands 寫入 .claude/commands/。"
             ),
             "3. 驗證 skills/governance/bootstrap-protocol.md 內含 Context Happy Path，且已安裝 skill 不含 manifest.ssot.stale_instruction_gate 的舊指令。",
             "4. 把 payload.claude_md_addition 加到對應 target 的 prompt 載入位置；專案模式用 CLAUDE.md。",
@@ -375,7 +377,9 @@ def build_codex_payload(selection: str, skip_overview: bool) -> dict:
             ),
             (
                 "2. 安裝 skill 文件（addon-aware merge）：\n"
-                "   a. 若使用者選當前目錄：依 manifest.ssot.governance_files / workflow_files 從 GitHub raw 逐檔下載到專案的 skills/governance/ 和 skills/workflows/\n"
+                "   a. 若使用者選當前目錄：依 manifest.ssot.governance_files / workflow_files 決定目標檔案，"
+                "先比對 `.codex/zenos-versions.json` 的 `_ssot.governance_version` / `_ssot.workflow_version`，"
+                "只有版本變更時才從 GitHub raw 更新 skills/governance/ 和 skills/workflows/\n"
                 "   b. 對於 skills/release/{role}/SKILL.md：\n"
                 "      - Codex 角色 skill 一律以 `skills/release/{role}/SKILL.codex.md` 為來源，再寫成目標路徑的 `SKILL.md`\n"
                 "      - 當前目錄模式：寫到你目前這個 Codex 專案採用的 project-local skills 路徑\n"

@@ -63,6 +63,7 @@ def skills_root(tmp_path: Path) -> Path:
         "schema_version": 1,
         "ssot": {
             "governance_version": "2026.04.26.2",
+            "workflow_version": "2026.04.26.2",
             "governance_files": [
                 "skills/governance/bootstrap-protocol.md",
                 "skills/governance/shared-rules.md",
@@ -650,6 +651,7 @@ class TestSetupManifestOnly:
         assert "skills/governance/bootstrap-protocol.md" in ssot["governance_files"]
         assert "skills/governance/capture-governance.md" in ssot["governance_files"]
         assert "skills/workflows/brainstorm.md" in ssot["workflow_files"]
+        assert "workflow_version" in ssot
         assert "Context Happy Path" in ssot["context_happy_path"]
         assert "journal_read(limit=20" in ssot["stale_instruction_gate"]
 
@@ -660,6 +662,7 @@ class TestSetupManifestOnly:
         data = _ok_data(result)
         instructions_text = " ".join(data["instructions"])
         assert "manifest.ssot.governance_files" in instructions_text
+        assert "_ssot.governance_version" in instructions_text or "_ssot.workflow_version" in instructions_text
         assert "Context Happy Path" in instructions_text
         assert "stale_instruction_gate" in instructions_text
         assert "ssot" in data["payload"]

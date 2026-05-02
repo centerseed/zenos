@@ -5,9 +5,10 @@
     "owner": "Barry",
     "repository": "https://github.com/centerseed/zenos"
   },
-  "published_at": "2026-04-28",
+  "published_at": "2026-05-02",
   "ssot": {
-    "governance_version": "2026.04.28.1",
+    "governance_version": "2026.05.02.1",
+    "workflow_version": "2026.05.02.1",
     "governance_files": [
       "skills/governance/bootstrap-protocol.md",
       "skills/governance/shared-rules.md",
@@ -43,7 +44,7 @@
   "skills": [
     {
       "name": "zenos-setup",
-      "version": "2.1.2",
+      "version": "2.1.3",
       "path": "zenos-setup",
       "files": ["SKILL.md"],
       "owner": "Barry"

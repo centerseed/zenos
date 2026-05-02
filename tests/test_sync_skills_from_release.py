@@ -103,3 +103,17 @@ def test_context_happy_path_is_published_in_bootstrap_and_core_roles():
         assert "Context Happy Path" in content
         assert "recent_updates" in content
         assert "L3 documents" in content or 'search(collection="documents"' in content
+
+
+def test_sync_versions_writes_ssot_versions_for_claude_and_codex(tmp_path: Path):
+    mod = _load_sync_module()
+
+    mod.sync_versions(tmp_path)
+
+    for root_name in (".claude", ".codex"):
+        versions_path = tmp_path / root_name / "zenos-versions.json"
+        assert versions_path.exists()
+        payload = __import__("json").loads(versions_path.read_text(encoding="utf-8"))
+        assert "_ssot" in payload
+        assert "governance_version" in payload["_ssot"]
+        assert "workflow_version" in payload["_ssot"]

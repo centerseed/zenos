@@ -169,15 +169,21 @@ def sync_agents_to(target_root: Path) -> int:
 
 
 def sync_versions(project_root: Path) -> None:
-    """Update .claude/zenos-versions.json from manifest.json so version tracking stays in sync."""
+    """Update version ledgers from manifest.json so version tracking stays in sync."""
     manifest_path = RELEASE_ROOT / "manifest.json"
     if not manifest_path.exists():
         return
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     versions = {s["name"]: s["version"] for s in manifest.get("skills", [])}
-    versions_path = project_root / ".claude" / "zenos-versions.json"
-    versions_path.parent.mkdir(parents=True, exist_ok=True)
-    versions_path.write_text(json.dumps(versions, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    ssot = manifest.get("ssot", {}) or {}
+    versions["_ssot"] = {
+        "governance_version": ssot.get("governance_version"),
+        "workflow_version": ssot.get("workflow_version"),
+    }
+    for root_name in (".claude", ".codex"):
+        versions_path = project_root / root_name / "zenos-versions.json"
+        versions_path.parent.mkdir(parents=True, exist_ok=True)
+        versions_path.write_text(json.dumps(versions, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def main() -> int:
