@@ -730,6 +730,211 @@ def test_ac_mide_07b_dogfood_workflow_forbids_data_remediation_by_default():
     assert "不可以：直接 `write/confirm` 去修 ontology 資料" in content, "dogfood workflow 未禁止預設修資料"
 
 
+@pytest.mark.spec("AC-MIDE-07D")
+def test_ac_mide_07d_dogfood_workflow_requires_graph_first_l3_gate():
+    """Dogfood workflow must validate L3 retrieval through L2 -> entity_name, not keyword coverage search."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "L3 Graph Retrieval Gate" in content, "dogfood workflow 未加入 L3 graph retrieval gate"
+    assert 'search(\n    collection="documents",' in content and 'entity_name="{最相關 L2}"' in content, (
+        "dogfood workflow 未要求從 L2 用 entity_name 拉 documents"
+    )
+    assert "keyword search 只能做 discovery" in content, "dogfood workflow 未禁止用 keyword search 做 coverage audit"
+
+
+@pytest.mark.spec("AC-MIDE-07F")
+def test_ac_mide_07f_dogfood_workflow_requires_clean_room_subagents():
+    """Dogfood workflow must require fresh producer/verifier sessions and a closed-loop subagent split."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "Clean-Room Session Gate" in content, "dogfood workflow 未加入 clean-room gate"
+    assert "producer subagent 必須新開" in content, "dogfood workflow 未要求 producer fresh session"
+    assert "Verifier subagent" in content, "dogfood workflow 未定義 verifier subagent"
+    assert "閉環驗證 Gate" in content, "dogfood workflow 未要求 fix->rerun closed loop"
+
+
+@pytest.mark.spec("AC-MIDE-07G")
+def test_ac_mide_07g_dogfood_workflow_defines_efficiency_and_graph_ticketing():
+    """Dogfood workflow must define efficiency beyond step count and require graph-assisted ticketing."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "token 成本" in content, "dogfood workflow 未把 token cost 納入效率目標"
+    assert "full-scan ratio" in content, "dogfood workflow 未把 full-scan ratio 納入效率目標"
+    assert "Graph-Assisted Ticketing Gate" in content, "dogfood workflow 未加入 graph-assisted ticketing gate"
+    assert "impacts chain" in content, "dogfood workflow 未要求開票考慮 impacts chain"
+
+
+@pytest.mark.spec("AC-MIDE-07H")
+def test_ac_mide_07h_dogfood_workflow_mentions_iteration_artifacts():
+    """Dogfood workflow must document producer/monitor artifact outputs for each iteration."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "build_iteration_artifacts.py" in content, "dogfood workflow 未引用 iteration artifact builder"
+    assert "/tmp/zenos-dogfood/{DF-ID}/producer.jsonl" in content, "dogfood workflow 未定義 producer artifact path"
+    assert "/tmp/zenos-dogfood/{DF-ID}/monitor.json" in content, "dogfood workflow 未定義 monitor artifact path"
+
+
+@pytest.mark.spec("AC-MIDE-07I")
+def test_ac_mide_07i_dogfood_workflow_mentions_baseline_builder():
+    """Dogfood workflow must document how to build the scenario baseline library."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "build_baseline_library.py" in content, "dogfood workflow 未引用 baseline builder"
+    assert "/tmp/zenos-dogfood/baseline-library.json" in content, "dogfood workflow 未定義 baseline library path"
+
+
+@pytest.mark.spec("AC-MIDE-07K")
+def test_ac_mide_07k_dogfood_workflow_mentions_monitor_report_builder():
+    """Dogfood workflow must document how to enrich monitor.json into a per-type health diff report."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "build_monitor_report.py" in content, "dogfood workflow 未引用 monitor report builder"
+    assert "--quality-json" in content and "--staleness-json" in content, (
+        "dogfood workflow 未說明 monitor report 需要哪些 governance payloads"
+    )
+
+
+@pytest.mark.spec("AC-MIDE-07L")
+def test_ac_mide_07l_dogfood_workflow_mentions_delta_builder():
+    """Dogfood workflow must document how to compare before/after iterations into delta.json."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "build_iteration_delta.py" in content, "dogfood workflow 未引用 delta builder"
+    assert "/tmp/zenos-dogfood/{DF-ID}/delta.json" in content, "dogfood workflow 未定義 delta artifact path"
+
+
+@pytest.mark.spec("AC-MIDE-07M")
+def test_ac_mide_07m_dogfood_workflow_mentions_replay_call_filters():
+    """Dogfood workflow must document call filters for replaying broad vs targeted document retrieval from real transcripts."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "--call-filter documents_broad" in content, "dogfood workflow 未說明 broad replay filter"
+    assert "--call-filter documents_targeted" in content, "dogfood workflow 未說明 targeted replay filter"
+
+
+@pytest.mark.spec("AC-MIDE-07N")
+def test_ac_mide_07n_dogfood_workflow_requires_minimal_clean_room_read_set():
+    """Dogfood workflow must keep producer/verifier pre-read minimal so token measurements are not dominated by governance docs."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "最小讀取集合" in content, "dogfood workflow 未定義 minimal clean-room read set"
+    assert "bootstrap-protocol.md" in content and "document-governance.md" in content, "dogfood workflow 未明示哪些長文件預設不要預載"
+    assert "token 成本不能先被 pre-read 吃掉" in content, "dogfood workflow 未說明 minimal read set 的 token 理由"
+
+
+@pytest.mark.spec("AC-MIDE-07O")
+def test_ac_mide_07o_dogfood_workflow_caps_clean_room_search_limits():
+    """Dogfood workflow must cap clean-room search limits so producer/verifier do not overfetch candidates by default."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "預設取樣上限" in content, "dogfood workflow 未定義 clean-room search limit cap"
+    assert 'limit=5' in content, "dogfood workflow 未要求 clean-room search limit<=5"
+    assert 'limit<=3' in content, "dogfood workflow 未要求 document candidate sampling limit<=3"
+
+
+@pytest.mark.spec("AC-MIDE-07P")
+def test_ac_mide_07p_dogfood_workflow_requires_product_scope_when_known():
+    """Dogfood workflow must require product-scoped search when scenario product is known."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "產品 scope（已知時必帶）" in content, "dogfood workflow 未定義 product-scoped retrieval rule"
+    assert 'product_id="{PRODUCT_ID}"' in content, "dogfood workflow 未要求 entity/document search 帶 product_id"
+
+
+@pytest.mark.spec("AC-MIDE-07Q")
+def test_ac_mide_07q_dogfood_workflow_separates_routing_from_delivery_failures():
+    """Dogfood workflow must classify document_summary fallback after correct L3 hit as delivery degradation, not routing failure."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "source delivery degraded" in content, "dogfood workflow 未定義 source delivery degraded 分類"
+    assert "L3 routing failure" in content, "dogfood workflow 未區分 routing failure"
+    assert "GitHub token / repo 權限 / delivery snapshot" in content, "dogfood workflow 未說明 delivery/auth path 判讀"
+
+
+@pytest.mark.spec("AC-MIDE-07R")
+def test_ac_mide_07r_dogfood_workflow_requires_github_delivery_secret_health_gate():
+    """Dogfood workflow must require a post-deploy GitHub delivery secret health check for MCP runtime changes."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "check_github_delivery_secret.py" in content, "dogfood workflow 未要求 deploy 後檢查 github delivery secret"
+    assert "--secret-name github-token" in content, "dogfood workflow 未指定 github-token secret health check"
+    assert "delivery/auth blocker" in content, "dogfood workflow 未定義 invalid github token 的 blocker 分類"
+    assert "--github-delivery-secret-health-json" in content, "dogfood workflow 未把 github secret health 接進 monitor artifact"
+    assert "health.delivery_auth" in content, "dogfood workflow 未要求 monitor 寫入 delivery_auth health"
+
+
+@pytest.mark.spec("AC-MIDE-07S")
+def test_ac_mide_07s_dogfood_workflow_treats_missing_formal_entry_snapshot_as_delivery_friction():
+    """Dogfood workflow must use invalid_documents analyzer signal to classify missing/stale formal-entry delivery snapshot as delivery friction."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert 'analyze(check_type="invalid_documents")' in content, "dogfood workflow 未要求 monitor 檢查 invalid_documents"
+    assert "--invalid-documents-json" in content, "dogfood workflow 未把 invalid_documents 接進 monitor artifact builder"
+    assert "current_formal_entry_missing_delivery_snapshot" in content, "dogfood workflow 未納入 missing delivery snapshot signal"
+    assert "current_formal_entry_stale_delivery_snapshot" in content, "dogfood workflow 未納入 stale delivery snapshot signal"
+    assert "delivery/auth path friction" in content, "dogfood workflow 未將 formal-entry snapshot 缺口歸類為 delivery friction"
+    assert "build_snapshot_repair_queue.py" in content, "dogfood workflow 未提供 snapshot repair queue builder"
+    assert "apply_snapshot_repair_queue.py" in content, "dogfood workflow 未提供 snapshot repair runner"
+
+
+@pytest.mark.spec("AC-MIDE-07T")
+def test_ac_mide_07t_dogfood_workflow_emits_source_repair_queue_for_source_not_found():
+    """Dogfood workflow must convert SOURCE_NOT_FOUND replay results into a source repair queue artifact."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "build_source_repair_queue.py" in content, "dogfood workflow 未提供 source repair queue builder"
+    assert "source-repair-queue.json" in content, "dogfood workflow 未定義 source repair queue artifact"
+    assert "SOURCE_NOT_FOUND" in content, "dogfood workflow 未處理 SOURCE_NOT_FOUND replay 結果"
+    assert "source governance friction" in content, "dogfood workflow 未定義 source governance friction 分類"
+    assert "--source-repair-queue-json" in content, "dogfood workflow 未把 source repair queue 接進 monitor artifact"
+    assert "health.source_governance" in content, "dogfood workflow 未要求 monitor 寫入 source_governance health"
+    assert "health.delivery_auth" in content, "dogfood workflow 未要求 delta 比較 delivery_auth health"
+    assert "build_governance_review_task_draft.py" in content, "dogfood workflow 未提供 governance review task draft builder"
+    assert "governance-review-task-drafts.json" in content, "dogfood workflow 未定義 governance review task draft artifact"
+
+
+@pytest.mark.spec("AC-MIDE-07H")
+def test_ac_mide_07h_task_governance_forbids_full_scan_ticket_context():
+    """Task governance must require graph-first context loading and forbid full-scan document search for ticket drafting."""
+    workflow = ROOT / "skills" / "governance" / "task-governance.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "建票 context 載入（graph-first" in content, "task governance 未加入 graph-first ticket context"
+    assert 'search(collection="documents", query="關鍵字")' in content, "task governance 未明示禁止 full-scan document query"
+    assert "linked_entities" in content and "impacts chain" in content, "task governance 未要求 graph-assisted ticket quality"
+
+
 @pytest.mark.spec("AC-MIDE-07C")
 def test_ac_mide_07c_release_governance_skill_distinguishes_process_vs_data():
     """Release governance skill must distinguish process governance from data remediation."""
@@ -739,6 +944,169 @@ def test_ac_mide_07c_release_governance_skill_distinguishes_process_vs_data():
     content = workflow.read_text(encoding="utf-8")
     assert "流程治理" in content, "release governance skill 未標示流程治理模式"
     assert "不是 ontology data remediation" in content, "release governance skill 未區分流程與資料修補"
+
+
+@pytest.mark.spec("AC-MIDE-07E")
+def test_ac_mide_07e_capture_workflow_forbids_keyword_coverage_audit():
+    """Capture workflow must route document coverage audits to graph-first retrieval instead of keyword search."""
+    workflow = ROOT / "skills" / "workflows" / "knowledge-capture.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "覆蓋率清查紅線" in content, "capture workflow 未加入 coverage audit red lines"
+    assert 'search(collection="documents", entity_name="<L2 name>", include=["summary"])' in content, (
+        "capture workflow 未要求用 entity_name 枚舉 L3 documents"
+    )
+    assert 'search(query="關鍵字", collection="documents")' in content, (
+        "capture workflow 未明示 keyword search 不是 coverage audit 主路徑"
+    )
+
+
+@pytest.mark.spec("AC-MIDE-07U")
+def test_ac_mide_07u_dogfood_release_skill_prefers_summary_compact_for_l3_graph_retrieval():
+    """Release dogfood skill should prefer summary_compact for low-token L3 graph retrieval."""
+    workflow = ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert 'include=["summary_compact"]' in content, "dogfood release skill 未要求 summary_compact"
+    assert 'search(collection="documents", entity_name="{L2 名稱}", include=["summary_compact"], limit=3, product_id="{PRODUCT_ID}")' in content, (
+        "dogfood release skill 未提供低 token 的 L3 graph retrieval path"
+    )
+
+
+@pytest.mark.spec("AC-MIDE-07V")
+def test_ac_mide_07v_dogfood_release_skill_tracks_payload_bytes_when_tokens_are_noisy():
+    """Release dogfood skill should compare payload bytes when session-level token totals are dominated by fixed overhead."""
+    workflow = ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "payload_bytes.total_result_bytes" in content, "dogfood release skill 未要求比較 total_result_bytes"
+    assert "payload_bytes.search_result_bytes" in content, "dogfood release skill 未要求比較 search_result_bytes"
+    assert "payload_bytes.read_source_result_bytes" in content, "dogfood release skill 未要求比較 read_source_result_bytes"
+
+
+@pytest.mark.spec("AC-MIDE-07V2")
+def test_ac_mide_07v2_dogfood_workflows_require_token_gate_for_pass_verdict():
+    """Dogfood workflows must not allow PASS when token budget is exceeded or contaminated."""
+    targets = [
+        ROOT / "skills" / "workflows" / "dogfood.md",
+        ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md",
+    ]
+    for workflow in targets:
+        if not workflow.exists():
+            pytest.fail(f"{workflow} not found")
+        content = workflow.read_text(encoding="utf-8")
+        assert "token_budget" in content, f"{workflow} 未要求定義 token_budget"
+        assert "token budget failure" in content, f"{workflow} 未定義 token budget failure"
+        assert "token budget contaminated" in content, f"{workflow} 未定義 token budget contaminated"
+        assert "cache_read_input_tokens" in content, f"{workflow} 未要求檢查 cache_read_input_tokens"
+        assert "不得宣稱 dogfood 通過" in content or "不得判定 PASS" in content, (
+            f"{workflow} 未禁止 token gate 未過時判定 PASS"
+        )
+
+
+@pytest.mark.spec("AC-MIDE-07V3")
+def test_ac_mide_07v3_dogfood_workflows_require_since_text_for_artifact_slicing():
+    """Dogfood workflows must slice transcript artifacts by the current DF marker to avoid session pollution."""
+    targets = [
+        ROOT / "skills" / "workflows" / "dogfood.md",
+        ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md",
+    ]
+    for workflow in targets:
+        if not workflow.exists():
+            pytest.fail(f"{workflow} not found")
+        content = workflow.read_text(encoding="utf-8")
+        assert "--since-text DF-{YYYYMMDD}-{N}" in content, f"{workflow} 未要求 artifact builder 使用 --since-text"
+        assert "marker 找不到時 script 會 fail" in content, f"{workflow} 未說明 marker missing 必須 fail"
+        assert "其他任務的 MCP calls / token usage" in content, f"{workflow} 未說明 since-text 防止 session 污染"
+
+
+@pytest.mark.spec("AC-MIDE-07V4")
+def test_ac_mide_07v4_dogfood_workflows_require_machine_verdict_for_l3_retrieval():
+    """Dogfood workflows must produce verdict.json for L3 retrieval runs instead of relying on manual monitor inspection."""
+    targets = [
+        ROOT / "skills" / "workflows" / "dogfood.md",
+        ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md",
+    ]
+    for workflow in targets:
+        if not workflow.exists():
+            pytest.fail(f"{workflow} not found")
+        content = workflow.read_text(encoding="utf-8")
+        assert "build_l3_retrieval_artifacts.py" in content, f"{workflow} 未要求一鍵 artifact + verdict wrapper"
+        assert "build_l3_retrieval_verdict.py" in content, f"{workflow} 未要求 L3 retrieval verdict builder"
+        assert "/tmp/zenos-dogfood/{DF-ID}/verdict.json" in content, f"{workflow} 未定義 verdict artifact"
+        assert "不得只靠人工讀 monitor" in content, f"{workflow} 未禁止人工 monitor 判定取代 verdict"
+        assert "routing / source delivery / token gate" in content, f"{workflow} 未明確 verdict 三個 gate"
+        assert "--token-budget <TOKEN_BUDGET>" in content, f"{workflow} 未要求 wrapper/verdict 帶 token budget"
+
+
+@pytest.mark.spec("AC-MIDE-07W")
+def test_ac_mide_07w_dogfood_release_skill_prefers_read_source_preview_before_full():
+    """Release dogfood skill should default to low-cost read_source preview before full-content read."""
+    workflow = ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "preview_chars=1200" in content, "dogfood release skill 未要求 read_source preview_chars"
+    assert "只有 preview 不足" in content, "dogfood release skill 未規定 preview 不足才升級 full read"
+
+
+@pytest.mark.spec("AC-MIDE-07X")
+def test_ac_mide_07x_dogfood_workflow_requires_new_top_level_session_after_tool_schema_changes():
+    """Dogfood workflow must require a fresh top-level chat session when validating MCP tool schema changes."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "MCP tool contract / parameter schema" in content, "dogfood workflow 未標示 tool schema 變更 gate"
+    assert "新的 top-level chat session" in content, "dogfood workflow 未要求 top-level session refresh"
+    assert "同一個聊天內只重開 subagent 不算" in content, "dogfood workflow 未禁止用同聊天 subagent 代替 schema refresh"
+    assert "schema freshness blocker" in content, "dogfood workflow 未定義 schema freshness blocker"
+
+
+@pytest.mark.spec("AC-MIDE-07Y")
+def test_ac_mide_07y_dogfood_release_skill_requires_new_top_level_session_after_tool_schema_changes():
+    """Release dogfood skill must require a fresh top-level chat session when validating new MCP parameters."""
+    workflow = ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "MCP tool contract / parameter schema" in content, "dogfood release skill 未標示 tool schema 變更 gate"
+    assert "新的 top-level chat session" in content, "dogfood release skill 未要求 top-level session refresh"
+    assert "同一個聊天內只重開 subagent 不算" in content, "dogfood release skill 未禁止同聊天 subagent 代替 schema refresh"
+    assert "schema freshness blocker" in content, "dogfood release skill 未定義 schema freshness blocker"
+
+
+@pytest.mark.spec("AC-MIDE-07Z")
+def test_ac_mide_07z_dogfood_workflows_expose_schema_freshness_artifact_gate():
+    """Dogfood workflows must expose machine-readable schema freshness detection for preview contract verification."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    release_workflow = ROOT / "skills" / "release" / "workflows" / "dogfood" / "SKILL.md"
+    for target in (workflow, release_workflow):
+        if not target.exists():
+            pytest.fail(f"{target} not found")
+        content = target.read_text(encoding="utf-8")
+        assert "--expect-read-source-preview" in content, f"{target} 未要求 artifact builder 檢查 preview schema freshness"
+        assert "tool_contract.schema_freshness_blocker" in content, f"{target} 未把 schema freshness blocker 接進 monitor artifact"
+        assert "findings" in content and "schema freshness blocker" in content, f"{target} 未要求 monitor findings 顯示 schema freshness blocker"
+
+
+@pytest.mark.spec("AC-MIDE-07J")
+def test_ac_mide_07j_release_capture_skill_requires_capture_journal_for_baseline():
+    """Release capture skill must make capture journal writes explicit so dogfood baseline can be built from real sessions."""
+    workflow = ROOT / "skills" / "release" / "zenos-capture" / "SKILL.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "Capture journal" in content, "release capture skill 未加入 capture journal 段落"
+    assert 'journal_read(limit=5, project="{PROJECT_NAME}", flow_type="capture")' in content, (
+        "release capture skill 未要求先查最近 capture journal"
+    )
+    assert 'journal_write(' in content and 'flow_type="capture"' in content, (
+        "release capture skill 未明示寫入 flow_type=capture journal"
+    )
 
 
 # --- P0: AC-MIDE-08 ---
