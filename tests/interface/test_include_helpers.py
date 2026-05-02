@@ -67,9 +67,9 @@ class TestValidateInclude:
         assert include_set == set()
 
     def test_search_valid_values(self):
-        include_set, err = validate_include(["summary", "tags", "full"], VALID_SEARCH_INCLUDES)
+        include_set, err = validate_include(["summary", "summary_compact", "tags", "full"], VALID_SEARCH_INCLUDES)
         assert err is None
-        assert include_set == {"summary", "tags", "full"}
+        assert include_set == {"summary", "summary_compact", "tags", "full"}
 
     def test_entity_include_unknown_in_search_valid_set(self):
         # "relationships" is valid for entities but NOT for search

@@ -28,6 +28,7 @@ VALID_ENTITY_INCLUDES: set[str] = {
 
 VALID_SEARCH_INCLUDES: set[str] = {
     "summary",
+    "summary_compact",
     "tags",
     "full",
 }
