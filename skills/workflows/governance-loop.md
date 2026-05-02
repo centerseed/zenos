@@ -20,6 +20,26 @@ version: 2.0.0
 - 任務閉環：治理問題要轉成 task，交付後用 confirm 驗收。
 - 文件 bundle-first：L3 document 預設視為 `doc_role=index`，治理完成必須包含 `bundle_highlights` 與 L2 可達入口。
 
+### 0.1) 先判斷：你現在是在修流程，還是在修資料
+
+若用戶意圖是：
+- 「找治理流程中的斷點或問題」
+- 「dogfood 為什麼沒過」
+- 「reject rate 為什麼高」
+- 「skill / MCP contract 哪裡不一致」
+
+這一輪屬於**流程治理**，不是 ontology data remediation。
+
+流程治理模式下：
+- 允許：`analyze/search/get` 盤點、讀 spec/skill/runtime、修 MCP 行為、修 workflow/skill、補測試、輸出 hot spots
+- 禁止：直接 `write/confirm` 去改 document/entity/task 資料，除非用戶明確要求「修資料」
+
+判斷原則：
+- 問題在「agent 怎麼被帶錯 / tool 怎麼 reject / contract 怎麼不一致」→ 修流程
+- 問題在「某個 entity/document 的內容或狀態不對」→ 修資料
+
+如果流程盤點時看到資料髒污，應降級記錄為 observation / backlog，不得自動把資料修補當成主線工作。
+
 ## 0.5) MCP SSOT（必守）
 
 依 `docs/specs/SPEC-mcp-tool-contract.md`：

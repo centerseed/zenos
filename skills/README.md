@@ -104,6 +104,7 @@ Agent 遇到這些意圖時，應主動載入對應 skill：
 | 「sync」「同步」「git 變更」 | `knowledge-sync` |
 | 「設定 ZenOS」「接 MCP」 | `setup` |
 | 「治理掃描」「品質分數」 | `governance-loop` |
+| 「dogfood 為什麼沒過」「找流程斷點」「reject rate 高」 | `dogfood`（先走流程評估模式，不要直接修 ontology 資料） |
 
 ---
 

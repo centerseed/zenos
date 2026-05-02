@@ -719,6 +719,28 @@ def test_ac_mide_07_dogfood_workflow_mentions_gate():
     assert "reject rate" in content.lower() or "reject-rate" in content.lower(), "dogfood workflow 未說明 gate threshold"
 
 
+@pytest.mark.spec("AC-MIDE-07B")
+def test_ac_mide_07b_dogfood_workflow_forbids_data_remediation_by_default():
+    """Dogfood workflow must distinguish process evaluation from ontology data remediation."""
+    workflow = ROOT / "skills" / "workflows" / "dogfood.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "流程評估模式" in content, "dogfood workflow 未明確標示流程評估模式"
+    assert "不可以：直接 `write/confirm` 去修 ontology 資料" in content, "dogfood workflow 未禁止預設修資料"
+
+
+@pytest.mark.spec("AC-MIDE-07C")
+def test_ac_mide_07c_release_governance_skill_distinguishes_process_vs_data():
+    """Release governance skill must distinguish process governance from data remediation."""
+    workflow = ROOT / "skills" / "release" / "zenos-governance" / "SKILL.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "流程治理" in content, "release governance skill 未標示流程治理模式"
+    assert "不是 ontology data remediation" in content, "release governance skill 未區分流程與資料修補"
+
+
 # --- P0: AC-MIDE-08 ---
 
 

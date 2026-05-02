@@ -12,6 +12,23 @@ version: 1.0.0
 
 讓 agent 自己跑過一條完整的治理鏈，邊跑邊記錄卡點，最後輸出評估報告。
 
+## 紅線：先分清楚你在驗流程，還是在修資料
+
+當用戶要的是：
+- 找治理流程斷點
+- 看 dogfood 為什麼沒過
+- 看 MCP reject rate / top rejection reasons
+- 驗證 skill / MCP contract / workflow 是否一致
+
+這一輪預設是**流程評估模式**，不是 ontology data remediation。
+
+流程評估模式下：
+- 可以：`search/get/analyze`、讀 transcript / skill / spec、統計 reject rate、修 MCP runtime、修 skill、修 spec、補測試
+- 不可以：直接 `write/confirm` 去修 ontology 資料、archive document、修改 entity/document 狀態、補資料欄位
+
+只有在用戶**明確要求修資料**時，才可切換到資料治理模式。
+若流程評估途中看到 Dogfood 子樹資料有髒污，應記錄為 observation / backlog，不得把它當作本輪完成條件。
+
 ---
 
 ## 評估目標
