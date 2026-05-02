@@ -62,6 +62,56 @@ async def test_fetch_contents_404_error_message_format():
     assert "(ref=main)" in msg
 
 
+@pytest.mark.asyncio
+async def test_fetch_contents_401_falls_back_to_public_raw():
+    """401 from Contents API can still read public files via unauthenticated raw URL."""
+    adapter = GitHubAdapter(token="fake-token")
+
+    api_resp = MagicMock()
+    api_resp.status_code = 401
+    api_resp.headers = {"content-type": "application/json"}
+    api_resp.json.return_value = {"message": "Bad credentials"}
+    raw_resp = MagicMock()
+    raw_resp.status_code = 200
+    raw_resp.text = "# Action Layer"
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client.get.side_effect = [api_resp, raw_resp]
+
+        result = await adapter._fetch_contents("centerseed", "zenos", "docs/specs/SPEC-action-layer.md", "main")
+
+    assert result == "# Action Layer"
+    assert mock_client.get.await_args_list[1].args[0] == (
+        "https://raw.githubusercontent.com/centerseed/zenos/main/docs/specs/SPEC-action-layer.md"
+    )
+
+
+@pytest.mark.asyncio
+async def test_fetch_contents_401_maps_to_permission_error_when_public_raw_fails():
+    """401 still normalizes to PermissionError when unauthenticated raw URL is unavailable."""
+    adapter = GitHubAdapter(token="fake-token")
+
+    api_resp = MagicMock()
+    api_resp.status_code = 401
+    api_resp.headers = {"content-type": "application/json"}
+    api_resp.json.return_value = {"message": "Bad credentials"}
+    raw_resp = MagicMock()
+    raw_resp.status_code = 404
+
+    with patch("httpx.AsyncClient") as mock_client_cls:
+        mock_client = AsyncMock()
+        mock_client_cls.return_value.__aenter__.return_value = mock_client
+        mock_client.get.side_effect = [api_resp, raw_resp]
+
+        with pytest.raises(PermissionError) as exc_info:
+            await adapter._fetch_contents("centerseed", "zenos", "docs/specs/SPEC-action-layer.md", "main")
+
+    assert "Permission denied" in str(exc_info.value)
+    assert "Bad credentials" in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # Unit tests: _fetch_via_blob NOT_FOUND error message format
 # ---------------------------------------------------------------------------

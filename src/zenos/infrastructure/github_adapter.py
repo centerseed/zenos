@@ -14,6 +14,7 @@ import httpx
 # ---------------------------------------------------------------------------
 
 GITHUB_API_BASE = "https://api.github.com"
+GITHUB_RAW_BASE = "https://raw.githubusercontent.com"
 
 _URL_PATTERN = re.compile(
     r"https?://github\.com/"
@@ -140,14 +141,21 @@ class GitHubAdapter:
             if resp.status_code == 429:
                 raise RuntimeError(f"GitHub API rate limited while fetching {path}")
 
-            if resp.status_code == 403:
+            if resp.status_code == 401:
+                raw_content = await self._fetch_public_raw(client, owner, repo, path, ref)
+                if raw_content is not None:
+                    return raw_content
+
+            if resp.status_code in {401, 403}:
                 body = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
                 message = body.get("message", "")
                 # Secondary rate limit
                 if "rate limit" in message.lower():
                     raise RuntimeError(f"GitHub API rate limited while fetching {path}")
                 # File too large -> try blob API
-                if "too large" in message.lower() or resp.headers.get("content-length", "0") == "0":
+                if resp.status_code != 401 and (
+                    "too large" in message.lower() or resp.headers.get("content-length", "0") == "0"
+                ):
                     return await self._fetch_via_blob(client, owner, repo, path, ref)
                 raise PermissionError(
                     f"Permission denied for {owner}/{repo}/{path}: {message}"
@@ -184,6 +192,21 @@ class GitHubAdapter:
             raise ValueError(
                 f"Unexpected response format for {owner}/{repo}/{path}"
             )
+
+    async def _fetch_public_raw(
+        self,
+        client: httpx.AsyncClient,
+        owner: str,
+        repo: str,
+        path: str,
+        ref: str,
+    ) -> str | None:
+        """Fetch a public GitHub file without auth when the API token is bad."""
+        raw_url = f"{GITHUB_RAW_BASE}/{owner}/{repo}/{ref}/{path}"
+        resp = await client.get(raw_url)
+        if resp.status_code == 200:
+            return resp.text
+        return None
 
     async def _fetch_via_blob(
         self,
@@ -298,7 +321,7 @@ class GitHubAdapter:
         """Raise appropriate errors for non-2xx responses."""
         if resp.status_code == 429:
             raise RuntimeError(f"GitHub API rate limited ({context})")
-        if resp.status_code == 403:
+        if resp.status_code in {401, 403}:
             body = resp.json() if "application/json" in resp.headers.get("content-type", "") else {}
             msg = body.get("message", "")
             if "rate limit" in msg.lower():
