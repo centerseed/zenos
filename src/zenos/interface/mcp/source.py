@@ -84,6 +84,7 @@ async def read_source(
     doc_id: str | None = None,
     source_id: str | None = None,
     uri: str | None = None,
+    preview_chars: int | None = None,
 ) -> dict:
     """讀取文件的原始內容（透過 adapter 從 GitHub 等來源取得）。
 
@@ -102,11 +103,23 @@ async def read_source(
         source_id: 可選。指定要讀取的 source（用於 doc_role=index 的多 source 文件）。
                    不指定時讀取 primary source 或第一個 valid source。
         uri: Deprecated alias for doc_id. Accepts either "<doc_id>" or "/docs/<doc_id>".
+        preview_chars: 可選。若提供，回傳內容會被截斷到最多這麼多字元，
+                       用於低成本 preview read。
     """
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
 
     legacy_warnings: list[str] = []
+    if preview_chars is not None:
+        if not isinstance(preview_chars, int) or preview_chars <= 0:
+            return _unified_response(
+                status="rejected",
+                data={
+                    "error": "INVALID_PREVIEW_CHARS",
+                    "message": "preview_chars must be a positive integer",
+                },
+                rejection_reason="preview_chars must be a positive integer",
+            )
     if not doc_id and uri:
         doc_id = _parse_legacy_doc_uri_alias(uri)
         if not doc_id:
@@ -131,6 +144,21 @@ async def read_source(
         if legacy_warnings:
             response["warnings"] = [*legacy_warnings, *(response.get("warnings") or [])]
         return response
+
+    def _apply_preview(payload: dict) -> dict:
+        if preview_chars is None:
+            return payload
+        content = payload.get("content")
+        if not isinstance(content, str):
+            return payload
+        resp = dict(payload)
+        resp["preview_chars"] = preview_chars
+        if len(content) > preview_chars:
+            resp["content"] = content[:preview_chars]
+            resp["content_truncated"] = True
+        else:
+            resp["content_truncated"] = False
+        return resp
 
     await _ensure_services()
     # MCP setup_hint mapping for adapter suggestions
@@ -188,7 +216,9 @@ async def read_source(
         if not sources:
             try:
                 legacy_result = await _mcp.source_service.read_source(doc_id)
-                return _with_legacy_warnings(_unified_response(data={"doc_id": doc_id, "content": legacy_result}))
+                return _with_legacy_warnings(
+                    _unified_response(data=_apply_preview({"doc_id": doc_id, "content": legacy_result}))
+                )
             except (ValueError, FileNotFoundError):
                 return _error_response(
                     status="rejected",
@@ -283,6 +313,35 @@ async def read_source(
                 resp["alternative_sources"] = alternative_sources
             return resp
 
+        async def _snapshot_delivery_fallback(delivery_status: str = "snapshot_fallback") -> dict | None:
+            snapshot_reader = getattr(_mcp.source_service, "read_source_with_snapshot", None)
+            if snapshot_reader is None:
+                return None
+            maybe = snapshot_reader(doc_id, source_id=current_sid, source_uri=uri)
+            snapshot_result = await maybe if inspect.isawaitable(maybe) else maybe
+            if isinstance(snapshot_result, dict) and "content" in snapshot_result:
+                resp = {
+                    "doc_id": doc_id,
+                    "content": snapshot_result["content"],
+                    "content_type": snapshot_result.get("content_type", "full"),
+                    "source_type": source_type,
+                    "content_access": content_access,
+                    "retrieval_mode": retrieval_mode,
+                    "delivery_status": delivery_status,
+                }
+                if current_sid:
+                    resp["source_id"] = current_sid
+                if alternative_sources:
+                    resp["alternative_sources"] = alternative_sources
+                return resp
+            return None
+
+        def _should_prefer_snapshot_for_github() -> bool:
+            # Snapshot-first for GitHub docs: prefer the durable delivery artifact
+            # before paying the external direct-read path. If no snapshot exists,
+            # we fall back to the existing direct-read / summary-fallback path.
+            return source_type == "github"
+
         if content_access == "none":
             return _error_response(
                 error_code="FORBIDDEN",
@@ -326,14 +385,14 @@ async def read_source(
                     resp["staleness_hint"] = staleness
                 if alternative_sources:
                     resp["alternative_sources"] = alternative_sources
-                return _with_legacy_warnings(_unified_response(data=resp))
+                return _with_legacy_warnings(_unified_response(data=_apply_preview(resp)))
             if source_type in {"local", "upload"}:
                 fallback = _document_summary_fallback(
                     "此 source 尚未有 snapshot_summary；已回傳文件 metadata summary。"
                     "請重新同步 source 以取得可讀 snapshot。"
                 )
                 if fallback is not None:
-                    return _with_legacy_warnings(_unified_response(data=fallback))
+                    return _with_legacy_warnings(_unified_response(data=_apply_preview(fallback)))
             # No snapshot_summary available
             _audit_source_unavailable(doc_id, current_sid, "SNAPSHOT_UNAVAILABLE")
             return _error_response(
@@ -357,12 +416,12 @@ async def read_source(
             if content_access != "full":
                 snapshot = target_source.get("snapshot_summary")
                 if snapshot:
-                    return _with_legacy_warnings(_unified_response(data={
+                    return _with_legacy_warnings(_unified_response(data=_apply_preview({
                         "doc_id": doc_id,
                         "source_id": current_sid,
                         "content": snapshot,
                         "content_type": "snapshot_summary",
-                    }))
+                    })))
                 return _error_response(
                     error_code="SNAPSHOT_UNAVAILABLE",
                     message=f"Source '{current_sid or uri}' has no snapshot_summary",
@@ -403,11 +462,11 @@ async def read_source(
             live_result = await maybe if inspect.isawaitable(maybe) else maybe
 
             if isinstance(live_result, str):
-                return _with_legacy_warnings(_unified_response(data={
+                return _with_legacy_warnings(_unified_response(data=_apply_preview({
                     "doc_id": doc_id,
                     "source_id": current_sid,
                     "content": live_result,
-                }))
+                })))
             if isinstance(live_result, dict) and "content" in live_result:
                 payload = {
                     "doc_id": doc_id,
@@ -416,7 +475,7 @@ async def read_source(
                 }
                 if "content_type" in live_result:
                     payload["content_type"] = live_result["content_type"]
-                return _with_legacy_warnings(_unified_response(data=payload))
+                return _with_legacy_warnings(_unified_response(data=_apply_preview(payload)))
             if isinstance(live_result, dict):
                 return _error_response(
                     error_code=str(live_result.get("error", "LIVE_RETRIEVAL_FAILED")),
@@ -459,6 +518,16 @@ async def read_source(
 
         # If target source is stale/unresolvable, return info with setup_hint
         if source_status in ("stale", "unresolvable"):
+            if source_type == "github":
+                snapshot_fallback = await _snapshot_delivery_fallback()
+                if snapshot_fallback is not None:
+                    return _with_legacy_warnings(_unified_response(data=_apply_preview(snapshot_fallback)))
+                fallback = _document_summary_fallback(
+                    "GitHub source 目前標記為 stale；已回傳文件 metadata summary。"
+                    "請修復 source URI / 權限，或補上 zenos_native delivery snapshot。"
+                )
+                if fallback is not None:
+                    return _with_legacy_warnings(_unified_response(data=_apply_preview(fallback)))
             staleness = _compute_staleness_hint(target_source)
             extra: dict = {
                 "doc_id": doc_id,
@@ -494,13 +563,13 @@ async def read_source(
                     resp["source_id"] = current_sid
                 if alternative_sources:
                     resp["alternative_sources"] = alternative_sources
-                return _with_legacy_warnings(_unified_response(data=resp))
+                return _with_legacy_warnings(_unified_response(data=_apply_preview(resp)))
             fallback = _document_summary_fallback(
                 "zenos_native source 尚未有 revision；已回傳文件 metadata summary。"
                 "請在 Dashboard 儲存文件或用 write(initial_content=...) 補上 delivery snapshot。"
             )
             if fallback is not None:
-                return _with_legacy_warnings(_unified_response(data=fallback))
+                return _with_legacy_warnings(_unified_response(data=_apply_preview(fallback)))
             _audit_source_unavailable(doc_id, current_sid, "SNAPSHOT_UNAVAILABLE")
             return _error_response(
                 error_code="SNAPSHOT_UNAVAILABLE",
@@ -514,6 +583,11 @@ async def read_source(
                     "alternative_sources": alternative_sources,
                 },
             )
+
+        if _should_prefer_snapshot_for_github():
+            snapshot_first = await _snapshot_delivery_fallback("snapshot_first")
+            if snapshot_first is not None:
+                return _with_legacy_warnings(_unified_response(data=_apply_preview(snapshot_first)))
 
         # Read the actual content via adapter — pass selected URI so the
         # service reads the correct source, not always sources[0].
@@ -534,7 +608,7 @@ async def read_source(
                 resp["staleness_hint"] = staleness
             if alternative_sources:
                 resp["alternative_sources"] = alternative_sources
-            return _with_legacy_warnings(_unified_response(data=resp))
+            return _with_legacy_warnings(_unified_response(data=_apply_preview(resp)))
         if "content" in result:
             resp = {"doc_id": doc_id, "content": result["content"]}
             if current_sid:
@@ -544,9 +618,23 @@ async def read_source(
                 resp["staleness_hint"] = staleness
             if alternative_sources:
                 resp["alternative_sources"] = alternative_sources
-            return _with_legacy_warnings(_unified_response(data=resp))
+            return _with_legacy_warnings(_unified_response(data=_apply_preview(resp)))
         # Error result from read_source_with_recovery — enrich with setup_hint
         if "error" in result:
+            if (
+                str(result.get("error") or "") == "DEAD_LINK"
+                and str(result.get("source_type") or source_type).strip().lower() == "github"
+                and str(result.get("suggested_action") or "") == "check_permission"
+            ):
+                snapshot_fallback = await _snapshot_delivery_fallback()
+                if snapshot_fallback is not None:
+                    return _with_legacy_warnings(_unified_response(data=_apply_preview(snapshot_fallback)))
+                fallback = _document_summary_fallback(
+                    "GitHub source 目前無法直接讀取原文；已回傳文件 metadata summary。"
+                    "請確認 GitHub token / repo 權限，或補上 zenos_native delivery snapshot。"
+                )
+                if fallback is not None:
+                    return _with_legacy_warnings(_unified_response(data=_apply_preview(fallback)))
             staleness = _compute_staleness_hint(target_source)
             extra_err: dict = {
                 **{k: v for k, v in result.items() if k not in {"error", "message"}},
@@ -560,7 +648,7 @@ async def read_source(
                 message=str(result.get("message", "Failed to read source")),
                 extra_data=extra_err,
             )
-        return _with_legacy_warnings(_unified_response(data=result))
+        return _with_legacy_warnings(_unified_response(data=_apply_preview(result)))
     except (ValueError, FileNotFoundError):
         return _error_response(
             status="rejected",

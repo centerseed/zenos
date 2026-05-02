@@ -417,6 +417,10 @@ class SourceService:
         target: dict | None = None
         if source_id:
             target = next((s for s in sources if s.get("source_id") == source_id), None)
+            # Be resilient to legacy/current mismatches where the caller has a
+            # stable URI but the persisted source_id was missing or changed.
+            if target is None and source_uri:
+                target = next((s for s in sources if s.get("uri", "") == source_uri), None)
         elif source_uri:
             target = next((s for s in sources if s.get("uri", "") == source_uri), None)
         else:
