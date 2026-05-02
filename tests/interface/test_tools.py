@@ -1350,13 +1350,47 @@ class TestReadSourceTool:
 
             assert _non_ok_data(result, "error")["error"] == "ADAPTER_ERROR"
 
-    async def test_read_source_zenos_native_without_revision_returns_snapshot_unavailable(self):
+    async def test_read_source_zenos_native_without_revision_returns_document_summary_fallback(self):
         from zenos.interface.mcp import read_source
 
         doc = _make_entity(
             id="doc-native",
             name="Native Doc",
             type="document",
+            summary="Stable metadata summary for this native document.",
+            sources=[{
+                "source_id": "src-native",
+                "uri": "/docs/doc-native",
+                "type": "zenos_native",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={"error": "NOT_FOUND"})
+
+            result = await read_source(doc_id="doc-native")
+            data = _ok_data(result)
+
+            assert data["content"] == "Stable metadata summary for this native document."
+            assert data["content_type"] == "document_summary"
+            assert data["source_type"] == "zenos_native"
+            assert data["delivery_status"] == "summary_fallback"
+            assert "write(initial_content=...)" in data["setup_hint"]
+
+    async def test_read_source_zenos_native_without_revision_and_summary_returns_snapshot_unavailable(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-native",
+            name="Native Doc",
+            type="document",
+            summary="",
             sources=[{
                 "source_id": "src-native",
                 "uri": "/docs/doc-native",
@@ -1378,7 +1412,6 @@ class TestReadSourceTool:
 
             assert data["error"] == "SNAPSHOT_UNAVAILABLE"
             assert data["source_type"] == "zenos_native"
-            assert "Dashboard 儲存文件" in data["setup_hint"]
 
     async def test_read_source_zenos_native_returns_snapshot_content(self):
         from zenos.interface.mcp import read_source
@@ -1445,6 +1478,37 @@ class TestReadSourceTool:
             assert data["content_access"] == "summary"
             assert "task attachment proxy" in data["setup_hint"]
             assert "write(initial_content=...)" in data["setup_hint"]
+
+    async def test_read_source_helper_source_without_snapshot_returns_document_summary_fallback(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-local",
+            name="Local Doc",
+            type="document",
+            summary="Local document metadata summary is still readable.",
+            sources=[{
+                "source_id": "src-local",
+                "uri": "/tmp/local.md",
+                "type": "local",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service"):
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await read_source(doc_id="doc-local", source_id="src-local")
+            data = _ok_data(result)
+
+            assert data["content"] == "Local document metadata summary is still readable."
+            assert data["content_type"] == "document_summary"
+            assert data["source_type"] == "local"
+            assert data["delivery_status"] == "summary_fallback"
 
 
 # ---------------------------------------------------------------------------
@@ -3179,6 +3243,30 @@ class TestTaskTool:
             assert "linked_entities" in warning_texts
             assert "ontology context" in warning_texts
 
+    async def test_create_task_product_id_without_project_uses_saved_project_without_missing_project_warning(self):
+        from zenos.interface.mcp import _task_handler
+        from zenos.application.action.task_service import TaskResult
+
+        t = _make_task(linked_entities=["ent-1"], project="ZenOS", product_id="prod-1")
+        create_result = TaskResult(task=t, cascade_updates=[])
+
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+            mock_ts.enrich_task = AsyncMock(return_value={"expanded_entities": []})
+
+            result = await _task_handler(
+                action="create",
+                title="Fix governance task scope",
+                created_by="architect",
+                linked_entities=["ent-1"],
+                product_id="prod-1",
+            )
+
+            assert result["status"] == "ok"
+            assert not any("未指定 project" in warning for warning in result.get("warnings", []))
+            payload = mock_ts.create_task.await_args.args[0]
+            assert payload["product_id"] == "prod-1"
+
     async def test_create_task_with_linked_entities_no_empty_warning(self):
         """task create with linked_entities set should NOT produce the empty-entities warning."""
         from zenos.interface.mcp import _task_handler
@@ -3988,6 +4076,52 @@ class TestAnalyzeTool:
             mock_gs.compute_health_signal.assert_awaited_once_with(entity_id="prod-1")
             assert data["scope"]["entity_id"] == "prod-1"
 
+    async def test_analyze_quality_accepts_product_id_scope_alias(self):
+        from zenos.interface.mcp import analyze
+
+        report = QualityReport(
+            score=85,
+            passed=[QualityCheckItem(name="check1", passed=True, detail="ok")],
+            failed=[],
+            warnings=[],
+        )
+        report.metadata = {
+            "scope": {
+                "entity_id": "prod-1",
+                "entity_name": "Dogfood",
+                "mode": "subtree",
+                "entity_count": 2,
+            }
+        }
+
+        with patch("zenos.interface.mcp.governance_service") as mock_gs, \
+             patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_gs.run_quality_check = AsyncMock(return_value=report)
+            mock_gs.infer_l2_backfill_proposals = AsyncMock(return_value=[])
+            mock_gs.check_governance_review_overdue = AsyncMock(return_value=[])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[
+                _make_entity(id="prod-1", type="product", name="Dogfood", level=1),
+                _make_entity(id="mod-1", type="module", name="Dogfood Module", parent_id="prod-1", level=2),
+            ])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="quality", product_id="prod-1")
+            data = _ok_data(result)
+
+            mock_gs.run_quality_check.assert_awaited_once()
+            assert mock_gs.run_quality_check.await_args.kwargs["entity_id"] == "prod-1"
+            assert data["quality"]["scope"]["entity_id"] == "prod-1"
+
+    async def test_analyze_rejects_conflicting_entity_and_product_scope(self):
+        from zenos.interface.mcp import analyze
+
+        result = await analyze(check_type="quality", entity_id="prod-1", product_id="prod-2")
+        data = _non_ok_data(result, "rejected")
+
+        assert data["error"] == "INVALID_INPUT"
+
     async def test_analyze_health_missing_scope_returns_rejected(self):
         from zenos.interface.mcp import analyze
 
@@ -4494,7 +4628,7 @@ class TestGovernanceGuideTool:
 
         assert data["topic"] == "entity"
         assert data["level"] == 1
-        assert data["version"] == "1.1"
+        assert data["version"] == "2.2"
         assert isinstance(data["content"], str)
         assert len(data["content"]) > 0
         assert data["content_hash"].startswith("sha256:")
@@ -4633,6 +4767,10 @@ class TestGovernanceGuideTool:
 
         # Must mention the three-question gate (external rule)
         assert "三問" in content
+        assert "layer_decision" in content
+        assert "LAYER_DECISION_REQUIRED" in content
+        assert "confirmed_by_user=false" in content
+        assert "新建 L2 一律 draft 狀態" not in content
         # Must NOT expose internal LLM prompt details
         assert "system prompt" not in content.lower()
         assert "temperature" not in content.lower()

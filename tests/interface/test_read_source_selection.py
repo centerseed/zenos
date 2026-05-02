@@ -318,6 +318,53 @@ class TestSourceIdPassedToService:
             )
 
 
+class TestLegacyUriAlias:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("legacy_uri", ["/docs/doc-1", "doc-1"])
+    async def test_uri_alias_maps_to_doc_id_and_warns(self, legacy_uri):
+        """Legacy read_source(uri=...) accepts only plain doc_id or /docs/{doc_id}."""
+        from zenos.interface.mcp.source import read_source
+
+        doc = _make_doc_entity(sources=[])
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.source_service") as mock_ss,
+            patch("zenos.interface.mcp._current_partner") as mock_partner,
+        ):
+            mock_partner.get.return_value = None
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_ss.read_source = AsyncMock(return_value="legacy content")
+
+            result = await read_source(uri=legacy_uri)
+            data = _ok_data(result)
+
+            assert data["doc_id"] == "doc-1"
+            assert data["content"] == "legacy content"
+            assert any("DEPRECATED_READ_SOURCE_URI_ALIAS" in warning for warning in result["warnings"])
+            mock_ss.read_source.assert_called_once_with("doc-1")
+
+    @pytest.mark.parametrize(
+        "legacy_uri",
+        ["https://example.com/doc.md", "/bad/doc-1", "/docs/"],
+    )
+    async def test_uri_alias_rejects_unsupported_shapes(self, legacy_uri):
+        """Legacy uri alias is narrow; URLs, arbitrary paths, and empty /docs/ are rejected."""
+        from zenos.interface.mcp.source import read_source
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.source_service") as mock_ss,
+        ):
+            result = await read_source(uri=legacy_uri)
+
+            assert result["status"] == "rejected"
+            assert result["data"]["error"] == "INVALID_READ_SOURCE_URI_ALIAS"
+            assert "doc_id" in result["data"]["message"]
+            mock_os.get_document.assert_not_called()
+            mock_ss.read_source.assert_not_called()
+
+
 # ---------------------------------------------------------------------------
 # Governed access: source-level content exposure policy
 # ---------------------------------------------------------------------------

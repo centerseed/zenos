@@ -15,7 +15,7 @@ async def journal_write(
     summary: str,
     project: str | None = None,
     flow_type: str | None = None,
-    tags: list[str] | None = None,
+    tags: list[str] | str | None = None,
     source_type: str | None = None,
     source_ref: str | None = None,
     change_kind: str | None = None,
@@ -33,7 +33,8 @@ async def journal_write(
         summary: 工作摘要（自動截斷至 500 字）
         project: 相關專案名稱（選填）
         flow_type: 工作類型，例如 feature/bugfix/review/research（選填）
-        tags: 標籤列表（選填）
+        tags: 標籤列表（選填）。Canonical shape is list[str].
+              Deprecated compatibility: CSV string or JSON-array string is normalized to list[str].
 
     Returns:
         dict — {id, created_at, compressed: bool}

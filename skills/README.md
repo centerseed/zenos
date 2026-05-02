@@ -41,9 +41,9 @@ Claude Code / Codex 目前的 setup tool 不再直接回傳 `payload.skill_files
 ```markdown
 ## ZenOS 治理技能
 
-寫文件前讀：skills/governance/document-governance.md
-操作 L2 節點前讀：skills/governance/l2-knowledge-governance.md
-建票/管票前讀：skills/governance/task-governance.md
+寫文件前先呼叫 `governance_guide(topic="document", level=2)`，再讀：skills/governance/document-governance.md
+操作 L2 節點前先呼叫 `governance_guide(topic="entity", level=2)`，再讀：skills/governance/l2-knowledge-governance.md
+建票/管票前先呼叫 `governance_guide(topic="task", level=2)`，再讀：skills/governance/task-governance.md
 ```
 
 ### Step 3：設定 ZenOS MCP（若尚未設定）

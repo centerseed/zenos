@@ -486,6 +486,7 @@ def _build_l2_index_create_patch(
 async def analyze(
     check_type: str = "all",
     entity_id: str | None = None,
+    product_id: str | None = None,
 ) -> dict:
     """執行 ontology 治理健康檢查。
 
@@ -512,6 +513,10 @@ async def analyze(
         check_type: "all" / "health" / "quality" / "staleness" / "blindspot" / "impacts" /
                     "document_consistency" / "permission_risk" / "invalid_documents" /
                     "orphaned_relationships" / "llm_health"
+        entity_id: Optional L1/L2/L3 root entity used to scope supported checks
+                   to that entity subtree.
+        product_id: Optional alias for entity_id when the scope root is an L1
+                    product. If both are provided they must be identical.
 
     Returns:
         dict — 各 check_type 對應的子結構：
@@ -535,6 +540,13 @@ async def analyze(
     from zenos.infrastructure.sql_common import get_pool, upsert_health_cache
 
     await _ensure_services()
+    if entity_id and product_id and entity_id != product_id:
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message="analyze scope received both entity_id and product_id with different values",
+        )
+    scope_entity_id = entity_id or product_id
     results: dict = {}
     l2_repairs: list[dict] = []
 
@@ -550,15 +562,32 @@ async def analyze(
             return bool(left.strip()) and bool(right.strip())
         return False
 
-    async def _infer_l2_repairs() -> list[dict]:
+    async def _load_scope_ids(target_entity_id: str | None) -> tuple[object | None, set[str] | None, dict[str, object]]:
+        all_entities_for_scope = await _mcp.ontology_service._entities.list_all()
+        entity_map = {e.id: e for e in all_entities_for_scope if e.id}
+        if not target_entity_id:
+            return None, None, entity_map
+        scope_root = entity_map.get(target_entity_id)
+        if scope_root is None:
+            raise ValueError(f"Entity '{target_entity_id}' not found")
+        return scope_root, _collect_subtree_ids(target_entity_id, entity_map), entity_map
+
+    async def _infer_l2_repairs(scope_ids: set[str] | None = None) -> list[dict]:
         all_entities = await _mcp.ontology_service._entities.list_all()
+        def _is_pending_l2(ent) -> bool:
+            return ent.status == "draft" or (
+                ent.status == "active" and not getattr(ent, "confirmed_by_user", False)
+            )
+
         active_modules = [
             e for e in all_entities
-            if e.type == "module" and e.status == "active" and e.id
+            if e.type == "module" and e.status == "active" and e.confirmed_by_user and e.id
+            and (scope_ids is None or e.id in scope_ids)
         ]
         draft_modules = [
             e for e in all_entities
-            if e.type == "module" and e.status == "draft" and e.id
+            if e.type == "module" and _is_pending_l2(e) and e.id
+            and (scope_ids is None or e.id in scope_ids)
         ]
         if not active_modules and not draft_modules:
             return []
@@ -606,6 +635,8 @@ async def analyze(
                 "entity_name": mod.name,
                 "severity": "yellow",
                 "defect": "draft_l2_pending_confirmation",
+                "status": mod.status,
+                "confirmed_by_user": getattr(mod, "confirmed_by_user", False),
                 "manual_override_reason": override,
                 "repair_options": [
                     "補 impacts 後 confirm",
@@ -704,19 +735,19 @@ async def analyze(
     # Previously analyze(quality) did both synchronously in a loop, timing
     # out on any entity with 40+ entries.
     if check_type == "consolidate":
-        if not entity_id:
+        if not scope_entity_id:
             return _error_response(
                 status="rejected",
                 error_code="INVALID_INPUT",
                 message="analyze(check_type='consolidate') 需要 entity_id（先用 quality 列 saturated 再 targeted call）",
             )
-        proposal = await _consolidate_one(entity_id)
+        proposal = await _consolidate_one(scope_entity_id)
         if proposal is None:
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
                 message=(
-                    f"Entity '{entity_id}' 不在 saturation 清單（active entries < 20），"
+                    f"Entity '{scope_entity_id}' 不在 saturation 清單（active entries < 20），"
                     "或 LLM 不可用。先跑 analyze(check_type='quality') 確認是否真的 saturated。"
                 ),
             )
@@ -730,18 +761,18 @@ async def analyze(
     if check_type == "entity_health":
         import re as _re
 
-        if not entity_id:
+        if not scope_entity_id:
             return _error_response(
                 status="rejected",
                 error_code="INVALID_INPUT",
                 message="analyze(check_type='entity_health') 需要 entity_id",
             )
-        entity = await _mcp.entity_repo.get_by_id(entity_id)
+        entity = await _mcp.entity_repo.get_by_id(scope_entity_id)
         if entity is None:
             return _error_response(
                 status="rejected",
                 error_code="NOT_FOUND",
-                message=_format_not_found("Entity", entity_id),
+                message=_format_not_found("Entity", scope_entity_id),
             )
 
         partner_dept = "all"
@@ -776,21 +807,21 @@ async def analyze(
         tags_dim = {"complete": not missing, "missing_dimensions": missing}
 
         # Dim 3 — relationships
-        rels = await _mcp.relationship_repo.list_by_entity(entity_id)
-        out_count = sum(1 for r in rels if r.source_entity_id == entity_id)
-        in_count = sum(1 for r in rels if r.source_entity_id != entity_id)
-        out_confirmed = sum(1 for r in rels if r.source_entity_id == entity_id and r.confirmed_by_user)
-        in_confirmed = sum(1 for r in rels if r.source_entity_id != entity_id and r.confirmed_by_user)
+        rels = await _mcp.relationship_repo.list_by_entity(scope_entity_id)
+        out_count = sum(1 for r in rels if r.source_entity_id == scope_entity_id)
+        in_count = sum(1 for r in rels if r.source_entity_id != scope_entity_id)
+        out_confirmed = sum(1 for r in rels if r.source_entity_id == scope_entity_id and r.confirmed_by_user)
+        in_confirmed = sum(1 for r in rels if r.source_entity_id != scope_entity_id and r.confirmed_by_user)
         total_confirmed = out_confirmed + in_confirmed
 
         # Cross-subtree check: walk peers' L1 roots
         all_ents = await _mcp.entity_repo.list_all()
         emap = {e.id: e for e in all_ents if e.id}
         from zenos.application.knowledge.ontology_service import _find_product_root
-        self_l1 = _find_product_root(entity_id, emap) if entity_id else None
+        self_l1 = _find_product_root(scope_entity_id, emap) if scope_entity_id else None
         cross_subtree = 0
         for r in rels:
-            peer_id = r.target_id if r.source_entity_id == entity_id else r.source_entity_id
+            peer_id = r.target_id if r.source_entity_id == scope_entity_id else r.source_entity_id
             peer_l1 = _find_product_root(peer_id, emap) if peer_id else None
             if self_l1 and peer_l1 and peer_l1 != self_l1:
                 cross_subtree += 1
@@ -805,7 +836,7 @@ async def analyze(
         }
 
         # Dim 4 — entries saturation & anti-pattern scan
-        entries = await _mcp.entry_repo.list_by_entity(entity_id, status="active", department=partner_dept)
+        entries = await _mcp.entry_repo.list_by_entity(scope_entity_id, status="active", department=partner_dept)
         active_count = len(entries)
         saturation_level = "red" if active_count >= 20 else ("yellow" if active_count >= 15 else "green")
 
@@ -898,7 +929,7 @@ async def analyze(
             })
 
         return _unified_response(data={
-            "entity_id": entity_id,
+            "entity_id": scope_entity_id,
             "name": entity.name,
             "type": entity.type,
             "level": entity.level,
@@ -917,7 +948,7 @@ async def analyze(
     # ADR-020: lightweight health check — KPIs only, no heavy analysis
     if check_type == "health":
         try:
-            health_signal = await _mcp.governance_service.compute_health_signal(entity_id=entity_id)
+            health_signal = await _mcp.governance_service.compute_health_signal(entity_id=scope_entity_id)
         except ValueError as exc:
             return _error_response(
                 status="rejected",
@@ -928,7 +959,7 @@ async def analyze(
         try:
             pool = await get_pool()
             pid = _current_partner_id.get() or ""
-            if pid and health_signal and not entity_id:
+            if pid and health_signal and not scope_entity_id:
                 await upsert_health_cache(pool, pid, health_signal.get("overall_level", "green"))
         except Exception:
             pass  # cache write is additive; never break the main operation
@@ -961,10 +992,25 @@ async def analyze(
             except Exception:
                 logger.warning("Entry sparsity data collection failed", exc_info=True)
 
-        report = await _mcp.governance_service.run_quality_check(entries_by_entity=_entries_by_entity)
-        results["quality"] = _serialize(report)
         try:
-            l2_repairs = await _infer_l2_repairs()
+            scope_root, scope_ids, _scope_entity_map = await _load_scope_ids(scope_entity_id)
+        except ValueError as exc:
+            return _error_response(
+                status="rejected",
+                error_code="NOT_FOUND",
+                message=str(exc),
+            )
+
+        report = await _mcp.governance_service.run_quality_check(
+            entries_by_entity=_entries_by_entity,
+            entity_id=scope_entity_id,
+        )
+        results["quality"] = _serialize(report)
+        scope_metadata = getattr(report, "metadata", {}).get("scope") if hasattr(report, "metadata") else None
+        if scope_metadata:
+            results["quality"]["scope"] = scope_metadata
+        try:
+            l2_repairs = await _infer_l2_repairs(scope_ids)
             active_repairs = [r for r in l2_repairs if r.get("defect") == "active_l2_missing_concrete_impacts"]
             draft_repairs = [r for r in l2_repairs if r.get("defect") == "draft_l2_pending_confirmation"]
             results["quality"]["active_l2_missing_impacts"] = len(active_repairs)
@@ -976,6 +1022,8 @@ async def analyze(
             logger.warning("L2 repairs inference failed", exc_info=True)
         try:
             backfill = await _mcp.governance_service.infer_l2_backfill_proposals()
+            if scope_ids is not None:
+                backfill = [item for item in backfill if item.get("entity_id") in scope_ids]
             results["quality"]["l2_backfill_proposals"] = backfill
             results["quality"]["l2_backfill_count"] = len(backfill)
         except Exception:
@@ -984,6 +1032,11 @@ async def analyze(
         # L2 governance: impacts target validity
         try:
             validity_report = await _mcp.governance_service.check_impacts_target_validity()
+            if scope_ids is not None:
+                validity_report = [
+                    item for item in validity_report
+                    if item.get("source_entity_id") in scope_ids
+                ]
             results["quality"]["l2_impacts_validity"] = _attach_impacts_repair_actions(validity_report)
         except Exception:
             logger.warning("L2 impacts target validity check failed", exc_info=True)
@@ -991,6 +1044,17 @@ async def analyze(
         # P0-2: quality correction priority
         try:
             priority_report = await _mcp.governance_service.run_quality_correction_priority()
+            if scope_ids is not None:
+                ranked = [
+                    item for item in priority_report.get("ranked", [])
+                    if item.get("entity_id") in scope_ids
+                ]
+                priority_report = {
+                    **priority_report,
+                    "total_l2_entities": len(ranked),
+                    "ranked": ranked,
+                    "needs_immediate_review": sum(1 for item in ranked if item.get("score", 0) > 1.5),
+                }
             results["quality"]["quality_correction_priority"] = priority_report
         except Exception:
             logger.warning("Quality correction priority failed", exc_info=True)
@@ -998,6 +1062,11 @@ async def analyze(
         # L2 governance: stale L2 downstream (entity part from domain; task part here)
         try:
             downstream_entities = await _mcp.governance_service.find_stale_l2_downstream_entities()
+            if scope_ids is not None:
+                downstream_entities = [
+                    item for item in downstream_entities
+                    if item.get("stale_module_id") in scope_ids
+                ]
             # Enrich with open tasks at interface layer (task_repo available here)
             _open_statuses = {"todo", "in_progress", "review"}
             all_tasks = await _mcp.task_service.list_tasks(limit=500)
@@ -1022,6 +1091,12 @@ async def analyze(
         # L2 governance: reverse impacts check
         try:
             reverse_impacts = await _mcp.governance_service.check_reverse_impacts()
+            if scope_ids is not None:
+                reverse_impacts = [
+                    item for item in reverse_impacts
+                    if item.get("target_entity_id") in scope_ids
+                    or item.get("source_entity_id") in scope_ids
+                ]
             results["quality"]["l2_reverse_impacts"] = reverse_impacts
         except Exception:
             logger.warning("L2 reverse impacts check failed", exc_info=True)
@@ -1029,6 +1104,8 @@ async def analyze(
         # L2 governance: review overdue check
         try:
             overdue = await _mcp.governance_service.check_governance_review_overdue()
+            if scope_ids is not None:
+                overdue = [item for item in overdue if item.get("entity_id") in scope_ids]
             results["quality"]["l2_governance_review_overdue"] = overdue
             results["quality"]["l2_review_overdue_count"] = len(overdue)
         except Exception:
@@ -1040,6 +1117,11 @@ async def analyze(
         # for a specific entity.)
         try:
             entry_saturation = await _list_saturated_entities()
+            if scope_ids is not None:
+                entry_saturation = [
+                    item for item in entry_saturation
+                    if item.get("entity_id") in scope_ids
+                ]
             results["quality"]["entry_saturation"] = entry_saturation
             results["quality"]["entry_saturation_count"] = len(entry_saturation)
         except Exception:
@@ -1051,6 +1133,13 @@ async def analyze(
                 partner_id = _current_partner_id.get() or ""
                 all_entities_for_signals = await _mcp.ontology_service._entities.list_all()
                 usage_stats = await _mcp._tool_event_repo.get_entity_usage_stats(partner_id, days=30)
+                if scope_ids is not None:
+                    all_entities_for_signals = [
+                        e for e in all_entities_for_signals if e.id in scope_ids
+                    ]
+                    usage_stats = [
+                        stat for stat in usage_stats if stat.get("entity_id") in scope_ids
+                    ]
                 search_unused = compute_search_unused_signals(usage_stats, all_entities_for_signals)
                 if search_unused:
                     results["quality"]["search_unused_signals"] = search_unused
@@ -1063,6 +1152,7 @@ async def analyze(
             l2_entities = [
                 e for e in all_entities_for_quality
                 if e.type == "module" and e.status in ("active", "draft") and e.id
+                and (scope_ids is None or e.id in scope_ids)
             ]
             summary_flags = []
             for e in l2_entities:
@@ -1158,17 +1248,17 @@ async def analyze(
                     rel_result = await rel_result
                 relationships_by_doc[doc.id] = list(rel_result or [])
         scope_data = None
-        if entity_id:
+        if scope_entity_id:
             all_entities_for_scope = await _mcp.ontology_service._entities.list_all()
             entity_map = {e.id: e for e in all_entities_for_scope if e.id}
-            scope_root = entity_map.get(entity_id)
+            scope_root = entity_map.get(scope_entity_id)
             if scope_root is None:
                 return _error_response(
                     status="rejected",
                     error_code="NOT_FOUND",
-                    message=_format_not_found("Entity", entity_id),
+                    message=_format_not_found("Entity", scope_entity_id),
                 )
-            scope_ids = _collect_subtree_ids(entity_id, entity_map)
+            scope_ids = _collect_subtree_ids(scope_entity_id, entity_map)
             all_doc_entities = [
                 doc for doc in all_doc_entities
                 if any(

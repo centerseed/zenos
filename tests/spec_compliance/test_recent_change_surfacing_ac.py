@@ -432,7 +432,12 @@ async def test_ac_rcs_08_recent_updates_filters_by_topic_then_sorts_by_time():
             product=product,
         )
 
-        result = await recent_updates(product="Paceriz", topic="marketing", since_days=14, limit=10)
+        result = await recent_updates(
+            product="Paceriz",
+            topic="marketing",
+            since="2026-04-16T00:00:00+00:00",
+            limit=10,
+        )
         data = result["data"]
 
         assert result["status"] == "ok"

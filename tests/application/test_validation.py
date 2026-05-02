@@ -165,8 +165,8 @@ class TestUpsertEntityValidation:
         )
         assert result.entity.type == "module"
 
-    async def test_new_l2_without_concrete_impacts_becomes_draft_with_warning(self):
-        """DC-3: write new L2 without impacts no longer raises; entity gets status=draft + warning."""
+    async def test_new_l2_without_concrete_impacts_becomes_unconfirmed_with_warning(self):
+        """DC-3: write new L2 without impacts no longer raises; entity is unconfirmed + warning."""
         repos = _mock_repos()
         parent = Entity(
             id="parent-1", name="Product", type="product",
@@ -193,12 +193,13 @@ class TestUpsertEntityValidation:
             governance_ai=_Gov(),
         )
         result = await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
-        assert result.entity.status == "draft"
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
         assert result.warnings is not None
-        assert any("draft" in w for w in result.warnings)
+        assert any("未確認" in w or "confirm" in w.lower() for w in result.warnings)
 
-    async def test_new_l2_with_concrete_impacts_inferred_is_draft(self):
-        """DC-2: even when governance AI infers impacts, new L2 still starts as draft."""
+    async def test_new_l2_with_concrete_impacts_inferred_is_unconfirmed(self):
+        """DC-2: even when governance AI infers impacts, new L2 still starts unconfirmed."""
         repos = _mock_repos()
         parent = Entity(
             id="parent-1", name="Product", type="product",
@@ -230,8 +231,9 @@ class TestUpsertEntityValidation:
         )
         result = await svc.upsert_entity(_valid_entity_data(type="module", parent_id="parent-1"))
         assert result.entity.type == "module"
-        # DC-2: new L2 is always draft regardless of inferred impacts
-        assert result.entity.status == "draft"
+        # DC-2: new L2 is always unconfirmed regardless of inferred impacts
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
 
     async def test_nonexistent_parent_id(self):
         svc = _make_service()

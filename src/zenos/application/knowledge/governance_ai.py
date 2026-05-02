@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any, Callable
 
@@ -82,6 +83,9 @@ class ConsolidationProposal(BaseModel):
 
 class GovernanceAI:
     """LLM-based governance inference for the ZenOS write path."""
+
+    TASK_LINK_ENTITY_CHUNK_SIZE = 25
+    TASK_LINK_FALLBACK_LIMIT = 3
 
     def __init__(
         self,
@@ -491,61 +495,172 @@ class GovernanceAI:
     ) -> list[str]:
         """Infer which entities a new task relates to.
 
-        Returns list of entity IDs. Returns empty list on LLM failure.
+        Returns list of entity IDs. Falls back to conservative keyword
+        matching only when every LLM chunk fails.
         """
         if not existing_entities:
             return []
 
-        entity_lines = "\n".join(
-            f"{e.get('id')}|{e.get('name')}|{e.get('type')}"
-            for e in existing_entities
-        )
-
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "判斷任務與哪些實體相關。回傳 JSON：{\"entity_ids\": [\"id1\", \"id2\"]}"
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"任務：{title} - {description}\n"
-                    f"實體：\n{entity_lines}"
-                ),
-            },
+        chunks = [
+            existing_entities[i : i + self.TASK_LINK_ENTITY_CHUNK_SIZE]
+            for i in range(0, len(existing_entities), self.TASK_LINK_ENTITY_CHUNK_SIZE)
         ]
+        candidate_ids = {str(e.get("id")) for e in existing_entities if e.get("id")}
+        result_ids: list[str] = []
+        failed_chunk_count = 0
+        fallback_used = False
 
-        try:
-            result = self._llm.chat_structured(
-                messages=messages,
-                response_schema=TaskLinkInference,
-                temperature=0.1,
+        for chunk_index, chunk in enumerate(chunks, start=1):
+            entity_lines = "\n".join(
+                f"{e.get('id')}|{e.get('name')}|{e.get('type')}"
+                for e in chunk
             )
-            self._schedule_usage_log("governance.infer_task_links", outcome="success")
-            _audit_governance(
-                "governance.infer_task_links",
+            messages = [
                 {
-                    "model": getattr(self._llm, "model", ""),
-                    "task_title": title,
-                    "candidate_entities_count": len(existing_entities),
-                    "result_entity_ids": result.entity_ids,
+                    "role": "system",
+                    "content": (
+                        "判斷任務與哪些實體相關。回傳 JSON：{\"entity_ids\": [\"id1\", \"id2\"]}"
+                    ),
                 },
+                {
+                    "role": "user",
+                    "content": (
+                        f"任務：{title} - {description}\n"
+                        f"實體：\n{entity_lines}"
+                    ),
+                },
+            ]
+
+            try:
+                result = self._llm.chat_structured(
+                    messages=messages,
+                    response_schema=TaskLinkInference,
+                    temperature=0.1,
+                )
+                result_ids.extend(result.entity_ids)
+            except Exception:
+                failed_chunk_count += 1
+                logger.warning(
+                    "GovernanceAI.infer_task_links chunk failed",
+                    extra={
+                        "chunk_index": chunk_index,
+                        "chunk_count": len(chunks),
+                    },
+                    exc_info=True,
+                )
+
+        sanitized_ids = self._sanitize_task_link_ids(result_ids, candidate_ids)
+        if failed_chunk_count == len(chunks) and not sanitized_ids:
+            fallback_used = True
+            sanitized_ids = self._infer_task_link_fallback(
+                title=title,
+                description=description,
+                existing_entities=existing_entities,
             )
-            return result.entity_ids
-        except Exception:
+
+        if failed_chunk_count:
             self._schedule_usage_log("governance.infer_task_links", outcome="exception")
+        if fallback_used:
             self._schedule_usage_log("governance.infer_task_links", outcome="fallback")
-            _audit_governance(
-                "governance.infer_task_links.error",
-                {
-                    "model": getattr(self._llm, "model", ""),
-                    "task_title": title,
-                },
-            )
-            logger.warning("GovernanceAI.infer_task_links failed", exc_info=True)
-            return []
+        if failed_chunk_count < len(chunks):
+            self._schedule_usage_log("governance.infer_task_links", outcome="success")
+
+        _audit_governance(
+            (
+                "governance.infer_task_links.error"
+                if failed_chunk_count == len(chunks)
+                else "governance.infer_task_links"
+            ),
+            {
+                "model": getattr(self._llm, "model", ""),
+                "task_title": title,
+                "candidate_entities_count": len(existing_entities),
+                "chunk_count": len(chunks),
+                "failed_chunk_count": failed_chunk_count,
+                "fallback_used": fallback_used,
+                "result_entity_ids": sanitized_ids,
+            },
+        )
+        return sanitized_ids
+
+    def _sanitize_task_link_ids(
+        self,
+        entity_ids: list[str],
+        candidate_ids: set[str],
+    ) -> list[str]:
+        """Keep only known candidate IDs, preserving first-seen order."""
+        sanitized: list[str] = []
+        seen: set[str] = set()
+        for entity_id in entity_ids:
+            normalized_id = str(entity_id)
+            if normalized_id in candidate_ids and normalized_id not in seen:
+                sanitized.append(normalized_id)
+                seen.add(normalized_id)
+        return sanitized
+
+    def _infer_task_link_fallback(
+        self,
+        title: str,
+        description: str,
+        existing_entities: list[dict],
+    ) -> list[str]:
+        """Conservative deterministic fallback for total LLM failure."""
+        task_text = f"{title} {description}".lower()
+        task_tokens = set(re.findall(r"[a-z0-9_]+", task_text))
+        task_cjk_grams = self._cjk_ngrams(task_text)
+        scored: list[tuple[int, int, str]] = []
+
+        for index, entity in enumerate(existing_entities):
+            entity_id = entity.get("id")
+            if not entity_id:
+                continue
+            fields = [
+                entity.get("name", ""),
+                entity.get("summary", ""),
+            ]
+            tags = entity.get("tags") if isinstance(entity.get("tags"), dict) else {}
+            what = tags.get("what", [])
+            if isinstance(what, str):
+                what = [what]
+            fields.extend(what[:3])
+
+            score = 0
+            for field in fields:
+                text = str(field or "").strip().lower()
+                if not text:
+                    continue
+                if text in task_text and not self._is_single_cjk(text):
+                    score += 3
+                field_tokens = set(re.findall(r"[a-z0-9_]+", text))
+                score += len(task_tokens & field_tokens)
+                field_cjk_grams = self._cjk_ngrams(text)
+                score += len(task_cjk_grams & field_cjk_grams)
+            if score > 0:
+                scored.append((-score, index, str(entity_id)))
+
+        scored.sort()
+        fallback_ids: list[str] = []
+        seen: set[str] = set()
+        for _, _, entity_id in scored:
+            if entity_id in seen:
+                continue
+            fallback_ids.append(entity_id)
+            seen.add(entity_id)
+            if len(fallback_ids) >= self.TASK_LINK_FALLBACK_LIMIT:
+                break
+        return fallback_ids
+
+    def _is_single_cjk(self, text: str) -> bool:
+        return re.fullmatch(r"[\u4e00-\u9fff]", text) is not None
+
+    def _cjk_ngrams(self, text: str, min_n: int = 2, max_n: int = 6) -> set[str]:
+        """Return CJK n-grams of length >= 2 to avoid noisy single-character hits."""
+        grams: set[str] = set()
+        for segment in re.findall(r"[\u4e00-\u9fff]+", text):
+            for size in range(min_n, min(max_n, len(segment)) + 1):
+                for index in range(0, len(segment) - size + 1):
+                    grams.add(segment[index : index + size])
+        return grams
 
     def consolidate_entries(
         self,

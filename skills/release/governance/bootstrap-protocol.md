@@ -68,6 +68,14 @@ mcp__zenos__get(collection="documents", id="{doc_id}")
 mcp__zenos__read_source(doc_id="{doc_id}")
 ```
 
+### MCP tool schema compatibility
+
+- Canonical `write` shape: `mcp__zenos__write(collection="entities", data={...})`; do not pass JSON strings. Legacy JSON object strings are accepted only for compatibility and return a deprecation warning.
+- Canonical `journal_write` tags shape: `tags=["tag-a", "tag-b"]`; legacy CSV / JSON-array strings may be normalized by the server, but new examples must use lists.
+- Canonical `read_source` shape: `mcp__zenos__read_source(doc_id="{doc_id}")`; legacy `uri="{doc_id}"` or `uri="/docs/{doc_id}"` is deprecated and only kept as an alias.
+- Do not echo audit fields such as `updated_by` into `task(...)`; the server writes them from actor context and ignores caller-supplied values with a warning.
+- `get` always requires `collection`; missing collection returns `MISSING_COLLECTION` with allowed values.
+
 只在以上來源仍不足以恢復脈絡時，才讀 `journal_read(limit=5, project=PROJECT_NAME)`。
 
 **載入後輸出摘要（可選，建議對新用戶顯示）：**

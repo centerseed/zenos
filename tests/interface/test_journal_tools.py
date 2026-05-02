@@ -48,6 +48,50 @@ def _make_partner_ctx(partner_id: str = _PARTNER_ID, partner_data: dict | None =
     return mock_pid, mock_partner
 
 
+class _AcquireContext:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        return self.conn
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+def _make_compression_repo(entries: list[dict], *, total_originals: int = 21) -> tuple[AsyncMock, AsyncMock]:
+    repo = AsyncMock()
+    conn = AsyncMock()
+    conn.fetchval = AsyncMock(return_value=total_originals)
+    repo._pool = MagicMock()
+    repo._pool.acquire = MagicMock(return_value=_AcquireContext(conn))
+    repo.list_oldest_originals = AsyncMock(return_value=entries)
+    repo.create_summary = AsyncMock(return_value="summary-uuid")
+    repo.delete_by_ids = AsyncMock(return_value=None)
+    return repo, conn
+
+
+def _compression_entries() -> list[dict]:
+    return [
+        {
+            "id": "j1",
+            "created_at": _FIXED_TS,
+            "project": "ZenOS",
+            "flow_type": "feature",
+            "summary": "Implemented task link fallback",
+            "tags": ["governance"],
+        },
+        {
+            "id": "j2",
+            "created_at": _FIXED_TS,
+            "project": "ZenOS",
+            "flow_type": "feature",
+            "summary": "Verified schema compatibility",
+            "tags": ["mcp"],
+        },
+    ]
+
+
 # ---------------------------------------------------------------------------
 # journal_write
 # ---------------------------------------------------------------------------
@@ -170,6 +214,28 @@ async def test_journal_write_truncates_summary_to_500_chars_with_warning():
     assert "journal summary truncated to 500 chars" in result["warnings"]
 
 
+async def test_journal_write_normalizes_string_tags_regression():
+    """journal_write accepts legacy CSV and JSON-array string tags as list tags."""
+    from zenos.interface.mcp.journal import journal_write
+
+    repo = _make_journal_repo()
+    mock_pid, mock_partner = _make_partner_ctx()
+
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        await journal_write(summary="csv tags", tags="alpha,beta")
+        csv_tags = repo.create.call_args.kwargs["tags"]
+        await journal_write(summary="json tags", tags='["alpha","beta"]')
+        json_tags = repo.create.call_args.kwargs["tags"]
+
+    assert csv_tags == ["alpha", "beta"]
+    assert json_tags == ["alpha", "beta"]
+
+
 async def test_journal_write_triggers_compress_when_over_20():
     """journal_write calls _compress_journal when count > 20."""
     from zenos.interface.mcp.journal import journal_write
@@ -210,6 +276,84 @@ async def test_journal_write_does_not_compress_when_under_or_equal_20():
 
     compress_mock.assert_not_awaited()
     assert result["data"]["compressed"] is False
+
+
+async def test_compress_journal_llm_failure_uses_fallback_without_traceback():
+    """LLM structured parse failure should not skip compression or log traceback."""
+    import zenos.interface.mcp as mcp_root
+
+    entries = _compression_entries()
+    repo, _conn = _make_compression_repo(entries)
+    llm = MagicMock()
+    llm.chat_structured.side_effect = ValueError("invalid structured output")
+
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.interface.mcp.create_llm_client", MagicMock(return_value=llm)),
+        patch("zenos.interface.mcp.logger") as logger,
+    ):
+        result = await mcp_root._compress_journal(_PARTNER_ID)
+
+    assert result is True
+    repo.create_summary.assert_awaited_once()
+    summary = repo.create_summary.call_args.kwargs["summary"]
+    assert summary.startswith("Compressed 2 work journal entries.")
+    assert "Implemented task link fallback" in summary
+    repo.delete_by_ids.assert_awaited_once_with(partner_id=_PARTNER_ID, ids=["j1", "j2"])
+    logger.warning.assert_called_once()
+    assert logger.warning.call_args.kwargs.get("exc_info") is not True
+
+
+async def test_compress_journal_uses_llm_summary_when_available():
+    """Successful LLM summary should override deterministic fallback."""
+    import zenos.interface.mcp as mcp_root
+
+    entries = _compression_entries()
+    repo, _conn = _make_compression_repo(entries)
+    llm_result = MagicMock()
+    llm_result.summary = "LLM compressed summary"
+    llm = MagicMock()
+    llm.chat_structured.return_value = llm_result
+
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.interface.mcp.create_llm_client", MagicMock(return_value=llm)),
+    ):
+        result = await mcp_root._compress_journal(_PARTNER_ID)
+
+    assert result is True
+    assert repo.create_summary.call_args.kwargs["summary"] == "LLM compressed summary"
+    repo.delete_by_ids.assert_awaited_once_with(partner_id=_PARTNER_ID, ids=["j1", "j2"])
+
+
+async def test_journal_write_reports_compressed_when_fallback_compression_succeeds():
+    """journal_write remains ok when compression succeeds through fallback."""
+    from zenos.interface.mcp.journal import journal_write
+
+    entries = _compression_entries()
+    repo, _conn = _make_compression_repo(entries)
+    repo.create = AsyncMock(return_value="journal-new")
+    repo.count = AsyncMock(return_value=21)
+    repo.list_recent = AsyncMock(return_value=([], 0))
+    llm = MagicMock()
+    llm.chat_structured.side_effect = ValueError("invalid structured output")
+    mock_pid, mock_partner = _make_partner_ctx()
+
+    with (
+        patch("zenos.interface.mcp._journal_repo", repo),
+        patch("zenos.interface.mcp._ensure_journal_repo", AsyncMock()),
+        patch("zenos.interface.mcp.create_llm_client", MagicMock(return_value=llm)),
+        patch("zenos.infrastructure.context.current_partner_id", mock_pid),
+        patch("zenos.interface.mcp.journal._current_partner", mock_partner),
+    ):
+        result = await journal_write(summary="new completed work")
+
+    assert result["status"] == "ok"
+    assert result["data"]["compressed"] is True
+    repo.create_summary.assert_awaited_once()
+    repo.delete_by_ids.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

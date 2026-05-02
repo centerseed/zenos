@@ -155,6 +155,7 @@ async def _task_handler(
     reason: str | None = None,
     output_ref: str | None = None,
     notes: str | None = None,
+    updated_by: str | None = None,
     conn: Any | None = None,
     # Wave 9 Phase B prime — optional L3TaskEntity input for dual-path dispatch.
     # When provided and action in ("create","update"), the service-layer
@@ -361,6 +362,9 @@ async def _task_handler(
         )
         mutation_warnings: list[str] = []
 
+        if updated_by is not None:
+            mutation_warnings.append("UPDATED_BY_IGNORED: caller-supplied updated_by is ignored; server actor context is used")
+
         # handoff_events is server-managed (append-only via task(action="handoff")).
         # If caller passes it on create/update, strip it and emit a warning.
         if handoff_events is not None:
@@ -501,9 +505,10 @@ async def _task_handler(
                 create_warnings.append(
                     "linked_entities 為空：任務缺少 ontology context，governance_hints 將無法產生有效建議"
                 )
-            if not effective_project:
+            saved_project = _normalize_project_scope(task_result.task.project)
+            if not saved_project:
                 create_warnings.append(
-                    "未指定 project：票已建立但無法被 search(project=...) 過濾找到，建議傳入 project 參數（如 'zenos'）"
+                    "未指定 project 且無法從 product_id 派生 project：票已建立但無法被 search(project=...) 過濾找到"
                 )
             return _unified_response(data=task_data, warnings=create_warnings)
 
@@ -716,6 +721,7 @@ async def task(
     reason: str | None = None,
     output_ref: str | None = None,
     notes: str | None = None,
+    updated_by: str | None = None,  # deprecated audit echo — ignored; server actor context wins
     workspace_id: str | None = None,
     project_id: str | None = None,  # DEPRECATED: ADR-047 D3 — passing any value → INVALID_INPUT
 ) -> dict:
@@ -798,6 +804,7 @@ async def task(
 
     系統欄位：
         updated_by: 不接受 caller 直接傳入；由 server 依當次 actor context 自動寫入
+            Deprecated compatibility: caller-supplied updated_by is ignored with a warning.
         workspace_id: 選填。切換到指定 workspace 執行任務操作（必須在你的可用列表內）。
         project_id: [DEPRECATED — ADR-047 D3] 此參數已完全移除語意。傳入任何非 None 值會立即
             回傳 {"status": "rejected", "data": {"error": "INVALID_INPUT"}}。
@@ -857,4 +864,5 @@ async def task(
         reason=reason,
         output_ref=output_ref,
         notes=notes,
+        updated_by=updated_by,
     )

@@ -139,7 +139,7 @@ async def _resolve_id_prefix_for_get(
 
 
 async def get(
-    collection: str,
+    collection: str | None = None,
     name: str | None = None,
     id: str | None = None,
     id_prefix: str | None = None,
@@ -185,7 +185,7 @@ async def get(
       範例：get(..., include=["impact_chain"], top_k_per_hop=3)
 
     Args:
-        collection: entities/documents/protocols/blindspots/tasks
+        collection: entities/documents/protocols/blindspots/tasks. Required; omission returns MISSING_COLLECTION.
         name: 項目名稱（entities 和 protocols 支援按名稱查詢）
         id: 項目 ID（所有集合都支援，32-char hex）
         id_prefix: 選填。ID 前綴查詢（至少 4 字元 hex）。與 id 互斥。
@@ -203,6 +203,13 @@ async def get(
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
 
+    valid_collections = ["entities", "documents", "protocols", "blindspots", "tasks", "entries"]
+    if not collection:
+        return _unified_response(
+            status="rejected",
+            data={"error": "MISSING_COLLECTION", "allowed": valid_collections},
+            rejection_reason="collection is required; use one of: " + ", ".join(valid_collections),
+        )
     if workspace_id:
         err = _apply_workspace_override(workspace_id)
         if err is not None:

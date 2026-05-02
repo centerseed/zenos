@@ -421,9 +421,16 @@ class GovernanceService:
         for mod in modules:
             reasons: list[str] = []
             repair_actions: list[str] = []
-            if mod.status == "draft":
-                reasons.append("L2 尚未 confirm，仍為 draft 狀態")
-                repair_actions.append("補出至少 1 條具體 impacts 後使用 confirm 升為 active")
+            pending_confirmation = (
+                mod.status == "draft"
+                or (mod.status == "active" and not mod.confirmed_by_user)
+            )
+            if pending_confirmation:
+                if mod.status == "draft":
+                    reasons.append("L2 尚未 confirm，仍為 legacy draft 狀態")
+                else:
+                    reasons.append("L2 尚未 confirm（status=active, confirmed_by_user=false）")
+                repair_actions.append("補出至少 1 條具體 impacts 後使用 confirm")
                 override_reason = (
                     mod.details.get("manual_override_reason")
                     if mod.details and isinstance(mod.details, dict)
@@ -508,6 +515,7 @@ class GovernanceService:
         self,
         tasks: list | None = None,
         entries_by_entity: dict[str, int] | None = None,
+        entity_id: str | None = None,
     ) -> QualityReport:
         """Run the full quality checklist across the ontology.
 
@@ -519,13 +527,39 @@ class GovernanceService:
                    If None, attempts to fetch from task_repo if available.
             entries_by_entity: Optional mapping of entity_id -> entry count.
                                Used for entry sparsity check.
+            entity_id: Optional L1/L2/L3 root entity. When provided, quality
+                       checks are restricted to that entity's subtree. External
+                       impacts targets are kept as read-only context so scoped
+                       checks do not flag valid cross-product targets as missing.
         """
-        all_entities = await self._entities.list_all()
+        all_entities_unscoped = await self._entities.list_all()
+        scope_root = None
+        scope_ids: set[str] | None = None
+        if entity_id:
+            scope_root = next((e for e in all_entities_unscoped if e.id == entity_id), None)
+            if scope_root is None:
+                raise ValueError(f"Entity '{entity_id}' not found")
+            scope_ids = self._scope_entity_ids(all_entities_unscoped, entity_id)
+            all_entities = [e for e in all_entities_unscoped if e.id in scope_ids]
+        else:
+            all_entities = all_entities_unscoped
+
         # Split: non-document entities vs document entities
         entities = [e for e in all_entities if e.type != EntityType.DOCUMENT]
         documents = [e for e in all_entities if e.type == EntityType.DOCUMENT]
-        blindspots = await self._blindspots.list_all()
-        relationships = await self._load_all_relationships(all_entities)
+        all_blindspots = await self._blindspots.list_all()
+        if scope_ids is not None:
+            blindspots = [
+                bs for bs in all_blindspots
+                if any(eid in scope_ids for eid in bs.related_entity_ids)
+            ]
+        else:
+            blindspots = all_blindspots
+        relationships = (
+            await self._load_relationships_for_scope(scope_ids)
+            if scope_ids is not None
+            else await self._load_all_relationships(all_entities)
+        )
 
         # Collect all protocols
         protocols = []
@@ -541,6 +575,32 @@ class GovernanceService:
                 tasks = await self._tasks.list_all(limit=500)
             except Exception:
                 tasks = None
+        if scope_ids is not None and tasks is not None:
+            tasks = [
+                task for task in tasks
+                if any(eid in scope_ids for eid in (getattr(task, "linked_entities", None) or []))
+            ]
+
+        scoped_entries_by_entity = entries_by_entity
+        if scope_ids is not None and entries_by_entity is not None:
+            scoped_entries_by_entity = {
+                eid: count for eid, count in entries_by_entity.items()
+                if eid in scope_ids
+            }
+
+        impact_target_context_entities: list[Entity] | None = None
+        if scope_ids is not None:
+            endpoint_ids = {
+                endpoint_id
+                for rel in relationships
+                if rel.type == "impacts"
+                for endpoint_id in (rel.source_entity_id, rel.target_id)
+            }
+            external_endpoint_ids = endpoint_ids - scope_ids
+            impact_target_context_entities = [
+                e for e in all_entities_unscoped
+                if e.id in external_endpoint_ids
+            ]
 
         quality_report = run_quality_check(
             entities=entities,
@@ -549,8 +609,23 @@ class GovernanceService:
             blindspots=blindspots,
             relationships=relationships,
             tasks=tasks,
-            entries_by_entity=entries_by_entity,
+            entries_by_entity=scoped_entries_by_entity,
+            impact_target_context_entities=impact_target_context_entities,
         )
+        if scope_root is not None:
+            quality_report.metadata = {
+                **getattr(quality_report, "metadata", {}),
+                "scope": {
+                    "entity_id": scope_root.id,
+                    "entity_name": scope_root.name,
+                    "entity_type": scope_root.type,
+                    "mode": "subtree",
+                    "entity_count": len(all_entities),
+                    "relationship_count": len(relationships),
+                    "blindspot_count": len(blindspots),
+                    "global_signals_excluded": ["llm_health"],
+                },
+            }
 
         return quality_report
 

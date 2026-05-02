@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import inspect
 
@@ -763,7 +764,7 @@ async def _maybe_auto_publish_document(serialized: dict) -> list[str]:
 
 async def write(
     collection: str,
-    data: dict,
+    data: dict | str,
     id: str | None = None,
     id_prefix: str | None = None,
     workspace_id: str | None = None,
@@ -881,7 +882,9 @@ async def write(
 
     Args:
         collection: entities/documents/protocols/blindspots/relationships/entries/patches
-        data: 集合對應的欄位（見上方說明）
+        data: 集合對應的欄位（見上方說明）。Canonical shape is a JSON object/dict.
+              Deprecated compatibility: a JSON object string is accepted with a warning;
+              invalid JSON or non-object JSON is rejected.
         id: entries 更新 status 時提供既有 entry ID；其他集合新增時不提供
         workspace_id: 選填。切換到指定 workspace 執行寫入（必須在你的可用列表內）。
         source: 選填。批次 patch 來源標記；等同 data.source，方便 agent 傳遞 audit metadata。
@@ -901,6 +904,34 @@ async def write(
             data={"hint": "write 類操作需完整 32-char id，避免 prefix 碰撞誤觸破壞性操作"},
             rejection_reason="id_prefix_not_allowed_for_write_ops",
         )
+    legacy_warnings: list[str] = []
+    if isinstance(data, str):
+        try:
+            parsed_data = json.loads(data)
+        except json.JSONDecodeError:
+            return _unified_response(
+                status="rejected",
+                data={"error": "INVALID_DATA_JSON"},
+                rejection_reason="write data JSON string must be valid JSON object; canonical shape is data={...}",
+            )
+        if not isinstance(parsed_data, dict):
+            return _unified_response(
+                status="rejected",
+                data={"error": "INVALID_DATA_JSON_OBJECT"},
+                rejection_reason="write data JSON string must decode to an object; canonical shape is data={...}",
+            )
+        data = parsed_data
+        legacy_warnings.append("DEPRECATED_WRITE_DATA_JSON_STRING: pass data as an object/dict, not a JSON string")
+    elif not isinstance(data, dict):
+        return _unified_response(
+            status="rejected",
+            data={"error": "INVALID_DATA"},
+            rejection_reason="write data must be an object/dict",
+        )
+
+    def _warnings_with_legacy(warnings: list[str] | None = None) -> list[str]:
+        return [*legacy_warnings, *(warnings or [])]
+
     await _ensure_services()
     try:
         if id:
@@ -975,13 +1006,13 @@ async def write(
                 event_type="ontology.entity.upsert",
                 target={"collection": collection, "id": entity_id},
                 changes={"input": data},
-                governance={"warnings": result.warnings or []},
+                governance={"warnings": _warnings_with_legacy(result.warnings)},
             )
             context_bundle = await _build_context_bundle(
                 linked_entity_ids=[entity_id] if entity_id else []
             )
             governance_hints = _build_governance_hints(
-                warnings=result.warnings or [],
+                warnings=_warnings_with_legacy(result.warnings),
                 similar_items=result.similar_items,
             )
             # --- Visibility change audit ---
@@ -1012,7 +1043,7 @@ async def write(
                 serialized["policy_suggestion"] = policy_suggestion
             response_data = _agent_friendly_entity_data(serialized)
             # Detect rejected fields and set response status accordingly
-            _warnings = result.warnings or []
+            _warnings = _warnings_with_legacy(result.warnings)
             _rejected = [w for w in _warnings if w.startswith("REJECTED_FIELDS:")]
             _resp_status = "ok"
             _rejection_reason = _rejected[0] if _rejected else None
@@ -1149,12 +1180,12 @@ async def write(
                 return _unified_response(
                     status="rejected",
                     data={},
-                    warnings=preflight_warnings,
+                    warnings=_warnings_with_legacy(preflight_warnings),
                     suggestions=[
                         "請先把 GitHub source push 到 remote，再 capture current formal-entry 文件",
                         "若現在就需要讓別人讀，請改成 git + gcs 或直接補 delivery snapshot",
                     ],
-                    governance_hints=_build_governance_hints(warnings=preflight_warnings),
+                    governance_hints=_build_governance_hints(warnings=_warnings_with_legacy(preflight_warnings)),
                     rejection_reason=rejection_reason,
                 )
 
@@ -1207,7 +1238,7 @@ async def write(
             # Helper Ingest Contract: noop detection + cross-doc duplicate warnings
             helper_meta = getattr(result, "_helper_upsert_meta", {}) or {}
             helper_warnings: list[str] = list(getattr(result, "_helper_warnings", None) or [])
-            all_warnings = list(preflight_warnings or []) + helper_warnings
+            all_warnings = _warnings_with_legacy(list(preflight_warnings or []) + helper_warnings)
             resp_data = dict(serialized)
             if helper_meta.get("noop"):
                 resp_data["noop"] = True
@@ -1466,6 +1497,7 @@ async def write(
             )
             return _unified_response(
                 data=serialized,
+                warnings=_warnings_with_legacy(),
                 context_bundle=await _build_context_bundle(
                     linked_entity_ids=[serialized.get("entity_id")] if serialized.get("entity_id") else [],
                     protocol_id=serialized.get("id"),
@@ -1519,6 +1551,7 @@ async def write(
                             "auto_created_task": _serialize(duplicate_open),
                             "auto_task_skipped": "EXISTING_OPEN_TASK",
                         },
+                        warnings=_warnings_with_legacy(),
                         suggestions=[{
                             "id": duplicate_open.id,
                             "title": duplicate_open.title,
@@ -1603,6 +1636,7 @@ async def write(
                 })
             return _unified_response(
                 data=serialized,
+                warnings=_warnings_with_legacy(),
                 suggestions=follow_ups,
                 context_bundle=context_bundle,
                 governance_hints=_build_governance_hints(suggested_follow_up_tasks=follow_ups),
@@ -1629,6 +1663,7 @@ async def write(
                 )
                 return _unified_response(
                     data={"id": id, "deleted": True, "reason": reason},
+                    warnings=_warnings_with_legacy(),
                     governance_hints=_build_governance_hints(),
                 )
 
@@ -1646,6 +1681,7 @@ async def write(
             )
             return _unified_response(
                 data=serialized,
+                warnings=_warnings_with_legacy(),
                 context_bundle=await _build_context_bundle(
                     linked_entity_ids=[data["source_entity_id"], data["target_entity_id"]],
                 ),
@@ -1680,6 +1716,7 @@ async def write(
                 serialized = _serialize(updated)
                 return _unified_response(
                     data=serialized,
+                    warnings=_warnings_with_legacy(),
                     context_bundle=await _build_context_bundle(
                         linked_entity_ids=[serialized.get("entity_id")] if serialized.get("entity_id") else []
                     ),
@@ -1737,6 +1774,7 @@ async def write(
             serialized = _serialize(result)
             active_count = await _mcp.entry_repo.count_active_by_entity(entity_id, department=partner_department)
             entry_warnings: list[str] = []
+            entry_warnings = _warnings_with_legacy(entry_warnings)
             if active_count >= 20:
                 entry_warnings.append(
                     "此 entity 已達 20 條 active entries 上限，"

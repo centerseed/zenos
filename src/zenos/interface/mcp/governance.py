@@ -69,7 +69,7 @@ async def governance_guide(
         )
 
     _topic_versions = {
-        "entity": "1.1",
+        "entity": "2.2",
         "document": "2.2",
         "bundle": "1.1",
         "task": "2.0",

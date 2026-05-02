@@ -497,11 +497,10 @@ class TestRunQualityCheck:
         assert "role_document_coverage" in failed_names
 
     def test_bad_split_granularity_fails(self):
-        # Module with only 1 doc (below 3)
+        # Bundle-first governance requires at least one document bundle.
         entity = _make_entity(entity_type=EntityType.MODULE)
-        doc = _make_doc(linked_entity_ids=["e1"])
         rel = _make_rel(source_id="e1", target_id="e1")
-        report = run_quality_check([entity], [doc], [], [], [rel])
+        report = run_quality_check([entity], [], [], [], [rel])
         failed_names = [f.name for f in report.failed]
         assert "split_granularity" in failed_names
 

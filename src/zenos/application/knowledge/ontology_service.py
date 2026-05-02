@@ -1373,7 +1373,8 @@ class OntologyService:
             )
 
         # 3. status enum — document type allows document-specific statuses;
-        # module (L2) type also allows draft and stale for lifecycle state machine.
+        # module (L2) keeps legacy "draft" readable, but new L2 drafts are
+        # represented as status=active + confirmed_by_user=false.
         status = merged_data.get("status", "active")
         _DOCUMENT_STATUSES = {"current", "stale", "draft", "conflict", "archived"}
         _BASE_STATUSES = {"active", "paused", "completed", "planned"}
@@ -1438,10 +1439,8 @@ class OntologyService:
                 )
                 merged_data["parent_id"] = inferred_parent
 
-        # 6c. L2 summary quality gate: tech-term scan (warn, may force draft)
+        # 6c. L2 summary quality gate: tech-term scan (warn only)
         # Runs on both create and update; detected terms trigger a warning.
-        # For unconfirmed modules, we also force status back to draft so the user
-        # must fix the summary before confirm.
         if entity_type == EntityType.MODULE:
             summary = merged_data.get("summary", "")
             found_terms = find_tech_terms_in_summary(summary)
@@ -1449,13 +1448,11 @@ class OntologyService:
                 is_confirmed_existing = (
                     existing is not None and existing.confirmed_by_user
                 )
-                if not is_confirmed_existing and not merged_data.get("force"):
-                    merged_data["status"] = "draft"
                 warnings.append(
                     f"L2 summary 包含技術術語：{', '.join(found_terms)}。"
                     f"L2 summary 應使用任何角色都聽得懂的語言。"
                     + (
-                        "已自動降為 draft。"
+                        "此 L2 會維持未確認狀態。"
                         if not is_confirmed_existing and not merged_data.get("force")
                         else ""
                     )
@@ -1463,8 +1460,13 @@ class OntologyService:
                 )
 
         # 6d. L2 hard rule on write path: check concrete impacts and warn;
-        # new modules always start as draft regardless of inferred impacts.
+        # new modules always start unconfirmed regardless of inferred impacts.
         if entity_type == EntityType.MODULE and not merged_data.get("id"):
+            if merged_data.get("confirmed_by_user") is True:
+                raise ValueError(
+                    "L2_CREATE_CANNOT_CONFIRM: 新建 L2 不能在 write 時直接設 confirmed_by_user=true。"
+                    "請先以 status=active、confirmed_by_user=false 建立，補齊 impacts relationship 後再呼叫 confirm。"
+                )
             # P0-1: layer_decision gate — enforce three-question routing on new L2 write
             force = merged_data.get("force")
             layer_decision = merged_data.get("layer_decision")
@@ -1545,7 +1547,7 @@ class OntologyService:
                     f"bypass layer_decision check: {override_reason}"
                 )
                 warnings.append(
-                    f"L2 以 force 模式寫入（draft）。manual_override_reason: {override_reason}"
+                    f"L2 以 force 模式寫入（未確認）。manual_override_reason: {override_reason}"
                 )
 
             # LLM impacts inference (only when governance_ai available)
@@ -1580,15 +1582,18 @@ class OntologyService:
                     )
                 elif inferred_concrete_impacts:
                     warnings.append(
-                        "已推斷出具體 impacts 關聯。confirm 後將升級為 active L2。"
+                        "已推斷出具體 impacts 關聯。補成 relationship 並 confirm 後會成為已確認 L2。"
                     )
 
-        # L2 lifecycle: new modules always start as draft.
-        # Users must confirm (via confirm tool) to transition to active.
+        # L2 lifecycle: new modules start as active but unconfirmed.
+        # Legacy status=draft remains valid for old records, but is no longer
+        # emitted by the write path.
         if entity_type == EntityType.MODULE and not merged_data.get("id"):
-            merged_data["status"] = "draft"
+            merged_data["status"] = "active"
+            merged_data["confirmed_by_user"] = False
             warnings.append(
-                "L2 entity 初始為 draft 狀態。經 confirm 且至少有 1 條具體 impacts 後才會升為 active。"
+                "L2 entity 初始為未確認狀態（status=active, confirmed_by_user=false）。"
+                "經 confirm 且至少有 1 條具體 impacts 後才會成為已確認 L2。"
             )
 
         # L2 consolidation_mode: store the mode that was used to produce this L2.

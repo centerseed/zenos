@@ -58,6 +58,20 @@ def _jaccard_similarity(a: str, b: str) -> float:
     return len(intersection) / len(union)
 
 
+def _add_document_to_link_index(
+    docs_by_entity: dict[str, list[Entity | Document]],
+    doc: Entity | Document,
+    relationships: list[Relationship],
+) -> None:
+    """Index document coverage using the canonical L3 document linkage contract."""
+    if isinstance(doc, _L3TaskBaseEntity):
+        linked_ids = [doc.parent_id] if doc.parent_id else []
+    else:
+        linked_ids = get_document_linked_entity_ids(doc, relationships)
+    for eid in linked_ids:
+        docs_by_entity.setdefault(eid, []).append(doc)
+
+
 # ──────────────────────────────────────────────
 # 1. Split-criteria check (拆分粒度檢查)
 # ──────────────────────────────────────────────
@@ -228,19 +242,7 @@ def detect_staleness(
     entity_map = {e.id: e for e in entities if e.id}
     docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
-        # Three-branch dispatch (Wave 9 Phase B):
-        #   1. Document  — uses linked_entity_ids (many-to-many explicit links)
-        #   2. L3TaskBaseEntity — uses parent_id (single-edge affiliation tree)
-        #   3. Entity (fallback) — also uses parent_id if present
-        if isinstance(doc, Document):
-            for eid in doc.linked_entity_ids:
-                docs_by_entity.setdefault(eid, []).append(doc)
-        elif isinstance(doc, _L3TaskBaseEntity):
-            # L3-Action entities affiliate via parent_id (SPEC §9.1)
-            if doc.parent_id:
-                docs_by_entity.setdefault(doc.parent_id, []).append(doc)
-        elif hasattr(doc, "parent_id") and doc.parent_id:
-            docs_by_entity.setdefault(doc.parent_id, []).append(doc)
+        _add_document_to_link_index(docs_by_entity, doc, relationships)
 
     def _doc_title(d: Entity | Document) -> str:
         return d.title if isinstance(d, Document) else d.name
@@ -411,15 +413,7 @@ def analyze_blindspots(
     entity_map = {e.id: e for e in entities if e.id}
     docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
-        # Three-branch dispatch (Wave 9 Phase B) — same logic as detect_staleness
-        if isinstance(doc, Document):
-            for eid in doc.linked_entity_ids:
-                docs_by_entity.setdefault(eid, []).append(doc)
-        elif isinstance(doc, _L3TaskBaseEntity):
-            if doc.parent_id:
-                docs_by_entity.setdefault(doc.parent_id, []).append(doc)
-        elif hasattr(doc, "parent_id") and doc.parent_id:
-            docs_by_entity.setdefault(doc.parent_id, []).append(doc)
+        _add_document_to_link_index(docs_by_entity, doc, relationships)
 
     def _d_title(d: Entity | Document) -> str:
         return d.title if isinstance(d, Document) else d.name
@@ -1076,15 +1070,7 @@ def run_quality_check(
     entity_map = {e.id: e for e in entities if e.id}
     docs_by_entity: dict[str, list[Entity | Document]] = {}
     for doc in documents:
-        # Three-branch dispatch (Wave 9 Phase B) — same logic as detect_staleness
-        if isinstance(doc, Document):
-            for eid in doc.linked_entity_ids:
-                docs_by_entity.setdefault(eid, []).append(doc)
-        elif isinstance(doc, _L3TaskBaseEntity):
-            if doc.parent_id:
-                docs_by_entity.setdefault(doc.parent_id, []).append(doc)
-        elif hasattr(doc, "parent_id") and doc.parent_id:
-            docs_by_entity.setdefault(doc.parent_id, []).append(doc)
+        _add_document_to_link_index(docs_by_entity, doc, relationships)
 
     def _qc_title(d: Entity | Document) -> str:
         return d.title if isinstance(d, Document) else d.name
@@ -1259,7 +1245,7 @@ def run_quality_check(
         weight=1,
     ))
 
-    # --- 9. Split granularity reasonable (3-10 docs per module)? ---
+    # --- 9. Split granularity reasonable (bundle-first: 1-10 docs per module)? ---
     modules = [
         e for e in entities
         if e.type == EntityType.MODULE and e.status == EntityStatus.ACTIVE and e.id
@@ -1269,14 +1255,14 @@ def run_quality_check(
         linked = docs_by_entity.get(mod.id, [])
         current = [d for d in linked if _qc_status(d) != DocumentStatus.ARCHIVED]
         count = len(current)
-        if count < 3 or count > 10:
+        if count < 1 or count > 10:
             bad_granularity.append((mod, count))
     check9_ok = len(bad_granularity) == 0
     items.append(QualityCheckItem(
         name="split_granularity",
         passed=check9_ok,
         detail=(
-            f"{len(bad_granularity)} module(s) outside 3-10 doc range"
+            f"{len(bad_granularity)} module(s) outside 1-10 doc range"
             + (
                 ": " + ", ".join(f"'{m.name}' ({c} docs)" for m, c in bad_granularity)
                 if bad_granularity else ""

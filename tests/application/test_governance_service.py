@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock
 
 from zenos.application.knowledge.governance_service import GovernanceService
 from zenos.application.knowledge.ontology_service import OntologyService
+from zenos.domain.governance import run_quality_check
 from zenos.domain.knowledge import Entity, Relationship, RelationshipType, Tags
 
 
@@ -143,6 +144,97 @@ async def test_run_staleness_check_returns_dict_with_consistency_warnings():
     assert isinstance(result["document_consistency_warnings"], list)
 
 
+async def test_run_quality_check_scopes_to_entity_subtree_without_global_noise():
+    product = _entity(id="prod-1", name="Dogfood", type="product", level=1)
+    module = _entity(
+        id="mod-1",
+        name="Dogfood MCP Friction",
+        type="module",
+        level=2,
+        parent_id="prod-1",
+        summary="Dogfood MCP Friction captures tool contract issues that block agent governance decisions.",
+    )
+    other_product = _entity(id="prod-2", name="Other Product", type="product", level=1)
+    other_module = _entity(
+        id="mod-2",
+        name="Other Module",
+        type="module",
+        level=2,
+        parent_id="prod-2",
+        summary="Other Module should not appear in scoped Dogfood quality details.",
+    )
+    rel = Relationship(
+        id="rel-1",
+        source_entity_id="mod-1",
+        target_id="mod-2",
+        type="impacts",
+        description="Dogfood MCP contract changes -> Other Module reviews tool response compatibility",
+    )
+
+    entity_repo = AsyncMock()
+    entity_repo.list_all = AsyncMock(return_value=[product, module, other_product, other_module])
+    relationship_repo = AsyncMock()
+    relationship_repo.list_by_entity = AsyncMock(
+        side_effect=lambda entity_id: [rel] if entity_id in {"mod-1", "mod-2"} else []
+    )
+    protocol_repo = AsyncMock()
+    protocol_repo.get_by_entity = AsyncMock(return_value=None)
+    blindspot_repo = AsyncMock()
+    blindspot_repo.list_all = AsyncMock(return_value=[])
+
+    service = GovernanceService(
+        entity_repo=entity_repo,
+        relationship_repo=relationship_repo,
+        protocol_repo=protocol_repo,
+        blindspot_repo=blindspot_repo,
+    )
+
+    report = await service.run_quality_check(entity_id="prod-1")
+    details = " ".join(item.detail for item in [*report.failed, *report.warnings, *report.passed])
+
+    assert report.metadata["scope"]["entity_id"] == "prod-1"
+    assert report.metadata["scope"]["entity_count"] == 2
+    assert "Other Product" not in details
+    assert "Other Module" not in details
+
+
+def test_quality_check_counts_l3_document_relationship_links_for_bundle_first_coverage():
+    module = _entity(
+        id="mod-1",
+        name="Order Fulfillment",
+        type="module",
+        parent_id="prod-1",
+        summary="Coordinates order delivery work across operations and support.",
+    )
+    doc = _entity(
+        id="doc-1",
+        name="Order Fulfillment Knowledge Index",
+        type="document",
+        parent_id="other-mod",
+        summary="Bundle entry for order fulfillment decisions and tests.",
+        status="current",
+    )
+    rel = Relationship(
+        id="rel-1",
+        source_entity_id="doc-1",
+        target_id="mod-1",
+        type=RelationshipType.RELATED_TO,
+        description="Document index covers Order Fulfillment governance decisions",
+    )
+
+    report = run_quality_check(
+        entities=[module],
+        documents=[doc],
+        protocols=[],
+        blindspots=[],
+        relationships=[rel],
+    )
+
+    split_check = next(item for item in [*report.passed, *report.failed] if item.name == "split_granularity")
+    assert split_check.passed
+    assert "1-10 doc range" in split_check.detail
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # _build_infer_all_inputs: entity_dicts must only contain PRODUCT + MODULE
 # ──────────────────────────────────────────────────────────────────────────────
@@ -214,4 +306,3 @@ async def test_build_infer_all_inputs_excludes_given_entity_id():
     entity_ids = {d["id"] for d in entity_dicts}
     assert "prod-1" in entity_ids
     assert "mod-1" not in entity_ids
-

@@ -142,13 +142,13 @@ class TestModuleStatusValidation:
 
 
 # ---------------------------------------------------------------------------
-# DC-2: New module always starts as draft
+# DC-2: New module starts active but unconfirmed
 # ---------------------------------------------------------------------------
 
-class TestNewModuleAlwaysDraft:
+class TestNewModuleStartsUnconfirmed:
 
-    async def test_new_module_without_governance_ai_is_draft(self):
-        """DC-2: new module without governance_ai still gets status=draft."""
+    async def test_new_module_without_governance_ai_is_active_unconfirmed(self):
+        """DC-2: new module without governance_ai gets status=active + confirmed_by_user=false."""
         repos = _mock_repos()
         parent = _make_parent()
         repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
@@ -156,10 +156,11 @@ class TestNewModuleAlwaysDraft:
         repos["entity_repo"].list_all = AsyncMock(return_value=[parent])
         svc = _make_service(repos, governance_ai=None)
         result = await svc.upsert_entity(_module_data())
-        assert result.entity.status == "draft"
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
 
-    async def test_new_module_active_status_overridden_to_draft(self):
-        """DC-2: caller passing status='active' is overridden to 'draft' for new L2."""
+    async def test_new_module_active_status_stays_unconfirmed(self):
+        """DC-2: caller passing status='active' still cannot confirm new L2 through write."""
         repos = _mock_repos()
         parent = _make_parent()
         repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
@@ -167,10 +168,22 @@ class TestNewModuleAlwaysDraft:
         repos["entity_repo"].list_all = AsyncMock(return_value=[parent])
         svc = _make_service(repos, governance_ai=None)
         result = await svc.upsert_entity(_module_data(status="active"))
-        assert result.entity.status == "draft"
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
 
-    async def test_new_module_draft_warning_present(self):
-        """DC-2: new module creation includes a warning about draft state."""
+    async def test_new_module_cannot_set_confirmed_by_user_true(self):
+        """DC-2: write cannot bypass confirm by setting confirmed_by_user=true on create."""
+        repos = _mock_repos()
+        parent = _make_parent()
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
+        repos["entity_repo"].get_by_name = AsyncMock(return_value=None)
+        repos["entity_repo"].list_all = AsyncMock(return_value=[parent])
+        svc = _make_service(repos, governance_ai=None)
+        with pytest.raises(ValueError, match="L2_CREATE_CANNOT_CONFIRM"):
+            await svc.upsert_entity(_module_data(confirmed_by_user=True))
+
+    async def test_new_module_unconfirmed_warning_present(self):
+        """DC-2: new module creation includes a warning about unconfirmed state."""
         repos = _mock_repos()
         parent = _make_parent()
         repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
@@ -179,7 +192,7 @@ class TestNewModuleAlwaysDraft:
         svc = _make_service(repos, governance_ai=None)
         result = await svc.upsert_entity(_module_data())
         assert result.warnings is not None
-        assert any("draft" in w for w in result.warnings)
+        assert any("未確認" in w for w in result.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +202,7 @@ class TestNewModuleAlwaysDraft:
 class TestNewModuleNoImpactsWarning:
 
     async def test_new_l2_without_impacts_does_not_raise(self):
-        """DC-3: no ValueError when governance AI finds no impacts; returns draft + warning."""
+        """DC-3: no ValueError when governance AI finds no impacts; returns unconfirmed + warning."""
         repos = _mock_repos()
         parent = _make_parent()
         repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
@@ -203,11 +216,12 @@ class TestNewModuleNoImpactsWarning:
 
         svc = _make_service(repos, governance_ai=_NoImpactsGov())
         result = await svc.upsert_entity(_module_data())
-        assert result.entity.status == "draft"
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
         assert result.warnings is not None
 
-    async def test_new_l2_with_inferred_impacts_warns_and_is_draft(self):
-        """DC-2+DC-3: even with inferred impacts, entity stays draft until confirmed."""
+    async def test_new_l2_with_inferred_impacts_warns_and_is_unconfirmed(self):
+        """DC-2+DC-3: even with inferred impacts, entity stays unconfirmed until confirm."""
         repos = _mock_repos()
         parent = _make_parent()
         repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
@@ -223,9 +237,10 @@ class TestNewModuleNoImpactsWarning:
 
         svc = _make_service(repos, governance_ai=_HasImpactsGov())
         result = await svc.upsert_entity(_module_data())
-        assert result.entity.status == "draft"
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
         assert result.warnings is not None
-        assert any("confirm" in w.lower() or "draft" in w.lower() for w in result.warnings)
+        assert any("confirm" in w.lower() or "未確認" in w for w in result.warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -605,8 +620,8 @@ class TestForceModuleWithOverrideReason:
         with pytest.raises(ValueError, match="manual_override_reason"):
             await svc.upsert_entity(_module_data(force=True))
 
-    async def test_force_l2_with_reason_creates_draft_with_details(self):
-        """DC-7+DC-9: force=true + reason → status=draft, details contains reason and timestamp."""
+    async def test_force_l2_with_reason_creates_unconfirmed_with_details(self):
+        """DC-7+DC-9: force=true + reason → unconfirmed, details contains reason and timestamp."""
         repos = _mock_repos()
         parent = _make_parent()
         repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
@@ -622,7 +637,8 @@ class TestForceModuleWithOverrideReason:
             force=True,
             manual_override_reason="PM 明確指示先建，impacts 後補",
         ))
-        assert result.entity.status == "draft"
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
         assert isinstance(result.entity.details, dict)
         assert result.entity.details["manual_override_reason"] == "PM 明確指示先建，impacts 後補"
         assert "manual_override_at" in result.entity.details
@@ -777,8 +793,8 @@ class TestL2SummaryTechTermScanOnWrite:
         warning_text = " ".join(result.warnings)
         assert "API" in warning_text
 
-    async def test_tech_term_in_summary_forces_draft_for_new_module(self):
-        """New (unconfirmed) module with tech-term summary is forced to draft status (DC-8)."""
+    async def test_tech_term_in_summary_keeps_new_module_unconfirmed(self):
+        """New module with tech-term summary gets warning but remains active/unconfirmed (DC-8)."""
         repos = _mock_repos()
         parent = _make_parent()
         repos["entity_repo"].get_by_id = AsyncMock(return_value=parent)
@@ -789,7 +805,9 @@ class TestL2SummaryTechTermScanOnWrite:
         result = await svc.upsert_entity(_module_data(
             summary="We use REST and Docker for deployment.",
         ))
-        assert result.entity.status == "draft"
+        assert result.entity.status == "active"
+        assert result.entity.confirmed_by_user is False
+        assert any("技術術語" in w for w in result.warnings or [])
 
     async def test_clean_summary_no_tech_term_warning(self):
         """Module with plain-language summary has no tech-term warning."""

@@ -141,6 +141,24 @@ async def _ensure_journal_repo() -> None:
     _journal_repo = SqlWorkJournalRepository(pool)
 
 
+def _fallback_journal_compression_summary(entries: list[dict]) -> str:
+    """Build a deterministic journal summary when LLM compression is unavailable."""
+    snippets: list[str] = []
+    for entry in entries[:5]:
+        summary = str(entry.get("summary") or "").strip()
+        if not summary:
+            continue
+        project = entry.get("project") or "unknown-project"
+        flow_type = entry.get("flow_type") or "general"
+        snippets.append(f"{project}/{flow_type}: {summary}")
+
+    if not snippets:
+        return f"Compressed {len(entries)} work journal entries; original summaries were empty."
+
+    combined = f"Compressed {len(entries)} work journal entries. " + " | ".join(snippets)
+    return combined[:300]
+
+
 async def _compress_journal(partner_id: str) -> bool:
     """Compress old non-summary journal entries into a single summary row.
 
@@ -184,11 +202,25 @@ async def _compress_journal(partner_id: str) -> bool:
         class _SummaryOut(_BaseModel):
             summary: str
 
-        llm = create_llm_client()
-        result = llm.chat_structured(
-            messages=[{"role": "user", "content": prompt}],
-            response_schema=_SummaryOut,
-        )
+        summary = _fallback_journal_compression_summary(entries)
+        try:
+            llm = create_llm_client()
+            result = llm.chat_structured(
+                messages=[{"role": "user", "content": prompt}],
+                response_schema=_SummaryOut,
+            )
+            llm_summary = result.summary.strip()
+            if llm_summary:
+                summary = llm_summary
+        except Exception as exc:
+            logger.warning(
+                "_compress_journal LLM summary failed; using deterministic fallback",
+                extra={
+                    "partner_id": partner_id,
+                    "entry_count": len(entries),
+                    "error_type": type(exc).__name__,
+                },
+            )
 
         as_of = datetime.now(tz=timezone.utc)
 
@@ -203,7 +235,7 @@ async def _compress_journal(partner_id: str) -> bool:
         ids = [str(e["id"]) for e in entries]
         await _journal_repo.create_summary(
             partner_id=partner_id,
-            summary=result.summary,
+            summary=summary,
             project=projects[0] if len(projects) == 1 else None,
             flow_type=flow_types[0] if len(flow_types) == 1 else None,
             tags=unique_tags,
