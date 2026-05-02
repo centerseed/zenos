@@ -342,6 +342,36 @@ async def read_source(
             # we fall back to the existing direct-read / summary-fallback path.
             return source_type == "github"
 
+        async def _read_direct_source() -> object:
+            reader = getattr(_mcp.source_service, "read_source_with_recovery", None)
+            if reader is not None:
+                maybe_result = reader(doc_id, source_uri=uri)
+                if inspect.isawaitable(maybe_result):
+                    result_value = await maybe_result
+                else:
+                    result_value = maybe_result
+                if result_value is not None:
+                    return result_value
+            return await _mcp.source_service.read_source(doc_id, source_uri=uri)
+
+        def _content_response_from_result(result: object) -> dict | None:
+            if isinstance(result, str):
+                resp = {"doc_id": doc_id, "content": result}
+            elif isinstance(result, dict) and "content" in result:
+                resp = {"doc_id": doc_id, "content": result["content"]}
+                if "content_type" in result:
+                    resp["content_type"] = result["content_type"]
+            else:
+                return None
+            if current_sid:
+                resp["source_id"] = current_sid
+            staleness = _compute_staleness_hint(target_source)
+            if staleness:
+                resp["staleness_hint"] = staleness
+            if alternative_sources:
+                resp["alternative_sources"] = alternative_sources
+            return resp
+
         if content_access == "none":
             return _error_response(
                 error_code="FORBIDDEN",
@@ -522,6 +552,12 @@ async def read_source(
                 snapshot_fallback = await _snapshot_delivery_fallback()
                 if snapshot_fallback is not None:
                     return _with_legacy_warnings(_unified_response(data=_apply_preview(snapshot_fallback)))
+                if source_status == "stale":
+                    direct_result = await _read_direct_source()
+                    direct_resp = _content_response_from_result(direct_result)
+                    if direct_resp is not None:
+                        direct_resp["delivery_status"] = "direct_stale_source"
+                        return _with_legacy_warnings(_unified_response(data=_apply_preview(direct_resp)))
                 fallback = _document_summary_fallback(
                     "GitHub source 目前標記為 stale；已回傳文件 metadata summary。"
                     "請修復 source URI / 權限，或補上 zenos_native delivery snapshot。"
@@ -591,34 +627,10 @@ async def read_source(
 
         # Read the actual content via adapter — pass selected URI so the
         # service reads the correct source, not always sources[0].
-        result = None
-        reader = getattr(_mcp.source_service, "read_source_with_recovery", None)
-        if reader is not None:
-            maybe = reader(doc_id, source_uri=uri)
-            if inspect.isawaitable(maybe):
-                result = await maybe
-        if result is None:
-            result = await _mcp.source_service.read_source(doc_id, source_uri=uri)
-        if isinstance(result, str):
-            resp = {"doc_id": doc_id, "content": result}
-            if current_sid:
-                resp["source_id"] = current_sid
-            staleness = _compute_staleness_hint(target_source)
-            if staleness:
-                resp["staleness_hint"] = staleness
-            if alternative_sources:
-                resp["alternative_sources"] = alternative_sources
-            return _with_legacy_warnings(_unified_response(data=_apply_preview(resp)))
-        if "content" in result:
-            resp = {"doc_id": doc_id, "content": result["content"]}
-            if current_sid:
-                resp["source_id"] = current_sid
-            staleness = _compute_staleness_hint(target_source)
-            if staleness:
-                resp["staleness_hint"] = staleness
-            if alternative_sources:
-                resp["alternative_sources"] = alternative_sources
-            return _with_legacy_warnings(_unified_response(data=_apply_preview(resp)))
+        result = await _read_direct_source()
+        content_resp = _content_response_from_result(result)
+        if content_resp is not None:
+            return _with_legacy_warnings(_unified_response(data=_apply_preview(content_resp)))
         # Error result from read_source_with_recovery — enrich with setup_hint
         if "error" in result:
             if (
