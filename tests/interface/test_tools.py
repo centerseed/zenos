@@ -2598,6 +2598,46 @@ class TestWriteTool:
         assert result["data"]["error"]["code"] == "LINKED_ENTITY_NOT_FOUND"
         assert result["data"]["error"]["missing_entity_ids"] == ["ghost-1"]
 
+    async def test_write_documents_autofills_summary_and_tags_when_missing(self):
+        from zenos.interface.mcp import write
+        from zenos.domain.knowledge import Entity, Tags
+
+        doc = Entity(
+            id="doc-1",
+            name="Spec",
+            type="document",
+            summary="這份文件說明「Spec」的內容、用途與閱讀邊界。",
+            tags=Tags(what=["Spec"], why="documented knowledge", how="reference document", who=["agent"]),
+            status="draft",
+            parent_id="module-1",
+            sources=[],
+        )
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.write._audit_log"),
+            patch("zenos.interface.mcp.write._load_document_relationships", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._document_delivery_suggestions", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._maybe_auto_publish_document", new=AsyncMock(return_value=[])),
+            patch("zenos.interface.mcp.write._build_context_bundle", new=AsyncMock(return_value={})),
+        ):
+            mock_os.upsert_document = AsyncMock(return_value=doc)
+
+            result = await write(
+                collection="documents",
+                data={
+                    "title": "Spec",
+                    "linked_entity_ids": ["module-1"],
+                },
+            )
+
+            payload = mock_os.upsert_document.await_args.args[0]
+            assert payload["summary"] == "這份文件說明「Spec」的內容、用途與閱讀邊界。"
+            assert payload["tags"]["what"] == ["Spec"]
+            assert result["status"] == "ok"
+            assert "DOCUMENT_SUMMARY_AUTOFILLED" in result["warnings"]
+            assert "DOCUMENT_TAGS_AUTOFILLED" in result["warnings"]
+
     async def test_write_documents_rejects_unpushed_github_for_explicit_formal_entry(self):
         from zenos.interface.mcp import write, _current_partner
 
@@ -3017,6 +3057,52 @@ class TestTaskTool:
 
             payload = mock_ts.create_task.call_args.args[0]
             assert payload["product_id"] == "prod-1"
+
+    async def test_create_task_normalizes_common_stopword_prefixes(self):
+        from zenos.interface.mcp import task
+        from zenos.application.action.task_service import TaskResult
+
+        t = _make_task(title="fix login bug")
+        create_result = TaskResult(task=t, cascade_updates=[])
+        with patch("zenos.interface.mcp.task_service") as mock_ts:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+
+            result = await task(
+                action="create",
+                title="Task to fix login bug",
+                created_by="architect",
+                product_id="prod-1",
+            )
+
+            payload = mock_ts.create_task.call_args.args[0]
+            assert payload["title"] == "fix login bug"
+            assert any("TASK_TITLE_NORMALIZED" in warning for warning in result.get("warnings", []))
+
+    async def test_create_task_resolves_plan_id_prefix(self):
+        from zenos.interface.mcp import task
+        from zenos.application.action.task_service import TaskResult
+
+        t = _make_task(project="zenos", product_id="prod-1", plan_id="a" * 32)
+        create_result = TaskResult(task=t, cascade_updates=[])
+        plan = MagicMock()
+        plan.id = "a" * 32
+
+        with patch("zenos.interface.mcp.task_service") as mock_ts, \
+             patch("zenos.interface.mcp.plan_repo") as mock_plan_repo:
+            mock_ts.create_task = AsyncMock(return_value=create_result)
+            mock_plan_repo.find_by_id_prefix = AsyncMock(return_value=[plan])
+
+            result = await task(
+                action="create",
+                title="Fix login",
+                created_by="architect",
+                product_id="prod-1",
+                plan_id="aaaa1234",
+            )
+
+            payload = mock_ts.create_task.call_args.args[0]
+            assert payload["plan_id"] == "a" * 32
+            assert any("PLAN_ID_PREFIX_RESOLVED" in warning for warning in result.get("warnings", []))
 
     async def test_create_task_missing_title(self):
         from zenos.interface.mcp import task

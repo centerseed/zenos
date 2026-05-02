@@ -316,7 +316,7 @@ mcp__zenos__confirm(
 | PM | 開 Feature Spec 完 | `task(action="create", product_id=X, dispatcher="agent:pm")` |
 | Architect | 拆 subtask | `task(action="create", parent_task_id=parent, product_id=X, plan_id=parent.plan_id, dispatcher="agent:architect")` |
 | Developer | 拿到任務 | `task(action="update", id=X, status="in_progress")` |
-| Developer | 完成實作 | `task(action="update", id=X, status="review", result="Completion Report")` |
-| Developer → QA | handoff | `task(action="handoff", to_dispatcher="agent:qa", reason="...", output_ref="...")` |
+| Developer | 完成實作 | `task(action="update", id=X, result="Completion Report")` |
+| Developer → QA | handoff | `task(action="handoff", id=X, to_dispatcher="agent:qa", reason="...", output_ref="...")` |
 | QA | PASS | `confirm(collection="tasks", id=X, accepted=True)` |
 | QA | FAIL | `confirm(collection="tasks", id=X, accepted=False, rejection_reason="...")` |

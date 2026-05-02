@@ -28,15 +28,23 @@ mcp__zenos__search(collection="tasks", status="todo,in_progress")
 mcp__zenos__task(action="update", id="task-id", status="in_progress")
 ```
 
-完成實作、跑完測試後，標記進入 review：
+完成實作、跑完測試後，先補 result，再 handoff 給 QA：
 
 ```python
+# 先補交付摘要
 mcp__zenos__task(
     action="update",
     id="task-id",
-    status="review",
     result="Completion Report 摘要：實作了 X，測試 N passed，信心度 🟢/🟡/🔴"
-    # result 在 update to review 時為必填
+)
+
+# 再交棒給 QA；server 會自動升為 review
+mcp__zenos__task(
+    action="handoff",
+    id="task-id",
+    to_dispatcher="agent:qa",
+    reason="implementation complete",
+    output_ref="completion-report"
 )
 ```
 
@@ -48,7 +56,7 @@ result 格式（Developer → QA 交接）：
 已知風險：{有的話列出，沒有填「無」}
 ```
 
-> 狀態更新為 `review` 後，等待 QA agent 接手驗收。若 QA FAIL，task 會退回 `in_progress`，根據 QA 回報的問題修復後再次更新為 `review`。
+> handoff 給 QA 後，server 會把 task 自動升為 `review`。若 QA FAIL，task 會退回 `in_progress`，根據 QA 回報修復後再次更新 result 並 handoff。
 
 不能用 update 把 status 改成 done——那是 QA `confirm` 的職責。
 

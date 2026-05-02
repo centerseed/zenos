@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import logging
 import re
 import uuid
@@ -23,6 +24,20 @@ from zenos.interface.mcp._audit import _audit_log
 logger = logging.getLogger(__name__)
 
 _VALID_ATTACHMENT_TYPES = {"image", "file", "link"}
+_TASK_TITLE_PREFIX_PATTERNS: tuple[tuple[str, str], ...] = (
+    (r"^\s*task\s+to\s+", ""),
+    (r"^\s*this\s+task\s*[:：-]?\s*", ""),
+    (r"^\s*this\s+", ""),
+    (r"^\s*that\s+", ""),
+    (r"^\s*a\s+", ""),
+    (r"^\s*an\s+", ""),
+    (r"^\s*任務\s*[:：-]?\s*", ""),
+    (r"^\s*這個任務\s*[:：-]?\s*", ""),
+    (r"^\s*這個\s*", ""),
+    (r"^\s*那個\s*", ""),
+    (r"^\s*我的任務\s*[:：-]?\s*", ""),
+    (r"^\s*我的\s*", ""),
+)
 
 
 def _normalize_project_scope(value: object) -> str:
@@ -30,6 +45,59 @@ def _normalize_project_scope(value: object) -> str:
     if value is None:
         return ""
     return str(value).strip().lower()
+
+
+def _normalize_task_title_for_mcp(title: str, warnings: list[str]) -> str:
+    """Trim common boilerplate prefixes before TaskService title validation."""
+    normalized = str(title or "").strip()
+    if not normalized:
+        return normalized
+    for pattern, replacement in _TASK_TITLE_PREFIX_PATTERNS:
+        candidate = re.sub(pattern, replacement, normalized, count=1, flags=re.IGNORECASE).strip()
+        if candidate != normalized and len(candidate) >= 4:
+            warnings.append(f"TASK_TITLE_NORMALIZED: {normalized!r} → {candidate!r}")
+            return candidate
+    return normalized
+
+
+async def _resolve_plan_id_for_mcp(plan_id: str | None, warnings: list[str]) -> str | dict | None:
+    """Resolve short plan_id prefixes to full IDs before TaskService validation."""
+    if plan_id is None:
+        return None
+    normalized = str(plan_id).strip()
+    if not normalized or len(normalized) >= 32:
+        return normalized or None
+
+    import zenos.interface.mcp as _mcp
+
+    plan_repo = _mcp.plan_repo or getattr(_mcp.task_service, "_plans", None)
+    if plan_repo is None or not hasattr(plan_repo, "find_by_id_prefix"):
+        return normalized
+
+    matched = plan_repo.find_by_id_prefix(normalized)
+    if inspect.isawaitable(matched):
+        matched = await matched
+    if not matched:
+        return _error_response(
+            status="rejected",
+            error_code="INVALID_INPUT",
+            message=(
+                f"plan_id '{normalized}' 不存在。若這張票不屬於任何 plan，請省略 plan_id；"
+                "若屬於既有 plan，請先用 plan(get/list) 或 search(collection='tasks', plan_id=...) 取得正確 ID。"
+            ),
+        )
+    if len(matched) > 1:
+        candidates = [{"id": plan.id, "goal": getattr(plan, "goal", "")} for plan in matched[:5]]
+        return _unified_response(
+            status="rejected",
+            data={"candidates": candidates},
+            rejection_reason=f"plan_id prefix '{normalized}' 模糊，請增加長度",
+        )
+
+    resolved = matched[0].id
+    if resolved != normalized:
+        warnings.append(f"PLAN_ID_PREFIX_RESOLVED: {normalized} → {resolved}")
+    return resolved
 
 
 def _validate_attachments(
@@ -373,6 +441,7 @@ async def _task_handler(
         if action == "create":
             if not title:
                 return _unified_response(status="rejected", data={}, rejection_reason="title is required for create")
+            title = _normalize_task_title_for_mcp(title, mutation_warnings)
             # In MCP context, creator identity must follow the authenticated
             # partner bound to the API key, not arbitrary caller input.
             if partner and partner.get("id"):
@@ -447,6 +516,9 @@ async def _task_handler(
             normalized_depends_on = _normalize_str_list(depends_on_task_ids, "depends_on_task_ids")
             if isinstance(normalized_depends_on, dict):
                 return normalized_depends_on
+            resolved_plan_id = await _resolve_plan_id_for_mcp(plan_id, mutation_warnings)
+            if isinstance(resolved_plan_id, dict):
+                return resolved_plan_id
 
             data = {
                 "title": title,
@@ -468,7 +540,7 @@ async def _task_handler(
                 "project": effective_project,
                 "product_id": product_id,
                 "assignee_role_id": assignee_role_id,
-                "plan_id": plan_id,
+                "plan_id": resolved_plan_id,
                 "plan_order": plan_order,
                 "depends_on_task_ids": normalized_depends_on,
                 "parent_task_id": parent_task_id,
@@ -563,7 +635,10 @@ async def _task_handler(
                 except (ValueError, TypeError):
                     return _unified_response(status="rejected", data={}, rejection_reason=f"Invalid due_date: {due_date}")
             if plan_id is not None:
-                updates["plan_id"] = plan_id
+                resolved_plan_id = await _resolve_plan_id_for_mcp(plan_id, mutation_warnings)
+                if isinstance(resolved_plan_id, dict):
+                    return resolved_plan_id
+                updates["plan_id"] = resolved_plan_id
             if plan_order is not None:
                 updates["plan_order"] = plan_order
             if depends_on_task_ids is not None:

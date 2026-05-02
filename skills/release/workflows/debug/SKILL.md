@@ -102,7 +102,7 @@ QA 驗收：
 1. 回歸測試 PASS（開發人員提供輸出）
 2. 根因確實被移除（不是繞過）
 3. 無新的 regression
-4. PASS：`mcp__zenos__confirm(collection="tasks", id=X, accept=True)`
+4. PASS：`mcp__zenos__confirm(collection="tasks", id=X, accepted=True)`
    → Server 自動 append 結束 HandoffEvent（to="human", reason="accepted"）+ status=done
 5. FAIL：`task(action="handoff", to_dispatcher="agent:developer", reason="rejected: ...")` → 退回 Phase 4
 

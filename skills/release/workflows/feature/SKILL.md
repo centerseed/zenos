@@ -178,7 +178,7 @@ Server 自動升 `status=review`。
 
 ### 5.3 QA 驗收
 叫起 QA subagent，讀 task + handoff_events（看整條履歷）：
-- **PASS**：`confirm(collection="tasks", id=X, accept=True, entity_entries=[...])`
+- **PASS**：`confirm(collection="tasks", id=X, accepted=True, entity_entries=[...])`
   - Server 自動 append 結束 HandoffEvent（to="human", reason="accepted"）+ status=done
 - **FAIL**：
   ```python

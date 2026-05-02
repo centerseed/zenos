@@ -176,12 +176,21 @@ Simplify 後立刻重跑該模組的最小 scope 測試。
 ## 完成後更新任務
 
 ```python
+# 先補完成摘要
 mcp__zenos__task(
     action="update",
     id="task-id",
-    status="review",
     result="交付：{檔案清單摘要}；驗證指令：{command}；已知風險：{或無}"
+)
+
+# 再顯性交棒給 QA，server 會自動升為 review
+mcp__zenos__task(
+    action="handoff",
+    id="task-id",
+    to_dispatcher="agent:qa",
+    reason="implementation complete",
+    output_ref="{commit-or-report-ref}"
 )
 ```
 
-等待 QA 驗收。QA FAIL → task 退回 `in_progress`，根據問題修復後再次 update to review。
+等待 QA 驗收。QA FAIL → task 退回 `in_progress`，根據問題修復後再次 update result 並 handoff。

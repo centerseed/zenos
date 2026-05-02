@@ -46,12 +46,20 @@ mcp__zenos__task(
 # 開始調查時
 mcp__zenos__task(action="update", id="task-id", status="in_progress")
 
-# 修復完成，提交 Debug Report 時
+# 修復完成，先補 Debug Report
 mcp__zenos__task(
     action="update",
     id="task-id",
-    status="review",
     result="根因：... 修復：file:line 回歸測試：file:line",
+)
+
+# 再 handoff 給 QA；server 會自動升為 review
+mcp__zenos__task(
+    action="handoff",
+    id="task-id",
+    to_dispatcher="agent:qa",
+    reason="debug fix complete",
+    output_ref="debug-report"
 )
 ```
 

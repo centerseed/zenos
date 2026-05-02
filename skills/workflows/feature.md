@@ -122,7 +122,7 @@ Architect 是實作階段的主控角色，按 plan_order 逐張 task 執行：
 ### 5.1 派工 Developer
 - 叫起 Developer subagent，傳入 task 的 description + acceptance_criteria
 - Developer 更新狀態：`task(action="update", id=X, status="in_progress")`
-- Developer 完成後：`task(action="update", id=X, status="review", result="完成摘要")`
+- Developer 完成後：先 `task(action="update", id=X, result="完成摘要")`，再 `task(action="handoff", id=X, to_dispatcher="agent:qa", reason="implementation complete", output_ref="...")`
 
 ### 5.2 Architect 驗證交付
 - 逐條比對 acceptance_criteria，確認實作符合要求

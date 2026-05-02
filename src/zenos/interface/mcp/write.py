@@ -83,6 +83,27 @@ _DOCUMENT_SOURCE_REPAIR_PATCH_ALLOWED_FIELDS = {
 }
 
 
+def _autofill_document_contract_fields(data: dict, warnings: list[str]) -> dict:
+    """Fill low-risk document metadata defaults to reduce MCP friction on create."""
+    if data.get("id"):
+        return data
+
+    normalized = dict(data)
+    title = str(normalized.get("title") or "").strip()
+    if title and not normalized.get("summary"):
+        normalized["summary"] = f"這份文件說明「{title}」的內容、用途與閱讀邊界。"
+        warnings.append("DOCUMENT_SUMMARY_AUTOFILLED")
+    if title and not normalized.get("tags"):
+        normalized["tags"] = {
+            "what": [title],
+            "why": "documented knowledge",
+            "how": "reference document",
+            "who": ["agent"],
+        }
+        warnings.append("DOCUMENT_TAGS_AUTOFILLED")
+    return normalized
+
+
 def _document_contract_rejection(data: dict) -> dict | None:
     """Validate MCP-level document invariants before mutating metadata."""
     sources = data.get("sources")
@@ -1059,6 +1080,8 @@ async def write(
 
         elif collection == "documents":
             # Backward compat: collection="documents" now creates entity(type="document")
+            preflight_warnings: list[str] = []
+            data = _autofill_document_contract_fields(data, preflight_warnings)
 
             # --- initial_content validation (P0-5) ---
             initial_content = data.get("initial_content")
@@ -1175,17 +1198,17 @@ async def write(
             )
             if bundle_target_rejection is not None:
                 return bundle_target_rejection
-            rejection_reason, preflight_warnings = await _preflight_document_remote_visibility(data)
+            rejection_reason, remote_visibility_warnings = await _preflight_document_remote_visibility(data)
             if rejection_reason is not None:
                 return _unified_response(
                     status="rejected",
                     data={},
-                    warnings=_warnings_with_legacy(preflight_warnings),
+                    warnings=_warnings_with_legacy(preflight_warnings + list(remote_visibility_warnings or [])),
                     suggestions=[
                         "請先把 GitHub source push 到 remote，再 capture current formal-entry 文件",
                         "若現在就需要讓別人讀，請改成 git + gcs 或直接補 delivery snapshot",
                     ],
-                    governance_hints=_build_governance_hints(warnings=_warnings_with_legacy(preflight_warnings)),
+                    governance_hints=_build_governance_hints(warnings=_warnings_with_legacy(preflight_warnings + list(remote_visibility_warnings or []))),
                     rejection_reason=rejection_reason,
                 )
 
@@ -1238,7 +1261,7 @@ async def write(
             # Helper Ingest Contract: noop detection + cross-doc duplicate warnings
             helper_meta = getattr(result, "_helper_upsert_meta", {}) or {}
             helper_warnings: list[str] = list(getattr(result, "_helper_warnings", None) or [])
-            all_warnings = _warnings_with_legacy(list(preflight_warnings or []) + helper_warnings)
+            all_warnings = _warnings_with_legacy(list(preflight_warnings or []) + list(remote_visibility_warnings or []) + helper_warnings)
             resp_data = dict(serialized)
             if helper_meta.get("noop"):
                 resp_data["noop"] = True

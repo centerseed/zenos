@@ -89,23 +89,25 @@ mcp__zenos__search(query="ZenOS 治理", collection="entities")
 ```python
 mcp__zenos__task(
     action="create",
-    title="[DOGFOOD] 驗證治理流程端到端可用性",
+    title="驗證治理流程端到端可用性",
     description="這是 dogfood 評估用的測試任務。背景：需要確認治理鏈完整可跑。問題：目前無自動驗證機制。期望結果：確認 create→update→review→confirm 全程無異常。",
     acceptance_criteria=[
         "task 建立成功，回傳有效 task ID",
         "update(status=in_progress) 成功",
-        "update(status=review, result=...) 成功",
+        "handoff(to_dispatcher=agent:qa) 後 task 自動進入 review",
         "confirm(accepted=True) 成功，任務進入 done"
     ],
-    linked_entities=[]  # Step 3 找到的 ID 填入，找不到就留空並記錄
+    linked_entities=["<Step 3 找到的 entity ID>"],
+    product_id="<測試 L1 ID>"
 )
 ```
 
 評估點：
-- `linked_entities=[]` 時 server 是否接受？還是強制要求？
+- title 不要用 `Task to ...` / `This task ...` / `這個任務 ...` 這類前綴。
+- `linked_entities` 盡量至少帶 1 個測試 L1 底下 entity；若真的找不到，記錄 warning，但不要亂掛正式資料。
 - 回傳的 `data.id` 路徑是否直觀？
 - `warnings` 或 `suggestions` 有無有用資訊？
-- title 長度驗證是否讓人困惑？
+- 若不是在某個既有 plan 底下，不要亂帶 `plan_id`。
 
 **記錄重試次數**：如果第一次 call 被 reject，記錄原因後修正重送。
 
@@ -127,20 +129,22 @@ mcp__zenos__task(
 
 ---
 
-### Step 6：更新狀態 → review（result 必填測試）
+### Step 6：Developer → QA handoff（server 自動升 review）
 
 ```python
 mcp__zenos__task(
-    action="update",
+    action="handoff",
     id="<task ID>",
-    status="review",
-    result="Dogfood 執行完成。已驗證 create/update/confirm 流程可跑。"
+    to_dispatcher="agent:qa",
+    reason="dogfood execution complete",
+    output_ref="dogfood-run",
+    notes="Dogfood 執行完成。已驗證 create/update/handoff 流程可跑。"
 )
 ```
 
 評估點：
-- 是否有清楚的錯誤訊息提示 result 必填？（如果忘記填）
-- 回傳中有沒有有用的 next step 提示？
+- `to_dispatcher=agent:qa` 且 task 目前為 `in_progress` 時，server 是否自動升為 `review`？
+- handoff 回傳中有沒有有用的 next step 提示？
 
 ---
 
@@ -150,12 +154,13 @@ mcp__zenos__task(
 mcp__zenos__confirm(
     collection="tasks",
     id="<task ID>",
-    accepted=True,
-    result="Dogfood PASS：完整治理鏈 create→review→confirm 無異常。"
+    accepted=True
 )
 ```
 
 評估點：
+- 只能在 task 已是 `review` 狀態時呼叫 confirm。
+- `result` 要在進入 review 前就寫入 task，不是 confirm 時再帶。
 - confirm 回傳的 `governance_hints.suggested_entity_updates` 有無內容？
 - 若 linked_entities 為空，hints 是否還有意義？
 
