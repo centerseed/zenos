@@ -124,7 +124,12 @@ def _qualify_codex_tool_name(namespace: str, name: str) -> str:
 
 
 def _contains_tool_error_text(text: str) -> bool:
-    return "Error calling tool" in text
+    lowered = text.lower()
+    return (
+        "error calling tool" in lowered
+        or "validation error" in lowered
+        or "unexpected keyword argument" in lowered
+    )
 
 
 def _payload_size_bytes(text: str | None = None, payload: dict[str, Any] | None = None) -> int:

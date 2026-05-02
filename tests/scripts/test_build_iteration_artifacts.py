@@ -478,6 +478,62 @@ def test_build_iteration_artifacts_counts_codex_tool_error_as_rejection(tmp_path
     assert monitor["top_rejection_reasons"][0]["reason"] == "TOOL_ERROR"
 
 
+def test_build_iteration_artifacts_counts_codex_validation_error_as_rejection(tmp_path: Path):
+    mod = _load_script_module()
+    transcripts = tmp_path / "transcripts"
+    transcripts.mkdir()
+
+    session = transcripts / "codex-validation-error.jsonl"
+    session.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-02T08:24:23.877Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "read_source",
+                            "namespace": "mcp__zenos__",
+                            "arguments": json.dumps({"doc_id": "doc-1", "preview_chars": 1200}),
+                            "call_id": "call_1",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "timestamp": "2026-05-02T08:24:24.000Z",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call_1",
+                            "output": (
+                                "Wall time: 0.1 seconds\nOutput:\n"
+                                "[{\"type\":\"text\",\"text\":\"1 validation error for call[read_source]\\n"
+                                "preview_chars\\n  Unexpected keyword argument\"}]"
+                            ),
+                        },
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = mod.build_iteration_artifacts(
+        df_id="DF-20260502-codex-validation-error",
+        transcripts_dir=transcripts,
+        session_file=str(session),
+        out_root=tmp_path / "out",
+    )
+
+    monitor = json.loads(Path(result["monitor_path"]).read_text(encoding="utf-8"))
+    assert monitor["total_mcp_calls"] == 1
+    assert monitor["rejected_count"] == 1
+    assert monitor["top_rejection_reasons"][0]["reason"] == "TOOL_ERROR"
+
+
 def test_build_iteration_artifacts_flags_schema_freshness_blocker_when_preview_expected_but_missing(tmp_path: Path):
     mod = _load_script_module()
     transcripts = tmp_path / "transcripts"

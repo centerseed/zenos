@@ -197,3 +197,56 @@ def test_build_l3_retrieval_verdict_passes_happy_path(tmp_path: Path):
     assert payload["source_delivery_pass"] is True
     assert payload["token_gate_pass"] is True
     assert payload["failures"] == []
+
+
+def test_build_l3_retrieval_verdict_flags_read_source_preview_schema_error(tmp_path: Path):
+    mod = _load_script_module()
+    monitor = tmp_path / "monitor.json"
+    producer = tmp_path / "producer.jsonl"
+    monitor.write_text(
+        json.dumps(
+            {
+                "total_mcp_calls": 3,
+                "rejected_count": 1,
+                "reject_rate": 1 / 3,
+                "usage": {"total_tokens": 2500, "cache_read_input_tokens": 0},
+                "payload_bytes": {"total_result_bytes": 5000},
+                "tool_contract": {"schema_freshness_blocker": False},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    _write_jsonl(
+        producer,
+        [
+            *_happy_producer_lines(read_source_payload={"status": "ok", "data": {"content_type": "full", "delivery_status": "ready"}})[:4],
+            _tool_call("c3", "read_source", {"doc_id": "doc-1", "source_id": "src-1", "preview_chars": 1200}),
+            _tool_output(
+                "c3",
+                [
+                    {
+                        "type": "text",
+                        "text": (
+                            "1 validation error for call[read_source]\n"
+                            "preview_chars\n"
+                            "  Unexpected keyword argument"
+                        ),
+                    }
+                ],
+            ),
+        ],
+    )
+
+    result = mod.build_l3_retrieval_verdict(
+        df_id="DF-schema-error",
+        monitor_json=monitor,
+        producer_jsonl=producer,
+        token_budget=30000,
+        out_root=tmp_path,
+    )
+
+    payload = json.loads(Path(result["out_path"]).read_text(encoding="utf-8"))
+    assert payload["verdict"] == "FAIL"
+    assert "tool_result_rejected" in payload["failures"]
+    assert "schema_freshness_blocker" in payload["failures"]

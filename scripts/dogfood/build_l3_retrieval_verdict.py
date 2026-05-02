@@ -64,6 +64,15 @@ def _maybe_parse_json_text(text: str) -> dict[str, Any]:
     return {}
 
 
+def _contains_tool_error_text(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "error calling tool" in lowered
+        or "validation error" in lowered
+        or "unexpected keyword argument" in lowered
+    )
+
+
 def _qualify_codex_tool_name(namespace: str, name: str) -> str:
     namespace = namespace.strip()
     name = name.strip()
@@ -80,6 +89,8 @@ def _extract_result_payload(event: dict[str, Any], item: dict[str, Any]) -> dict
         payload = _maybe_parse_json_text(text)
         if payload:
             return payload
+        if _contains_tool_error_text(text):
+            return {"status": "rejected", "rejection_reason": "TOOL_SCHEMA_OR_VALIDATION_ERROR", "raw_error": text}
 
     mcp_meta = event.get("mcpMeta", {})
     if isinstance(mcp_meta, dict):
@@ -156,7 +167,15 @@ def _parse_producer(path: str | Path) -> list[dict[str, Any]]:
                 call = pending.pop(tool_id, None)
                 if call is None:
                     continue
-                calls.append({**call, "result": _maybe_parse_json_text(str(payload.get("output", "")))})
+                output_text = str(payload.get("output", ""))
+                result_payload = _maybe_parse_json_text(output_text)
+                if not result_payload and _contains_tool_error_text(output_text):
+                    result_payload = {
+                        "status": "rejected",
+                        "rejection_reason": "TOOL_SCHEMA_OR_VALIDATION_ERROR",
+                        "raw_error": output_text,
+                    }
+                calls.append({**call, "result": result_payload})
 
     return calls
 
@@ -197,6 +216,8 @@ def build_l3_retrieval_verdict(
 
     if int(monitor.get("rejected_count") or 0) > 0:
         failures.append("mcp_rejections_present")
+    if any((call.get("result") or {}).get("status") == "rejected" for call in calls):
+        failures.append("tool_result_rejected")
 
     broad_document_searches = [
         call for call in calls
@@ -271,6 +292,8 @@ def build_l3_retrieval_verdict(
 
     tool_contract = monitor.get("tool_contract") or {}
     if tool_contract.get("schema_freshness_blocker"):
+        failures.append("schema_freshness_blocker")
+    if any("unexpected keyword argument" in str((call.get("result") or {}).get("raw_error", "")).lower() for call in calls):
         failures.append("schema_freshness_blocker")
 
     routing_pass = (
