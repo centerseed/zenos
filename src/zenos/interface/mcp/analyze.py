@@ -42,9 +42,11 @@ def _bundle_issue_sort_key(issue: dict) -> tuple:
         "index_missing_sources": 0,
         "index_missing_bundle_highlights": 1,
         "index_missing_primary_highlight": 2,
-        "l2_missing_current_index_document": 3,
-        "index_missing_change_summary": 4,
-        "index_summary_not_retrieval_map": 5,
+        "current_formal_entry_missing_delivery_snapshot": 3,
+        "current_formal_entry_stale_delivery_snapshot": 4,
+        "l2_missing_current_index_document": 5,
+        "index_missing_change_summary": 6,
+        "index_summary_not_retrieval_map": 7,
     }
     return (
         severity_rank.get(str(issue.get("severity", "")).lower(), 9),
@@ -58,6 +60,24 @@ def _doc_primary_source(doc: object) -> dict | None:
     if not sources:
         return None
     return next((src for src in sources if src.get("is_primary")), sources[0])
+
+
+def _doc_is_formal_entry(doc: object) -> bool:
+    details = getattr(doc, "details", None)
+    if isinstance(details, dict) and details.get("formal_entry") is not None:
+        return bool(details.get("formal_entry"))
+    parent_id = str(getattr(doc, "parent_id", "") or "").strip()
+    doc_role = str(getattr(doc, "doc_role", "single") or "single").strip().lower()
+    return bool(parent_id) and doc_role == "index"
+
+
+def _doc_has_github_source(doc: object) -> bool:
+    for source in list(getattr(doc, "sources", None) or []):
+        if not isinstance(source, dict):
+            continue
+        if str(source.get("type") or "").strip().lower() == "github":
+            return True
+    return False
 
 
 def _detect_invalid_document_sources(docs: list[object]) -> list[dict]:
@@ -697,6 +717,123 @@ async def analyze(
             result["department"] = dept
         return result
 
+    async def _load_document_delivery_state(doc_ids: list[str]) -> dict[str, dict]:
+        if not doc_ids:
+            return {}
+        try:
+            from zenos.infrastructure.sql_common import SCHEMA
+
+            pool = await get_pool()
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, primary_snapshot_revision_id, delivery_status
+                    FROM {SCHEMA}.entities
+                    WHERE id = ANY($1::text[])
+                    """,
+                    doc_ids,
+                )
+        except Exception:
+            logger.warning("Document delivery-state lookup failed", exc_info=True)
+            return {}
+
+        delivery_state: dict[str, dict] = {}
+        for row in rows:
+            doc_id = str(row["id"] or "").strip()
+            if not doc_id:
+                continue
+            delivery_state[doc_id] = {
+                "primary_snapshot_revision_id": row["primary_snapshot_revision_id"],
+                "delivery_status": row["delivery_status"],
+            }
+        return delivery_state
+
+    async def _annotate_delivery_issues_with_source_drift(issues: list[dict]) -> list[dict]:
+        if not issues:
+            return issues
+        try:
+            from zenos.infrastructure.github_adapter import GitHubAdapter
+        except Exception:
+            return issues
+
+        adapter = GitHubAdapter()
+        enriched: list[dict] = []
+        for issue in issues:
+            source_uri = str(issue.get("source_uri") or "").strip()
+            if not source_uri:
+                enriched.append(issue)
+                continue
+            try:
+                alternatives = await adapter.search_alternatives_for_uri(source_uri)
+            except Exception:
+                alternatives = []
+            alternatives = [
+                candidate for candidate in alternatives
+                if isinstance(candidate, str) and candidate.strip() and candidate.strip() != source_uri
+            ][:10]
+            if alternatives:
+                issue = dict(issue)
+                issue["suspected_root_cause"] = "source_uri_drift"
+                issue["alternative_uris"] = alternatives
+                issue["suggested_action"] = (
+                    f"{issue.get('suggested_action', '').strip()} "
+                    "可能的替代 GitHub URI 已附上；先更新 current source，再重新 publish delivery snapshot。"
+                ).strip()
+            enriched.append(issue)
+        return enriched
+
+    def _detect_formal_entry_delivery_issues(
+        docs: list[object],
+        delivery_state: dict[str, dict],
+        relationships_by_doc_map: dict[str, list],
+    ) -> list[dict]:
+        issues: list[dict] = []
+        for doc in docs:
+            doc_id = str(getattr(doc, "id", "") or "").strip()
+            if not doc_id:
+                continue
+            if str(getattr(doc, "status", "") or "").lower() != "current":
+                continue
+            if not _doc_is_formal_entry(doc):
+                continue
+
+            linked_ids = get_document_linked_entity_ids(doc, relationships_by_doc_map.get(doc_id, []))
+            state = delivery_state.get(doc_id) or {}
+            snapshot_revision_id = state.get("primary_snapshot_revision_id")
+            delivery_status = str(state.get("delivery_status") or "").strip().lower()
+            primary_source = _doc_primary_source(doc) or {}
+            source_uri = str(primary_source.get("uri") or "").strip()
+
+            if not snapshot_revision_id:
+                issues.append({
+                    "issue_type": "current_formal_entry_missing_delivery_snapshot",
+                    "entity_id": doc_id,
+                    "title": getattr(doc, "name", "") or "未命名文件",
+                    "linked_entity_ids": linked_ids,
+                    "source_uri": source_uri,
+                    "severity": "red",
+                    "requires_snapshot_repair": True,
+                    "suggested_action": (
+                        "此 current formal-entry 文件缺少 delivery snapshot。"
+                        "請 publish snapshot，否則 agent 讀原文時只能退化為 summary_fallback。"
+                    ),
+                })
+            elif delivery_status == "stale":
+                issues.append({
+                    "issue_type": "current_formal_entry_stale_delivery_snapshot",
+                    "entity_id": doc_id,
+                    "title": getattr(doc, "name", "") or "未命名文件",
+                    "linked_entity_ids": linked_ids,
+                    "source_uri": source_uri,
+                    "severity": "yellow",
+                    "requires_snapshot_repair": True,
+                    "suggested_action": (
+                        "此 current formal-entry 文件的 delivery snapshot 已 stale。"
+                        "請重新 publish current snapshot，避免 full-content delivery 退化。"
+                    ),
+                })
+        return issues
+
     def _attach_impacts_repair_actions(validity_report: list[dict]) -> list[dict]:
         """Enrich broken impacts with executable repair payloads.
 
@@ -1287,6 +1424,16 @@ async def analyze(
             relationships_by_doc=relationships_by_doc,
             entity_map=entity_map,
         )
+        delivery_state = await _load_document_delivery_state(
+            [doc.id for doc in all_doc_entities if getattr(doc, "id", None)]
+        )
+        delivery_issues = _detect_formal_entry_delivery_issues(
+                all_doc_entities,
+                delivery_state,
+                relationships_by_doc,
+            )
+        delivery_issues = await _annotate_delivery_issues_with_source_drift(delivery_issues)
+        bundle_issues.extend(delivery_issues)
         doc_by_id = {doc.id: doc for doc in all_doc_entities if doc.id}
         entity_map_for_patches = locals().get("entity_map")
         if any(issue.get("issue_type") == "l2_missing_current_index_document" for issue in bundle_issues):
@@ -1345,6 +1492,16 @@ async def analyze(
             "bundle_issue_count": len(bundle_issues),
             "bundle_issue_limit": _INVALID_DOCUMENT_BUNDLE_ISSUE_LIMIT,
             "bundle_issues_truncated": len(bundle_issues) > _INVALID_DOCUMENT_BUNDLE_ISSUE_LIMIT,
+            "summary": {
+                "invalid_count": len(invalid_docs),
+                "snapshot_missing_count": sum(
+                    1
+                    for issue in bundle_issues
+                    if issue.get("issue_type") == "current_formal_entry_missing_delivery_snapshot"
+                ),
+                "bundle_issue_count": len(bundle_issues),
+                "truncated": len(bundle_issues) > _INVALID_DOCUMENT_BUNDLE_ISSUE_LIMIT,
+            },
         }
         if scope_data is not None:
             results["invalid_documents"]["scope"] = scope_data

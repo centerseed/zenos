@@ -22,6 +22,28 @@ class SearchResult:
 _CJK_RANGE = re.compile(r"[\u4e00-\u9fff]")
 
 
+def _stringify_search_part(value: object) -> list[str]:
+    """Flatten arbitrary metadata into searchable strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (int, float, bool)):
+        return [str(value)]
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key, item in value.items():
+            parts.extend(_stringify_search_part(key))
+            parts.extend(_stringify_search_part(item))
+        return parts
+    if isinstance(value, (list, tuple, set, frozenset)):
+        parts: list[str] = []
+        for item in value:
+            parts.extend(_stringify_search_part(item))
+        return parts
+    return [str(value)]
+
+
 def _cjk_bigrams(token: str) -> list[str]:
     """Generate bigrams from a CJK token.
 
@@ -43,60 +65,39 @@ def _tokenize(text: str) -> list[str]:
 
 def _collect_searchable_text_entity(entity: Entity) -> str:
     """Collect all searchable text from an entity."""
-    parts = [entity.name, entity.summary, entity.type]
+    parts = _stringify_search_part([entity.name, entity.summary, entity.type])
     if isinstance(entity.tags, Tags):
-        what = entity.tags.what
-        who = entity.tags.who
-        # Handle both list[str] and str formats
-        if isinstance(what, list):
-            parts.extend(what)
-        else:
-            parts.append(what)
-        parts.append(entity.tags.why)
-        parts.append(entity.tags.how)
-        if isinstance(who, list):
-            parts.extend(who)
-        else:
-            parts.append(who)
+        parts.extend(_stringify_search_part(entity.tags.what))
+        parts.extend(_stringify_search_part(entity.tags.why))
+        parts.extend(_stringify_search_part(entity.tags.how))
+        parts.extend(_stringify_search_part(entity.tags.who))
     # ADR-022: Include per-source doc_type so doc_type searches hit bundle sources
     if entity.sources:
         for src in entity.sources:
             if isinstance(src, dict):
-                doc_type = src.get("doc_type", "")
-                if doc_type:
-                    parts.append(doc_type)
+                parts.extend(_stringify_search_part(src.get("doc_type")))
+                parts.extend(_stringify_search_part(src.get("label")))
+                parts.extend(_stringify_search_part(src.get("uri")))
     return " ".join(parts)
 
 
 def _collect_searchable_text_document(doc: Document) -> str:
     """Collect all searchable text from a document."""
-    parts = [doc.title, doc.summary]
-    parts.extend(doc.tags.what)
-    parts.append(doc.tags.why)
-    parts.append(doc.tags.how)
-    parts.extend(doc.tags.who)
+    parts = _stringify_search_part([doc.title, doc.summary])
+    parts.extend(_stringify_search_part(doc.tags.what))
+    parts.extend(_stringify_search_part(doc.tags.why))
+    parts.extend(_stringify_search_part(doc.tags.how))
+    parts.extend(_stringify_search_part(doc.tags.who))
     return " ".join(parts)
 
 
 def _collect_searchable_text_protocol(protocol: Protocol) -> str:
     """Collect all searchable text from a protocol."""
-    parts = [protocol.entity_name]
-    # Flatten content dict values
-    if isinstance(protocol.content, dict):
-        for val in protocol.content.values():
-            if isinstance(val, str):
-                parts.append(val)
-            elif isinstance(val, dict):
-                for v in val.values():
-                    if isinstance(v, str):
-                        parts.append(v)
-            elif isinstance(val, list):
-                for item in val:
-                    if isinstance(item, str):
-                        parts.append(item)
+    parts = _stringify_search_part(protocol.entity_name)
+    parts.extend(_stringify_search_part(protocol.content))
     # Gaps
     for gap in protocol.gaps:
-        parts.append(gap.description)
+        parts.extend(_stringify_search_part(gap.description))
     return " ".join(parts)
 
 

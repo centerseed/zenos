@@ -144,8 +144,8 @@ class TestAutoSelectSkipsStalePrimary:
             mock_ss.read_source.assert_called_once_with("doc-1", source_uri="valid-primary.md")
 
     @pytest.mark.asyncio
-    async def test_all_stale_returns_source_unavailable(self):
-        """All sources are stale -> returns SOURCE_UNAVAILABLE with alternatives empty."""
+    async def test_all_stale_returns_explicit_summary_fallback(self):
+        """All stale GitHub sources may return metadata summary, but never as full content."""
         from zenos.interface.mcp import read_source
 
         doc = _make_doc_entity(sources=[
@@ -176,10 +176,53 @@ class TestAutoSelectSkipsStalePrimary:
             mock_os.get_document = AsyncMock(return_value=doc)
 
             result = await read_source(doc_id="doc-1")
-            data = _non_ok_data(result, "error")
+            data = _ok_data(result)
 
-            assert data["error"] == "SOURCE_UNAVAILABLE"
-            assert data["source_status"] == "stale"
+            assert data["content"] == "A doc"
+            assert data["content_type"] == "document_summary"
+            assert data["content_access"] == "summary"
+            assert data["original_content_access"] == "full"
+            assert data["delivery_status"] == "summary_fallback"
+            assert data["requires_snapshot_repair"] is True
+
+    @pytest.mark.asyncio
+    async def test_summary_fallback_is_not_marked_full_content(self):
+        """Metadata summary fallback must be explicit so agents do not treat it as source text."""
+        from zenos.interface.mcp import read_source
+
+        doc = _make_doc_entity(
+            sources=[{
+                "source_id": "s1",
+                "uri": "/docs/doc-1",
+                "label": "Native",
+                "type": "zenos_native",
+                "status": "valid",
+                "is_primary": True,
+            }],
+            summary="Metadata summary only.",
+        )
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.interface.mcp.source_service") as mock_ss,
+            patch("zenos.interface.mcp._current_partner") as mock_partner,
+        ):
+            mock_partner.get.return_value = None
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={
+                "error": "SNAPSHOT_UNAVAILABLE",
+                "source_id": "s1",
+            })
+
+            result = await read_source(doc_id="doc-1")
+            data = _ok_data(result)
+
+            assert data["content"] == "Metadata summary only."
+            assert data["content_type"] == "document_summary"
+            assert data["content_access"] == "summary"
+            assert data["original_content_access"] == "full"
+            assert data["delivery_status"] == "summary_fallback"
+            assert data["requires_snapshot_repair"] is True
 
     @pytest.mark.asyncio
     async def test_source_status_alias_also_drives_selection(self):

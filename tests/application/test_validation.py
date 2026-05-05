@@ -1709,7 +1709,7 @@ class TestSourcesDedup:
         existing = Entity(
             id="ent-1", name="Paceriz", type="product",
             summary="App", tags=Tags(what="x", why="x", how="x", who="x"),
-            sources=[{"uri": "https://example.com/a.md", "label": "A", "type": "github"}],
+            sources=[{"uri": "https://github.com/acme/repo/blob/main/a.md", "label": "A", "type": "github"}],
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
         svc = _make_service(repos)
@@ -1717,14 +1717,34 @@ class TestSourcesDedup:
         result = await svc.upsert_entity({
             "id": "ent-1",
             "append_sources": [
-                {"uri": "https://example.com/a.md", "label": "A dup", "type": "github"},
-                {"uri": "https://example.com/new.md", "label": "New", "type": "github"},
+                {"uri": "https://github.com/acme/repo/blob/main/a.md", "label": "A dup", "type": "github"},
+                {"uri": "https://github.com/acme/repo/blob/main/new.md", "label": "New", "type": "github"},
             ],
         })
         assert len(result.entity.sources) == 2
         uris = [s.get("uri") for s in result.entity.sources]
-        assert "https://example.com/a.md" in uris
-        assert "https://example.com/new.md" in uris
+        assert "https://github.com/acme/repo/blob/main/a.md" in uris
+        assert "https://github.com/acme/repo/blob/main/new.md" in uris
+
+    @pytest.mark.asyncio
+    async def test_append_sources_rejects_unreadable_source_uri(self):
+        """append_sources fast path must not bypass source URI validation."""
+        repos = _mock_repos()
+        existing = Entity(
+            id="ent-1", name="Paceriz", type="product",
+            summary="App", tags=Tags(what="x", why="x", how="x", who="x"),
+            sources=[],
+        )
+        repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
+        svc = _make_service(repos)
+
+        with pytest.raises(ValueError, match="Invalid source URI for append_sources"):
+            await svc.upsert_entity({
+                "id": "ent-1",
+                "append_sources": [
+                    {"uri": "docs/specs/FRD-07.md", "label": "FRD-07", "type": "github"},
+                ],
+            })
 
 
 class TestEntityUpdateSemantics:
@@ -2012,7 +2032,7 @@ class TestConfirmedEntityFieldUpdate:
             summary="summary",
             tags=Tags(what="app", why="coach", how="AI", who="runners"),
             confirmed_by_user=False,  # unconfirmed, so name change should succeed
-            sources=[{"uri": "https://old.md", "label": "old", "type": "github"}],
+            sources=[{"uri": "https://github.com/acme/repo/blob/main/old.md", "label": "old", "type": "github"}],
         )
         repos["entity_repo"].get_by_id = AsyncMock(return_value=existing)
         repos["entity_repo"].list_by_parent = AsyncMock(return_value=[])
@@ -2021,15 +2041,15 @@ class TestConfirmedEntityFieldUpdate:
         result = await svc.upsert_entity({
             "id": "ent-1",
             "name": "New Name",
-            "append_sources": [{"uri": "https://new.md", "label": "new", "type": "github"}],
+            "append_sources": [{"uri": "https://github.com/acme/repo/blob/main/new.md", "label": "new", "type": "github"}],
         })
 
         # Name should be updated (not swallowed by fast path)
         assert result.entity.name == "New Name"
         # New source should be appended
         uris = [s.get("uri") for s in result.entity.sources]
-        assert "https://new.md" in uris
-        assert "https://old.md" in uris
+        assert "https://github.com/acme/repo/blob/main/new.md" in uris
+        assert "https://github.com/acme/repo/blob/main/old.md" in uris
 
 
 # ===========================================================================

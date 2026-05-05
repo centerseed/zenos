@@ -255,6 +255,22 @@ class TestSearchOntology:
         results = search_ontology("marketing", [], [doc], [])
         assert len(results) >= 1
 
+    def test_nested_metadata_does_not_crash_search(self):
+        entity = _entity("Training Knowledge")
+        entity.tags.what = ["training", ["plan", {"phase": "base"}]]
+        entity.tags.who = [{"role": ["coach", None]}, "runner"]
+        entity.sources = [{
+            "uri": "https://github.com/acme/repo/blob/main/docs/FRD-07.md",
+            "label": "FRD-07",
+            "type": "github",
+            "doc_type": ["SPEC", {"legacy": "FRD"}],
+        }]
+
+        results = search_ontology("FRD coach", [entity], [], [])
+
+        assert len(results) >= 1
+        assert results[0].name == "Training Knowledge"
+
     def test_summary_match(self):
         entity = _entity("Module X", summary="handles ACWR safety calculations")
         results = search_ontology("ACWR safety", [entity], [], [])

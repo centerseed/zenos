@@ -302,9 +302,11 @@ async def read_source(
                 "content": summary,
                 "content_type": "document_summary",
                 "source_type": source_type,
-                "content_access": content_access,
+                "content_access": "summary",
+                "original_content_access": content_access,
                 "retrieval_mode": retrieval_mode,
                 "delivery_status": "summary_fallback",
+                "requires_snapshot_repair": True,
                 "setup_hint": setup_hint,
             }
             if current_sid:

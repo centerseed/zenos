@@ -90,6 +90,19 @@ def _validate_document_source_uri(source: dict, *, context: str = "source") -> N
             raise ValueError(f"Invalid source URI for {context}: {error_msg}")
 
 
+def _validate_append_sources(sources: object) -> list[dict]:
+    """Validate append_sources before any fast path mutates persisted metadata."""
+    if not isinstance(sources, list):
+        raise ValueError("append_sources must be a list of source dicts")
+    validated: list[dict] = []
+    for idx, source in enumerate(sources):
+        if not isinstance(source, dict):
+            raise ValueError(f"append_sources[{idx}] must be a dict")
+        _validate_document_source_uri(source, context=f"append_sources[{idx}]")
+        validated.append(source)
+    return validated
+
+
 # ──────────────────────────────────────────────
 # Helper types
 # ──────────────────────────────────────────────
@@ -1224,7 +1237,7 @@ class OntologyService:
             if k in data
         )
         if existing and data.get("append_sources") and not _has_field_mutations:
-            append_sources = data["append_sources"]
+            append_sources = _validate_append_sources(data["append_sources"])
             existing_uris = {s.get("uri") for s in existing.sources}
             added = 0
             for s in append_sources:
@@ -1698,6 +1711,7 @@ class OntologyService:
                 # append_sources always works on confirmed entities (additive, not overwrite)
                 append_sources = data.get("append_sources")
                 if append_sources:
+                    append_sources = _validate_append_sources(append_sources)
                     existing_uris = {s.get("uri") for s in existing.sources}
                     for s in append_sources:
                         if s.get("uri") not in existing_uris:
@@ -1745,6 +1759,7 @@ class OntologyService:
             sources = deduped
         append_sources = merged_data.get("append_sources")
         if append_sources and existing:
+            append_sources = _validate_append_sources(append_sources)
             existing_uris = {s.get("uri") for s in existing.sources}
             sources = list(existing.sources)
             for s in append_sources:
