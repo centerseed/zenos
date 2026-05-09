@@ -4,7 +4,7 @@ id: ADR-032-document-delivery-layer-architecture
 status: Approved
 ontology_entity: l3-document
 created: 2026-04-11
-updated: 2026-04-23
+updated: 2026-05-02
 accepted_at: 2026-04-20
 related: ADR-048-grand-ontology-refactor
 partially_superseded_sections:
@@ -55,6 +55,12 @@ retained_canonical_sections:
 7. **Phase 1 先支援 Markdown。**  
    先交付 markdown content 與 metadata；WYSIWYG/雙向回寫不在本輪。
 
+8. **Graph-first routing 與 source delivery 必須分開判讀。**
+   當 agent 已經用 `L2 -> L3 bundle -> source` 命中正確文件入口，但 GitHub source 因 token / repo 權限 / remote 可見性失敗而無法回全文時，系統應降級為 `document_summary` / snapshot fallback，並把狀態視為 **delivery degraded**，不是 **routing failure**。
+
+9. **Current 正式入口不得長期依賴 GitHub token 才能全文可讀。**
+   對外分享、跨 agent 消費、或 dogfood 驗證中的正式入口文件，若全文仍只能靠 GitHub direct read 取得，則不算 delivery 完成；應優先補 ZenOS delivery snapshot。
+
 ## Alternatives
 
 | 方案 | 優點 | 缺點 | 為什麼不選 |
@@ -70,11 +76,13 @@ retained_canonical_sections:
   - 權限與分享可被統一審計（token lifecycle + access logs）。
   - 可重用現有 attachment proxy/GCS 能力，加速落地。
   - 前端可快速重用 MarkdownRenderer，縮短 Reader 開發週期。
+  - Dogfood 與 runtime 會把「routing 已成功」和「delivery/auth 退化」分開回報，較容易定位真 blocker。
 
 - 負面：
   - 需要新增 migration（revisions/share tokens + entity delivery 欄位）。
   - publish 流程會增加一次 snapshot 寫入成本。
   - 非 github source 的 publish/read 仍受 adapter 能力限制。
+  - 若 current 正式入口沒有 snapshot，GitHub token 失效會直接讓全文交付退化成 summary fallback。
 
 - 後續處理：
   - [未確認] 是否分離 documents bucket 與 attachments bucket。
@@ -100,3 +108,6 @@ retained_canonical_sections:
    - dashboard API 文檔路由 mock tests
    - share token create/revoke/expire 路徑
    - Reader 基本渲染與授權失敗狀態
+7. Dogfood / runtime 判讀補充：
+   - `search(documents)` 命中正確 L3 bundle、但 `read_source` 因 GitHub `401/403` 或 remote 不可讀而回 fallback 時，分類為 `source delivery degraded`
+   - current 正式入口若發生上述情況，優先補 delivery snapshot，而不是把問題歸咎為 L3 routing 失敗

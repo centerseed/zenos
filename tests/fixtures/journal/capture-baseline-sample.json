@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "data": {
+    "entries": [
+      {
+        "id": "j1",
+        "created_at": "2026-05-01T00:00:00Z",
+        "project": "ZenOS",
+        "flow_type": "capture",
+        "summary": "整理 zenos governance flow",
+        "tags": ["tokens:120", "entries:2", "documents:1", "blindspots:1"]
+      },
+      {
+        "id": "j2",
+        "created_at": "2026-05-01T01:00:00Z",
+        "project": "Paceriz",
+        "flow_type": "capture",
+        "summary": "CRM customer call capture",
+        "tags": ["entries:1"]
+      },
+      {
+        "id": "j3",
+        "created_at": "2026-05-01T02:00:00Z",
+        "project": "Marketing",
+        "flow_type": "feature",
+        "summary": "should be ignored",
+        "tags": ["tokens:999"]
+      }
+    ]
+  }
+}

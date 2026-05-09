@@ -12,7 +12,7 @@ import { Icon, ICONS } from "@/components/zen/Icons";
 import { useAuth } from "@/lib/auth";
 import { getAllBlindspots, getAllEntities, getAllRelationships } from "@/lib/api";
 import { useToast } from "@/components/zen/Toast";
-import type { Blindspot, Entity, Relationship } from "@/types";
+import type { Blindspot, Entity, Relationship, Source } from "@/types";
 
 const KnowledgeGraph = dynamic(() => import("@/components/KnowledgeGraph"), {
   ssr: false,
@@ -30,6 +30,21 @@ const TYPE_LABEL: Partial<Record<Entity["type"], string>> = {
   deal: "DEAL",
   person: "PERSON",
 };
+
+function sourceLabel(source: Source): string {
+  if (source.label && source.label !== source.type) return source.label;
+  try {
+    const path = source.uri.replace(/[#?].*/, "").split("/").filter(Boolean);
+    return path[path.length - 1] || source.uri;
+  } catch {
+    return source.uri || "Untitled source";
+  }
+}
+
+function sourceUrl(source: Source): string | null {
+  if (source.uri.startsWith("http://") || source.uri.startsWith("https://")) return source.uri;
+  return null;
+}
 
 export default function KnowledgeMapPage() {
   const t = useInk("light");
@@ -131,6 +146,14 @@ export default function KnowledgeMapPage() {
       ...children.map((entity) => ({ entity, relation: "child" as const })),
     ];
   }, [entities, entityMap, selectedId]);
+
+  const selectedDocumentBundles = useMemo(() => {
+    if (!selectedEntity) return [];
+    if (selectedEntity.type === "document") return [selectedEntity];
+    return entities
+      .filter((entity) => entity.parentId === selectedEntity.id && entity.type === "document")
+      .sort((a, b) => (b.sources?.length ?? 0) - (a.sources?.length ?? 0));
+  }, [entities, selectedEntity]);
 
   // Visible counts (KnowledgeGraph hides document + project internally)
   const visibleCount = useMemo(
@@ -715,6 +738,130 @@ export default function KnowledgeMapPage() {
                   </div>
                 )}
               </div>
+
+              {/* Documents + article sources */}
+              {selectedDocumentBundles.length > 0 ? (
+                <div>
+                  <div
+                    style={{
+                      fontFamily: fontMono,
+                      fontSize: 10,
+                      color: c.inkFaint,
+                      letterSpacing: "0.12em",
+                      textTransform: "uppercase",
+                      marginBottom: 8,
+                    }}
+                  >
+                    文章 · Sources
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {selectedDocumentBundles.map((doc) => (
+                      <div
+                        key={doc.id}
+                        style={{
+                          border: `1px solid ${c.inkHair}`,
+                          background: c.paper,
+                          borderRadius: 2,
+                          padding: 10,
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => selectEntity(doc.id)}
+                          style={{
+                            width: "100%",
+                            border: "none",
+                            background: "transparent",
+                            color: c.ink,
+                            cursor: "pointer",
+                            padding: 0,
+                            textAlign: "left",
+                            fontFamily: fontBody,
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <span
+                              style={{
+                                fontFamily: fontMono,
+                                fontSize: 9,
+                                color: c.vermillion,
+                                letterSpacing: "0.08em",
+                                flexShrink: 0,
+                              }}
+                            >
+                              {doc.docRole === "index" ? "INDEX" : "DOC"}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: 12,
+                                color: c.ink,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap",
+                              }}
+                            >
+                              {doc.name}
+                            </span>
+                            <span style={{ marginLeft: "auto", fontFamily: fontMono, fontSize: 9, color: c.inkFaint }}>
+                              {doc.sources.length}
+                            </span>
+                          </div>
+                        </button>
+                        {doc.sources.length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 8 }}>
+                            {doc.sources.map((source, index) => {
+                              const url = sourceUrl(source);
+                              const disabled = !url || source.source_status === "unresolvable";
+                              return (
+                                <button
+                                  key={source.source_id ?? `${doc.id}:source:${index}`}
+                                  type="button"
+                                  disabled={disabled}
+                                  onClick={() => {
+                                    if (url) window.open(url, "_blank", "noopener,noreferrer");
+                                  }}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 8,
+                                    width: "100%",
+                                    border: "none",
+                                    background: "transparent",
+                                    color: disabled ? c.inkFaint : c.ink,
+                                    cursor: disabled ? "default" : "pointer",
+                                    padding: "4px 0",
+                                    textAlign: "left",
+                                    fontFamily: fontBody,
+                                    fontSize: 12,
+                                    opacity: disabled ? 0.55 : 1,
+                                  }}
+                                  title={url ?? source.uri}
+                                >
+                                  <span style={{ fontFamily: fontMono, fontSize: 9, color: c.inkFaint, flexShrink: 0 }}>
+                                    {source.type === "gdoc" || source.type === "google_drive" ? "GD" : source.type.slice(0, 2).toUpperCase()}
+                                  </span>
+                                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {sourceLabel(source)}
+                                  </span>
+                                  {url ? (
+                                    <span style={{ fontFamily: fontMono, fontSize: 9, color: c.vermillion, flexShrink: 0 }}>
+                                      OPEN
+                                    </span>
+                                  ) : null}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 8, fontFamily: fontMono, fontSize: 11, color: c.inkFaint }}>
+                            沒有可開啟的 source
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               {/* Recent activity — P1 */}
               <div>

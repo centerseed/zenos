@@ -337,6 +337,17 @@ class FirestoreEntityRepository:
             results.append(_dict_to_entity(doc.id, doc.to_dict()))
         return results
 
+    async def list_by_ids(self, entity_ids: list[str]) -> list[Entity]:
+        if not entity_ids:
+            return []
+        results: list[Entity] = []
+        for start in range(0, len(entity_ids), 30):
+            chunk = entity_ids[start:start + 30]
+            query = self._col.where(firestore.FieldPath.document_id(), "in", chunk)
+            async for doc in query.stream():
+                results.append(_dict_to_entity(doc.id, doc.to_dict()))
+        return results
+
     async def upsert(self, entity: Entity) -> Entity:
         now = _now()
         entity.updated_at = now
@@ -386,6 +397,20 @@ class FirestoreRelationshipRepository:
         results: list[Relationship] = []
         async for doc in self._col(entity_id).stream():
             results.append(_dict_to_rel(doc.id, doc.to_dict()))
+        return results
+
+    async def list_by_target(
+        self,
+        target_id: str,
+        rel_types: tuple[str, ...] | None = None,
+    ) -> list[Relationship]:
+        query = self._db.collection_group("relationships").where("targetId", "==", target_id)
+        results: list[Relationship] = []
+        async for doc in query.stream():
+            rel = _dict_to_rel(doc.id, doc.to_dict())
+            if rel_types and rel.type not in rel_types:
+                continue
+            results.append(rel)
         return results
 
     async def find_duplicate(

@@ -98,6 +98,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - `analyze(check_type="staleness")`
    - `analyze(check_type="blindspot")`
    - 文件治理優先用 scoped：`analyze(check_type="invalid_documents", entity_id="<L1/L2 id>")`
+   - 做 L3 覆蓋率 / 存在性清查時，必須先找 L2，再用 `search(collection="documents", entity_name="<L2 name>", include=["summary"])` 枚舉；**禁止**把 `search(query="關鍵字", collection="documents")` 當完整清查路徑
 2. 分類問題
    - 結構問題：命名混亂、L1/L2 掛錯、孤兒節點、關聯缺失。
    - 文件問題：legacy `single` 過多、缺少 `bundle_highlights`、L2 找不到 doc bundle、source 重複或入口錯誤。
@@ -129,6 +130,7 @@ Agent 應解析統一格式，讀取回傳欄位據此行動。
    - 低價值文件轉 stale 或只保留 source，不建立獨立節點。
 5. 文件 bundle 重整
    - 先把同主題 L3 收斂成單一 doc bundle，補 `bundle_highlights`，再決定哪些 source 應 stale / archive。
+   - 若 agent 需要逐一打開大量 MD 才知道 bundle 內容，這是流程缺陷，不是「資料剛好比較散」；先修 retrieval path，再談資料補齊。
 6. 最後才修文案
    - 統一 summary/tags 語言，避免先改文案後又被結構改動推翻。
 

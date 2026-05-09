@@ -43,6 +43,30 @@ class SqlRelationshipRepository:
             )
         return [_row_to_relationship(r) for r in rows]
 
+    async def list_by_target(
+        self,
+        target_id: str,
+        rel_types: tuple[str, ...] | None = None,
+    ) -> list[Relationship]:
+        pid = _get_partner_id()
+        async with self._pool.acquire() as conn:
+            if rel_types:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {SCHEMA}.relationships
+                        WHERE target_entity_id = $1
+                        AND type = ANY($2::text[])
+                        AND partner_id = $3""",
+                    target_id, list(rel_types), pid,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""SELECT * FROM {SCHEMA}.relationships
+                        WHERE target_entity_id = $1
+                        AND partner_id = $2""",
+                    target_id, pid,
+                )
+        return [_row_to_relationship(r) for r in rows]
+
     async def list_all(self) -> list[Relationship]:
         pid = _get_partner_id()
         async with self._pool.acquire() as conn:

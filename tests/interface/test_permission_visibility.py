@@ -376,6 +376,39 @@ class TestTaskVisibility:
                 mock_repo.get_by_id = AsyncMock(side_effect=RuntimeError("db down"))
                 assert await _is_task_visible(task) is False
 
+    async def test_guest_task_visibility_avoids_entity_full_scan(self):
+        from zenos.interface.mcp import _is_task_visible
+
+        task = _make_task(linked_entities=["ent-shared"])
+        shared = _make_entity(id="ent-shared", parent_id="product-acme", visibility="public")
+
+        with _PartnerContext("p-guest", is_admin=False):
+            from zenos.interface.mcp import _current_partner
+
+            token = _current_partner.set(
+                {
+                    "id": "p-guest",
+                    "isAdmin": False,
+                    "workspaceRole": "guest",
+                    "authorizedEntityIds": ["product-acme"],
+                }
+            )
+            try:
+                with patch("zenos.interface.mcp.entity_repo") as mock_repo:
+                    mock_repo.list_all = AsyncMock(
+                        side_effect=AssertionError("guest task visibility should not require list_all")
+                    )
+                    mock_repo.list_by_parent = AsyncMock(
+                        side_effect=lambda parent_id: {
+                            "product-acme": [shared],
+                            "ent-shared": [],
+                        }.get(parent_id, [])
+                    )
+                    mock_repo.get_by_id = AsyncMock(return_value=shared)
+                    assert await _is_task_visible(task) is True
+            finally:
+                _current_partner.reset(token)
+
     async def test_search_tasks_filters_by_visibility(self):
         """search(collection="tasks") should exclude tasks linked to invisible entities."""
         from zenos.interface.mcp import search

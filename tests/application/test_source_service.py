@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import pytest
+from unittest.mock import patch
 
 from zenos.application.knowledge.source_service import SourceService
 from zenos.domain.knowledge import Entity, EntityStatus, Tags
+from zenos.infrastructure.context import current_partner_id
 
 
 # ---------------------------------------------------------------------------
@@ -283,3 +285,66 @@ async def test_read_source_with_recovery_honors_source_status_alias():
     result = await svc.read_source_with_recovery("uuid-012")
 
     assert result == {"error": "ALREADY_UNRESOLVABLE"}
+
+
+@pytest.mark.asyncio
+async def test_read_source_with_snapshot_falls_back_to_uri_when_source_id_misses():
+    """Snapshot reads should recover via source_uri when source_id cannot be matched."""
+    entity = Entity(
+        id="uuid-013",
+        name="Snapshot Doc",
+        type="document",
+        summary="doc with snapshot",
+        tags=Tags(what=["test"], why="testing", how="unit", who=["dev"]),
+        sources=[
+            {
+                "uri": "docs/spec.md",
+                "label": "primary",
+                "type": "github",
+                # Intentionally omit source_id to simulate legacy/current mismatch.
+                "source_status": "valid",
+            }
+        ],
+    )
+    repo = _StubEntityRepo([entity])
+    adapter = _StubSourceAdapter()
+    svc = SourceService(entity_repo=repo, source_adapter=adapter)
+
+    class _FakeConn:
+        async def fetchrow(self, query, *args):
+            if "SELECT primary_snapshot_revision_id" in query:
+                return {"primary_snapshot_revision_id": "rev-1"}
+            if "SELECT snapshot_bucket, snapshot_object_path" in query:
+                return {
+                    "snapshot_bucket": "bucket-1",
+                    "snapshot_object_path": "snapshots/rev-1.md",
+                }
+            raise AssertionError(f"Unexpected query: {query}")
+
+    class _Acquire:
+        async def __aenter__(self):
+            return _FakeConn()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakePool:
+        def acquire(self):
+            return _Acquire()
+
+    token = current_partner_id.set("partner-1")
+    try:
+        with (
+            patch("zenos.infrastructure.sql_common.get_pool", return_value=_FakePool()),
+            patch("zenos.infrastructure.gcs_client.download_blob", return_value=(b"# snapshot", "text/markdown")),
+        ):
+            result = await svc.read_source_with_snapshot(
+                "uuid-013",
+                source_id="src-missing",
+                source_uri="docs/spec.md",
+            )
+    finally:
+        current_partner_id.reset(token)
+
+    assert result["content"] == "# snapshot"
+    assert result["content_type"] == "full"

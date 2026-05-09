@@ -16,6 +16,7 @@ ALLOW_UNAUTHENTICATED="${ALLOW_UNAUTHENTICATED:-true}"
 CLOUDSQL_INSTANCE="${CLOUDSQL_INSTANCE:-zentropy-4f7a5:asia-east1:zentropy-db}"
 MAX_INSTANCES="${MAX_INSTANCES:-2}"
 SERVICE_ACCOUNT="${SERVICE_ACCOUNT:-165893875709-compute@developer.gserviceaccount.com}"
+SKIP_GITHUB_SECRET_HEALTHCHECK="${SKIP_GITHUB_SECRET_HEALTHCHECK:-false}"
 
 echo "=== ZenOS MCP Deploy ==="
 echo ""
@@ -199,5 +200,17 @@ echo "[4/4] Deploy complete"
 echo "  serving revision: $TARGET_REVISION"
 echo "  SSE endpoint: $SERVICE_URL/sse?api_key=YOUR_API_KEY"
 echo "  Streamable HTTP endpoint: $SERVICE_URL/mcp?api_key=YOUR_API_KEY"
+
+echo ""
+echo "[5/5] Verifying GitHub delivery secret health..."
+if [ "$SKIP_GITHUB_SECRET_HEALTHCHECK" = "true" ]; then  # pragma: allowlist secret
+  echo "  skipped (SKIP_GITHUB_SECRET_HEALTHCHECK=true)"
+else
+  "$ROOT_DIR/.venv/bin/python" "$ROOT_DIR/scripts/check_github_delivery_secret.py" \
+    --project-id "$PROJECT_ID" \
+    --secret-name github-token
+  echo "  github-token is valid for GitHub delivery reads"
+fi
+
 echo ""
 echo "=== Deploy complete ==="

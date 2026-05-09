@@ -5,9 +5,9 @@
     "owner": "Barry",
     "repository": "https://github.com/centerseed/zenos"
   },
-  "published_at": "2026-05-02",
+  "published_at": "2026-05-09",
   "ssot": {
-    "governance_version": "2026.05.02.1",
+    "governance_version": "2026.05.09.1",
     "workflow_version": "2026.05.02.1",
     "governance_files": [
       "skills/governance/bootstrap-protocol.md",
@@ -26,6 +26,7 @@
       "skills/workflows/debug.md",
       "skills/workflows/triage.md",
       "skills/workflows/brainstorm.md",
+      "skills/workflows/dogfood.md",
       "skills/workflows/marketing-intel.md",
       "skills/workflows/marketing-plan.md",
       "skills/workflows/marketing-generate.md",
@@ -162,6 +163,13 @@
       "owner": "Barry"
     },
     {
+      "name": "dogfood",
+      "version": "1.0.0",
+      "path": "workflows/dogfood",
+      "files": ["SKILL.md"],
+      "owner": "Barry"
+    },
+    {
       "name": "marketing-intel",
       "version": "0.1.0",
       "path": "workflows/marketing-intel",
@@ -210,6 +218,7 @@
         "zenos-sync",
         "zenos-governance",
         "brainstorm",
+        "dogfood",
         "challenger",
         "triage"
       ]

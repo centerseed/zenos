@@ -76,6 +76,7 @@ SSOT 有新版時，**不要再重跑首次 bootstrap**。直接執行 `/zenos-s
 | `knowledge-sync.md` | 掃描 git log，增量同步 ontology | 專案有新 commit 後 |
 | `setup.md` | MCP token 設定 + skill 安裝 | 第一次接上 ZenOS 時 |
 | `governance-loop.md` | 全面治理掃描 + 自動修復 | 定期巡檢或品質不佳時 |
+| `dogfood.md` | clean-room dogfooding，驗證 graph-first 與治理閉環 | 找流程斷點、reject rate、效率退化時 |
 
 ---
 
@@ -88,6 +89,7 @@ SSOT 有新版時，**不要再重跑首次 bootstrap**。直接執行 `/zenos-s
 | 首次建構 ontology | `knowledge-capture` + `l2-knowledge-governance` + `document-governance` |
 | 日常 commit 後同步 | `knowledge-sync` |
 | 治理巡邏 | `governance-loop` |
+| 治理 dogfooding | `dogfood` + `governance-loop` |
 
 ---
 
@@ -135,6 +137,7 @@ python3 scripts/sync_skills_from_release.py
 | `release/workflows/debug/` | 多角色協作除錯流程 | Workflow |
 | `release/workflows/triage/` | 任務盤點流程 | Workflow |
 | `release/workflows/brainstorm/` | 系統性腦暴流程 | Workflow |
+| `release/workflows/dogfood/` | clean-room 治理 dogfooding 閉環 | Workflow |
 
 > `skills/agents/` 已 deprecated，保留僅供歷史參考。角色與 workflow 的可發佈版本一律以 `skills/release/` 為準。
 

@@ -181,7 +181,8 @@ class TestSearchTool:
         from zenos.interface.mcp import search
 
         entities = [_make_entity(), _make_entity(id="ent-2", name="ZenOS")]
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities")
@@ -197,7 +198,8 @@ class TestSearchTool:
             _make_entity(confirmed_by_user=True),
             _make_entity(id="ent-2", confirmed_by_user=False),
         ]
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities", confirmed_only=True)
@@ -210,7 +212,8 @@ class TestSearchTool:
             _make_entity(id="ent-active", status="active"),
             _make_entity(id="ent-paused", status="paused"),
         ]
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities", status="active")
@@ -225,7 +228,8 @@ class TestSearchTool:
             _make_entity(id="prod-1", type="product", level=1),
             _make_entity(id="mod-1", type="module", level=2),
         ]
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities", status="product")
@@ -327,7 +331,8 @@ class TestSearchTool:
         from zenos.interface.mcp import search
 
         entities = [_make_entity(id=f"ent-{i}") for i in range(10)]
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os.list_entities = AsyncMock(return_value=entities)
 
             result = await search(collection="entities", limit=3)
@@ -414,7 +419,8 @@ class TestSearchTool:
             summary="spec",
             sources=[{"uri": "https://github.com/acme/repo/blob/main/docs/spec-b.md", "label": "spec-b.md", "type": "github"}],
         )
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(return_value=[doc_hit, doc_miss])
             mock_os._entities.get_by_name = AsyncMock(return_value=None)
@@ -445,7 +451,8 @@ class TestSearchTool:
             summary="unrelated",
             sources=[{"uri": "other.md", "label": "other.md", "type": "github"}],
         )
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(return_value=[doc_hit, doc_miss])
             mock_os._entities.get_by_name = AsyncMock(return_value=None)
@@ -483,12 +490,16 @@ class TestSearchTool:
                 return [doc]
             return [primary, secondary, doc]
 
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(return_value=[])
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[doc])
             mock_os._entities.get_by_name = AsyncMock(return_value=secondary)
             mock_os._relationships = AsyncMock()
             mock_os._relationships.list_by_entity = AsyncMock(return_value=[rel])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[rel])
 
             result = await search(collection="documents", entity_name="Secondary Module")
             data = _ok_data(result)
@@ -545,12 +556,16 @@ class TestSearchTool:
                 return [rel]
             return []
 
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(return_value=[primary_doc])
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[related_index])
             mock_os._entities.get_by_name = AsyncMock(return_value=target)
             mock_os._relationships = AsyncMock()
             mock_os._relationships.list_by_entity = AsyncMock(side_effect=list_by_entity)
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[rel])
 
             result = await search(collection="documents", entity_name="MCP 介面設計")
             data = _ok_data(result)
@@ -579,21 +594,90 @@ class TestSearchTool:
         )
 
         async def list_all(type_filter=None):
-            if type_filter == "document":
-                return [doc]
-            return [product, primary, secondary, doc]
+            raise AssertionError(f"product_id lookup should stay targeted, got list_all({type_filter!r})")
 
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(
+                side_effect=lambda parent_id: {
+                    "product-1": [secondary],
+                    "module-secondary": [],
+                }.get(parent_id, [])
+            )
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[doc])
             mock_os._entities.get_by_name = AsyncMock(return_value=None)
             mock_os._relationships = AsyncMock()
             mock_os._relationships.list_by_entity = AsyncMock(return_value=[rel])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[rel])
 
             result = await search(collection="documents", product_id="product-1")
             data = _ok_data(result)
 
             assert [d["id"] for d in data["documents"]] == ["doc-1"]
+
+    async def test_documents_entity_name_with_product_id_prefers_scoped_entity_match(self):
+        from zenos.interface.mcp import search
+
+        product = _make_entity(id="product-1", name="Product", type="product", parent_id=None)
+        scoped_module = _make_entity(id="module-scoped", name="Action Layer", type="module", parent_id="product-1")
+        global_module = _make_entity(id="module-global", name="Action Layer", type="module", parent_id=None)
+        scoped_doc = _make_entity(
+            id="doc-scoped",
+            name="Scoped Spec",
+            type="document",
+            parent_id="module-scoped",
+            summary="scoped",
+        )
+        global_doc = _make_entity(
+            id="doc-global",
+            name="Global Spec",
+            type="document",
+            parent_id="module-global",
+            summary="global",
+        )
+
+        async def list_all(type_filter=None):
+            raise AssertionError(f"entity_name+product_id lookup should stay targeted, got list_all({type_filter!r})")
+
+        async def list_by_parent(parent_id):
+            return {
+                "product-1": [scoped_module],
+                "module-scoped": [scoped_doc],
+                "module-global": [global_doc],
+            }.get(parent_id, [])
+
+        async def list_by_ids(ids):
+            items = {
+                "product-1": product,
+                "module-scoped": scoped_module,
+                "module-global": global_module,
+                "doc-scoped": scoped_doc,
+                "doc-global": global_doc,
+            }
+            return [items[i] for i in ids if i in items]
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(side_effect=list_by_parent)
+            mock_os._entities.list_by_ids = AsyncMock(side_effect=list_by_ids)
+            mock_os._entities.get_by_name = AsyncMock(return_value=global_module)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+            result = await search(
+                collection="documents",
+                entity_name="Action Layer",
+                product_id="product-1",
+            )
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"]] == ["doc-scoped"]
+            assert result["applied_filters"]["entity_level"]["effective_max_level"] is None
 
     async def test_documents_search_prioritizes_current_index_retrieval_maps(self):
         from zenos.interface.mcp import search
@@ -644,12 +728,16 @@ class TestSearchTool:
                 return [single_doc, draft_index, current_index]
             return [module, single_doc, draft_index, current_index]
 
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(return_value=[single_doc, draft_index, current_index])
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[])
             mock_os._entities.get_by_name = AsyncMock(return_value=module)
             mock_os._relationships = AsyncMock()
             mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[])
 
             result = await search(collection="documents", entity_name="L3 文件治理")
             data = _ok_data(result)
@@ -683,12 +771,16 @@ class TestSearchTool:
                 return docs
             return [module, *docs]
 
-        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.search._load_document_delivery_states", AsyncMock(return_value={})):
             mock_os._entities = AsyncMock()
             mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(return_value=docs)
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[])
             mock_os._entities.get_by_name = AsyncMock(return_value=module)
             mock_os._relationships = AsyncMock()
             mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[])
 
             result = await search(collection="documents", entity_name="語意治理 Pipeline", limit=20)
             data = _ok_data(result)
@@ -700,6 +792,377 @@ class TestSearchTool:
             assert data["documents"][0]["source_count"] == 1
             assert data["documents"][0]["primary_source"]["uri"].endswith(".md")
             assert any("compact summary" in warning for warning in result["warnings"])
+
+    async def test_documents_entity_name_lookup_avoids_document_full_scan(self):
+        from zenos.interface.mcp import search
+
+        module = _make_entity(id="module-1", name="Graph Module", type="module")
+        doc = _make_entity(
+            id="doc-1",
+            name="Graph Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="graph-first",
+        )
+
+        async def list_all(type_filter=None):
+            raise AssertionError(f"entity_name lookup should stay targeted, got list_all({type_filter!r})")
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(return_value=[doc])
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[])
+            mock_os._entities.get_by_name = AsyncMock(return_value=module)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+            result = await search(collection="documents", entity_name="Graph Module")
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"]] == ["doc-1"]
+
+    async def test_documents_entity_name_prefers_valid_source_over_stale_source(self):
+        from zenos.interface.mcp import search
+
+        module = _make_entity(id="module-1", name="Graph Module", type="module")
+        stale_doc = _make_entity(
+            id="doc-stale",
+            name="Stale Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="stale first",
+            doc_role="index",
+            sources=[{"source_id": "src-stale", "uri": "stale.md", "type": "github", "status": "stale", "source_status": "stale"}],
+            bundle_highlights=[{"source_id": "src-stale", "headline": "stale", "priority": "primary"}],
+        )
+        valid_doc = _make_entity(
+            id="doc-valid",
+            name="Valid Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="valid first",
+            doc_role="index",
+            sources=[{"source_id": "src-valid", "uri": "valid.md", "type": "github", "status": "valid", "source_status": "valid"}],
+            bundle_highlights=[{"source_id": "src-valid", "headline": "valid", "priority": "primary"}],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_by_parent = AsyncMock(return_value=[stale_doc, valid_doc])
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[])
+            mock_os._entities.get_by_name = AsyncMock(return_value=module)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+            result = await search(
+                collection="documents",
+                entity_name="Graph Module",
+                include=["summary"],
+                limit=10,
+            )
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"][:2]] == ["doc-valid", "doc-stale"]
+
+    async def test_documents_entity_name_prefers_ready_delivery_snapshot_over_missing_snapshot(self):
+        from zenos.interface.mcp import search
+
+        module = _make_entity(id="module-1", name="Graph Module", type="module")
+        missing_snapshot_doc = _make_entity(
+            id="doc-missing-snapshot",
+            name="Missing Snapshot Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="valid github but no snapshot",
+            details={"formal_entry": True},
+            doc_role="index",
+            sources=[{"source_id": "src-missing", "uri": "missing.md", "type": "github", "status": "valid", "source_status": "valid"}],
+            bundle_highlights=[{"source_id": "src-missing", "headline": "missing", "priority": "primary"}],
+        )
+        ready_snapshot_doc = _make_entity(
+            id="doc-ready-snapshot",
+            name="Ready Snapshot Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="valid github with ready snapshot",
+            details={"formal_entry": True},
+            doc_role="index",
+            sources=[{"source_id": "src-ready", "uri": "ready.md", "type": "github", "status": "valid", "source_status": "valid"}],
+            bundle_highlights=[{"source_id": "src-ready", "headline": "ready", "priority": "primary"}],
+        )
+        ready_snapshot_doc.primary_snapshot_revision_id = "rev-1"
+        ready_snapshot_doc.delivery_status = "ready"
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_by_parent = AsyncMock(return_value=[missing_snapshot_doc, ready_snapshot_doc])
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[])
+            mock_os._entities.get_by_name = AsyncMock(return_value=module)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+            result = await search(
+                collection="documents",
+                entity_name="Graph Module",
+                include=["summary"],
+                limit=10,
+            )
+            data = _ok_data(result)
+
+            assert [d["id"] for d in data["documents"][:2]] == [
+                "doc-ready-snapshot",
+                "doc-missing-snapshot",
+            ]
+            assert data["documents"][0]["delivery_status"] == "ready"
+            assert data["documents"][0]["has_delivery_snapshot"] is True
+            assert data["documents"][1]["has_delivery_snapshot"] is False
+
+    async def test_documents_summary_include_returns_minimal_routing_payload(self):
+        from zenos.interface.mcp import search
+
+        module = _make_entity(id="module-1", name="Graph Module", type="module")
+        doc = _make_entity(
+            id="doc-1",
+            name="Graph Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="graph-first retrieval map",
+            doc_role="index",
+            sources=[{
+                "source_id": "src-1",
+                "uri": "graph-spec.md",
+                "label": "graph-spec.md",
+                "type": "github",
+                "doc_type": "SPEC",
+                "status": "valid",
+                "source_status": "valid",
+                "is_primary": True,
+                "adapter": "github",
+                "extra_field": "drop-me",
+            }],
+            bundle_highlights=[
+                {"source_id": "src-1", "headline": "Read this first", "priority": "primary", "reason_to_read": "too long"},
+                {"source_id": "src-2", "headline": "Then this", "priority": "secondary", "reason_to_read": "too long"},
+                {"source_id": "src-3", "headline": "And this", "priority": "secondary", "reason_to_read": "too long"},
+            ],
+        )
+        doc.primary_snapshot_revision_id = "rev-1"
+        doc.delivery_status = "ready"
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_by_parent = AsyncMock(return_value=[doc])
+            mock_os._entities.list_by_ids = AsyncMock(return_value=[module])
+            mock_os._entities.get_by_name = AsyncMock(return_value=module)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+            result = await search(
+                collection="documents",
+                entity_name="Graph Module",
+                include=["summary"],
+                limit=10,
+            )
+            data = _ok_data(result)
+
+            payload = data["documents"][0]
+            assert payload["summary"] == "graph-first retrieval map"
+            assert payload["primary_source"]["uri"] == "graph-spec.md"
+            assert "extra_field" not in payload["primary_source"]
+            assert len(payload["bundle_highlights"]) == 2
+            assert "reason_to_read" not in payload["bundle_highlights"][0]
+            assert payload["delivery_status"] == "ready"
+            assert payload["has_delivery_snapshot"] is True
+            assert "linked_entities" not in payload
+            assert "related_entity_ids" not in payload
+            assert "change_summary" not in payload
+
+    async def test_documents_search_uses_partner_visible_sources_for_primary_source(self):
+        from zenos.interface.mcp import search
+        from zenos.interface.mcp._auth import _current_partner
+
+        module = _make_entity(id="module-1", name="Graph Module", type="module")
+        doc = _make_entity(
+            id="doc-1",
+            name="Graph Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="graph-first retrieval map",
+            doc_role="index",
+            sources=[
+                {
+                    "source_id": "src-hidden",
+                    "uri": "hidden-valid.md",
+                    "label": "Hidden Valid",
+                    "type": "github",
+                    "doc_type": "SPEC",
+                    "status": "valid",
+                    "source_status": "valid",
+                    "is_primary": True,
+                    "container_id": "repo:hidden",
+                },
+                {
+                    "source_id": "src-visible",
+                    "uri": "visible-stale.md",
+                    "label": "Visible Stale",
+                    "type": "github",
+                    "doc_type": "SPEC",
+                    "status": "stale",
+                    "source_status": "stale",
+                    "container_id": "repo:allowed",
+                },
+            ],
+            bundle_highlights=[{"source_id": "src-visible", "headline": "Read this first", "priority": "primary"}],
+        )
+
+        token = _current_partner.set({
+            "id": "partner-1",
+            "preferences": {"connectorScopes": {"github": {"containers": ["repo:allowed"]}}},
+        })
+        try:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os:
+                mock_os._entities = AsyncMock()
+                mock_os._entities.list_by_parent = AsyncMock(return_value=[doc])
+                mock_os._entities.list_by_ids = AsyncMock(return_value=[module])
+                mock_os._entities.get_by_name = AsyncMock(return_value=module)
+                mock_os._relationships = AsyncMock()
+                mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+                mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+                result = await search(
+                    collection="documents",
+                    entity_name="Graph Module",
+                    include=["summary"],
+                    limit=10,
+                )
+                data = _ok_data(result)
+
+                payload = data["documents"][0]
+                assert payload["primary_source"]["uri"] == "visible-stale.md"
+                assert payload["primary_source"]["source_status"] == "stale"
+                assert payload["source_count"] == 1
+        finally:
+            _current_partner.reset(token)
+
+    async def test_documents_search_hides_docs_without_partner_visible_sources(self):
+        from zenos.interface.mcp import search
+        from zenos.interface.mcp._auth import _current_partner
+
+        module = _make_entity(id="module-1", name="Graph Module", type="module")
+        doc = _make_entity(
+            id="doc-1",
+            name="Hidden Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            summary="hidden from this partner",
+            sources=[{
+                "source_id": "src-hidden",
+                "uri": "hidden-valid.md",
+                "label": "Hidden Valid",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+                "is_primary": True,
+                "container_id": "repo:hidden",
+            }],
+        )
+
+        token = _current_partner.set({
+            "id": "partner-1",
+            "preferences": {"connectorScopes": {"github": {"containers": ["repo:allowed"]}}},
+        })
+        try:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os:
+                mock_os._entities = AsyncMock()
+                mock_os._entities.list_by_parent = AsyncMock(return_value=[doc])
+                mock_os._entities.list_by_ids = AsyncMock(return_value=[module])
+                mock_os._entities.get_by_name = AsyncMock(return_value=module)
+                mock_os._relationships = AsyncMock()
+                mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+                mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+                result = await search(
+                    collection="documents",
+                    entity_name="Graph Module",
+                    include=["summary"],
+                    limit=10,
+                )
+                data = _ok_data(result)
+
+                assert data["documents"] == []
+        finally:
+            _current_partner.reset(token)
+
+    async def test_search_does_not_duplicate_workspace_context_inside_data(self):
+        from zenos.interface.mcp import search
+        from zenos.interface.mcp._auth import _current_partner
+        from zenos.infrastructure.context import current_partner_id
+
+        module = _make_entity(id="module-1", name="Graph Module", type="module")
+
+        token_partner = _current_partner.set({"id": "partner-1", "name": "Test Partner"})
+        token_ws = current_partner_id.set("partner-1")
+        try:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os:
+                mock_os._entities = AsyncMock()
+                mock_os._entities.list_by_parent = AsyncMock(return_value=[])
+                mock_os._entities.list_by_ids = AsyncMock(return_value=[])
+                mock_os._entities.get_by_name = AsyncMock(return_value=module)
+                mock_os._relationships = AsyncMock()
+                mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+                mock_os._relationships.list_by_target = AsyncMock(return_value=[])
+
+                result = await search(
+                    collection="documents",
+                    entity_name="Graph Module",
+                    include=["summary"],
+                    limit=10,
+                )
+
+            assert "workspace_context" not in result["data"]
+            assert "workspace_context" in result
+        finally:
+            current_partner_id.reset(token_ws)
+            _current_partner.reset(token_partner)
+
+    async def test_blindspots_product_id_lookup_avoids_entity_full_scan(self):
+        from zenos.interface.mcp import search
+
+        blindspot = _make_blindspot(related_entity_ids=["mod-1"])
+        product = _make_entity(id="prod-1", name="Paceriz", type="product", level=1)
+        module = _make_entity(id="mod-1", name="Coach", type="module", level=2, parent_id="prod-1")
+
+        async def list_all(type_filter=None):
+            raise AssertionError(f"blindspot product scope should stay targeted, got list_all({type_filter!r})")
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os:
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(side_effect=list_all)
+            mock_os._entities.list_by_parent = AsyncMock(
+                side_effect=lambda parent_id: {
+                    "prod-1": [module],
+                    "mod-1": [],
+                }.get(parent_id, [])
+            )
+            mock_os.list_blindspots = AsyncMock(return_value=[blindspot])
+
+            result = await search(collection="blindspots", product_id="prod-1")
+            data = _ok_data(result)
+
+            assert [b["id"] for b in data["blindspots"]] == ["bs-1"]
 
 
 class TestSearchNewParams:
@@ -834,6 +1297,13 @@ class TestSearchNewParams:
         unrelated = _make_entity(id="mod-2", name="Billing", type="module", level=2, parent_id="prod-other")
         with patch("zenos.interface.mcp.ontology_service") as mock_os:
             mock_os.list_entities = AsyncMock(return_value=[product, child, unrelated])
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_by_parent = AsyncMock(
+                side_effect=lambda parent_id: {
+                    "prod-1": [child],
+                    "mod-1": [],
+                }.get(parent_id, [])
+            )
             result = await search(collection="entities", product_id="prod-1")
             ids = [e["id"] for e in _ok_data(result)["entities"]]
             assert "prod-1" in ids
@@ -924,6 +1394,48 @@ class TestSearchNewParams:
             mock_os.search.assert_called_once_with(
                 "test", max_level=2, product_id="prod-from-name",
             )
+
+    async def test_guest_entity_search_scope_avoids_entity_full_scan(self):
+        """Guest entity listing should resolve authorized subtree without entity list-all scans."""
+        from zenos.interface.mcp import search, _current_partner
+
+        product = _make_entity(id="product-acme", name="Acme", type="product", level=1)
+        child = _make_entity(id="mod-1", name="Scoped Module", type="module", level=2, parent_id="product-acme")
+        outsider = _make_entity(id="mod-2", name="Other Module", type="module", level=2, parent_id="product-other")
+
+        token = _current_partner.set(
+            {
+                "id": "p-guest",
+                "isAdmin": False,
+                "workspaceRole": "guest",
+                "authorizedEntityIds": ["product-acme"],
+            }
+        )
+        try:
+            with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+                 patch("zenos.interface.mcp.entity_repo") as mock_er:
+                mock_os.list_entities = AsyncMock(return_value=[product, child, outsider])
+                mock_os._entities = AsyncMock()
+                mock_os._entities.list_all = AsyncMock(
+                    side_effect=AssertionError("guest entity scope should not require list_all")
+                )
+                mock_er.list_all = AsyncMock(
+                    side_effect=AssertionError("guest entity scope should not require entity_repo.list_all")
+                )
+                mock_er.list_by_parent = AsyncMock(
+                    side_effect=lambda parent_id: {
+                        "product-acme": [child],
+                        "mod-1": [],
+                    }.get(parent_id, [])
+                )
+
+                result = await search(collection="entities")
+                ids = [e["id"] for e in _ok_data(result)["entities"]]
+                assert "product-acme" in ids
+                assert "mod-1" in ids
+                assert "mod-2" not in ids
+        finally:
+            _current_partner.reset(token)
 
 
 class TestParseEntityLevel:
@@ -1509,6 +2021,309 @@ class TestReadSourceTool:
             assert data["content_type"] == "document_summary"
             assert data["source_type"] == "local"
             assert data["delivery_status"] == "summary_fallback"
+
+    async def test_read_source_github_permission_issue_returns_document_summary_fallback(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github",
+            name="GitHub Doc",
+            type="document",
+            summary="GitHub metadata summary remains readable when live source access fails.",
+            sources=[{
+                "source_id": "src-github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_recovery = AsyncMock(return_value={
+                "error": "DEAD_LINK",
+                "source_type": "github",
+                "source_status": "stale",
+                "suggested_action": "check_permission",
+            })
+
+            result = await read_source(doc_id="doc-github", source_id="src-github")
+            data = _ok_data(result)
+
+            assert data["content"] == "GitHub metadata summary remains readable when live source access fails."
+            assert data["content_type"] == "document_summary"
+            assert data["source_type"] == "github"
+            assert data["delivery_status"] == "summary_fallback"
+            assert "GitHub token / repo 權限" in data["setup_hint"]
+
+    async def test_read_source_github_with_snapshot_prefers_snapshot_first(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github",
+            name="GitHub Doc",
+            type="document",
+            summary="GitHub metadata summary remains readable when live source access fails.",
+            sources=[{
+                "source_id": "src-github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_recovery = AsyncMock(return_value={
+                "error": "DEAD_LINK",
+                "source_type": "github",
+                "source_status": "stale",
+                "suggested_action": "check_permission",
+            })
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={
+                "content": "# Snapshot content",
+                "source_id": "src-github",
+                "content_type": "full",
+            })
+
+            result = await read_source(doc_id="doc-github", source_id="src-github")
+            data = _ok_data(result)
+
+            assert data["content"] == "# Snapshot content"
+            assert data["content_type"] == "full"
+            assert data["delivery_status"] == "snapshot_first"
+            assert data["source_id"] == "src-github"
+            mock_ss.read_source_with_recovery.assert_not_called()
+
+    async def test_read_source_preview_chars_truncates_snapshot_first_content(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github",
+            name="GitHub Doc",
+            type="document",
+            summary="GitHub metadata summary remains readable when live source access fails.",
+            sources=[{
+                "source_id": "src-github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={
+                "content": "# Snapshot content for preview",
+                "source_id": "src-github",
+                "content_type": "full",
+            })
+
+            result = await read_source(doc_id="doc-github", source_id="src-github", preview_chars=12)
+            data = _ok_data(result)
+
+            assert data["content"] == "# Snapshot c"
+            assert data["preview_chars"] == 12
+            assert data["content_truncated"] is True
+            assert data["delivery_status"] == "snapshot_first"
+
+    async def test_read_source_preview_chars_marks_short_content_not_truncated(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github-formal",
+            name="GitHub Formal Doc",
+            type="document",
+            summary="Should fall back to direct read when snapshot is unavailable.",
+            doc_role="index",
+            parent_id="l2-1",
+            sources=[{
+                "source_id": "src-github-formal",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={"error": "NOT_FOUND"})
+            mock_ss.read_source_with_recovery = AsyncMock(return_value="# Direct")
+
+            result = await read_source(doc_id="doc-github-formal", source_id="src-github-formal", preview_chars=50)
+            data = _ok_data(result)
+
+            assert data["content"] == "# Direct"
+            assert data["preview_chars"] == 50
+            assert data["content_truncated"] is False
+
+    async def test_read_source_rejects_invalid_preview_chars(self):
+        from zenos.interface.mcp import read_source
+
+        result = await read_source(doc_id="doc-1", preview_chars=0)
+
+        assert result["status"] == "rejected"
+        assert result["data"]["error"] == "INVALID_PREVIEW_CHARS"
+
+    async def test_read_source_stale_github_returns_document_summary_fallback(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github-stale",
+            name="GitHub Stale Doc",
+            type="document",
+            summary="Fallback summary for stale GitHub source.",
+            sources=[{
+                "source_id": "src-github-stale",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "stale",
+                "source_status": "stale",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service"):
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await read_source(doc_id="doc-github-stale", source_id="src-github-stale")
+            data = _ok_data(result)
+
+            assert data["content"] == "Fallback summary for stale GitHub source."
+            assert data["content_type"] == "document_summary"
+            assert data["source_type"] == "github"
+            assert data["delivery_status"] == "summary_fallback"
+            assert "標記為 stale" in data["setup_hint"]
+
+    async def test_read_source_stale_github_prefers_snapshot_fallback_when_available(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github-stale",
+            name="GitHub Stale Doc",
+            type="document",
+            summary="Fallback summary for stale GitHub source.",
+            sources=[{
+                "source_id": "src-github-stale",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "stale",
+                "source_status": "stale",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={
+                "content": "# Snapshot fallback for stale github",
+                "source_id": "src-github-stale",
+                "content_type": "full",
+            })
+
+            result = await read_source(doc_id="doc-github-stale", source_id="src-github-stale")
+            data = _ok_data(result)
+
+            assert data["content"] == "# Snapshot fallback for stale github"
+            assert data["content_type"] == "full"
+            assert data["delivery_status"] == "snapshot_fallback"
+            assert data["source_id"] == "src-github-stale"
+
+    async def test_read_source_ready_formal_entry_github_prefers_snapshot_before_direct_read(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github-ready",
+            name="GitHub Ready Doc",
+            type="document",
+            summary="Should prefer ready snapshot first.",
+            doc_role="index",
+            parent_id="l2-1",
+            sources=[{
+                "source_id": "src-github-ready",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+        doc.primary_snapshot_revision_id = "rev-1"
+        doc.delivery_status = "ready"
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={
+                "content": "# Ready snapshot content",
+                "source_id": "src-github-ready",
+                "content_type": "full",
+            })
+            mock_ss.read_source_with_recovery = AsyncMock()
+
+            result = await read_source(doc_id="doc-github-ready", source_id="src-github-ready")
+            data = _ok_data(result)
+
+            assert data["content"] == "# Ready snapshot content"
+            assert data["content_type"] == "full"
+            assert data["delivery_status"] == "snapshot_first"
+            mock_ss.read_source_with_snapshot.assert_awaited_once()
+            mock_ss.read_source_with_recovery.assert_not_called()
+
+    async def test_read_source_formal_entry_github_without_snapshot_falls_back_to_direct_read(self):
+        from zenos.interface.mcp import read_source
+
+        doc = _make_entity(
+            id="doc-github-formal",
+            name="GitHub Formal Doc",
+            type="document",
+            summary="Should fall back to direct read when snapshot is unavailable.",
+            doc_role="index",
+            parent_id="l2-1",
+            sources=[{
+                "source_id": "src-github-formal",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "type": "github",
+                "status": "valid",
+                "source_status": "valid",
+            }],
+        )
+
+        with patch("zenos.interface.mcp.ontology_service") as mock_os, \
+             patch("zenos.interface.mcp.source_service") as mock_ss:
+            mock_os.get_document = AsyncMock(return_value=doc)
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+            mock_ss.read_source_with_snapshot = AsyncMock(return_value={"error": "NOT_FOUND"})
+            mock_ss.read_source_with_recovery = AsyncMock(return_value="# Direct content")
+
+            result = await read_source(doc_id="doc-github-formal", source_id="src-github-formal")
+            data = _ok_data(result)
+
+            assert data["content"] == "# Direct content"
+            mock_ss.read_source_with_snapshot.assert_awaited_once()
+            mock_ss.read_source_with_recovery.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -3849,6 +4664,205 @@ class TestAnalyzeTool:
             assert repair_patch["data"]["add_source"]["retrieval_mode"] == "snapshot"
             assert repair_patch["data"]["add_source"]["content_access"] == "full"
 
+    async def test_analyze_invalid_documents_reports_missing_delivery_snapshot_for_current_formal_entry(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-formal",
+            name="Formal Entry Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            details={"formal_entry": True},
+            doc_role="single",
+            summary="Formal entry spec.",
+            sources=[{
+                "source_id": "src-gh",
+                "type": "github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec.md",
+                "is_primary": True,
+            }],
+        )
+
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[{
+            "id": "doc-formal",
+            "primary_snapshot_revision_id": None,
+            "delivery_status": None,
+        }])
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acquire(conn))
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.infrastructure.sql_common.get_pool", new=AsyncMock(return_value=pool)),
+        ):
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            issues = _ok_data(result)["invalid_documents"]["bundle_issues"]
+
+            issue = next(
+                item for item in issues
+                if item["issue_type"] == "current_formal_entry_missing_delivery_snapshot"
+            )
+            assert issue["entity_id"] == "doc-formal"
+            assert issue["severity"] == "red"
+            assert issue["linked_entity_ids"] == ["module-1"]
+            assert "publish snapshot" in issue["suggested_action"]
+
+    async def test_analyze_invalid_documents_reports_stale_delivery_snapshot_for_current_formal_entry(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-formal-stale",
+            name="Formal Entry Decision",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            details={"formal_entry": True},
+            doc_role="single",
+            summary="Formal entry decision.",
+            sources=[{
+                "source_id": "src-gh",
+                "type": "github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/adr.md",
+                "is_primary": True,
+            }],
+        )
+
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[{
+            "id": "doc-formal-stale",
+            "primary_snapshot_revision_id": "rev-1",
+            "delivery_status": "stale",
+        }])
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acquire(conn))
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.infrastructure.sql_common.get_pool", new=AsyncMock(return_value=pool)),
+        ):
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            issues = _ok_data(result)["invalid_documents"]["bundle_issues"]
+
+            issue = next(
+                item for item in issues
+                if item["issue_type"] == "current_formal_entry_stale_delivery_snapshot"
+            )
+            assert issue["entity_id"] == "doc-formal-stale"
+            assert issue["severity"] == "yellow"
+            assert "重新 publish" in issue["suggested_action"]
+
+    async def test_analyze_invalid_documents_enriches_delivery_issue_with_alternative_uris(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-formal-drift",
+            name="Formal Entry Drifted Spec",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            details={"formal_entry": True},
+            doc_role="single",
+            summary="Formal entry spec.",
+            sources=[{
+                "source_id": "src-gh",
+                "type": "github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/spec-old.md",
+                "is_primary": True,
+            }],
+        )
+
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[{
+            "id": "doc-formal-drift",
+            "primary_snapshot_revision_id": None,
+            "delivery_status": None,
+        }])
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acquire(conn))
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.infrastructure.sql_common.get_pool", new=AsyncMock(return_value=pool)),
+            patch("zenos.infrastructure.github_adapter.GitHubAdapter.search_alternatives_for_uri", new=AsyncMock(return_value=[
+                "https://github.com/acme/repo/blob/main/specs/spec-new.md"
+            ])),
+        ):
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            issues = _ok_data(result)["invalid_documents"]["bundle_issues"]
+
+            issue = next(
+                item for item in issues
+                if item["issue_type"] == "current_formal_entry_missing_delivery_snapshot"
+            )
+            assert issue["suspected_root_cause"] == "source_uri_drift"
+            assert issue["alternative_uris"] == [
+                "https://github.com/acme/repo/blob/main/specs/spec-new.md"
+            ]
+
+    async def test_analyze_invalid_documents_infers_formal_entry_from_current_index_parent(self):
+        from zenos.interface.mcp import analyze
+
+        doc = _make_entity(
+            id="doc-index-inferred",
+            name="Inferred Formal Entry Index",
+            type="document",
+            parent_id="module-1",
+            status="current",
+            details=None,
+            doc_role="index",
+            summary="Inferred formal entry index.",
+            sources=[{
+                "source_id": "src-gh",
+                "type": "github",
+                "uri": "https://github.com/acme/repo/blob/main/docs/index.md",
+                "is_primary": True,
+            }],
+        )
+
+        conn = MagicMock()
+        conn.fetch = AsyncMock(return_value=[{
+            "id": "doc-index-inferred",
+            "primary_snapshot_revision_id": None,
+            "delivery_status": None,
+        }])
+        pool = MagicMock()
+        pool.acquire = MagicMock(return_value=_Acquire(conn))
+
+        with (
+            patch("zenos.interface.mcp.ontology_service") as mock_os,
+            patch("zenos.infrastructure.sql_common.get_pool", new=AsyncMock(return_value=pool)),
+        ):
+            mock_os._entities = AsyncMock()
+            mock_os._entities.list_all = AsyncMock(return_value=[doc])
+            mock_os._relationships = AsyncMock()
+            mock_os._relationships.list_by_entity = AsyncMock(return_value=[])
+
+            result = await analyze(check_type="invalid_documents")
+            issues = _ok_data(result)["invalid_documents"]["bundle_issues"]
+
+            issue = next(
+                item for item in issues
+                if item["issue_type"] == "current_formal_entry_missing_delivery_snapshot"
+            )
+            assert issue["entity_id"] == "doc-index-inferred"
+
     async def test_analyze_invalid_documents_suggests_l2_index_create_patch(self):
         from zenos.interface.mcp import analyze
 
@@ -4893,6 +5907,9 @@ class TestGovernanceGuideTool:
         assert "L3 index summary" in content
         assert "文件群 retrieval map" in content
         assert 'search(collection="documents", entity_name="<L2 name>")' in content
+        assert 'include=["summary", "documents"]' in content
+        assert "使用者語言" in content
+        assert "新手 5K/10K 課表" in content
         assert "bundle_highlights" in content
 
     async def test_bundle_rules_require_index_summary_retrieval_map(self):

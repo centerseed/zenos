@@ -172,6 +172,7 @@ Governance 檔案（`skills/governance/`）與 workflow 檔案（`skills/workflo
 - `skills/workflows/debug.md`
 - `skills/workflows/triage.md`
 - `skills/workflows/brainstorm.md`
+- `skills/workflows/dogfood.md`
 - `skills/workflows/marketing-intel.md`
 - `skills/workflows/marketing-plan.md`
 - `skills/workflows/marketing-generate.md`

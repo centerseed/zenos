@@ -21,6 +21,33 @@ related:
 2. 主動治理讓知識圖譜越來越完整（支持 #1）
 3. 跨用戶/跨 agent 同一套 context 可用（CRM/marketing 已達標，繼續守住）
 
+### 目標重述（v2 success criteria）
+
+本 plan 的完成不是「資料變多」，而是以下目標同時成立：
+
+1. **達成 spec 目標**
+   - L2 真的是跨角色公司共識概念，且具體 impacts 可推下游
+   - L3 真的是 agent 可消費的知識入口，不是 metadata 容器
+
+2. **比資料夾全文搜尋更高效**
+   - 衡量包含：
+     - MCP calls
+     - token 成本
+     - MCP result payload size（當 clean-room session 固定 overhead 主導總 token 時）
+     - 命中率
+     - full-scan ratio
+   - 若只是把全量搜尋濃縮成單一步驟，不算成功
+
+3. **Task 品質因圖譜而提升**
+   - 開票時能用 L2 / L3 / impacts chain 補齊背景、AC、相關模組
+   - 不漏掉應跟著看的 module / protocol / blindspot
+   - 不靠全域文件搜尋拼湊上下文
+
+4. **閉環可重複**
+   - clean-room producer 找到真問題
+   - fixer 修 skill/runtime/test
+   - clean-room verifier 重跑同 scenario 證明改善
+
 ## 硬約束（不可動）
 
 - **Capture/治理入口必須保留人為觸發**（`/zenos-capture`、`/zenos-governance`）
@@ -120,6 +147,64 @@ related:
 │            └──────────────────────────────────────────┘        │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+## v2 Clean-Room Orchestration
+
+上面的架構還不夠，因為 producer 若沿用上一輪 transcript，會把 workaround 當成產品能力，dogfood 失真。
+
+### 新增約束
+
+1. **Producer clean-room**
+   - 每輪 producer 都是新 subagent / 新 transcript
+   - prompt 只給 scenario、產品 scope、Context Happy Path、驗證假設
+   - 不給上一輪完整 findings、錯誤清單、臨時 workaround
+2. **Monitor 持有歷史**
+   - 歷史比較、reject-rate 累積、修前/修後 diff，只留在 monitor / orchestrator
+   - producer 不看歷史，以免被 bias
+3. **Verifier 再開一次 clean-room**
+   - 修補後不可直接在 fixer 那個 session 內重試
+   - 必須用另一個乾淨 verifier session 重跑同 scenario
+4. **只修流程，不修資料**
+   - 本 loop 的主要產出是 skill/runtime/test/contract 修正
+   - ontology data 問題只記 observation/backlog，除非該輪目標明確是 data remediation
+
+### 建議最小編制（4 agents）
+
+| Agent | 主要任務 | 保留歷史？ |
+|---|---|---|
+| Producer | 用乾淨 context 真跑 scenario | 否 |
+| Monitor | 記錄 calls / rejects / path / token | 是 |
+| Fixer | 依 findings 改 skill/runtime/test | 是（只讀 findings） |
+| Verifier | 修後重跑同 scenario | 否 |
+
+### 與現有角色的直接映射
+
+為了降低協作成本，v2 不新增全新角色名詞，直接映射到 repo 現有 subagent：
+
+| v2 角色 | 現有角色 |
+|---|---|
+| Planner / Orchestrator | Architect |
+| Producer / Fixer | Developer |
+| Verifier | QA |
+| Monitor | dogfood + governance-loop + reject-rate tooling |
+
+這樣可以直接沿用既有 `Architect -> Developer -> QA -> Architect` handoff chain，而不是再做一套平行 orchestration。
+
+### 單輪完成定義
+
+單一 DF iteration 只有在以下條件都成立時才算完成：
+
+1. Producer 跑出可重現問題
+2. Monitor 已把問題定位到 skill / MCP / runtime / prompt path
+3. Fixer 已提交對應修補與測試
+4. Verifier 用新 session 重跑，證明問題改善
+5. Orchestrator 記錄修前/修後 delta：
+   - MCP calls
+   - reject rate / top rejection reason
+   - 是否仍需 keyword / full scan
+   - 是否更快命中正確 L2 / L3 bundle
+
+若只有「改完了」但沒有 verifier clean-room rerun，這輪不算閉環。
 
 ### Producer subagent
 
@@ -224,6 +309,9 @@ Step 6. 回 Step 1
 ### 中期（iteration 10-30）
 
 - 重放過去 1 個月任一 capture 場景 → token 降 30%+
+- 若 total token 主要被 agent runtime 固定成本主導，至少要證明：
+  - `payload_bytes.total_result_bytes` 降 30%+
+  - 或 `payload_bytes.search_result_bytes` / `payload_bytes.read_source_result_bytes` 至少一項明顯下降，且命中率不退化
 - Monitor 可偵測 4 種 entity 的全部健康維度
 - 至少一次「發現 ADR 規則過時 → 更新 ADR」
 
@@ -1084,3 +1172,1374 @@ Step 6. 回 Step 1
   - Agent 查 context 的預設路徑變成固定流程，不再需要憑經驗猜要先讀 journal、tasks 還是 L3 docs。
 - Resume Point:
   - 下一輪可考慮把 Context Happy Path 做成 MCP tool response suggestion，例如 search/get 回傳 `next_context_steps`，讓不讀 skill 的 agent 也能走對路徑。
+
+### DF-20260502-1
+
+- Scenario: 把 `/dogfood` 從 repo 內部 workflow 升成正式 project-level release skill，然後用 clean-room producer / verifier 重跑目前最明顯的 L3 retrieval 問題：`search(collection="documents", entity_name="<L2 name>")` 是否仍退化成 documents full-scan。
+- Findings:
+  - `/dogfood` 原本只存在 `skills/workflows/dogfood.md`，不在 `skills/release/`、manifest、setup content、sync script 內；安裝後使用者看不到它。
+  - clean-room producer 證實 runtime 問題不在資料，而在查詢契約：workflow 已要求 `L2 -> entity_name documents`，但 `search(collection="documents")` 在 `entity_name` path 仍先 `list_all(type_filter="document")` 再過濾。
+  - 第一輪修補後，documents full-scan 已移除，但 verifier 抓到殘留：`entity_name` path 後面還會做一次 `entities.list_all()` 建 entity map，仍不是完全 targeted。
+  - Firestore entity repo 沒有 `list_by_ids`，related docs 只能 fallback 逐筆 `get_by_id`，跨 backend 契約不一致。
+- Fix:
+  - 發布鏈：
+    - 新增 `skills/release/workflows/dogfood/SKILL.md`。
+    - `skills/release/manifest.json` 納入 `skills/workflows/dogfood.md` 與 `dogfood` skill entry。
+    - `src/zenos/interface/setup_content.py` 納入 workflow、slash-command、default package。
+    - `scripts/sync_skills_from_release.py` 納入 `workflows/dogfood` 與 alias `dogfood`。
+    - `src/zenos/interface/setup_adapters.py` 的 `usage_summary` 明列 `/dogfood`。
+  - Runtime：
+    - `src/zenos/interface/mcp/search.py` 的 `entity_name` documents path 改成 targeted lookup：
+      - `get_by_name(L2)`
+      - `list_by_parent(L2.id)` 取 primary docs
+      - `list_by_target(L2.id, rel_types=document-link types)` 取 related docs
+      - `list_by_ids(doc_ids)` 批次抓 document entities
+    - 只有 `not targeted_document_lookup` 才 fallback 到 `list_all(type_filter="document")`。
+    - `entity_name` only path 的 entity map 改成只抓當前 documents 的 linked entity IDs，不再為了 response linkage names 做 `entities.list_all()`。
+    - `RelationshipRepository` 新增 `list_by_target(...)`；SQL / Firestore repo 都實作。
+    - `FirestoreEntityRepository` 新增 `list_by_ids(...)`，避免 related docs fallback 成逐筆 `get_by_id`。
+  - Session log hook：
+    - 新增 `scripts/dogfood/build_iteration_artifacts.py`，可從 clean-room transcript 直接產出：
+      - `/tmp/zenos-dogfood/{DF-ID}/producer.jsonl`
+      - `/tmp/zenos-dogfood/{DF-ID}/monitor.json`
+    - `skills/workflows/dogfood.md` 與 release `/dogfood` workflow 都補上這個 artifact 產生步驟。
+    - `tests/scripts/test_build_iteration_artifacts.py` 與 spec guard 驗證 artifact builder 與 workflow 說明存在。
+  - Baseline 庫：
+    - 新增 `scripts/dogfood/build_baseline_library.py`，可吃 `journal_read(flow_type="capture")` 匯出的 JSON，產生 `/tmp/zenos-dogfood/baseline-library.json`。
+    - baseline 會輸出：
+      - `total_capture_sessions`
+      - `avg_tokens`
+      - `avg_outputs.{entries,documents,blindspots}`
+      - `topic_distribution`
+      - replayable `scenarios[]`
+    - `skills/workflows/dogfood.md` 與 release `/dogfood` workflow 都補上 baseline builder 的使用方式。
+    - `tests/scripts/test_build_baseline_library.py` 覆蓋 journal payload shape 與 topic classification。
+  - Tests：
+    - `tests/interface/test_tools.py` 新增/更新 `entity_name` 文件查詢案例。
+    - 明確 guard：`entity_name` 命中時若呼叫任何 `list_all(...)`，測試直接 fail。
+    - `tests/interface/test_setup_tool.py` / `tests/test_sync_skills_from_release.py` 補 `/dogfood` 發布與入口驗證。
+- QA:
+  - `pytest -q tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07'` → `8 passed`
+  - `pytest -q tests/interface/test_setup_tool.py tests/test_sync_skills_from_release.py` → `81 passed`
+  - `pytest -q tests/interface/test_tools.py -k 'documents_entity_name or documents_search_prioritizes_current_index_retrieval_maps or documents_entity_name_many_results_auto_degrades_to_summary_payload'` → `5 passed`
+  - `pytest -q tests/scripts/test_build_iteration_artifacts.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07'` → `9 passed`
+  - `pytest -q tests/scripts/test_build_baseline_library.py` → `2 passed`
+- Outcome:
+  - `/dogfood` 現在是正式可安裝、可同步、可被 setup 暴露的 project-level workflow。
+  - 第一輪 clean-room producer / fixer / verifier 閉環已完成：documents full-scan 被移除，`entity_name` retrieval 改成 targeted graph lookup。
+  - Session log hook 與 baseline builder 都已落地；L3 retrieval 仍未完全到 plan 的終點，product_id / blindspot 等其他 path 還有全量 scan。
+- Resume Point:
+  - 下一輪優先考慮把 targeted lookup 收斂成單一 primitive（例如 `list_documents_for_entity`），繼續消除其他 high-frequency full-scan path，並用真實 `journal_read(flow_type="capture")` 資料生成第一版 baseline。
+
+### DF-20260502-2
+
+- Scenario: 延續 DF-20260502-1，直接針對 `product_id` scope 這條高頻 dogfood path 收斂 full-scan，並驗證 baseline builder 是否已有真實 capture journal 可用。
+- Findings:
+  - `search(collection="entities", product_id=...)` 在 collection listing fallback path 與 search-service path 後處理時，都還會透過 `entities.list_all()` 建 subtree map。
+  - `search(collection="documents", product_id=...)` 雖然 `entity_name` path 已修好，但只要改成 product scope，仍會先 `list_all(type_filter="document")`，再用 linked entities 做二次過濾。
+  - `search(collection="blindspots", product_id=...)` 仍會 `entities.list_all()` 才算 subtree。
+  - `journal_read(flow_type="capture")` 目前回空：`entries=[]`，代表 baseline builder 已有腳本與測試，但暫時沒有真實 capture journal 可產出第一版 live baseline。
+- Fix:
+  - `src/zenos/interface/mcp/search.py`
+    - 新增 `_collect_subtree_ids_via_parent(...)`，改用 `list_by_parent` 逐層走 subtree，不再為 product scope 建整張 entity map。
+    - `entities + product_id` 改走 parent traversal subtree filter。
+    - `documents + product_id` 改成 targeted lookup：
+      - 先用 product subtree ids
+      - 對 subtree 節點跑 `list_by_parent(...)` 收 primary docs
+      - 對 subtree 節點跑 `list_by_target(..., rel_types=document-link types)` 收 secondary linked docs
+      - 用 `list_by_ids(...)` 批次抓 doc entities
+    - document result 的 linkage `entity_map` 改成只抓當前結果集的 linked entity ids，不再 fallback `entities.list_all()`。
+    - `blindspots + product_id` 改走 parent traversal subtree filter。
+  - `tests/interface/test_tools.py`
+    - 新增 guard：`documents + product_id` 不得呼叫 `list_all(...)`。
+    - 新增 guard：`blindspots + product_id` 不得呼叫 `list_all(...)`。
+    - 更新 `entities + product_id` 測試，明確 mock `list_by_parent(...)`。
+  - `skills/release/zenos-capture/SKILL.md`
+    - 補明確的 capture journal 段落，要求有實質知識變更時先 `journal_read(flow_type="capture")`，再 `journal_write(flow_type="capture")`。
+    - 直接把 baseline library 對 capture journal 的依賴寫進 release skill，避免 agent 只做 ontology 寫入卻沒留下可重放場景。
+  - `src/zenos/interface/mcp/_visibility.py`
+    - 新增 guest subtree parent-traversal helper，`_guest_allowed_entity_ids()` 不再靠 `entity_repo.list_all()`。
+    - guest task visibility 改成共用 `_guest_allowed_entity_ids()` + `get_by_id()`，不再先掃全量 entity map。
+  - `src/zenos/interface/mcp/search.py`
+    - guest entity listing 直接共用 `_guest_allowed_entity_ids()`，移除兩處 guest scope `list_all()`。
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 guard：release capture skill 必須明示 `flow_type="capture"` 的 journal 寫入。
+  - `tests/interface/test_permission_visibility.py`
+    - 新增 guard：guest task visibility 不得呼叫 `list_all()`。
+  - `tests/interface/test_tools.py`
+    - 新增 guard：guest entity search scope 不得呼叫 `list_all()`。
+- QA:
+  - `pytest -q tests/interface/test_tools.py -k 'product_id_filters_entities_to_subtree or documents_product_filter_uses_any_linked_entity or blindspots_product_id_lookup_avoids_entity_full_scan or documents_entity_name_lookup_avoids_document_full_scan'` → `4 passed`
+  - `pytest -q tests/interface/test_tools.py -k 'documents_ or blindspots or product_id or keyword_search_passes_max_level_and_product_id'` → `33 passed`
+  - `pytest -q tests/interface/test_tools.py -k 'product_id_filters_entities_to_subtree or documents_product_filter_uses_any_linked_entity or blindspots_product_id_lookup_avoids_entity_full_scan or documents_entity_name_lookup_avoids_document_full_scan' tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07J or MIDE_07I or MIDE_07H or MIDE_07G or MIDE_07F or MIDE_07E'` → `7 passed`
+  - `pytest -q tests/interface/test_tools.py tests/interface/test_permission_visibility.py -k 'guest_entity_search_scope_avoids_entity_full_scan or guest_task_visibility_avoids_entity_full_scan'` → `2 passed`
+  - `pytest -q tests/interface/test_tools.py -k 'product_id or guest_entity_search_scope_avoids_entity_full_scan or documents_ or blindspots' tests/interface/test_permission_visibility.py -k 'guest_task_visibility_avoids_entity_full_scan or test_task_'` → `6 passed`
+- Outcome:
+  - product scope 的 entities / documents / blindspots 三條常用 dogfood path，已不再依賴 `entities.list_all()` 或 `list_all(type_filter="document")` 來做 subtree / linkage 過濾。
+  - baseline 的腳本面已備妥，但 live baseline 仍缺真實 capture journal；這不是 builder 缺口，現階段主要是 capture 完成後沒有足夠可讀的 `flow_type="capture"` 歷史。
+  - guest entity scope / guest task visibility 這兩條先前仍會掃全圖的權限 path，現在也已改成 targeted subtree lookup。
+- Resume Point:
+  - 下一輪優先盤點 generic documents listing（無 entity_name / product_id）與 protocols listing 是否需要更強的 graph/index support。
+  - 若要完成 baseline 目標，需先在有真實 capture journal 的 workspace 重跑，或先產生一批受控 capture session 作為第一版 live baseline。
+
+### DF-20260502-3
+
+- Scenario: 補齊 Monitor deliverable。上一輪雖然已有 `/tmp/zenos-dogfood/{DF-ID}/monitor.json`，但內容只有 MCP traffic 摘要，還不是 plan 定義的 per-type health diff report。
+- Findings:
+  - `scripts/dogfood/build_iteration_artifacts.py` 只輸出：
+    - `total_mcp_calls`
+    - `rejected_count`
+    - `reject_rate`
+    - `top_rejection_reasons`
+  - 這對「哪個治理維度壞了」仍不夠，orchestrator 還需要手動對照 quality / staleness / tasks / blindspots payload 才能做 fix 決策。
+  - `documents` generic listing 與 `protocols` listing 雖然仍有 `list_all()` 呼叫，但確認後屬於 repository level 的 filtered DB query，不是前幾輪那種本地 full-scan 病灶；目前更缺的是 monitor health report。
+- Fix:
+  - 新增 `scripts/dogfood/build_monitor_report.py`
+    - 輸入：
+      - `--existing-monitor`
+      - `--quality-json`
+      - `--staleness-json`
+      - `--tasks-json`
+      - `--blindspots-json`
+    - 輸出仍是同一個 `/tmp/zenos-dogfood/{DF-ID}/monitor.json`
+    - 會把 MCP traffic summary 與 per-type health summary 合併：
+      - `l2_entities`: `score`, `active_l2_missing_impacts`, `entry_saturation_count`, `failed_checks`
+      - `l3_documents`: `stale_count`, `document_consistency_count`
+      - `tasks`: `todo_count`, `stalled_open_count`
+      - `blindspots`: `green_open_count`, `total_count`
+      - `findings`: 給 orchestrator 直接判斷 fix 優先級
+  - `skills/workflows/dogfood.md` / release `/dogfood` workflow
+    - 補上 `build_monitor_report.py` 使用步驟，讓 monitor 不只產 traffic summary，還能產治理 diff。
+  - `tests/scripts/test_build_monitor_report.py`
+    - 驗證 merge 既有 monitor summary + health payload
+    - 驗證沒有 existing monitor 時也能直接產生 monitor.json
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 workflow guard：dogfood workflow 必須明示 `build_monitor_report.py`
+- QA:
+  - `pytest -q tests/scripts/test_build_monitor_report.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07K or build_monitor_report'` → `3 passed`
+  - Live smoke:
+    - `python3 scripts/dogfood/build_monitor_report.py --df-id DF-20260502-smoke ...`
+    - 成功產出 `/tmp/zenos-dogfood/DF-20260502-smoke/monitor.json`
+    - 內容同時包含：
+      - `total_mcp_calls/reject_rate`
+      - `health.l2_entities`
+      - `health.l3_documents`
+      - `health.tasks`
+      - `health.blindspots`
+      - `findings`
+- Outcome:
+  - Monitor deliverable 從「只有 MCP traffic 摘要」升級成「可直接支援 orchestrator 決策的 per-type health diff report」。
+  - baseline builder 也已用真實 `journal_read(flow_type="capture", project=\"zenos\")` 的受控 bootstrap payload 成功跑出 live baseline：
+    - `/tmp/zenos-dogfood/live-baseline.json`
+- Resume Point:
+  - 下一輪若要逼近 plan 完成，應轉成真正的 completion audit：
+    - 檢查短期成功指標是否都已有實證
+    - 盤清中期 / 長期目標哪些仍缺 runtime 或 live adoption 證據
+    - 對不能在 repo 內直接驗證的項目，明確標成 external blocker，而不是假裝已完成
+
+### DF-20260502-4
+
+- Scenario: 補齊 Architect 比較層。雖然現在已有 baseline / monitor，但還沒有一個標準化 artifact 能直接比較「修前 vs 修後 calls / reject_rate / hit_rate / full-scan ratio」。
+- Findings:
+  - workflow 與 plan 都要求 Architect 收 delta，但 repo 裡沒有對應的 machine-readable builder。
+  - 目前只能人眼對照兩份 `monitor.json` 與 `producer.jsonl`，不利於持續重放與 regression 判讀。
+- Fix:
+  - 新增 `scripts/dogfood/build_iteration_delta.py`
+    - 輸入：
+      - `--before-monitor`
+      - `--before-producer`
+      - `--after-monitor`
+      - `--after-producer`
+    - 輸出：
+      - `/tmp/zenos-dogfood/{DF-ID}/delta.json`
+    - 指標：
+      - `calls`
+      - `reject_rate`
+      - `hit_rate`
+      - `full_scan_ratio`
+      - `targeted_hit_within_3_calls`
+    - `producer.jsonl` 會解析 documents retrieval path：
+      - broad keyword / generic document search → full-scan 側
+      - `entity_name` / `product_id` → targeted 側
+  - `skills/workflows/dogfood.md` / release `/dogfood` workflow
+    - 補上 `build_iteration_delta.py` 的使用方式與 `delta.json` artifact path。
+  - `tests/scripts/test_build_iteration_delta.py`
+    - 驗證 broad-before vs targeted-after 的比較結果。
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 workflow guard：dogfood workflow 必須明示 `build_iteration_delta.py`
+- QA:
+  - `pytest -q tests/scripts/test_build_iteration_delta.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07L or build_iteration_delta'` → `2 passed`
+  - Live smoke:
+    - `python3 scripts/dogfood/build_iteration_delta.py --df-id DF-20260502-delta-smoke ...`
+    - 成功產出 `/tmp/zenos-dogfood/DF-20260502-delta-smoke/delta.json`
+    - 結果可直接讀到：
+      - `calls: 4 -> 2`
+      - `reject_rate: 0.25 -> 0.0`
+      - `hit_rate: 0.0 -> 1.0`
+      - `full_scan_ratio: 1.0 -> 0.0`
+- Outcome:
+  - `/dogfood` 閉環現在已有完整 artifact 鏈：
+    - `producer.jsonl`
+    - `monitor.json`（traffic + health diff）
+    - `baseline-library.json` / `live-baseline.json`
+    - `delta.json`
+  - `monitor.json` 與 `delta.json` 現在都能承載真實 transcript 的 token 使用量：
+    - `build_iteration_artifacts.py` 會從 Claude transcript `message.usage` 聚合 `input_tokens / output_tokens / cache_* / total_tokens`
+    - 已用真實 transcript smoke 驗證：
+      - `/tmp/zenos-dogfood/DF-20260502-usage-smoke/monitor.json`
+      - `usage.total_tokens = 431966`
+- Resume Point:
+  - 下一輪應做真正的 completion audit：
+    - 逐條比對短期 / 中期 / 長期成功指標
+    - 區分「repo 內已證明」與「需要真實 adoption / 外部運行資料」的項目
+
+### DF-20260502-5
+
+- Scenario: 用真實 Claude transcript 跑第一份 non-synthetic replay delta，驗證目前 artifact 鏈是否真的能比較 broad document search 與 targeted document search，而不是只在 synthetic fixture 上成立。
+- Findings:
+  - `build_iteration_artifacts.py` 新增 `--call-filter`：
+    - `documents_broad`
+    - `documents_targeted`
+  - 若只 filter tool call 而 token 仍累加整個 session，delta 會被無關上下文污染；已修成「有 filter 時只累加被保留的 assistant tool_use message usage」。
+  - `build_iteration_delta.py` 原本只懂 envelope 形狀：
+    - `{"status":"ok","data":{"documents":[...]}}`
+  - 真實 transcript 還有兩種常見 shape：
+    - top-level `{"documents":[...]}`
+    - tool result 被截斷，真正 payload 落在 `mcpMeta.structuredContent`
+  - 若不補這兩種 shape，真實 replay 的 `hit_rate` 會被誤算成 0。
+- Fix:
+  - `scripts/dogfood/build_iteration_artifacts.py`
+    - 新增 `call_filter`
+    - replay 模式下只累加保留事件的 token usage
+    - `monitor.json` 寫入 `call_filter`
+  - `scripts/dogfood/build_iteration_delta.py`
+    - 新增 top-level `documents` payload 支援
+    - 新增 `mcpMeta.structuredContent` fallback
+  - `tests/scripts/test_build_iteration_artifacts.py`
+    - 補 broad / targeted filter 測試
+  - `tests/scripts/test_build_iteration_delta.py`
+    - 補 top-level documents payload
+    - 補 `mcpMeta.structuredContent` fallback
+  - `skills/workflows/dogfood.md`
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 補 replay 時必須使用 `--call-filter documents_broad|documents_targeted`
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 workflow guard：必須明示 replay call filters
+- QA:
+  - `pytest -q tests/scripts/test_build_iteration_artifacts.py tests/scripts/test_build_iteration_delta.py` → `8 passed`
+  - `python3 scripts/dogfood/build_iteration_artifacts.py --df-id DF-20260502-replay-before --transcripts-dir ~/.claude/projects/-Users-wubaizong-clients-ZenOS --session-file ~/.claude/projects/-Users-wubaizong-clients-ZenOS/6df3dbd0-71aa-4698-91f0-c361ef135b8e.jsonl --call-filter documents_broad --out-root /tmp/zenos-dogfood`
+  - `python3 scripts/dogfood/build_iteration_artifacts.py --df-id DF-20260502-replay-after --transcripts-dir ~/.claude/projects/-Users-wubaizong-clients-ZenOS --session-file ~/.claude/projects/-Users-wubaizong-clients-ZenOS/5e382302-7abc-4b02-b087-7680aa61cba8.jsonl --call-filter documents_targeted --out-root /tmp/zenos-dogfood`
+  - `python3 scripts/dogfood/build_iteration_delta.py --df-id DF-20260502-replay ...` 成功產出：
+    - `/tmp/zenos-dogfood/DF-20260502-replay/delta.json`
+  - 真實 replay 結果：
+    - `before`: `calls=1`, `tokens=59618`, `hit_rate=1.0`, `full_scan_ratio=1.0`
+    - `after`: `calls=2`, `tokens=203628`, `hit_rate=0.5`, `full_scan_ratio=0.0`, `targeted_hit_within_3_calls=true`
+- Outcome:
+  - 第一份 non-synthetic replay delta 已成立，證明 artifact 鏈可以吃真實 transcript，不只吃 fixture。
+  - 但這份 replay **不能當作中期 success evidence**：
+    - targeted path 的 graph-first 與 `full_scan_ratio` 確實改善
+    - 但 `calls` / `tokens` / `hit_rate` 沒有比 broad before 更好
+  - 所以目前最多只能說：
+    - 「閉環證據鏈已能處理真實 transcript」
+    - 不能說「已證明 token 降 30%+」
+- Resume Point:
+  - 下一輪應該做兩件事擇一：
+    1. 從真實 transcript 庫挑更公平的 before/after pair，找出第一份能同時改善 graph path 與效率的 replay delta
+    2. 若挑不出來，就代表歷史 targeted 使用方式本身還不夠高效，需要再收一輪 runtime / workflow friction，不能提前宣稱 plan 完成
+
+### DF-20260502-6
+
+- Scenario: 用真正的 clean-room producer / verifier 去驗 graph-first L3 retrieval，而不是只看歷史 transcript replay。目標是確認 fresh agent 能否在不做 broad/full-scan 的前提下，從 L2 命中可用 L3，並把 `read_source` friction 關成可用 fallback。
+- Producer findings:
+  - clean-room producer 路徑：
+    - `recent_updates(product="ZenOS")`
+    - seed L2：`MCP 介面設計`
+    - `search(tasks, linked_entity=L2)`
+    - `search(documents, entity_name="MCP 介面設計")`
+    - `read_source(doc_id=...)`
+  - graph-first routing 成立：seed L2 後 3 個 call 內拿到可用 L3 retrieval-map
+  - friction：
+    1. `tasks` hop 對該 L2 回空
+    2. `read_source` 對 GitHub source 回 `401 Unauthorized`
+- Fix:
+  - `src/zenos/interface/mcp/source.py`
+    - GitHub 權限失敗（`DEAD_LINK + check_permission`）時，若 document 有 summary，回 `document_summary` fallback
+    - GitHub source 已標記 `stale/unresolvable` 時，若 document 有 summary，也回 `document_summary` fallback
+  - `src/zenos/infrastructure/github_adapter.py`
+    - 把 GitHub `401` 正規化成 `PermissionError`，避免直接 `raise_for_status()` 跳過 recovery/fallback 路徑
+  - 測試：
+    - `tests/interface/test_tools.py`
+      - `test_read_source_github_permission_issue_returns_document_summary_fallback`
+      - `test_read_source_stale_github_returns_document_summary_fallback`
+    - `tests/infrastructure/test_github_adapter.py`
+      - `test_fetch_contents_401_maps_to_permission_error`
+  - 部署：
+    - `./scripts/deploy_mcp.sh`
+    - `zenos-mcp-00273-9g9`
+    - `zenos-mcp-00274-nls`
+    - traffic 均驗證為 100% latest revision
+- QA / verifier:
+  - focused tests：
+    - `pytest -q tests/infrastructure/test_github_adapter.py tests/interface/test_tools.py -k 'fetch_contents_401_maps_to_permission_error or read_source_github_permission_issue_returns_document_summary_fallback'`
+    - `pytest -q tests/interface/test_tools.py -k 'read_source_github_permission_issue_returns_document_summary_fallback or read_source_stale_github_returns_document_summary_fallback'`
+  - direct MCP verify：
+    - `read_source(doc_id="EXvX84jg67g8CEhqJsgt")`
+    - 結果從 `401/SOURCE_UNAVAILABLE` 轉成：
+      - `status="ok"`
+      - `content_type="document_summary"`
+      - `delivery_status="summary_fallback"`
+  - final clean-room verifier：
+    - path：
+      - `search(entities, query="ZenOS", entity_level="L1")`
+      - `recent_updates(product_id="Gr54tjmnXK0ZAtZia6Pj")`
+      - `search(documents, entity_name="MCP 介面設計", product_id="Gr54tjmnXK0ZAtZia6Pj")`
+      - `read_source(doc_id="EXvX84jg67g8CEhqJsgt")`
+    - 結果：
+      - `read_source = summary fallback`
+      - `useful L3 context within 3 MCP calls = yes`
+      - `broad/full-scan needed = no`
+- Outcome:
+  - 這輪 clean-room DF iteration 已閉環：
+    1. Producer 找到真 friction
+    2. Fixer 修 runtime/test
+    3. Deploy 到真實 MCP runtime
+    4. Verifier 用新 session 重跑，證明 graph-first path 現在不會被 source delivery error 直接打斷
+  - 目前狀態可簡化成：
+    - `graph-first retrieval pass`
+    - `source delivery degraded but usable via summary fallback`
+- Resume Point:
+  - 下一輪 completion audit 要明確區分：
+    - 已達成：clean-room graph-first + no full-scan + usable fallback
+    - 未達成：真實 replay 的 `calls/tokens/hit_rate` 中期效率證據、以及 source full-content delivery 本身
+
+### DF-20260502-7
+
+- Scenario: 把 DF-20260502-6 的兩份真實 clean-room subagent transcript 正式接進 artifact 鏈，確認 repo 內的 `build_iteration_artifacts.py` / `build_iteration_delta.py` 不只是吃舊 fixture transcript，也吃得下今天真的跑出來的 Codex session JSONL。
+- Finding:
+  - `~/.codex/sessions/2026/05/02/...019de7c9-...jsonl` 與 `...019de7d9-...jsonl` 確認存在，且內容就是 DF-20260502-6 的 clean-room producer / verifier。
+  - 但 `build_iteration_artifacts.py` 原本只懂舊 schema：
+    - `message.role=assistant/user`
+    - `tool_use` / `tool_result`
+  - 直接餵真實 Codex session 時，會把 MCP calls 算成 `0`，導致：
+    - `monitor.json.total_mcp_calls = 0`
+    - `delta.json` 失真
+  - 此外，Codex session 的 `function_call_output` 內若包的是 `Error calling tool ...`，原本也不會記進 `rejected_count`。
+- Fix:
+  - `scripts/dogfood/build_iteration_artifacts.py`
+    - 新增 Codex session schema 支援：
+      - `response_item.payload.type=function_call`
+      - `response_item.payload.type=function_call_output`
+      - `event_msg.payload.type=token_count`
+    - `namespace="mcp__zenos__"` 會正確組成 `mcp__zenos__search` 等 qualified tool name
+    - 使用 `last_token_usage` 聚合 Codex transcript token 成本
+    - `function_call_output` 中的 `Error calling tool ...` 現在會記成 `TOOL_ERROR`
+  - `scripts/dogfood/build_iteration_delta.py`
+    - 新增 Codex producer artifact 解析：
+      - `function_call`
+      - `function_call_output`
+    - 可正確抽出 top-level `documents` payload 與 `Output:\n{...}` 形狀
+  - 測試：
+    - `tests/scripts/test_build_iteration_artifacts.py`
+      - `test_build_iteration_artifacts_supports_codex_session_schema`
+      - `test_build_iteration_artifacts_counts_codex_tool_error_as_rejection`
+    - `tests/scripts/test_build_iteration_delta.py`
+      - `test_build_iteration_delta_supports_codex_producer_schema`
+- QA:
+  - `pytest -q tests/scripts/test_build_iteration_artifacts.py tests/scripts/test_build_iteration_delta.py` → `11 passed`
+  - `git diff --check` → pass
+  - 用真實 clean-room session 產 artifact：
+    - `python3 scripts/dogfood/build_iteration_artifacts.py --df-id DF-20260502-6-before --session-file ~/.codex/sessions/2026/05/02/rollout-2026-05-02T17-24-23-019de7c9-ed62-70a0-9de7-d3cd6fd78fa7.jsonl ...`
+    - `python3 scripts/dogfood/build_iteration_artifacts.py --df-id DF-20260502-6-after --session-file ~/.codex/sessions/2026/05/02/rollout-2026-05-02T17-40-55-019de7d9-0f37-7fc3-b2c0-4dad02e2abe4.jsonl ...`
+    - `python3 scripts/dogfood/build_iteration_delta.py --df-id DF-20260502-6-replay ...`
+  - 真實 artifact 結果：
+    - `before monitor`: `calls=4`, `reject_rate=0.25`, `top_rejection_reasons=[TOOL_ERROR]`, `tokens=341334`
+    - `after monitor`: `calls=4`, `reject_rate=0.0`, `tokens=344424`
+    - `delta`: `reject_rate -0.25`，其餘核心效率指標未改善
+- Outcome:
+  - repo 內的 artifact 鏈現在已能吃「真實 clean-room subagent transcript」，不再只吃 fixture 或歷史 broad/targeted replay transcript。
+  - DF-20260502-6 現在有正式 machine-readable delta 證據：
+    - 改善的是 `tool error / reject_rate`
+    - 沒改善的是 `calls / tokens / hit_rate / full_scan_ratio`
+  - 這代表：
+    - `graph-first + usable fallback` 已經可被 artifact 鏈驗證
+    - 但它仍**不能當作中期效率 success evidence**
+- Resume Point:
+  - 下一輪不要再補 transcript tooling；應直接找一個能真正改善 `calls/tokens` 的 scenario / runtime friction。
+  - 若之後要宣稱 plan 完成，至少還要補到：
+    1. 真實 before/after 顯示 `tokens` 有明顯下降（plan 寫的是 `30%+`）
+    2. 至少一次 dogfood 真的導出 `ADR` 更新
+
+### DF-20260502-8
+
+- Scenario: 針對 DF-20260502-7 暴露出的 token blocker 做流程修正。真實 clean-room artifact 顯示：
+  - `before.tokens = 341334`
+  - `after.tokens = 344424`
+  - graph-first path 已成立，但 token 仍高得不合理
+  - 主要嫌疑不是 MCP call 數，而是 clean-room agent 前置載入過多治理文件
+- Fix:
+  - `skills/workflows/dogfood.md`
+    - 在 `Clean-Room Session Gate` 明確加入「最小讀取集合（預設）」：
+      - producer / verifier 只讀 `/dogfood`
+      - 不預載 `bootstrap-protocol.md`、`document-governance.md` 全文
+      - 只有定位 document routing 規則錯誤時，才額外加讀治理文件
+    - 明說原因：`token 成本不能先被 pre-read 吃掉`
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步同一條 minimal read-set 規則，避免 release sync 把工作版覆蓋回去
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 `AC-MIDE-07N`
+- QA:
+  - `pytest -q tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07N or MIDE_07M or MIDE_07F'` → `3 passed`
+  - `git diff --check` → pass
+- Fresh rerun evidence:
+  - 新開 clean-room verifier，只讀 `skills/release/workflows/dogfood/SKILL.md`
+  - session：
+    - `/Users/wubaizong/.codex/sessions/2026/05/02/rollout-2026-05-02T17-54-22-019de7e5-61ed-7502-8943-429c87f575ab.jsonl`
+  - path：
+    - `search(entities, query="retrieval", entity_level="L2")`
+    - seed L2 = `Librarian Engine`
+    - `search(documents, entity_name="Librarian Engine")`
+    - `read_source(doc_id="2762f4f80a514c13b0056c61c3fce802")`
+  - artifact：
+    - `python3 scripts/dogfood/build_iteration_artifacts.py --df-id DF-20260502-8-after --session-file ...019de7e5...jsonl ...`
+    - `python3 scripts/dogfood/build_iteration_delta.py --df-id DF-20260502-8-replay --before-monitor /tmp/zenos-dogfood/DF-20260502-6-after/monitor.json --after-monitor /tmp/zenos-dogfood/DF-20260502-8-after/monitor.json ...`
+  - 結果：
+    - `before`: `calls=4`, `tokens=344424`
+    - `after`: `calls=3`, `tokens=297886`
+    - `delta`: `calls -1`, `tokens -46538`（約 `-13.5%`）
+    - `hit_rate=1.0`、`full_scan_ratio=0.0` 維持不變
+- Outcome:
+  - clean-room dogfood 的 token 量測規則已經拉正，不再默許 verifier / producer 先把長篇治理文件全文塞進 context。
+  - minimal read-set 已證明能讓 fresh clean-room rerun 的 `calls` 與 `tokens` 一起下降。
+  - 但這仍**不夠讓 plan 達標**：
+    - `tokens` 雖下降，但只有約 `13.5%`
+    - plan 中期 gate 寫的是「真實場景 token 降 `30%+`」
+- Resume Point:
+  - 下一輪要拆的已不是 pre-read gate，而是剩餘 token hot spot：
+    1. `search(entities, query=...)` 的 seed cost
+    2. `search(documents, entity_name=...)` 回傳 payload 是否過大
+    3. `read_source -> summary fallback` 的回傳內容是否仍太肥
+  - 要過中期 gate，下一步應該挑其中一個做 targeted shrink，再跑 fresh clean-room delta
+
+### DF-20260502-9
+
+- Scenario: 針對 live clean-room 中 `search(documents)` 與 `read_source` 對同一份 L3 doc 的 source 判定不一致做 runtime 修補。目標不是修資料，而是確認 document search 回傳的 `primary_source` 與 `read_source` 實際可見/可選的 source 視角一致。
+- Finding:
+  - `read_source` 在 `src/zenos/interface/mcp/source.py` 會先做 `filter_sources_for_partner(...)`，再決定 target source。
+  - 但 `search(collection="documents")` 原本直接拿 entity 上的 `sources` 排序、query match、組 `primary_source`，沒有套同一層 partner connector scope。
+  - 這會導致：
+    - search 回的 `primary_source` 可能是 caller 看不到的 source
+    - read_source 實際會選另一顆 source，甚至直接 fallback
+- Fix:
+  - `src/zenos/interface/mcp/search.py`
+    - documents path 新增 `visible_sources_by_doc`
+    - `query match`、`sort key`、`primary_source`、`source_count` 都只看 `filter_sources_for_partner(...)` 後的 sources
+    - 若文件原本有 sources，但對當前 caller 全部不可見，search 直接不回該 doc
+  - `skills/workflows/dogfood.md`
+    - 補上判讀規則：若 `search(documents)` 已命中正確 L3 bundle，但 `read_source` 只回 `document_summary` fallback，先記為 `source delivery degraded`
+    - 不再把 GitHub token / repo 權限 / delivery snapshot 問題誤判成 `L3 routing failure`
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步同一條 release workflow 判讀規則
+  - `tests/interface/test_tools.py`
+    - 新增 `test_documents_search_uses_partner_visible_sources_for_primary_source`
+    - 新增 `test_documents_search_hides_docs_without_partner_visible_sources`
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 `AC-MIDE-07Q`
+- QA:
+  - `python -m py_compile src/zenos/interface/mcp/search.py tests/interface/test_tools.py` → pass
+  - `pytest -q tests/interface/test_tools.py -k 'documents_search_uses_partner_visible_sources_for_primary_source or documents_search_hides_docs_without_partner_visible_sources or documents_entity_name_prefers_valid_source_over_stale_source or documents_summary_include_returns_minimal_routing_payload or documents_entity_name_lookup_avoids_document_full_scan'` → `5 passed`
+  - `pytest -q tests/interface/test_read_source_selection.py tests/interface/test_tools.py -k 'source_status_alias_also_drives_selection or stale_primary_skipped_valid_source_used or documents_search_uses_partner_visible_sources_for_primary_source or documents_search_hides_docs_without_partner_visible_sources or documents_entity_name_prefers_valid_source_over_stale_source'` → `5 passed`
+  - `pytest -q tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07Q or MIDE_07P or MIDE_07D'` → `3 passed`
+  - `git diff --check` → pass
+- Deploy / Live:
+  - `./scripts/deploy_mcp.sh`
+  - serving revision: `zenos-mcp-00278-dhd`
+  - 100% traffic
+  - endpoint: `https://zenos-mcp-s5oifosv3a-de.a.run.app/mcp?api_key=YOUR_API_KEY`
+  - live MCP path:
+    - `search(collection="entities", query="retrieval", entity_level="L2", product="ZenOS")`
+    - `search(collection="documents", entity_name="MCP 介面設計", include=["summary"], limit=5, product_id="Gr54tjmnXK0ZAtZia6Pj")`
+    - `read_source(doc_id="4dc3f4d8b0fe436ab756a50dd9b94bae")`
+  - live result:
+    - `search(documents)` 不再回先前那類 stale routing doc，前幾個結果都顯示 `primary_source.status=valid`
+    - `read_source` 仍回 `document_summary` fallback，但 `setup_hint` 已明確收斂成 **GitHub direct read permission / delivery** 問題，不再是 source selection 分裂
+- Outcome:
+  - 這輪關掉的是 **document source selection mismatch**
+  - 現在 graph-first retrieval 的下一個真 blocker 已收斂成：
+    - GitHub full-content delivery / auth
+    - 不是 L3 routing 本身
+- Resume Point:
+  - 下一輪應直接追 `github source valid in search, but read_source falls back due permission` 的 runtime contract：
+    1. 先判定這是 caller-scope 預期行為，還是 server-side GitHub adapter / token 問題
+    2. 若是 server-side token 問題，dogfood 中期效率 gate 仍無法過，因為 full-content delivery 會一直退化成 summary fallback
+
+### DF-20260502-10
+
+- Scenario: 針對 DF-20260502-9 收斂出的 `GitHub full-content delivery / auth` blocker 做 infra 定位，確認這是不是 repo 內 runtime 問題，還是 Cloud Run 綁定 secret 已失效。
+- Finding:
+  - Cloud Run revision `zenos-mcp-00278-dhd` 的 runtime metadata 確認有掛：
+    - `GITHUB_TOKEN=github-token:latest`
+  - 但直接用 secret 打 GitHub `/user` health check：
+    - `github-token:latest` → `401 Bad credentials`
+    - `github-token` version `1` → `401`
+    - `github-token` version `2` → `401`
+  - 這表示 blocker 不是：
+    - `search(documents)` source selection
+    - `read_source` fallback 路徑
+    - Cloud Run 漏掛 env
+  - 真正 blocker 是：**部署用 GitHub secret 本身已失效**
+- Fix:
+  - `docs/decisions/ADR-032-document-delivery-layer-architecture.md`
+    - 補上新決策：
+      1. graph-first routing 與 source delivery 必須分開判讀
+      2. current 正式入口不得長期依賴 GitHub token 才能全文可讀
+      3. delivery degraded 時，優先補 ZenOS delivery snapshot，而不是把問題歸咎於 routing
+- QA / Evidence:
+  - `gcloud run services describe zenos-mcp ... --format=json(spec.template.spec.containers[0].env,...)`
+    - 證明 Cloud Run 確實有掛 `github-token:latest`
+  - secret metadata：
+    - `gcloud secrets versions list github-token --limit=5`
+    - version `1` / `2` 都是 `enabled`
+  - live secret health check：
+    - `github-token:latest` → `401`
+    - body: `{\"message\": \"Bad credentials\", \"status\": \"401\"}`
+    - version `1` → `401`
+    - version `2` → `401`
+- Outcome:
+  - 這輪把 blocker 從「repo 內 delivery/auth path 可能有 bug」正式收斂成 **infra secret rotation 問題**
+  - 也完成了 plan 中期 success criteria 裡的其中一條證據：
+    - **至少一次 dogfood 發現規則過時 / 不足 → 更新 ADR**
+    - 本次對應更新的是 `ADR-032`
+- Resume Point:
+  - 在 `github-token` 重新 rotation 前，repo 內已無法把 GitHub full-content delivery 從 `summary_fallback` 推進到 `full content`
+  - 下一輪只有兩種有效動作：
+    1. 旋轉 `github-token` secret，重新 deploy，重跑 clean-room verifier
+    2. 若不打算依賴 GitHub direct read，改以 current 正式入口一律補 ZenOS delivery snapshot，然後再測 token / call delta
+
+### DF-20260502-11
+
+- Scenario: 不把 `github-token` 失效只留在 plan observation，而是把它正式收成 deploy / dogfood gate，避免下次 deploy 完還要等 clean-room rerun 才知道 GitHub full-content delivery 已壞。
+- Fix:
+  - 新增 `scripts/check_github_delivery_secret.py`
+    - 讀 `github-token` secret
+    - 打 GitHub `/user`
+    - 只回結構化結果：`ok / rejected / error`
+    - 不輸出 token 明文
+  - `scripts/deploy_mcp.sh`
+    - 新增 `[5/5] Verifying GitHub delivery secret health`
+    - deploy 後預設執行 secret health check
+    - 可用 `SKIP_GITHUB_SECRET_HEALTHCHECK=true` 明示跳過
+  - `skills/workflows/dogfood.md`
+    - 把 post-deploy GitHub delivery secret health check 納入 workflow
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/scripts/test_check_github_delivery_secret.py`
+    - 覆蓋 `ok / INVALID_GITHUB_TOKEN / SECRET_READ_FAILED`
+  - `tests/scripts/test_deploy_mcp_script.py`
+    - 覆蓋 deploy script 已接上 health gate
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 `AC-MIDE-07R`
+- QA:
+  - `python -m py_compile scripts/check_github_delivery_secret.py` → pass
+  - `pytest -q tests/scripts/test_check_github_delivery_secret.py tests/scripts/test_deploy_mcp_script.py` → `7 passed`
+  - `pytest -q tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07R or MIDE_07Q or MIDE_07P'` → `3 passed`
+  - `git diff --check` → pass
+- Outcome:
+  - `github-token` 失效現在不再只是 clean-room rerun 的後驗發現，而是 deploy/dogfood 的前置健康檢查
+  - 這讓 closed loop 從：
+    - deploy → rerun → 才發現 GitHub delivery 壞了
+    - 變成 deploy → secret health gate fail → 直接標記 `delivery/auth blocker`
+- Resume Point:
+  - plan 仍未完成，因為：
+    1. `github-token` 仍然無效，full-content delivery 沒恢復
+    2. 真實場景 `token -30%+` 的中期 gate 仍未達成
+  - 下一步若要繼續推進 completion，只剩：
+    - rotation `github-token` 後重跑 clean-room verifier
+    - 或直接把 current 正式入口全面轉為 delivery snapshot 驗證路徑
+
+### DF-20260502-12
+
+- Scenario: clean-room verifier 已證明 graph-first routing 本身可過，但仍有 current formal-entry GitHub 文件只能回 `summary_fallback`。這代表下一個缺口不是 routing，而是 **delivery snapshot coverage 無法被 analyzer 正式看見**。
+- Fix:
+  - `src/zenos/interface/mcp/analyze.py`
+    - `invalid_documents.bundle_issues` 新增兩個 live delivery coverage signal：
+      - `current_formal_entry_missing_delivery_snapshot`
+      - `current_formal_entry_stale_delivery_snapshot`
+    - 條件：
+      - `status=current`
+      - `details.formal_entry=true`
+      - 有 GitHub source
+      - 再用 SQL `entities.primary_snapshot_revision_id / delivery_status` 判斷 snapshot coverage
+    - sort priority 也同步上提，避免被一般 bundle hygiene issue 淹掉
+  - `tests/interface/test_tools.py`
+    - 新增 analyzer focused tests：
+      - 缺 snapshot → red issue
+      - snapshot stale → yellow issue
+  - `skills/workflows/dogfood.md`
+    - Monitor phase 現在要求同步看 `analyze(check_type="invalid_documents")`
+    - 若命中上述兩個 issue type，要分類成 `delivery/auth path friction`
+    - 不可誤判成 `L3 routing failure`
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 `AC-MIDE-07S`
+- QA:
+  - `pytest -q tests/interface/test_tools.py -k 'missing_delivery_snapshot_for_current_formal_entry or stale_delivery_snapshot_for_current_formal_entry or analyze_invalid_documents'`
+    - `11 passed`
+  - `pytest -q tests/interface/test_tools.py -k 'missing_delivery_snapshot_for_current_formal_entry or stale_delivery_snapshot_for_current_formal_entry or inferred_formal_entry_from_current_index_parent or analyze_invalid_documents'`
+    - `12 passed`
+  - `pytest -q tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07S or MIDE_07Q or MIDE_07R'`
+    - `3 passed`
+  - deploy:
+    - `./scripts/deploy_mcp.sh`
+    - serving revision: `zenos-mcp-00280-k6h`
+    - health gate 仍回 `INVALID_GITHUB_TOKEN`（符合既有 blocker）
+  - live MCP:
+    - `analyze(check_type="invalid_documents", entity_id="GAWPNrvdToJGHTtYC2W2")`
+    - 成功抓到：
+      - `EXvX84jg67g8CEhqJsgt`
+      - `QzX3uwowz5VqRmV4fUTD`
+      - `pvvXhc1TTG1zGUu81NXa`
+      - `ukxG9PEP9AzdLCihGTeB`
+    - 都被標成 `current_formal_entry_missing_delivery_snapshot`
+  - `git diff --check`
+    - pass
+- Outcome:
+  - current formal-entry 文件的 delivery snapshot coverage 缺口，現在不再只能靠人工 verifier 從 `read_source(summary_fallback)` 反推
+  - 它已經變成 `/dogfood` monitor 可直接讀到的正式治理訊號
+  - 這讓閉環可以更早判斷：
+    - graph-first routing pass
+    - 但 delivery coverage still incomplete
+  - 並且已確認 analyzer formal-entry 判定要和 `write` contract 對齊：
+    - `details.formal_entry=true` **或**
+    - `parent_id 非空 + doc_role=index`
+    - 否則 live current index 會被漏報
+- Resume Point:
+  - plan 仍未完成；下一個最合理的動作是：
+    1. 用這個 live signal 產第一份真正的 repair queue（哪些 current formal-entry 要補 snapshot）
+    2. 再決定是：
+       - rotation `github-token` 後驗 direct read
+       - 還是直接補 current formal-entry 的 snapshot coverage
+    3. 中期 gate `token -30%+` 仍未達成，還需要一輪修後 replay 證據
+
+### DF-20260502-13
+
+- Scenario: 雖然 `invalid_documents` 已能 live 抓到 `current_formal_entry_missing_delivery_snapshot`，但 `/dogfood` 的 artifact builder `build_monitor_report.py` 還沒把這份 JSON 接進 `monitor.json`。這代表 workflow 有規則，artifact 鏈卻還看不到，閉環不完整。
+- Fix:
+  - `scripts/dogfood/build_monitor_report.py`
+    - 新增 `--invalid-documents-json`
+    - `health.invalid_documents` 現在會輸出：
+      - `invalid_document_count`
+      - `bundle_issue_count`
+      - `current_formal_entry_missing_delivery_snapshot`
+      - `current_formal_entry_stale_delivery_snapshot`
+    - `findings` 也會把兩種 snapshot coverage issue 明列出來
+  - `tests/scripts/test_build_monitor_report.py`
+    - 新增 invalid_documents fixture
+    - 驗證 monitor report 會把 missing/stale snapshot 數量寫進 health 與 findings
+  - `skills/workflows/dogfood.md`
+    - `build_monitor_report.py` 指令補上 `--invalid-documents-json`
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - `AC-MIDE-07S` 補驗 `--invalid-documents-json`
+- QA:
+  - `pytest -q tests/interface/test_tools.py -k 'missing_delivery_snapshot_for_current_formal_entry or stale_delivery_snapshot_for_current_formal_entry or inferred_formal_entry_from_current_index_parent or analyze_invalid_documents'`
+    - `12 passed`
+  - `pytest -q tests/scripts/test_build_monitor_report.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'build_monitor_report or MIDE_07S or MIDE_07Q or MIDE_07R'`
+    - `12 passed`
+  - `git diff --check`
+    - pass
+- Outcome:
+  - 這個 signal 現在不只存在於 analyzer 回傳，也正式進入 `/dogfood` 的 `monitor.json`
+  - closed loop 從：
+    - runtime 有 signal，但 monitor artifact 看不到
+    - 變成 runtime / workflow / artifact / spec test 全部一致
+- Resume Point:
+  - plan 仍未完成；接下來可以直接用 live `invalid_documents` 輸出產第一份 snapshot coverage repair queue
+  - 但這仍然屬於流程/監測完善，不代表中期效率 gate 已達標
+
+### DF-20260502-14
+
+- Scenario: 依 DF-20260502-12 / 13 的收斂結果，把 live `invalid_documents` signal 真正落成第一份可執行的 snapshot repair queue，而不是只停在 analyzer issue list。
+- Fix:
+  - 新增 `scripts/dogfood/build_snapshot_repair_queue.py`
+    - 吃 `analyze(check_type="invalid_documents")` 輸出
+    - 只收：
+      - `current_formal_entry_missing_delivery_snapshot`
+      - `current_formal_entry_stale_delivery_snapshot`
+    - 產出：
+      - `/tmp/zenos-dogfood/{DF-ID}/snapshot-repair-queue.json`
+    - 每筆 queue item 都會帶：
+      - `doc_id`
+      - `title`
+      - `linked_entity_ids`
+      - `repair_action.type=publish_delivery_snapshot`
+      - `repair_action.path=/api/docs/{docId}/publish`
+  - `tests/scripts/test_build_snapshot_repair_queue.py`
+    - 覆蓋 full MCP payload 與 raw invalid_documents payload 兩種 shape
+  - `skills/workflows/dogfood.md`
+    - 補上 `build_snapshot_repair_queue.py` 用法
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - `AC-MIDE-07S` 補驗 workflow 有提到 queue builder
+- QA:
+  - `pytest -q tests/scripts/test_build_snapshot_repair_queue.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'build_snapshot_repair_queue or MIDE_07S'`
+    - `3 passed`
+  - `git diff --check`
+    - pass
+  - live MCP:
+    - `analyze(check_type="invalid_documents", entity_id="GAWPNrvdToJGHTtYC2W2")`
+    - 仍回 4 筆 `current_formal_entry_missing_delivery_snapshot`
+  - live artifact:
+    - `python3 scripts/dogfood/build_snapshot_repair_queue.py --df-id DF-20260502-14 --invalid-documents-json /tmp/zenos-dogfood/DF-20260502-14-invalid-documents.json`
+    - 成功產出：
+      - `/tmp/zenos-dogfood/DF-20260502-14/snapshot-repair-queue.json`
+    - `queue_count=4`
+- Outcome:
+  - 第一份 live snapshot repair queue 已落地，不再只是「issue list」
+  - closed loop 現在已有：
+    - detector：`invalid_documents`
+    - monitor artifact：`monitor.json`
+    - repair queue artifact：`snapshot-repair-queue.json`
+  - 但這仍是「找出要修哪些 current formal-entry」，不是已修完，也不是效率 gate 已達標
+- Resume Point:
+  - 下一步可直接拿這份 queue 做受控 snapshot publish，觀察：
+    1. `read_source` 是否從 `summary_fallback` 升到 `snapshot_fallback/full`
+    2. 修後 replay 的 token / call delta 是否改善
+
+### DF-20260502-15
+
+- Scenario: 將 DF-20260502-14 的第一份 live snapshot repair queue 往前推成 **controlled repair replay**，確認 queue 是否真的可執行，並把 publish failure 從「缺 snapshot」進一步收斂成更具體的 blocker。
+- Fix:
+  - 新增 `scripts/dogfood/apply_snapshot_repair_queue.py`
+    - 吃 `snapshot-repair-queue.json`
+    - 用 Dashboard 同一個 internal primitive `_publish_document_snapshot_internal(...)`
+    - 產出：
+      - `/tmp/zenos-dogfood/{DF-ID}/snapshot-repair-results.json`
+    - 支援：
+      - `--partner-id` override（避免本地單一 workspace replay 先卡在 DB lookup）
+      - `dry_run`
+  - `tests/scripts/test_apply_snapshot_repair_queue.py`
+    - 覆蓋：
+      - dry-run
+      - `SOURCE_FORBIDDEN`
+      - `partner_id` override
+  - 為了讓 repair result 更可修：
+    - `src/zenos/interface/mcp/analyze.py`
+      - formal-entry snapshot issue 現在回 `source_uri`
+    - `scripts/dogfood/build_snapshot_repair_queue.py`
+      - queue item 會保留 `source_uri`
+    - `scripts/dogfood/apply_snapshot_repair_queue.py`
+      - 若 `SOURCE_NOT_FOUND`，會呼叫 `GitHubAdapter.search_alternatives_for_uri(...)`
+      - 把 `alternative_uris` 帶進 result
+  - `skills/workflows/dogfood.md`
+    - 補上 `apply_snapshot_repair_queue.py` 的用法
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - `AC-MIDE-07S` 補驗 workflow 有提到 repair runner
+- QA:
+  - `pytest -q tests/scripts/test_apply_snapshot_repair_queue.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'apply_snapshot_repair_queue or MIDE_07S'`
+    - `4 passed`
+  - `pytest -q tests/scripts/test_build_snapshot_repair_queue.py tests/scripts/test_apply_snapshot_repair_queue.py`
+    - `6 passed`
+  - `git diff --check`
+    - pass
+  - live controlled replay：
+    - queue：`/tmp/zenos-dogfood/DF-20260502-15/snapshot-repair-queue.json`
+    - command：`apply_snapshot_repair_queue.py --partner-id xm6YB5DH2d4BMu5g0Ka2`
+    - result：`/tmp/zenos-dogfood/DF-20260502-15-apply-proxy/snapshot-repair-results.json`
+    - `success_count=0`
+    - `failed_count=4`
+- Outcome:
+  - 這輪沒有去手動修資料，但把 blocker 再往下收斂了一層：
+    - 不是只有「缺 delivery snapshot」
+    - 而是「缺 snapshot 的 current formal-entry，在 controlled publish 時實際命中 `SOURCE_NOT_FOUND`」
+  - 其中至少 1 筆已拿到替代 URI 候選：
+    - `pvvXhc1TTG1zGUu81NXa`
+    - alternative:
+      - `https://github.com/centerseed/zenos/blob/main/docs/archive/specs/tasks-2026-03/T4-mcp-tools.md`
+  - 這表示下一個治理缺口不是單純 auth，而是 **formal-entry source URI drift / archive path migration 沒同步到 current doc source**
+- Resume Point:
+  - plan 仍未完成；目前最精準的 blocker 已分成兩層：
+    1. current formal-entry delivery snapshot coverage 不完整
+    2. 部分 current formal-entry 的 GitHub source 已漂移，導致 controlled publish 命中 `SOURCE_NOT_FOUND`
+  - 下一步若繼續走流程面，應優先把這類 drift 做成正式 analyzer / repair suggestion，而不是直接手修 doc source
+
+### DF-20260502-16
+
+- Scenario: 在 DF-20260502-15 已證明 controlled publish replay 會打到 `SOURCE_NOT_FOUND` 後，補齊最後一段 artifact 鏈，避免這類 source drift 只留在 `snapshot-repair-results.json` 供人工判讀。
+- Fix:
+  - 新增 `scripts/dogfood/build_source_repair_queue.py`
+    - 吃 `snapshot-repair-results.json`
+    - 只收 `error=SOURCE_NOT_FOUND`
+    - 產出：
+      - `/tmp/zenos-dogfood/{DF-ID}/source-repair-queue.json`
+    - 每筆 queue item 會帶：
+      - `doc_id`
+      - `title`
+      - `partner_id`
+      - `source_uri`
+      - `alternative_uris`
+      - `repair_action.type=review_or_update_document_source`
+  - `skills/workflows/dogfood.md`
+    - 補上 `build_source_repair_queue.py` 的用法
+    - 明定 `SOURCE_NOT_FOUND on current formal-entry replay` 一律記為 **source governance friction**
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/scripts/test_build_source_repair_queue.py`
+    - 驗證只會收 `SOURCE_NOT_FOUND`，且保留 `alternative_uris`
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - 新增 `AC-MIDE-07T`
+    - 驗 workflow 已定義：
+      - `build_source_repair_queue.py`
+      - `source-repair-queue.json`
+      - `SOURCE_NOT_FOUND`
+      - `source governance friction`
+- QA:
+  - `pytest -q tests/scripts/test_build_source_repair_queue.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'build_source_repair_queue or MIDE_07T'`
+    - `2 passed`
+  - `git diff --check`
+    - pass
+  - live artifact:
+    - `python3 scripts/dogfood/build_source_repair_queue.py --df-id DF-20260502-16-source --repair-results-json /tmp/zenos-dogfood/DF-20260502-16-apply-proxy/snapshot-repair-results.json`
+    - 成功產出：
+      - `/tmp/zenos-dogfood/DF-20260502-16-source/source-repair-queue.json`
+    - `queue_count=4`
+- Outcome:
+  - 閉環 artifact 鏈再補齊一段：
+    - `invalid_documents` → `snapshot-repair-queue.json` → `snapshot-repair-results.json` → `source-repair-queue.json`
+  - 這讓 source drift / broken current source 不再只是 replay log，而是正式 repair backlog
+  - 這仍屬於流程治理改善，不等於已手動修復任何 Dogfood data
+- Resume Point:
+  - plan 仍未完成；目前 blocker 更精準：
+    1. `github-token` 失效仍阻斷 direct-read/full-content delivery
+    2. 部分 current formal-entry source 在 controlled publish replay 命中 `SOURCE_NOT_FOUND`
+    3. 真實場景 `token -30%+` 的中期效率 gate 仍未達成
+  - 下一步若繼續走純流程面，最合理的是把 `source-repair-queue.json` 接進 analyzer / governance review，或做 URI drift 專用 analyzer signal，而不是直接手改 ontology source
+
+### DF-20260502-17
+
+- Scenario: DF-20260502-16 已把 `SOURCE_NOT_FOUND` 收成 `source-repair-queue.json`，但 monitor artifact 還看不到這類 source drift。這代表 workflow 雖然有 queue，`monitor.json` 仍無法覆蓋 L3 source governance 健康度，中期條件「Monitor 可偵測 4 種 entity 的全部健康維度」仍有缺口。
+- Fix:
+  - `scripts/dogfood/build_monitor_report.py`
+    - 新增 `--source-repair-queue-json`
+    - 新增 `health.source_governance`
+      - `source_not_found_count`
+      - `alternative_uri_candidate_count`
+    - `findings` 也會明列：
+      - `Current formal-entry SOURCE_NOT_FOUND during controlled replay`
+      - `Current formal-entry with alternative URI candidates`
+  - `tests/scripts/test_build_monitor_report.py`
+    - 補 source repair queue fixture
+    - 驗 `health.source_governance` 與 findings 都會寫入 monitor
+  - `skills/workflows/dogfood.md`
+    - `build_monitor_report.py` 指令補上 `--source-repair-queue-json`
+    - 明定有 `source-repair-queue.json` 時，monitor 必須 classify 成 **source governance friction**
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - `AC-MIDE-07T` 補驗：
+      - `--source-repair-queue-json`
+      - `health.source_governance`
+- QA:
+  - `pytest -q tests/scripts/test_build_monitor_report.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'build_monitor_report or MIDE_07T'`
+    - `3 passed`
+  - `git diff --check`
+    - pass
+  - live artifact:
+    - `python3 scripts/dogfood/build_monitor_report.py --df-id DF-20260502-16-monitor --existing-monitor /tmp/zenos-dogfood/DF-20260502-14/monitor.json --source-repair-queue-json /tmp/zenos-dogfood/DF-20260502-16-source/source-repair-queue.json`
+    - 成功把：
+      - `health.source_governance.source_not_found_count = 4`
+      - `health.source_governance.alternative_uri_candidate_count = 0`
+      寫進 monitor artifact
+- Outcome:
+  - `SOURCE_NOT_FOUND` 現在不只存在於 replay result / queue，也正式進入 `monitor.json`
+  - 這代表 L3 的 source governance friction 已經被 monitor 接住，而不是只能靠人工讀 log
+  - 仍屬於流程治理改善；沒有手動修改任何 Dogfood ontology data
+- Resume Point:
+  - plan 仍未完成；目前已補齊：
+    - `invalid_documents` → `snapshot-repair-queue.json` → `snapshot-repair-results.json` → `source-repair-queue.json` → `monitor.json`
+  - 但核心未解還是：
+    1. `github-token` 失效，full-content delivery 未恢復
+    2. 真實場景 `token -30%+` 中期 gate 未達成
+    3. `source governance friction` 雖已可監測，還沒有形成「修後 replay 改善效率」的證據
+
+### DF-20260502-18
+
+- Scenario: `github-token` 失效雖然已有 deploy gate 與 workflow 規則，但 `monitor.json` 還看不到這個 blocker。這代表 delivery/auth 問題仍分散在 deploy log 與人工判讀，沒真正進閉環 artifact。
+- Fix:
+  - `scripts/dogfood/build_monitor_report.py`
+    - 新增 `--github-delivery-secret-health-json`
+    - 新增 `health.delivery_auth`
+      - `github_secret_status`
+      - `github_secret_error`
+      - `github_secret_http_status`
+      - `github_secret_invalid`
+    - `findings` 會明列：
+      - `GitHub delivery secret invalid (401)`
+  - `tests/scripts/test_build_monitor_report.py`
+    - 補一份 `INVALID_GITHUB_TOKEN` health fixture
+    - 驗 `health.delivery_auth` 與 findings 都會寫進 monitor
+  - `skills/workflows/dogfood.md`
+    - `build_monitor_report.py` 指令補上 `--github-delivery-secret-health-json`
+    - 明定 `INVALID_GITHUB_TOKEN` 一律記為 **delivery/auth blocker**
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - `AC-MIDE-07R` 補驗：
+      - `--github-delivery-secret-health-json`
+      - `health.delivery_auth`
+- QA:
+  - `pytest -q tests/scripts/test_build_monitor_report.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'build_monitor_report or MIDE_07R'`
+    - `3 passed`
+  - local smoke:
+    - 建立 `/tmp/zenos-dogfood/df-20260502-secret-health.json`
+      - `{"status":"rejected","error":"INVALID_GITHUB_TOKEN","http_status":401}`
+    - `python3 scripts/dogfood/build_monitor_report.py --df-id DF-20260502-17-monitor --existing-monitor /tmp/zenos-dogfood/DF-20260502-14/monitor.json --github-delivery-secret-health-json /tmp/zenos-dogfood/df-20260502-secret-health.json`
+    - 成功把：
+      - `health.delivery_auth.github_secret_invalid = true`
+      - `health.delivery_auth.github_secret_http_status = 401`
+      寫進 monitor artifact
+- Outcome:
+  - `delivery/auth blocker` 現在不只存在於 deploy gate，也正式進入 `monitor.json`
+  - 這讓 `/dogfood` monitor 可以同時觀測：
+    - `invalid_documents` / snapshot coverage
+    - `source governance friction`
+    - `delivery_auth blocker`
+  - 仍屬於流程治理補強；沒有旋轉 secret，也沒有手動修資料
+- Resume Point:
+  - plan 仍未完成；現在 monitor artifact 已能覆蓋：
+    - delivery/auth
+    - source governance
+    - snapshot coverage
+  - 但離完成還差三個硬點：
+    1. `github-token` 仍未恢復有效
+    2. 真實場景 `token -30%+` 中期 gate 仍未過
+    3. 還沒有一輪「修後 replay」證明 delivery/source 斷點收斂後，效率真的改善
+
+### DF-20260502-19
+
+- Scenario: monitor 已經能觀測 `snapshot coverage / source governance / delivery_auth`，但 `delta.json` 還只比 `calls / tokens / reject_rate / hit_rate / full-scan ratio`。這代表修前/修後 replay 仍無法機器判斷 blocker 是否真的收斂。
+- Fix:
+  - `scripts/dogfood/build_iteration_delta.py`
+    - 新增 health delta：
+      - `health.invalid_documents.current_formal_entry_missing_delivery_snapshot`
+      - `health.invalid_documents.current_formal_entry_stale_delivery_snapshot`
+      - `health.source_governance.source_not_found_count`
+      - `health.delivery_auth.github_secret_invalid`
+    - `before / after / delta / improved` 全部都會帶這些欄位
+  - `tests/scripts/test_build_iteration_delta.py`
+    - 補 health fixture
+    - 驗：
+      - `delta.health.missing_delivery_snapshot == -2`
+      - `delta.health.github_secret_invalid == -1`
+      - `improved.health.source_not_found_count == true`
+  - `skills/workflows/dogfood.md`
+    - 明定 delta 不只比效率，也要比：
+      - `health.invalid_documents`
+      - `health.source_governance`
+      - `health.delivery_auth`
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - `AC-MIDE-07T` 補驗 workflow 有提 `health.delivery_auth`
+- QA:
+  - `pytest -q tests/scripts/test_build_iteration_delta.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'build_iteration_delta or MIDE_07T'`
+    - `5 passed`
+  - `git diff --check`
+    - pass
+  - local smoke:
+    - `build_iteration_delta.py` 對一組 before/after monitor + producer 產出：
+      - `delta.health.missing_delivery_snapshot = -2`
+      - `delta.health.stale_delivery_snapshot = -1`
+      - `delta.health.source_not_found_count = -2`
+      - `delta.health.github_secret_invalid = -1`
+      - `improved.health.* = true`
+- Outcome:
+  - `delta.json` 現在不只會說「token 有沒有降」，也會說：
+    - snapshot coverage 有沒有收斂
+    - `SOURCE_NOT_FOUND` 有沒有下降
+    - `github-token` blocker 有沒有解除
+  - 這讓下一輪修後 replay 有完整 machine-readable 驗收面，不必再人工比對多份 artifact
+- Resume Point:
+  - plan 仍未完成；現在 artifact 鏈已能：
+    - 偵測 blocker
+    - queue blocker
+    - monitor blocker
+    - 比較 blocker delta
+  - 但仍缺最關鍵的實證：
+    1. `github-token` 真正恢復有效
+    2. 真實場景修後 replay 讓 `token -30%+` 達標
+
+### DF-20260502-20
+
+- Scenario: `source-repair-queue.json` 雖已把 raw blocker 結構化，但下一輪 fixer / architect 仍要人工把 queue 轉成治理 review task。這讓 task 品質提升目標還沒真正接上 dogfood artifact 鏈。
+- Fix:
+  - 新增 `scripts/dogfood/build_governance_review_task_draft.py`
+    - 吃 `source-repair-queue.json`
+    - 產出：
+      - `/tmp/zenos-dogfood/{DF-ID}/governance-review-task-drafts.json`
+    - 每筆 draft 都帶：
+      - `title`
+      - `product_id`
+      - `description`
+      - `acceptance_criteria`
+      - `linked_entities`
+      - `dispatcher`
+      - `source_metadata`
+  - `tests/scripts/test_build_governance_review_task_draft.py`
+    - 驗 source queue 會轉成高品質治理 review task draft
+  - `skills/workflows/dogfood.md`
+    - 補上 `build_governance_review_task_draft.py` 用法
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - 同步 release workflow
+  - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+    - `AC-MIDE-07T` 補驗：
+      - `build_governance_review_task_draft.py`
+      - `governance-review-task-drafts.json`
+- QA:
+  - `pytest -q tests/scripts/test_build_governance_review_task_draft.py tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'build_governance_review_task_draft or MIDE_07T'`
+    - `2 passed`
+  - `git diff --check`
+    - pass
+  - live artifact:
+    - `python3 scripts/dogfood/build_governance_review_task_draft.py --df-id DF-20260502-20 --source-repair-queue-json /tmp/zenos-dogfood/DF-20260502-16-source/source-repair-queue.json --product-id GAWPNrvdToJGHTtYC2W2`
+    - 成功產出：
+      - `/tmp/zenos-dogfood/DF-20260502-20/governance-review-task-drafts.json`
+    - `draft_count=4`
+- Outcome:
+  - 這讓 dogfood artifact 鏈不只會發現 blocker，也能直接產出下一輪 fixer 的 graph-first task 草稿
+  - 更接近 plan 裡「Task 品質因圖譜而提升」：task draft 不再靠人工從 raw JSON 拼 description / AC
+  - 仍屬於流程治理改善；沒有直接開 task，也沒有手修 Dogfood data
+- Resume Point:
+  - plan 仍未完成；目前 artifact 鏈已補到：
+    - detect -> queue -> monitor -> delta -> task draft
+  - 但仍缺兩個 completion blocker：
+    1. `github-token` 未恢復
+    2. 真實場景 `token -30%+` 中期 gate 未達成
+
+### DF-20260502-21
+
+- Scenario: 前幾輪已經證明 `github-token` 失效會把 current formal-entry 的 full-content delivery 打回 `summary_fallback`，而 repo 內其實已經有 private snapshot delivery。若 `read_source` 對「已經有 ready snapshot 的 GitHub current formal-entry」仍先走 direct read，再 fallback snapshot，等於平白支付 GitHub 路徑成本，也放大 token / auth 摩擦。
+- Fix:
+  - `src/zenos/interface/mcp/source.py`
+    - 新增 `_should_prefer_snapshot_for_github()`
+    - 條件：
+      - `source_type == github`
+      - `doc_role=index + parent_id`（formal-entry 推定）或 `details.formal_entry=true`
+      - `primary_snapshot_revision_id` 存在
+      - `delivery_status == ready`
+    - 命中時先嘗試 `read_source_with_snapshot(...)`
+    - 只有 snapshot 不可讀時，才回到既有 GitHub direct-read / fallback 路徑
+  - `tests/interface/test_tools.py`
+    - 新增 `test_read_source_ready_formal_entry_github_prefers_snapshot_before_direct_read`
+    - 驗：
+      - 直接回 snapshot content
+      - `delivery_status == snapshot_fallback`
+      - `read_source_with_recovery` 不會被呼叫
+- QA:
+  - `pytest -q tests/interface/test_tools.py -k 'read_source_ready_formal_entry_github_prefers_snapshot_before_direct_read or read_source_github_permission_issue_prefers_snapshot_fallback_when_available or read_source_stale_github_prefers_snapshot_fallback_when_available'`
+    - `3 passed`
+  - `git diff --check`
+    - pass
+- Outcome:
+  - 這是第一個直接改 runtime delivery path 的 dogfood 修補，而不是只補 queue / monitor / delta
+  - 對「已經有 ready snapshot 的 current formal-entry」而言，現在不必先撞 GitHub，再退回 snapshot
+  - 這不能單獨證明 `token -30%+`，但它確實縮小了 `github-token` 對已有 snapshot 文檔的影響面
+- Resume Point:
+  - plan 仍未完成；還缺：
+    1. live replay 證明 snapshot-first 對真實 scenario 的 token/call 有改善
+    2. `github-token` 對沒有 snapshot 的 current docs 仍是 blocker
+
+### DF-20260502-22
+
+- Scenario: 上一輪把 `read_source` 往 snapshot-first 拉後，live 驗證仍持續看到 `delivery_status=snapshot_fallback`，一度像是 runtime 修補沒有真正生效。實際根因不是 deploy 失敗，而是驗證樣本本身的 `source_status=stale`，而 `read_source` 在 stale 分支本來就會先走 `snapshot_fallback`，不會命中後面的 preemptive branch。
+- Fix:
+  - `src/zenos/application/knowledge/source_service.py`
+    - `read_source_with_snapshot(...)` 的 target source selection 補強：
+      - caller 有帶 `source_id` 但 repo 內 source 配不到時
+      - 若同時帶了 `source_uri`
+      - 退回用 `source_uri` 比對 target source
+    - 目的：降低 legacy / drift source metadata 造成的 snapshot probe miss
+  - `tests/application/test_source_service.py`
+    - 新增 `test_read_source_with_snapshot_falls_back_to_uri_when_source_id_misses`
+    - 驗 `source_id` miss 但 `source_uri` match 時，仍能成功讀到 snapshot
+- QA:
+  - `pytest -q tests/application/test_source_service.py -k 'snapshot_falls_back_to_uri_when_source_id_misses or read_source_with_recovery_honors_source_status_alias'`
+    - `2 passed`
+  - `pytest -q tests/interface/test_tools.py -k 'read_source_github_with_snapshot_prefers_snapshot_first or read_source_formal_entry_github_without_snapshot_falls_back_to_direct_read or read_source_ready_formal_entry_github_prefers_snapshot_before_direct_read or read_source_github_permission_issue_returns_document_summary_fallback or read_source_stale_github_prefers_snapshot_fallback_when_available'`
+    - `5 passed`
+  - `git diff --check`
+    - pass
+  - deploy:
+    - `./scripts/deploy_mcp.sh`
+    - serving revision: `zenos-mcp-00287-gb8`
+    - deploy gate 仍因 `INVALID_GITHUB_TOKEN (401 Bad credentials)` 結束為非 0
+  - live verification:
+    - `get(collection="documents", id="<stale-github-doc-id>")`
+      - 確認該 doc 的 source 為 `github + stale`
+    - `read_source(doc_id="<stale-github-doc-id>")`
+      - 仍回 `delivery_status=snapshot_fallback`
+      - 這符合 stale 分支預期，不能再拿它驗 preemptive branch
+    - `read_source(doc_id="<ready-snapshot-doc-id>")`
+      - live 回 `delivery_status=snapshot_first`
+- Outcome:
+  - 這輪把一個驗證盲點釐清了：
+    - `snapshot_fallback` 不等於 snapshot-first runtime 失敗
+    - 必須區分 `stale github` 與 `valid github`
+  - 也首次在 live 上證明：
+    - `valid github + snapshot available` 的 doc 已經真的走到 `snapshot_first`
+  - 這讓接下來的 dogfood replay 可以更精準：
+    - stale docs 驗「delivery degraded」
+    - valid docs 驗「snapshot-first efficiency」
+- Resume Point:
+  - plan 仍未完成；目前 runtime snapshot-first 已有 live functional proof
+  - 下一個缺口不再是「snapshot-first 有沒有生效」，而是：
+    1. 找一個真實 replay scenario，量 `snapshot_first` 對 token/call 的 before/after delta
+    2. 持續處理 `github-token` 對無 snapshot 文檔的 delivery blocker
+
+### DF-20260502-23
+
+- Scenario: 用全新 clean-room producer 驗證 graph-first retrieval 在 `Action Layer` 這個真實 L2 上的第一反應。重點不是 repo 內部測試，而是看乾淨 agent 會不會自然踩到 delivery friction。
+- Producer:
+  - `search(collection="documents", entity_name="Action Layer", include=["summary"], limit=10)`
+  - `read_source(doc_id="QzX3uwowz5VqRmV4fUTD")`
+- Findings:
+  - producer 沒有使用 keyword search，也沒有 full-scan
+  - 但它選到的 `Action Layer PRD` 雖然是 `current/index/github`，`read_source` 只回 `summary_fallback`
+  - 這表示 clean-room agent 在 graph-first 路徑上，仍可能先踩到「可命中但不可全文讀」的 L3 入口
+- Root Cause:
+  - `search(collection="documents", entity_name=...)` 當時雖然已排序 `current / formal_entry / index / source_status`
+  - 但沒有把 `delivery_status / has_delivery_snapshot` 帶進排序與 payload
+  - 對 clean-room agent 來說，`Qz...` 與真正 snapshot-ready 的候選沒有足夠可見差異
+- Outcome:
+  - 這輪證明目前 blocker 已從「graph-first path 是否成立」收斂成「graph-first path 的 candidate ranking / readiness signal 是否足夠」
+  - 所以下一刀應改 `document search`，不是再改 `read_source`
+
+### DF-20260502-24
+
+- Scenario: 接續 DF-20260502-23，把 `documents(entity_name)` search runtime 補上 delivery readiness，驗證 clean-room agent 是否會自然選到可全文讀的 candidate。
+- Fix:
+  - `src/zenos/interface/mcp/search.py`
+    - 新增 document delivery state lookup（`primary_snapshot_revision_id`, `delivery_status`）
+    - document sort key 新增 delivery rank：snapshot-ready 優先於 missing snapshot
+    - summary payload 新增：
+      - `delivery_status`
+      - `has_delivery_snapshot`
+  - `tests/interface/test_tools.py`
+    - 新增 `test_documents_entity_name_prefers_ready_delivery_snapshot_over_missing_snapshot`
+    - 補 `test_documents_summary_include_returns_minimal_routing_payload` 驗 delivery fields
+- QA:
+  - `pytest -q tests/interface/test_tools.py -k 'documents_entity_name_prefers_ready_delivery_snapshot_over_missing_snapshot or documents_summary_include_returns_minimal_routing_payload or documents_entity_name_prefers_valid_source_over_stale_source or documents_search_prioritizes_current_index_retrieval_maps'`
+    - `4 passed`
+  - `git diff --check`
+    - pass
+  - deploy:
+    - `./scripts/deploy_mcp.sh`
+    - serving revision: `zenos-mcp-00288-tk5`
+    - health gate 仍因 `INVALID_GITHUB_TOKEN` 非 0 結束
+  - live search verification:
+    - `search(collection="documents", entity_name="Action Layer", include=["summary"], limit=10)`
+    - 前幾筆已帶：
+      - `delivery_status=ready`
+      - `has_delivery_snapshot=true`
+  - clean-room producer:
+    - `search(collection="documents", entity_name="Action Layer", include=["summary"], limit=10)`
+    - `read_source(doc_id="EOIDBT9gfZt0H8yypOLC")`
+    - 結果：
+      - `keyword/full-scan = no`
+      - 選到 `SPEC: Enriched Task Dispatch（Archive）`
+      - `read_source = full`
+      - `delivery_status = ready`
+- Outcome:
+  - 這輪首次用 clean-room subagent 證明：
+    - graph-first search 不只會命中 L3
+    - 還能因 delivery readiness signal 而命中「可全文讀」的 L3
+  - 這比 DF-20260502-23 更接近 plan 的 retrieval 目標：
+    - 少 call（2 calls）
+    - 無 keyword/full-scan
+    - 命中 full-content source
+- Resume Point:
+  - plan 仍未完成
+  - 已有 functional evidence：search/runtime 現在能引導 clean-room agent 選到 snapshot-ready doc
+  - 仍缺：
+    1. 真實 before/after replay 的 token/call delta（尤其 `token -30%+`）
+    2. `github-token` 對無 snapshot current docs 的 delivery blocker
+
+### DF-20260502-25
+
+- Scenario: 接續 DF-20260502-24，進一步把 `documents(entity_name)` 的 graph-first path 改成預設低 token 版本，驗證 `include=["summary_compact"]` 是否能在不損失命中品質的前提下，實際降低 clean-room retrieval 成本。
+- Fix:
+  - `src/zenos/interface/mcp/_include.py`
+    - 正式把 `summary_compact` 納入 `VALID_SEARCH_INCLUDES`
+  - `skills/release/workflows/dogfood/SKILL.md`
+    - L3 graph retrieval 預設改成：
+      - `search(collection="documents", entity_name="{L2 名稱}", include=["summary_compact"], limit=5, product_id="{PRODUCT_ID}")`
+  - `scripts/dogfood/build_iteration_artifacts.py`
+    - monitor artifact 新增：
+      - `payload_bytes.total_result_bytes`
+      - `payload_bytes.by_tool`
+  - `scripts/dogfood/build_iteration_delta.py`
+    - delta artifact 新增：
+      - `payload_bytes.total_result_bytes`
+      - `payload_bytes.search_result_bytes`
+      - `payload_bytes.read_source_result_bytes`
+    - 用來區分：
+      - session-level total tokens
+      - MCP result payload 本身的體積變化
+  - 測試：
+    - `tests/interface/test_include_helpers.py`
+    - `tests/scripts/test_build_iteration_artifacts.py`
+    - `tests/scripts/test_build_iteration_delta.py`
+    - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`（`AC-MIDE-07U`、`AC-MIDE-07V`）
+- QA:
+  - `pytest -q tests/interface/test_include_helpers.py`
+    - `32 passed`
+  - `pytest -q tests/scripts/test_build_iteration_artifacts.py tests/scripts/test_build_iteration_delta.py`
+    - `11 passed`
+  - `pytest -q tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07U or MIDE_07V'`
+    - `2 passed`
+  - `git diff --check`
+    - pass
+  - live contract verification:
+    - `search(collection="documents", entity_name="Action Layer", include=["summary_compact"], limit=5)`
+    - live MCP 已接受 `summary_compact`
+  - clean-room producer:
+    - `search(collection="documents", entity_name="Action Layer", include=["summary_compact"], limit=5)`
+    - `read_source(doc_id="EOIDBT9gfZt0H8yypOLC")`
+    - 結果：
+      - `mcp_calls_count = 2`
+      - `keyword/full-scan = no`
+      - `read_source_content_type = full`
+      - `read_source_delivery_status = snapshot_first`
+  - artifact delta（DF-24 -> DF-25）：
+    - `calls: 2 -> 2`
+    - `tokens: 150873 -> 145768`（約 `-3.4%`）
+    - `payload_bytes.total_result_bytes: 19360 -> 11970`（`-7390`, 約 `-38.2%`）
+    - `payload_bytes.search_result_bytes: 13840 -> 6450`（`-7390`, 約 `-53.4%`）
+    - `payload_bytes.read_source_result_bytes: 5520 -> 5520`（無變化）
+- Outcome:
+  - `summary_compact` 確實把 graph-first search 的 MCP payload 砍掉一半以上，且 clean-room 命中品質沒有退化。
+  - 但它只把整輪 session-level total tokens 壓了約 `3.4%`，遠低於 plan 中期 gate 要的 `30%+`。
+  - 新證據說明下一個主 bottleneck 不在 search routing，而在：
+    1. clean-room session 固定成本
+    2. `read_source` full-content payload 本體
+- Resume Point:
+  - plan 仍未完成
+  - 已新增第二層量測：
+    - session token
+    - MCP payload bytes
+  - 下一輪應優先拆：
+    1. `read_source` 的初次讀取體積
+    2. session-level 固定 token 成本是否可再縮
+
+### DF-20260502-26
+
+- Scenario: 不先改 `read_source` contract，先測更便宜的一刀：把 graph-first document sampling 從 `limit=5` 壓到 `limit=3`，確認 clean-room producer 是否仍能命中正確 L3，並量 search payload 是否再下降。
+- Producer:
+  - `search(collection="documents", entity_name="Action Layer", include=["summary_compact"], limit=3)`
+  - `read_source(doc_id="EOIDBT9gfZt0H8yypOLC")`
+- Findings:
+  - clean-room producer 仍維持：
+    - `mcp_calls_count = 2`
+    - `keyword/full-scan = no`
+    - `read_source_content_type = full`
+    - `read_source_delivery_status = snapshot_first`
+  - artifact delta（DF-25 -> DF-26）：
+    - `calls: 2 -> 2`
+    - `tokens: 145768 -> 144416`（約 `-0.9%`）
+    - `payload_bytes.total_result_bytes: 12038 -> 9796`（`-2242`, 約 `-18.6%`）
+    - `payload_bytes.search_result_bytes: 6484 -> 4242`（`-2242`, 約 `-34.6%`）
+    - `payload_bytes.read_source_result_bytes: 5554 -> 5554`（無變化）
+- Outcome:
+  - `limit=3` 仍足以命中正確 L3，並且再度確認 search 這段可以繼續瘦身。
+  - 但 session-level token 只再降不到 `1%`，表示 search sampling 已不是主瓶頸。
+  - 現在最明確的 bottleneck 只剩兩個：
+    1. `read_source` full-content payload 本體
+    2. clean-room session 固定 token overhead
+- Resume Point:
+  - 之後若要再追 `token -30%+`，優先順序應改成：
+    1. 拆 `read_source` 的全文回傳成本
+    2. 再回頭看 producer/verifier 的固定 overhead
+
+### DF-20260502-27
+
+- Scenario: 直接追 `read_source` payload 熱點。目標是讓 `/dogfood` 第一次讀文件時先走低成本 preview，而不是一上來就把全文灌進 context；同時補齊 `entity_name + product_id` 的 scoped graph lookup，避免 clean-room verifier 因 scope 解析錯誤拿不到 L3 docs。
+- Findings:
+  - runtime 先前沒有 `read_source` 的低成本初讀路徑；一旦 agent 決定讀某份 doc，就會直接回整份內容，`payload_bytes.read_source_result_bytes` 無法下降。
+  - 第一次 clean-room verifier（DF-20260502-27a）表面上像是 `documents + product_id` 回空、還帶著 `effective_max_level=2`；深入驗證後，真因不是 entity-level filter，而是 verifier 用錯 `product_id=j7ke1P0gs8rq6KTN0w6x`。
+  - live MCP 直接查證後，當前 workspace 內 `Action Layer` 的 L2 id 為 `ZkDjmVp2uM7ZtrgmLq24`，其 L1 `parent_id/product_id` 為 `Gr54tjmnXK0ZAtZia6Pj`。
+  - 第二次 clean-room verifier（DF-20260502-27c）用正確 `product_id=Gr54tjmnXK0ZAtZia6Pj` 後，graph-first retrieval 仍成功：
+    - `3 calls`
+    - `no full-scan`
+    - 命中 `EOIDBT9gfZt0H8yypOLC / SPEC: Enriched Task Dispatch（Archive）`
+  - 但 transcript 顯示這次實際 tool call 仍是 `read_source(doc_id=..., source_id=...)`，**沒有帶 `preview_chars`**。也就是說，repo 內 contract 已改，但當前 session 的 live connector schema 尚未刷新；這輪無法在同一個聊天 session 直接驗證 preview path 的真實 payload 降幅。
+- Fix:
+  - `src/zenos/interface/mcp/source.py`
+    - `read_source` 新增 optional `preview_chars`
+    - 若 caller 帶 `preview_chars`，成功回傳會：
+      - 將 `content` 截到最多 N 字元
+      - 補 `preview_chars`
+      - 補 `content_truncated`
+    - 未帶時維持原本完整內容合約
+  - `docs/specs/SPEC-doc-governance.md`
+    - `read_source(doc_id, source_id?, preview_chars?)`
+    - 明定 preview 是低成本初讀路徑；只有 preview 不足才再讀 full
+  - `docs/specs/SPEC-mcp-tool-contract.md`
+    - 補 `preview_chars` request parameter 與 `content_truncated` response contract
+  - `/dogfood` workflow / release skill
+    - 預設文件讀取改成先 `read_source(..., preview_chars=1200)`
+    - 只有 preview 不足才允許 full read
+  - `src/zenos/interface/mcp/search.py`
+    - 新增 `_resolve_scoped_entity_by_name(...)`
+    - `documents + entity_name + product_id` 先在 product subtree 內解析 entity，同名但不同 product 的 L2 不再把 verifier 拉到錯 scope
+    - `applied_filters.entity_level` 對 `collection="documents"` 改成明示 `entity_level does not filter documents collection`，避免回應 echo 誤導 clean-room agent
+  - Tests：
+    - `tests/interface/test_tools.py`
+      - `read_source` preview truncation / invalid preview_chars
+      - `documents entity_name + product_id` 會偏好 scoped entity
+    - `tests/spec_compliance/test_mcp_id_ergonomics_ac.py`
+      - release `/dogfood` skill 必須明示 `preview_chars=1200`
+- QA:
+  - `pytest -q tests/interface/test_tools.py -k 'read_source_preview_chars or read_source_github_with_snapshot_prefers_snapshot_first or read_source_formal_entry_github_without_snapshot_falls_back_to_direct_read or documents_entity_name_with_product_id_prefers_scoped_entity_match or documents_product_filter_uses_any_linked_entity'` → `6 passed`
+  - `pytest -q tests/spec_compliance/test_mcp_id_ergonomics_ac.py -k 'MIDE_07U or MIDE_07V or MIDE_07W'` → `3 passed`
+  - `python3 -m py_compile src/zenos/interface/mcp/source.py src/zenos/interface/mcp/search.py` → pass
+  - clean-room verifier DF-20260502-27c:
+    - transcript: `/Users/wubaizong/.codex/sessions/2026/05/02/rollout-2026-05-02T22-31-40-019de8e3-4059-7b21-acf7-a4428baf31ad.jsonl`
+    - artifact: `/tmp/zenos-dogfood/DF-20260502-27c/{producer.jsonl,monitor.json}`
+  - DF-20260502-26 -> DF-20260502-27c delta:
+    - `calls: 2 -> 3`
+    - `payload_bytes.search_result_bytes: 4242 -> 4278`
+    - `payload_bytes.read_source_result_bytes: 5554 -> 5554`
+    - 這輪沒有變好，因為 verifier 多做了 1 次 `get(Action Layer)`，且 live call 沒真正帶到 `preview_chars`
+  - deploy / rollout:
+    - `./scripts/deploy_mcp.sh`
+    - serving revision: `zenos-mcp-00290-vqs`
+    - endpoint: `https://zenos-mcp-s5oifosv3a-de.a.run.app/mcp?api_key=YOUR_API_KEY`
+    - deploy gate 仍失敗於 GitHub delivery secret health：
+      - `INVALID_GITHUB_TOKEN`
+      - `http_status=401`
+- Outcome:
+  - `entity_name + product_id` scoped retrieval bug 已在 repo 內修正，且用正確 product scope 時 live clean-room 仍能穩定命中正確 L3。
+  - `read_source preview` contract 已落地到 runtime / spec / workflow / tests。
+  - 但 **preview 對真實 payload 的 end-to-end 改善尚未驗證完成**：
+    - 當前 session 的 live MCP tool schema 尚未刷新，clean-room verifier 實際沒把 `preview_chars` 打進 tool call
+    - deploy gate 仍暴露 `github-token` 失效，對沒有 snapshot 的 current docs 依然是 external blocker
+  - 因此 `/dogfood` workflow / release skill 另外補一條硬 gate：
+    - 若 fix 涉及 **MCP tool contract / parameter schema**
+    - verifier 必須改用 **新的 top-level chat session**
+    - 同一個聊天內只重開 subagent 不算驗證完成；若 transcript 看不到新參數，統一記為 **schema freshness blocker**
+  - 另外把這條規則接成 machine-readable artifact：
+    - `build_iteration_artifacts.py --expect-read-source-preview`
+    - `monitor.json.tool_contract.schema_freshness_blocker`
+    - `delta.json.health.schema_freshness_blocker`
+    - `build_monitor_report.py` findings 也會直接顯示 `schema freshness blocker`
+    - 目的：讓下一輪 replay 不用人工翻 transcript，就能知道 preview contract 是真的沒生效，還是只是 schema 沒刷新
+- Resume Point:
+  - 下一輪要做的不是再改 search，而是：
+    1. 用新 session / 刷新後的 MCP tool schema 驗證 `read_source(..., preview_chars=1200)` 真的被送出
+    2. rotate / 修好 `github-token`，否則 deploy gate 與無 snapshot docs 的 delivery path 仍會卡住
+    3. 再跑一輪 DF-26 baseline 對照，確認 `payload_bytes.read_source_result_bytes` 是否下降
+    4. 若下降仍不足，再拆 preview 長度或二段式 read policy

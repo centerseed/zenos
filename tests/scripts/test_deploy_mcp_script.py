@@ -56,3 +56,12 @@ def test_deploy_mcp_script_uses_json_for_traffic_validation():
     assert "percent == 100" in text
     assert "_print_service_traffic" in text
     assert 'entry.get("tag", "")' in text
+
+
+def test_deploy_mcp_script_checks_github_delivery_secret_health():
+    text = SCRIPT.read_text()
+
+    assert "SKIP_GITHUB_SECRET_HEALTHCHECK" in text
+    assert "check_github_delivery_secret.py" in text
+    assert "--secret-name github-token" in text
+    assert "Verifying GitHub delivery secret health" in text

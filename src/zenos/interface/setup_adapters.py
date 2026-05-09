@@ -108,6 +108,11 @@ _USAGE_SUMMARY = [
         "when": "想檢查治理品質、找缺口、讓 agent 自動修補時",
         "what_it_does": "跑治理掃描、補文件、建票或提出修復建議",
     },
+    {
+        "skill": "/dogfood",
+        "when": "想用乾淨 session 驗證 graph-first 效率、找治理流程斷點、追 reject rate 時",
+        "what_it_does": "跑 clean-room producer/fixer/verifier 閉環，衡量 calls、tokens、hit rate、full-scan ratio",
+    },
 ]
 
 _LOCAL_INSTALL_RULES = [

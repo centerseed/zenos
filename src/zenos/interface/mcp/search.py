@@ -10,7 +10,10 @@ from zenos.domain.knowledge.entity_levels import DEFAULT_TYPE_LEVELS
 from zenos.domain.partner_access import describe_partner_access, is_guest
 from zenos.infrastructure.context import (
     current_partner_department,
+    current_partner_id,
 )
+from zenos.infrastructure.sql_common import get_pool, SCHEMA
+from zenos.application.identity.source_access_policy import filter_sources_for_partner
 
 from zenos.interface.mcp._auth import _current_partner, _apply_workspace_override
 from zenos.interface.mcp._common import (
@@ -37,7 +40,7 @@ from zenos.interface.mcp._include import (
     build_search_result,
 )
 from zenos.domain.task_rules import normalize_task_status
-from zenos.domain.document_linkage import get_document_linked_entity_ids
+from zenos.domain.document_linkage import DOCUMENT_LINK_REL_TYPES, get_document_linked_entity_ids
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,98 @@ _ENTITY_STATUS_FILTERS = {
     "superseded",
 }
 _ENTITY_TYPE_FILTERS = set(DEFAULT_TYPE_LEVELS)
+
+
+async def _list_entities_by_ids(entity_repo: object, entity_ids: list[str]) -> list[object]:
+    """Fetch entities by ids with best-available repository primitive."""
+    if not entity_ids:
+        return []
+
+    deduped_ids = list(dict.fromkeys(entity_ids))
+    list_by_ids = getattr(entity_repo, "list_by_ids", None)
+    if list_by_ids is not None:
+        result = list_by_ids(deduped_ids)
+        if inspect.isawaitable(result):
+            result = await result
+        return [entity for entity in (result or []) if entity is not None]
+
+    get_by_id = getattr(entity_repo, "get_by_id", None)
+    if get_by_id is None:
+        return []
+
+    entities = []
+    for entity_id in deduped_ids:
+        result = get_by_id(entity_id)
+        if inspect.isawaitable(result):
+            result = await result
+        if result is not None:
+            entities.append(result)
+    return entities
+
+
+async def _collect_subtree_ids_via_parent(entity_repo: object, root_id: str) -> set[str]:
+    """Collect a product subtree without falling back to entity list-all scans."""
+    if not root_id:
+        return set()
+
+    list_by_parent = getattr(entity_repo, "list_by_parent", None)
+    if list_by_parent is None:
+        return {root_id}
+
+    subtree_ids: set[str] = set()
+    pending: list[str] = [root_id]
+    while pending:
+        current_id = pending.pop()
+        if current_id in subtree_ids:
+            continue
+        subtree_ids.add(current_id)
+        children = list_by_parent(current_id)
+        if inspect.isawaitable(children):
+            children = await children
+        for child in children or []:
+            child_id = getattr(child, "id", None)
+            if child_id and child_id not in subtree_ids:
+                pending.append(child_id)
+    return subtree_ids
+
+
+async def _resolve_scoped_entity_by_name(
+    entity_repo: object,
+    *,
+    entity_name: str,
+    scoped_ids: set[str] | None = None,
+) -> object | None:
+    """Resolve an entity by name, preferring a known subtree scope when provided."""
+    get_by_name = getattr(entity_repo, "get_by_name", None)
+    if get_by_name is not None:
+        candidate = get_by_name(entity_name)
+        if inspect.isawaitable(candidate):
+            candidate = await candidate
+        if candidate is not None and (not scoped_ids or getattr(candidate, "id", None) in scoped_ids):
+            return candidate
+
+    if not scoped_ids:
+        return None
+
+    scoped_entities = await _list_entities_by_ids(entity_repo, list(scoped_ids))
+    normalized_name = str(entity_name or "").strip().lower()
+    matches = [
+        entity for entity in scoped_entities
+        if str(getattr(entity, "name", "") or "").strip().lower() == normalized_name
+    ]
+    if not matches:
+        return None
+
+    def _match_rank(entity: object) -> tuple[int, int, str]:
+        level = getattr(entity, "level", None)
+        if level is None:
+            level = DEFAULT_TYPE_LEVELS.get(str(getattr(entity, "type", "") or "").lower(), 99)
+        type_name = str(getattr(entity, "type", "") or "").lower()
+        type_rank = 0 if type_name == "module" else 1 if type_name == "product" else 2
+        return (type_rank, int(level or 99), str(getattr(entity, "id", "") or ""))
+
+    matches.sort(key=_match_rank)
+    return matches[0]
 
 
 def _parse_entity_status_type_filters(status: str | None) -> tuple[set[str], set[str]]:
@@ -82,7 +177,69 @@ def _normalize_project_scope(value: object) -> str:
     return str(value).strip().lower()
 
 
-def _document_search_sort_key(doc: object) -> tuple:
+async def _load_document_delivery_states(doc_ids: list[str]) -> dict[str, dict[str, object]]:
+    """Fetch snapshot delivery state for a batch of document entities."""
+    if not doc_ids:
+        return {}
+    partner_id = str(current_partner_id.get() or "").strip()
+    if not partner_id:
+        return {}
+    try:
+        pool = await get_pool()
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT id, primary_snapshot_revision_id, delivery_status
+                FROM {SCHEMA}.entities
+                WHERE partner_id = $1 AND id = ANY($2::text[])
+                """,
+                partner_id,
+                doc_ids,
+            )
+    except Exception:
+        logger.warning("document delivery state lookup failed", exc_info=True)
+        return {}
+    return {
+        str(row["id"]): {
+            "primary_snapshot_revision_id": row["primary_snapshot_revision_id"],
+            "delivery_status": row["delivery_status"],
+        }
+        for row in rows
+    }
+
+
+def _document_delivery_fields(
+    doc: object,
+    *,
+    delivery_state: dict[str, object] | None = None,
+) -> tuple[bool, str | None]:
+    primary_snapshot_revision_id = getattr(doc, "primary_snapshot_revision_id", None)
+    delivery_status = getattr(doc, "delivery_status", None)
+    if delivery_state:
+        if primary_snapshot_revision_id is None:
+            primary_snapshot_revision_id = delivery_state.get("primary_snapshot_revision_id")
+        if delivery_status is None:
+            delivery_status = delivery_state.get("delivery_status")
+    has_delivery_snapshot = bool(primary_snapshot_revision_id)
+    normalized_delivery_status = str(delivery_status).strip().lower() if delivery_status is not None else None
+    return has_delivery_snapshot, normalized_delivery_status or None
+
+
+def _document_delivery_rank(doc: object, *, delivery_state: dict[str, object] | None = None) -> tuple[int, int]:
+    has_delivery_snapshot, delivery_status = _document_delivery_fields(doc, delivery_state=delivery_state)
+    if has_delivery_snapshot and delivery_status == "ready":
+        return (0, 0)
+    if has_delivery_snapshot:
+        return (1, 0 if delivery_status != "stale" else 1)
+    return (2, 0)
+
+
+def _document_search_sort_key(
+    doc: object,
+    *,
+    sources: list[dict] | None = None,
+    delivery_state: dict[str, object] | None = None,
+) -> tuple:
     """Prioritize L3 index docs that are useful as retrieval maps."""
     status_rank = {
         "current": 0,
@@ -100,14 +257,29 @@ def _document_search_sort_key(doc: object) -> tuple:
     except Exception:
         updated_ts = 0.0
     highlights = getattr(doc, "bundle_highlights", None) or []
-    sources = getattr(doc, "sources", None) or []
+    effective_sources = sources if sources is not None else (getattr(doc, "sources", None) or [])
+    primary_source = next((s for s in effective_sources if isinstance(s, dict) and s.get("is_primary")), None)
+    if primary_source is None and effective_sources:
+        primary_source = effective_sources[0]
+    primary_source_status = str((primary_source or {}).get("source_status") or (primary_source or {}).get("status") or "").lower()
+    source_status_rank = {
+        "valid": 0,
+        "current": 1,
+        "under_review": 2,
+        "draft": 3,
+        "stale": 4,
+        "unresolvable": 5,
+        "archived": 6,
+    }
     return (
         status_rank.get(str(getattr(doc, "status", "") or "").lower(), 9),
         0 if bool(details.get("formal_entry")) else 1,
         0 if getattr(doc, "doc_role", None) == "index" else 1,
+        *_document_delivery_rank(doc, delivery_state=delivery_state),
+        source_status_rank.get(primary_source_status, 9),
         0 if highlights else 1,
         -len(highlights),
-        -len(sources),
+        -len(effective_sources),
         -updated_ts,
         str(getattr(doc, "name", "") or "").lower(),
     )
@@ -118,22 +290,25 @@ def _document_search_sort_key_for_entity(
     *,
     matched_entity_id: str | None,
     linked_ids: list[str] | None,
+    sources: list[dict] | None = None,
+    delivery_state: dict[str, object] | None = None,
 ) -> tuple:
     """Rank primary-linked docs before secondary-linked docs for entity lookups."""
     if not matched_entity_id:
-        return _document_search_sort_key(doc)
+        return _document_search_sort_key(doc, sources=sources, delivery_state=delivery_state)
     primary_linked_id = linked_ids[0] if linked_ids else getattr(doc, "parent_id", None)
     primary_rank = 0 if primary_linked_id == matched_entity_id else 1
-    return (primary_rank, *_document_search_sort_key(doc))
+    return (primary_rank, *_document_search_sort_key(doc, sources=sources, delivery_state=delivery_state))
 
 
-def _document_matches_query(doc: object, query: str) -> bool:
+def _document_matches_query(doc: object, query: str, *, sources: list[dict] | None = None) -> bool:
     q = query.lower().strip()
     if not q:
         return True
-    source_uris = " ".join(str(s.get("uri", "")) for s in (getattr(doc, "sources", None) or []))
-    source_labels = " ".join(str(s.get("label", "")) for s in (getattr(doc, "sources", None) or []))
-    source_types = " ".join(str(s.get("doc_type", "")) for s in (getattr(doc, "sources", None) or []))
+    effective_sources = sources if sources is not None else (getattr(doc, "sources", None) or [])
+    source_uris = " ".join(str(s.get("uri", "")) for s in effective_sources)
+    source_labels = " ".join(str(s.get("label", "")) for s in effective_sources)
+    source_types = " ".join(str(s.get("doc_type", "")) for s in effective_sources)
     tags = getattr(doc, "tags", None)
     tag_parts: list[str] = []
     if tags is not None:
@@ -157,20 +332,40 @@ def _build_document_search_result(serialized: dict, include_set: set[str] | None
     primary_source = next((s for s in sources if s.get("is_primary")), None)
     if primary_source is None and sources:
         primary_source = sources[0]
+    compact_primary_source = None
+    if isinstance(primary_source, dict):
+        compact_primary_source = {
+            "source_id": primary_source.get("source_id"),
+            "uri": primary_source.get("uri"),
+            "label": primary_source.get("label"),
+            "type": primary_source.get("type"),
+            "doc_type": primary_source.get("doc_type"),
+            "status": primary_source.get("status"),
+            "source_status": primary_source.get("source_status"),
+        }
+    highlights = serialized.get("bundle_highlights") or []
+    compact_highlights = []
+    for highlight in highlights[:2]:
+        if not isinstance(highlight, dict):
+            continue
+        compact_highlights.append({
+            "source_id": highlight.get("source_id"),
+            "headline": highlight.get("headline"),
+            "priority": highlight.get("priority"),
+        })
     result: dict = {
         "id": serialized.get("id"),
         "name": serialized.get("name"),
         "type": serialized.get("type"),
         "status": serialized.get("status"),
         "doc_role": serialized.get("doc_role"),
-        "change_summary": serialized.get("change_summary"),
-        "bundle_highlights": serialized.get("bundle_highlights") or [],
+        "delivery_status": serialized.get("delivery_status"),
+        "has_delivery_snapshot": bool(serialized.get("primary_snapshot_revision_id")),
+        "bundle_highlights": compact_highlights,
         "source_count": len(sources),
-        "primary_source": primary_source,
+        "primary_source": compact_primary_source,
         "linked_entity_ids": serialized.get("linked_entity_ids") or [],
         "primary_linked_entity_id": serialized.get("primary_linked_entity_id"),
-        "related_entity_ids": serialized.get("related_entity_ids") or [],
-        "linked_entities": serialized.get("linked_entities") or [],
     }
     summary = str(serialized.get("summary") or "")
     if "summary_compact" in include_set:
@@ -180,6 +375,158 @@ def _build_document_search_result(serialized: dict, include_set: set[str] | None
     if "tags" in include_set:
         result["tags"] = serialized.get("tags")
     return result
+
+
+async def _load_entity_context_documents(
+    *,
+    entity: object,
+    entity_repo: object,
+    relationship_repo: object | None,
+    partner_ctx: dict | None,
+    limit: int = 3,
+) -> list[dict]:
+    """Return compact L3 routing docs for an entity search result.
+
+    This is intentionally metadata-only: it gives agents the next L3 bundles to
+    inspect without paying the cost of read_source or full document payloads.
+    """
+    entity_id = getattr(entity, "id", None)
+    if not entity_id or limit <= 0:
+        return []
+
+    candidates: list[object] = []
+    seen_doc_ids: set[str] = set()
+
+    async def _add_doc(doc: object | None) -> None:
+        if doc is None:
+            return
+        if str(getattr(doc, "type", "") or "") != "document":
+            return
+        doc_id = getattr(doc, "id", None)
+        if not doc_id or doc_id in seen_doc_ids:
+            return
+        if str(getattr(doc, "status", "") or "").lower() == "archived":
+            return
+        if not _is_entity_visible(doc):
+            return
+        seen_doc_ids.add(doc_id)
+        candidates.append(doc)
+
+    list_by_parent = getattr(entity_repo, "list_by_parent", None)
+    if list_by_parent is not None:
+        try:
+            children = list_by_parent(entity_id)
+            if inspect.isawaitable(children):
+                children = await children
+            for child in children or []:
+                await _add_doc(child)
+        except Exception:
+            logger.debug("entity context document child lookup failed", exc_info=True)
+
+    if relationship_repo is not None:
+        rel_loader = getattr(relationship_repo, "list_by_entity", None)
+        get_by_id = getattr(entity_repo, "get_by_id", None)
+        if rel_loader is not None and get_by_id is not None:
+            try:
+                rels = rel_loader(entity_id)
+                if inspect.isawaitable(rels):
+                    rels = await rels
+                for rel in rels or []:
+                    if getattr(rel, "type", None) not in DOCUMENT_LINK_REL_TYPES:
+                        continue
+                    other_id = (
+                        getattr(rel, "source_entity_id", None)
+                        if getattr(rel, "target_id", None) == entity_id
+                        else getattr(rel, "target_id", None)
+                    )
+                    if not other_id or other_id == entity_id or other_id in seen_doc_ids:
+                        continue
+                    doc = get_by_id(other_id)
+                    if inspect.isawaitable(doc):
+                        doc = await doc
+                    await _add_doc(doc)
+            except Exception:
+                logger.debug("entity context document relationship lookup failed", exc_info=True)
+
+    if not candidates:
+        return []
+
+    doc_relationships: dict[str, list] = {}
+    if relationship_repo is not None:
+        rel_loader = getattr(relationship_repo, "list_by_entity", None)
+        if rel_loader is not None:
+            for doc in candidates:
+                doc_id = getattr(doc, "id", None)
+                if not doc_id:
+                    continue
+                try:
+                    rels = rel_loader(doc_id)
+                    if inspect.isawaitable(rels):
+                        rels = await rels
+                    doc_relationships[doc_id] = list(rels or [])
+                except Exception:
+                    doc_relationships[doc_id] = []
+
+    if partner_ctx and is_guest(partner_ctx):
+        allowed_ids = await _guest_allowed_entity_ids()
+        candidates = [
+            doc for doc in candidates
+            if _is_document_like_entity_visible_for_guest(
+                doc,
+                allowed_ids,
+                doc_relationships.get(getattr(doc, "id", "") or "", []),
+            )
+        ]
+
+    visible_sources_by_doc = {
+        getattr(doc, "id", ""): filter_sources_for_partner(getattr(doc, "sources", None), partner_ctx)
+        for doc in candidates
+        if getattr(doc, "id", None)
+    }
+    delivery_states_by_doc = await _load_document_delivery_states(
+        [getattr(doc, "id") for doc in candidates if getattr(doc, "id", None)]
+    )
+    linked_ids_by_doc = {
+        getattr(doc, "id"): get_document_linked_entity_ids(
+            doc,
+            doc_relationships.get(getattr(doc, "id", "") or "", []),
+        )
+        for doc in candidates
+        if getattr(doc, "id", None)
+    }
+
+    candidates.sort(
+        key=lambda doc: _document_search_sort_key_for_entity(
+            doc,
+            matched_entity_id=entity_id,
+            linked_ids=linked_ids_by_doc.get(getattr(doc, "id", "") or "", []),
+            sources=visible_sources_by_doc.get(getattr(doc, "id", "") or "", []),
+            delivery_state=delivery_states_by_doc.get(getattr(doc, "id", "") or "", {}),
+        )
+    )
+
+    results: list[dict] = []
+    for doc in candidates[:limit]:
+        doc_id = getattr(doc, "id", "") or ""
+        serialized = _serialize(doc)
+        serialized["sources"] = visible_sources_by_doc.get(doc_id, [])
+        delivery_state = delivery_states_by_doc.get(doc_id, {})
+        primary_snapshot_revision_id = getattr(doc, "primary_snapshot_revision_id", None)
+        delivery_status = getattr(doc, "delivery_status", None)
+        if primary_snapshot_revision_id is None:
+            primary_snapshot_revision_id = delivery_state.get("primary_snapshot_revision_id")
+        if delivery_status is None:
+            delivery_status = delivery_state.get("delivery_status")
+        serialized["primary_snapshot_revision_id"] = primary_snapshot_revision_id
+        serialized["delivery_status"] = delivery_status
+        serialized.update(
+            _document_linkage_fields(
+                doc,
+                doc_relationships.get(doc_id, []),
+            )
+        )
+        results.append(_build_document_search_result(serialized, {"summary_compact"}))
+    return results
 
 
 async def _resolve_id_prefix_for_search(
@@ -333,7 +680,8 @@ async def search(
     範例：search(collection="entities", query="治理怎麼做", mode="semantic")
 
     include 參數（對 collection="entities" / "documents" 有效）：
-    - include=["summary"]  → 快速識別 / capture：每筆回傳 {id, name, type, level, summary_short, score}，token 用量最小
+    - include=["summary"]  → 快速識別 / capture：entities 回傳 {id, name, type, level, summary_short, score}；documents 回傳 routing summary + primary_source
+    - include=["summary_compact"] → documents retrieval 用的更省 token 版本；summary 會截短成 `summary_short`
     - include=["tags"]     → 快速分類：在 summary 基礎上加回 tags
     - include=["full"]     → 完整 payload：等同不傳 include 的 eager dump，但不 log warning
 
@@ -343,7 +691,8 @@ async def search(
 
     範例：
     - search(collection="entities", include=["summary"]) → 快速列出所有 entity（低 token）
-    - search(collection="documents", entity_name="<L2 name>", include=["summary"]) → 快速列出 L3 index retrieval maps（低 token）
+    - search(collection="documents", entity_name="<L2 name>", include=["summary_compact"]) → 快速列出 L3 index retrieval maps（最低 token）
+    - search(collection="documents", entity_name="<L2 name>", include=["summary"]) → 列出 L3 index retrieval maps（保留完整 routing summary）
     - search(collection="entities", include=["full"]) → 完整 payload（等同不傳 include）
 
     Args:
@@ -379,9 +728,9 @@ async def search(
             ⚠️ project / goal / role 屬 level=3，需要 entity_level="all" 才看得到。
             回傳 response 的 `applied_filters.entity_level` 會 echo 實際套用的 max_level。
         workspace_id: 選填。切換到指定 workspace 執行搜尋（必須在你的可用列表內）。
-        include: 選填。控制每筆 entity result 的欄位集合（僅 entities 有效）。
-            支援值：summary / tags / full
-            範例：include=["summary"]、include=["full"]
+        include: 選填。控制每筆搜尋結果的欄位集合。
+            支援值：summary / summary_compact / tags / documents / full
+            範例：include=["summary"]、include=["summary", "documents"]、include=["full"]
     """
     from zenos.interface.mcp import _ensure_services
     import zenos.interface.mcp as _mcp
@@ -469,6 +818,15 @@ async def search(
         },
         "visibility_applied": True,
     }
+    if collection == "documents":
+        applied_filters["entity_level"] = {
+            "input": entity_level,
+            "effective_max_level": None,
+            "exact_level": None,
+            "included_types": ["document"],
+            "excluded_types": [],
+            "note": "entity_level does not filter documents collection",
+        }
     if product_id is not None:
         applied_filters["product_id"] = product_id
     if confirmed_only is not None:
@@ -542,7 +900,7 @@ async def search(
                 _schedule_tool_event("search", eid, query, exposed_count)
 
         return _unified_response(
-            data=_inject_workspace_context(results),
+            data=results,
             warnings=warnings,
             applied_filters=applied_filters,
             completeness="partial",  # keyword search is ranked; may omit matches
@@ -579,11 +937,7 @@ async def search(
                 _partner_ctx = _current_partner.get() or {}
                 _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
                 if _access and _access["is_guest"]:
-                    all_entities_for_map = await _mcp.ontology_service._entities.list_all()
-                    _entity_map = {e.id: e for e in all_entities_for_map if e.id}
-                    _allowed: set[str] = set()
-                    for _l1_id in _access["authorized_l1_ids"]:
-                        _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
+                    _allowed = await _guest_allowed_entity_ids()
                     entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.id in _allowed]
 
                 # Apply legacy type filter (status="product") and lifecycle status filter.
@@ -607,9 +961,10 @@ async def search(
 
                 # Apply product_id filter
                 if product_id is not None:
-                    all_e = await _mcp.ontology_service._entities.list_all()
-                    entity_map = {e.id: e for e in all_e if e.id}
-                    subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                    subtree_ids = await _collect_subtree_ids_via_parent(
+                        _mcp.ontology_service._entities,
+                        product_id,
+                    )
                     entities_with_scores = [(e, sc, bd) for e, sc, bd in entities_with_scores if e.id in subtree_ids]
 
                 # DF-20260419-L2d: exclude archived entities from default search
@@ -659,6 +1014,7 @@ async def search(
                         item = build_search_result(_serialize(e), score=score, include_set=_effective_include_set)
                         item["score_breakdown"] = score_breakdown
                         items.append(item)
+                context_entities = [e for e, _score, _breakdown in paginated]
             else:
                 # Fallback path when search_service is not yet wired (should not happen in production)
                 type_filter = next(iter(entity_type_filters)) if len(entity_type_filters) == 1 else None
@@ -671,11 +1027,7 @@ async def search(
                 _partner_ctx = _current_partner.get() or {}
                 _access = describe_partner_access(_partner_ctx) if _partner_ctx else None
                 if _access and _access["is_guest"]:
-                    all_entities_for_map = await _mcp.ontology_service._entities.list_all()
-                    _entity_map = {e.id: e for e in all_entities_for_map if e.id}
-                    _allowed: set[str] = set()
-                    for _l1_id in _access["authorized_l1_ids"]:
-                        _allowed |= _collect_subtree_ids(_l1_id, _entity_map)
+                    _allowed = await _guest_allowed_entity_ids()
                     entities = [e for e in entities if e.id in _allowed]
                 if max_level is not None:
                     if _exact_level == 3:
@@ -683,8 +1035,10 @@ async def search(
                     else:
                         entities = [e for e in entities if (e.level or 1) <= max_level]
                 if product_id is not None:
-                    entity_map = {e.id: e for e in entities if e.id}
-                    subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                    subtree_ids = await _collect_subtree_ids_via_parent(
+                        _mcp.ontology_service._entities,
+                        product_id,
+                    )
                     entities = [e for e in entities if e.id in subtree_ids]
                 if "archived" not in entity_status_filters:
                     entities = [e for e in entities if str(e.status or "").lower() != "archived"]
@@ -701,21 +1055,121 @@ async def search(
                         build_search_result(_serialize(e), score=0.0, include_set=include_set)
                         for e in paginated_entities
                     ]
+                context_entities = list(paginated_entities)
+            if include_set is not None and "documents" in include_set:
+                partner_ctx = _current_partner.get() or {}
+                rel_repo = getattr(_mcp.ontology_service, "_relationships", None)
+                entity_repo_for_docs = getattr(_mcp.ontology_service, "_entities", None) or _mcp.entity_repo
+                for item, entity in zip(items, context_entities, strict=False):
+                    item["documents"] = await _load_entity_context_documents(
+                        entity=entity,
+                        entity_repo=entity_repo_for_docs,
+                        relationship_repo=rel_repo,
+                        partner_ctx=partner_ctx,
+                        limit=3,
+                    )
             results["entities"] = items
 
         elif col == "documents":
-            # Query document entities (type="document") from entities collection
-            doc_entities = await _mcp.ontology_service._entities.list_all(type_filter="document")
-            doc_entities = [d for d in doc_entities if _is_entity_visible(d)]
+            entity_repo = _mcp.ontology_service._entities
+            rel_repo = getattr(_mcp.ontology_service, "_relationships", None)
             partner_ctx = _current_partner.get()
+            doc_entities: list = []
+            matched_entity_id: str | None = None
+            targeted_document_lookup = False
+            product_subtree_ids: set[str] | None = None
+            if product_id is not None:
+                product_subtree_ids = await _collect_subtree_ids_via_parent(entity_repo, product_id)
+            if entity_name:
+                entity = await _resolve_scoped_entity_by_name(
+                    entity_repo,
+                    entity_name=entity_name,
+                    scoped_ids=product_subtree_ids,
+                )
+                if entity and entity.id:
+                    matched_entity_id = entity.id
+                    targeted_document_lookup = True
+
+                    primary_docs = await entity_repo.list_by_parent(entity.id)
+                    linked_doc_ids: list[str] = []
+                    if rel_repo is not None:
+                        target_loader = getattr(rel_repo, "list_by_target", None)
+                        if target_loader is not None:
+                            rel_result = target_loader(entity.id, rel_types=tuple(str(t) for t in DOCUMENT_LINK_REL_TYPES))
+                            if inspect.isawaitable(rel_result):
+                                rel_result = await rel_result
+                            linked_doc_ids = [
+                                rel.source_entity_id
+                                for rel in (rel_result or [])
+                                if getattr(rel, "source_entity_id", None)
+                            ]
+                    related_docs = await _list_entities_by_ids(entity_repo, linked_doc_ids)
+                    combined_docs = [
+                        *primary_docs,
+                        *related_docs,
+                    ]
+                    deduped_docs = {}
+                    for doc in combined_docs:
+                        doc_id = getattr(doc, "id", None)
+                        if not doc_id or getattr(doc, "type", None) != "document":
+                            continue
+                        deduped_docs[doc_id] = doc
+                    doc_entities = list(deduped_docs.values())
+            elif product_id is not None:
+                targeted_document_lookup = True
+
+                primary_docs: list[object] = []
+                linked_doc_ids: list[str] = []
+                target_loader = getattr(rel_repo, "list_by_target", None) if rel_repo is not None else None
+                for scope_entity_id in product_subtree_ids:
+                    primary_docs.extend(await entity_repo.list_by_parent(scope_entity_id))
+                    if target_loader is not None:
+                        rel_result = target_loader(
+                            scope_entity_id,
+                            rel_types=tuple(str(t) for t in DOCUMENT_LINK_REL_TYPES),
+                        )
+                        if inspect.isawaitable(rel_result):
+                            rel_result = await rel_result
+                        linked_doc_ids.extend(
+                            rel.source_entity_id
+                            for rel in (rel_result or [])
+                            if getattr(rel, "source_entity_id", None)
+                        )
+                related_docs = await _list_entities_by_ids(entity_repo, linked_doc_ids)
+                deduped_docs = {}
+                for doc in [*primary_docs, *related_docs]:
+                    doc_id = getattr(doc, "id", None)
+                    if not doc_id or getattr(doc, "type", None) != "document":
+                        continue
+                    deduped_docs[doc_id] = doc
+                doc_entities = list(deduped_docs.values())
+
+            if not targeted_document_lookup:
+                # Query document entities (type="document") from entities collection
+                doc_entities = await entity_repo.list_all(type_filter="document")
+
+            doc_entities = [d for d in doc_entities if _is_entity_visible(d)]
             if partner_ctx and is_guest(partner_ctx):
                 allowed_ids = await _guest_allowed_entity_ids()
             else:
                 allowed_ids = set()
+            visible_sources_by_doc = {
+                d.id: filter_sources_for_partner(getattr(d, "sources", None), partner_ctx)
+                for d in doc_entities
+                if getattr(d, "id", None)
+            }
+            delivery_states_by_doc = await _load_document_delivery_states(
+                [d.id for d in doc_entities if getattr(d, "id", None)]
+            )
+            doc_entities = [
+                d for d in doc_entities
+                if not isinstance(getattr(d, "sources", None), list)
+                or not getattr(d, "sources", None)
+                or bool(visible_sources_by_doc.get(d.id or "", []))
+            ]
             # Exclude archived document entities (dead links confirmed unresolvable)
             doc_entities = [d for d in doc_entities if d.status != "archived"]
 
-            rel_repo = getattr(_mcp.ontology_service, "_relationships", None)
             rel_loader = getattr(rel_repo, "list_by_entity", None)
             relationships_by_doc: dict[str, list] = {}
             if rel_loader is not None:
@@ -741,17 +1195,13 @@ async def search(
                     )
                 ]
 
-            all_entities_for_links = None
-            entity_map = None
-            if product_id is not None or entity_name:
-                all_entities_for_links = await _mcp.ontology_service._entities.list_all()
-                entity_map = {e.id: e for e in all_entities_for_links if e.id}
-
             # Apply product_id filter for documents via any canonical document link.
+            entity_map = None
             if product_id is not None:
-                all_entities = all_entities_for_links or await _mcp.ontology_service._entities.list_all()
-                entity_map = entity_map or {e.id: e for e in all_entities if e.id}
-                subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                subtree_ids = product_subtree_ids or await _collect_subtree_ids_via_parent(
+                    _mcp.ontology_service._entities,
+                    product_id,
+                )
                 doc_entities = [
                     d for d in doc_entities
                     if any(eid in subtree_ids for eid in linked_ids_by_doc.get(d.id or "", []))
@@ -759,32 +1209,51 @@ async def search(
             if query.strip():
                 filtered = []
                 for d in doc_entities:
-                    if _document_matches_query(d, query):
+                    if _document_matches_query(
+                        d,
+                        query,
+                        sources=visible_sources_by_doc.get(d.id or "", []),
+                    ):
                         filtered.append(d)
                 doc_entities = filtered
-            matched_entity_id: str | None = None
-            if entity_name:
-                entity = await _mcp.ontology_service._entities.get_by_name(entity_name)
+            if entity_name and matched_entity_id is None:
+                entity = await _resolve_scoped_entity_by_name(
+                    entity_repo,
+                    entity_name=entity_name,
+                    scoped_ids=product_subtree_ids,
+                )
                 if entity and entity.id:
                     matched_entity_id = entity.id
+            if entity_name and matched_entity_id is not None and not targeted_document_lookup:
                     doc_entities = [
                         d for d in doc_entities
-                        if entity.id in linked_ids_by_doc.get(d.id or "", [])
+                        if matched_entity_id in linked_ids_by_doc.get(d.id or "", [])
                     ]
             if confirmed_only is not None:
                 doc_entities = [d for d in doc_entities if d.confirmed_by_user == confirmed_only]
-            doc_entities = sorted(
+                doc_entities = sorted(
                 doc_entities,
                 key=lambda d: _document_search_sort_key_for_entity(
                     d,
                     matched_entity_id=matched_entity_id,
                     linked_ids=linked_ids_by_doc.get(d.id or "", []),
+                    sources=visible_sources_by_doc.get(d.id or "", []),
+                    delivery_state=delivery_states_by_doc.get(d.id or "", {}),
                 ),
             )
             if entity_map is None:
                 try:
-                    all_entities_for_links = await _mcp.ontology_service._entities.list_all()
-                    entity_map = {e.id: e for e in all_entities_for_links if e.id}
+                    linked_entity_ids = []
+                    for doc in doc_entities:
+                        linked_entity_ids.extend(linked_ids_by_doc.get(doc.id or "", []))
+                    if matched_entity_id:
+                        linked_entity_ids.append(matched_entity_id)
+                    linked_entities = await _list_entities_by_ids(entity_repo, linked_entity_ids)
+                    entity_map = {
+                        entity.id: entity
+                        for entity in linked_entities
+                        if getattr(entity, "id", None)
+                    }
                 except Exception:
                     entity_map = None
             effective_doc_include_set = include_set
@@ -797,6 +1266,16 @@ async def search(
             documents = []
             for doc in doc_entities[offset:offset + limit]:
                 serialized = _serialize(doc)
+                serialized["sources"] = visible_sources_by_doc.get(doc.id or "", [])
+                delivery_state = delivery_states_by_doc.get(doc.id or "", {})
+                primary_snapshot_revision_id = getattr(doc, "primary_snapshot_revision_id", None)
+                delivery_status = getattr(doc, "delivery_status", None)
+                if primary_snapshot_revision_id is None and "primary_snapshot_revision_id" in delivery_state:
+                    primary_snapshot_revision_id = delivery_state.get("primary_snapshot_revision_id")
+                if delivery_status is None and "delivery_status" in delivery_state:
+                    delivery_status = delivery_state.get("delivery_status")
+                serialized["primary_snapshot_revision_id"] = primary_snapshot_revision_id
+                serialized["delivery_status"] = delivery_status
                 serialized.update(
                     _document_linkage_fields(
                         doc,
@@ -832,9 +1311,10 @@ async def search(
             # scope. Now: keep blindspot if any related_entity is in the
             # subtree. Strict mode (all related in subtree) may be added later.
             if product_id is not None:
-                all_e = await _mcp.ontology_service._entities.list_all()
-                entity_map = {e.id: e for e in all_e if e.id}
-                subtree_ids = _collect_subtree_ids(product_id, entity_map)
+                subtree_ids = await _collect_subtree_ids_via_parent(
+                    _mcp.ontology_service._entities,
+                    product_id,
+                )
                 blindspots = [
                     b for b in blindspots
                     if any(eid in subtree_ids for eid in (b.related_entity_ids or []))
@@ -974,7 +1454,7 @@ async def search(
     # Collection listing is exhaustive within the declared applied_filters
     # (pagination via limit/offset is ok; the filter scope is fully materialized).
     return _unified_response(
-        data=_inject_workspace_context(results),
+        data=results,
         warnings=warnings,
         applied_filters=applied_filters,
         completeness="exhaustive",

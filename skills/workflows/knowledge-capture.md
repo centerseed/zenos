@@ -31,10 +31,23 @@ version: 2.3.1
 
 以下情境**不要走 /zenos-capture 主流程**：
 - 用戶要「直接改文件內容」「直接把 md 寫到 document」「不經 git 發布內容」。
+- 用戶要「查某個 L2 底下文件有沒有都進 ZenOS」「做文件覆蓋率 / 存在性清查」。
 
 改走：
 - Document Delivery 內容寫入流程（`POST /api/docs/{doc_id}/content`）發布 snapshot。
 - capture 只負責知識抽取（entity / entries / relationships / document metadata），不是文件內容編輯器。
+- 覆蓋率清查先走 graph-first retrieval：`get(L2)` → `search(collection="documents", entity_name="<L2 name>", include=["summary"])` → 本地差集比對。
+
+### 覆蓋率清查紅線
+
+- **不要**用 `search(query="關鍵字", collection="documents")` 判斷「大多數文件是否已存在」；那是 discovery，不是完整枚舉。
+- **不要**把大量本地 MD 全文讀進 context 只為了確認 ZenOS 裡有沒有；原文上傳請走 `upload_document_file(path="...")` 或 `write(initial_content="...")`。
+- 若目標是找某個 L2 的 L3 文件覆蓋率，標準路徑是：
+
+```python
+mcp__zenos__get(collection="entities", name="<L2 name>", include=["summary", "relationships", "entries"])
+mcp__zenos__search(collection="documents", entity_name="<L2 name>", include=["summary"], limit=100)
+```
 
 ---
 
@@ -446,6 +459,18 @@ write(collection="documents", data={
 - `headline` 要回答「這份文件最值得看的點」
 - `reason_to_read` 要回答「為什麼現在先讀它」
 - 不得只建立 document metadata 而不補 `bundle_highlights`
+- `summary` / `bundle_highlights` 必須包含使用者會查的詞，不得只寫文件名或內部代碼名。
+- 寫入後必須用使用者語言驗證 retrieval：
+  ```python
+  search(
+      collection="entities",
+      query="<使用者語言查詢>",
+      entity_level="L2",
+      include=["summary", "documents"],
+  )
+  ```
+  結果必須包含目標 L2，且該 L2 的 `documents` 至少列出 1 個可用 L3 index。
+- 若驗證查不到，這次 capture 視為未完成治理；先修 `summary` / `bundle_highlights` / source metadata。例：「新手 5K/10K 課表」必須能命中訓練計畫 L2 並帶出相關 L3。
 
 Helper / connector 來源（Notion、GDrive、local、upload、wiki、url）必須盡量帶 `snapshot_summary`：
 - `snapshot_summary` 是 10KB 內的語意摘要，不是全文 mirror。

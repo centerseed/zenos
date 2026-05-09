@@ -383,11 +383,14 @@ L3 document entity 是正式文件的語意索引入口。
 
 ## L3 index summary = 文件群 retrieval map
 - `doc_role=index` 的 `summary` 是文件群語意地圖，不是單一檔案摘要
-- Agent 預設順序：先找 L2 → `search(collection="documents", entity_name="<L2 name>")` → 讀 index 的 `summary` / `change_summary` / `bundle_highlights` → 再選讀 source
+- Agent 預設順序：先用 `search(collection="entities", query="<使用者語言查詢>", entity_level="L2", include=["summary", "documents"])` 找 L2 與其 top L3 documents；需要列出完整文件時才退到 `search(collection="documents", entity_name="<L2 name>")`
 - summary 必須說清楚 bundle 可回答哪些問題、primary/SSOT 是哪個 source、各 source 分別處理 spec/design/test/reference/delivery/sync 的哪一塊
+- summary 必須包含使用者可能查詢的自然語言與實作術語，例如功能名稱、常見別名、endpoint、methodology id、target type
 - summary 應優先使用 source metadata 與 `snapshot_summary` 做 source-aware routing；沒有 snapshot 時至少列出 label/uri/doc_type/doc_status/is_primary
 - 治理掃描預設用 scoped `analyze(check_type="invalid_documents", entity_id="<L2 id>")`；全域 analyze 只用於盤點 backlog
 - `change_summary` 描述文件群近期變化；`bundle_highlights` 是 source routing table
+- `headline` / `reason_to_read` 不得只寫「這是目前最直接入口」這類模板句；必須說清楚 source 何時該先讀
+- capture / sync 完成前，必須用使用者語言驗證 retrieval；例如「新手 5K/10K 課表」必須能命中訓練計畫 L2 並帶出含 beginner / 5K / 10K / complete_5k / complete_10k / target_type 的 L3 index
 
 ## Delivery-first 硬規則
 - current 正式入口文件不得只剩外部 source 而沒有 ZenOS 可讀 delivery
@@ -540,7 +543,7 @@ supersedes: null
 - index：按 `doc_type` 分組顯示 sources，並優先展示 `bundle_highlights`
 
 ### L3 index summary = 文件群 retrieval map
-- Agent 預設順序：先找 L2 → `search(collection="documents", entity_name="<L2 name>")` → 讀 index 的 `summary` / `change_summary` / `bundle_highlights` → 再選讀 source
+- Agent 預設順序：先用 `search(collection="entities", query="<使用者語言查詢>", entity_level="L2", include=["summary", "documents"])` 找 L2 與其 top L3 documents；需要列出完整文件時才退到 `search(collection="documents", entity_name="<L2 name>")`
 
 ### Index summary 最低要求
 - `summary` 必須描述整個文件群可以回答哪些問題，不可只描述第一個 source
@@ -548,8 +551,11 @@ supersedes: null
 - 必須說明各 source 的用途，例如 spec、design、test、reference、delivery、sync
 - 必須區分 current / draft / stale source 的閱讀邊界
 - 必須能搭配 `linked_entity_ids`，讓 agent 從 L2 找到 L3 index 後知道下一步該讀哪份 source
+- summary 必須包含使用者可能查詢的自然語言與實作術語，例如功能名稱、常見別名、endpoint、methodology id、target type
 - summary 應優先使用 source metadata 與 `snapshot_summary` 做 source-aware routing；沒有 snapshot 時至少列出 label / uri / doc_type / doc_status / is_primary
 - 治理掃描預設用 scoped `analyze(check_type="invalid_documents", entity_id="<L2 id>")`；全域 analyze 只用於盤點 backlog
+- `headline` / `reason_to_read` 不得只寫「這是目前最直接入口」這類模板句；必須說清楚 source 何時該先讀
+- capture / sync 完成前，必須用使用者語言跑 retrieval 驗證；例如「新手 5K/10K 課表」必須能命中訓練計畫 L2，且 `documents` 必須帶出含 beginner / 5K / 10K / complete_5k / complete_10k / target_type 的 L3 index
 
 ## 生命週期
 draft → under_review → approved（正式文件）
@@ -1289,8 +1295,9 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 
 ## index summary 最低要求
 - `summary` 是文件群 retrieval map，不是單一 source 摘要
-- Agent 應先用 `search(collection="documents", entity_name="<L2 name>")` 找 index，再讀 `summary` / `change_summary` / `bundle_highlights`
+- Agent 應先用 `search(collection="entities", query="<使用者語言查詢>", entity_level="L2", include=["summary", "documents"])` 找 L2 與其 top L3 documents；需要列出完整文件時才退到 `search(collection="documents", entity_name="<L2 name>")`
 - summary 必須說明 bundle 可回答哪些問題、primary/SSOT source、各 source 的用途與 current/draft/stale 閱讀邊界
+- summary 必須包含使用者可能查詢的自然語言與實作術語，例如功能名稱、常見別名、endpoint、methodology id、target type；不得只用內部文件標題描述
 - summary 應優先使用 source metadata 與 `snapshot_summary` 做 source-aware routing；沒有 snapshot 時至少列出 label / uri / doc_type / doc_status / is_primary
 - 文件治理預設用 scoped `analyze(check_type="invalid_documents", entity_id="<L2 id>")`；全域 analyze 只用於盤點 backlog
 - `change_summary` 描述文件群近期變化，不是單一檔案 diff
@@ -1299,7 +1306,15 @@ plan_order 5: 更新 auth 架構文件（linked: 用戶認證架構）
 - index 必須帶 `bundle_highlights`
 - 至少 1 筆 `priority=primary`
 - highlight 只能引用該 bundle 內的 `source_id`
+- `headline` 必須說明該 source 回答的具體問題，不得使用「這是目前最直接入口」這類模板句作為唯一內容
+- `reason_to_read` 必須說明何時先讀此 source，例如 API contract、AC 定義、SSOT、測試覆蓋或歷史決策
 - 缺少 highlights 時，不得視為治理完成
+
+## retrieval 驗證（治理完成必做）
+- capture / sync 完成前，必須用使用者語言跑 `search(collection="entities", query="<使用者語言查詢>", entity_level="L2", include=["summary", "documents"])`
+- 結果必須包含目標 L2，且該 L2 的 `documents` 至少列出 1 個可用 L3 index
+- 高頻問題不得只用文件名驗證；例如「新手 5K/10K 課表」必須能命中訓練計畫 L2 並帶出含 beginner / 5K / 10K / complete_5k / complete_10k / target_type 的 L3 index
+- retrieval 驗證失敗時，先修 summary / bundle_highlights / source metadata，不得用新增 L2 或新增分類繞過
 
 ## capture / sync 路由
 - 已有同主題 index entity → `add_source`

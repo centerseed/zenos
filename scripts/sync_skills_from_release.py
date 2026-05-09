@@ -20,6 +20,7 @@ SKILLS = (
     "workflows/debug",
     "workflows/triage",
     "workflows/brainstorm",
+    "workflows/dogfood",
     "workflows/marketing-intel",
     "workflows/marketing-plan",
     "workflows/marketing-generate",
@@ -49,6 +50,7 @@ WORKFLOW_ALIASES = {
     "workflows/debug": "debug",
     "workflows/triage": "triage",
     "workflows/brainstorm": "brainstorm",
+    "workflows/dogfood": "dogfood",
 }
 
 HOST_VARIANT_FILES = {

@@ -72,6 +72,49 @@ mcp__zenos__search(
 
 有重複的票就 update，不要開新票。
 
+## 建票 context 載入（graph-first，禁止 full scan）
+
+開票不是先搜所有文件，而是先走知識圖譜：
+
+1. 先找最相關的 L2 / L3 entity
+2. 讀主要 L2 的 `summary + relationships + entries`
+3. 再從該 L2 找 L3 documents / protocol
+4. 最後才寫 task title / description / acceptance criteria / linked_entities
+
+```python
+mcp__zenos__search(
+    collection="entities",
+    query="{任務主題}",
+    entity_level="all",
+    include=["summary"]
+)
+
+mcp__zenos__get(
+    collection="entities",
+    name="{最相關 L2}",
+    include=["summary", "relationships", "entries"]
+)
+
+mcp__zenos__search(
+    collection="documents",
+    entity_name="{最相關 L2}",
+    include=["summary"],
+    limit=10
+)
+```
+
+**目標**：讓 ticket 品質因圖譜而變好，而不是只把當前局部問題記下來。
+
+建票時至少要回答：
+- 這張票直接作用在哪個模組？
+- impacts chain 指向哪些下游模組 / 文件 / protocol 要跟著看？
+- 哪些 L2 / L3 應該放進 `linked_entities`，而且 description / AC 裡真的有提到？
+
+**禁止模式**：
+- 不要用 `search(collection="documents", query="關鍵字")` 做全域文件亂搜來補 ticket context
+- 不要只因為關鍵字有撞到就把 entity 掛進 `linked_entities`
+- 不要開一張票完全不提受影響模組，卻宣稱它已經反映 impacts
+
 > canonical task status 只有：`todo` / `in_progress` / `review` / `done` / `cancelled`。
 > `backlog`、`blocked`、`archived` 是 legacy alias；server 目前會自動正規化，但 skill 不應再主動使用。
 

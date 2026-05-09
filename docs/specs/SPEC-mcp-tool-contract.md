@@ -291,10 +291,17 @@ agent 要依賴的是 machine-readable 欄位，不是長篇 prose。
     "doc_id": "...",
     "source_id": "...",
     "content": "...",
-    "content_type": "snapshot_summary | ..."
+    "content_type": "snapshot_summary | ...",
+    "preview_chars": 1200,
+    "content_truncated": true
   }
 }
 ```
+
+`preview_chars` 為 optional request parameter：
+- 未帶 → canonical 行為，回完整內容
+- 帶正整數 N → `data.content` 最多回 N 字元，並附 `data.preview_chars` / `data.content_truncated`
+- 此模式用於 low-cost preview read；若 preview 不足，再由 caller 明確重讀完整內容
 
 **不可讀時的 error_code 矩陣**（canonical: `mcp/source.py`）：
 

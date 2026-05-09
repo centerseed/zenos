@@ -13,6 +13,7 @@ Contains:
 
 from __future__ import annotations
 
+import inspect
 import logging
 
 from zenos.infrastructure.context import current_partner_department
@@ -21,6 +22,32 @@ from zenos.application.knowledge.ontology_service import _collect_subtree_ids
 from zenos.application.identity.source_access_policy import entity_has_visible_source
 
 logger = logging.getLogger(__name__)
+
+
+async def _collect_subtree_ids_via_parent(entity_repo: object, root_id: str) -> set[str]:
+    """Collect a subtree via list_by_parent to avoid list-all scans."""
+    if not root_id:
+        return set()
+
+    list_by_parent = getattr(entity_repo, "list_by_parent", None)
+    if list_by_parent is None:
+        return {root_id}
+
+    subtree_ids: set[str] = set()
+    pending: list[str] = [root_id]
+    while pending:
+        current_id = pending.pop()
+        if current_id in subtree_ids:
+            continue
+        subtree_ids.add(current_id)
+        children = list_by_parent(current_id)
+        if inspect.isawaitable(children):
+            children = await children
+        for child in children or []:
+            child_id = getattr(child, "id", None)
+            if child_id and child_id not in subtree_ids:
+                pending.append(child_id)
+    return subtree_ids
 
 
 def _is_entity_visible(entity: object) -> bool:
@@ -91,11 +118,9 @@ async def _guest_allowed_entity_ids() -> set[str]:
         if not authorized_ids:
             return set()
 
-        all_entities_list = await _mcp.entity_repo.list_all()
-        entity_map = {e.id: e for e in (all_entities_list or []) if e.id}
         allowed: set[str] = set()
         for l1_id in authorized_ids:
-            allowed |= _collect_subtree_ids(l1_id, entity_map)
+            allowed |= await _collect_subtree_ids_via_parent(_mcp.entity_repo, l1_id)
         return allowed
     except Exception:
         logger.warning("_guest_allowed_entity_ids failed, denying guest access", exc_info=True)
@@ -154,16 +179,11 @@ async def _is_task_visible(task: object) -> bool:
             # itself visible to the guest.
             if not linked:
                 return False
-            authorized_ids = describe_partner_access(partner)["authorized_l1_ids"]
-            all_entities_list = await _mcp.entity_repo.list_all()
-            entity_map = {e.id: e for e in (all_entities_list or []) if e.id}
-            allowed: set[str] = set()
-            for l1_id in authorized_ids:
-                allowed |= _collect_subtree_ids(l1_id, entity_map)
+            allowed = await _guest_allowed_entity_ids()
             for eid in linked:
                 if isinstance(eid, dict):
                     eid = eid.get("id", "")
-                entity = entity_map.get(eid) if eid else None
+                entity = await _mcp.entity_repo.get_by_id(eid) if eid else None
                 if eid and eid in allowed and entity and _is_entity_visible(entity):
                     return True
             return False

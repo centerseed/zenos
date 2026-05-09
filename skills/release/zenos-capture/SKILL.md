@@ -108,3 +108,27 @@ version: 3.0.1
 - 回報這次新增 / 更新了哪些 entity、document、entry。
 - 若發現規則缺口、資料不完整、或需要後續修復，建 blindspot 或 task。
 - 只有實際新增/更新知識，或留下 TBD / blindspot 需要下輪接續時才寫 journal；純掃描無變更不要寫。
+
+### Capture journal（baseline 依賴）
+
+若這次有實際知識變更，完成前補一筆 capture journal；否則 `/dogfood` 的 baseline library 不會有真實場景可重放。
+
+先查最近 capture：
+
+```python
+mcp__zenos__journal_read(limit=5, project="{PROJECT_NAME}", flow_type="capture")
+```
+
+再寫入：
+
+```python
+mcp__zenos__journal_write(
+    summary="capture {來源描述}：{這次新增/更新了哪些知識}；{仍待補的 TBD 或 blindspot}",
+    project="{PROJECT_NAME}",
+    flow_type="capture",
+    tags=["{PRODUCT_NAME}"],
+)
+```
+
+- 不要只寫「新增 N 筆」；要寫這次捕獲了什麼、還缺什麼。
+- 若這輪只是掃描、沒有新增/更新任何知識，則**不要**寫 journal。

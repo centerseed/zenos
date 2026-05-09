@@ -1,4 +1,4 @@
-# L3 文件治理規則 v2.3（含完整範例）
+# L3 文件治理規則 v2.2（含完整範例）
 
 ## 文件的定位
 L3 document entity 是正式文件的語意索引入口。
@@ -261,6 +261,8 @@ Then: {預期結果}
 - 同一個 L2 主題的正式文件，預設應收斂到同一個 `index`
 - `index` 建立後，必須補 `bundle_highlights`
 - `bundle_highlights` 至少要指出 1 份 `primary` source 與「為什麼先讀它」
+- `summary` 必須寫成 retrieval map：說明這個 bundle 能回答哪些使用者問題，並包含常見別名、endpoint、methodology id、target type 等可查詞。
+- `headline` / `reason_to_read` 不得只寫「這是目前最直接入口」這類模板句；必須說清楚 source 何時該先讀。
 
 ### 建立 index 文件範例
 ```
@@ -342,9 +344,7 @@ write(collection="documents", data={
     → 同時判斷 `git only / git + gcs / gcs only`
     ↓
 2d. 使用者明確要求「直接把 markdown 寫進 ZenOS 文件（不經 Git）」
-    → 新建文件：write(collection="documents", data={..., "initial_content": "..."})
-        一次呼叫完成：建 entity + 寫 GCS revision（MCP-native，1MB 上限）
-    → 既有文件更新：POST /api/docs/{doc_id}/content
+    → 走 Document Delivery 內容寫入流程（POST /api/docs/{doc_id}/content）
     → 產生/更新 snapshot revision（GCS private）
     → Reader 走 /docs permalink，不依賴外部 source 可用性
 2e. 文件已是 current / 正式入口，但還沒有 snapshot
@@ -366,7 +366,7 @@ write(collection="documents", data={
 
 ## Done Criteria（文件治理完成的最低標準）
 
-以下 5 項都滿足，才算 document governance 完成：
+以下項目都滿足，才算 document governance 完成：
 
 1. 文件已正確分類、frontmatter 合法
 2. 已正確掛到對應 L2
@@ -375,6 +375,18 @@ write(collection="documents", data={
 5. 從 L2 detail 可以直接知道先讀哪份文件，而不是只看到 source list
 6. 若文件 status=`current` 且作為正式入口，ZenOS Reader / snapshot 已可用；否則視為 delivery 治理缺口
 7. 若正式入口仍依賴 GitHub source，agent 已確認對應檔案/commit 在 remote 可見；未 push 的本地檔案不算完成治理
+8. Retrieval 驗證通過：
+   ```python
+   search(
+       collection="entities",
+       query="<使用者語言查詢>",
+       entity_level="L2",
+       include=["summary", "documents"],
+   )
+   ```
+   結果必須包含目標 L2，且該 L2 的 `documents` 至少列出 1 個可用 L3 index。
+9. 高頻問題必須用使用者語言驗證，不得只用文件名或內部代碼名。例：「新手 5K/10K 課表」能命中訓練計畫 L2 並帶出 L3 文件，才算相關治理完成。
+10. 若 retrieval 驗證失敗，先修 `summary` / `bundle_highlights` / source metadata，不得用新增 L2 或新增分類繞過。
 
 ## Supersede 操作步驟（完整流程）
 
@@ -444,36 +456,9 @@ write(
 - 用戶明確要求「不要經 git，直接更新文件內容」
 - 目標是快速發布可讀版本，而非多人重度協作編輯
 
-### 路徑 A：MCP-native（新建文件 + 一次寫入）
-
-適用場景：新建 document entity，同時把 markdown 寫入 GCS revision，讓 Dashboard 可立即顯示完整內容。
-
-```python
-write(
-  collection="documents",
-  data={
-    "title": "文件標題",
-    "type": "SPEC",
-    "doc_role": "index",
-    "ontology_entity": "對應 L2 名稱",
-    "initial_content": "# 文件標題\n\n完整 markdown 內容..."   # 最多 1MB
-  }
-)
-# server 自動：建 doc entity → 加 zenos_native source（is_primary=true）→ 寫 GCS revision
-# response 含 doc_id、revision_id、source_id
-```
-
-限制：
-- `initial_content` 只能在 **create** 時使用；update 既有文件走路徑 B
-- `initial_content` 與 `sources` **互斥**；要混合外部 source 請先 create，再用 `add_source` 追加
-- 超過 1MB → 413 `INITIAL_CONTENT_TOO_LARGE`
-
-### 路徑 B：既有文件更新（追加 revision）
-
-適用場景：document entity 已存在，需更新內容。
-
-1. 先確認 document entity 存在（search → 取得 doc_id）。
-2. 呼叫 Dashboard API `POST /api/docs/{doc_id}/content` 提交 markdown。
+流程：
+1. 先確認 document entity 存在（沒有就先 `write(collection="documents")` 建 metadata）。
+2. 呼叫 Delivery 內容寫入 API（`POST /api/docs/{doc_id}/content`）提交 markdown。
 3. 系統建立新 revision 並更新 `primary_snapshot_revision_id`。
 4. 分享與閱讀使用 `/docs` 與 share-link，不直接暴露 GCS object URL。
 

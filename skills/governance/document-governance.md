@@ -261,6 +261,8 @@ Then: {預期結果}
 - 同一個 L2 主題的正式文件，預設應收斂到同一個 `index`
 - `index` 建立後，必須補 `bundle_highlights`
 - `bundle_highlights` 至少要指出 1 份 `primary` source 與「為什麼先讀它」
+- `summary` 必須寫成 retrieval map：說明這個 bundle 能回答哪些使用者問題，並包含常見別名、endpoint、methodology id、target type 等可查詞。
+- `headline` / `reason_to_read` 不得只寫「這是目前最直接入口」這類模板句；必須說清楚 source 何時該先讀。
 
 ### 建立 index 文件範例
 ```
@@ -364,7 +366,7 @@ write(collection="documents", data={
 
 ## Done Criteria（文件治理完成的最低標準）
 
-以下 5 項都滿足，才算 document governance 完成：
+以下項目都滿足，才算 document governance 完成：
 
 1. 文件已正確分類、frontmatter 合法
 2. 已正確掛到對應 L2
@@ -373,6 +375,18 @@ write(collection="documents", data={
 5. 從 L2 detail 可以直接知道先讀哪份文件，而不是只看到 source list
 6. 若文件 status=`current` 且作為正式入口，ZenOS Reader / snapshot 已可用；否則視為 delivery 治理缺口
 7. 若正式入口仍依賴 GitHub source，agent 已確認對應檔案/commit 在 remote 可見；未 push 的本地檔案不算完成治理
+8. Retrieval 驗證通過：
+   ```python
+   search(
+       collection="entities",
+       query="<使用者語言查詢>",
+       entity_level="L2",
+       include=["summary", "documents"],
+   )
+   ```
+   結果必須包含目標 L2，且該 L2 的 `documents` 至少列出 1 個可用 L3 index。
+9. 高頻問題必須用使用者語言驗證，不得只用文件名或內部代碼名。例：「新手 5K/10K 課表」能命中訓練計畫 L2 並帶出 L3 文件，才算相關治理完成。
+10. 若 retrieval 驗證失敗，先修 `summary` / `bundle_highlights` / source metadata，不得用新增 L2 或新增分類繞過。
 
 ## Supersede 操作步驟（完整流程）
 

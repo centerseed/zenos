@@ -30,6 +30,7 @@ VALID_SEARCH_INCLUDES: set[str] = {
     "summary",
     "summary_compact",
     "tags",
+    "documents",
     "full",
 }
 

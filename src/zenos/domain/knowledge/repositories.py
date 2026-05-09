@@ -44,6 +44,14 @@ class RelationshipRepository(TypingProtocol):
 
     async def list_by_entity(self, entity_id: str) -> list[Relationship]: ...
 
+    async def list_by_target(
+        self,
+        target_id: str,
+        rel_types: tuple[str, ...] | None = None,
+    ) -> list[Relationship]:
+        """List incoming relationships for a target entity, optionally filtered by type."""
+        ...
+
     async def list_all(self) -> list[Relationship]: ...
 
     async def find_duplicate(

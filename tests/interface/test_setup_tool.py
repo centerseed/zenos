@@ -52,7 +52,7 @@ def skills_root(tmp_path: Path) -> Path:
     # workflow skills
     for name in [
         "knowledge-capture.md", "knowledge-sync.md", "setup.md", "governance-loop.md",
-        "feature.md", "debug.md", "triage.md", "brainstorm.md",
+        "feature.md", "debug.md", "triage.md", "brainstorm.md", "dogfood.md",
         "marketing-intel.md", "marketing-plan.md", "marketing-generate.md",
         "marketing-adapt.md", "marketing-publish.md",
     ]:
@@ -81,6 +81,7 @@ def skills_root(tmp_path: Path) -> Path:
                 "skills/workflows/debug.md",
                 "skills/workflows/triage.md",
                 "skills/workflows/brainstorm.md",
+                "skills/workflows/dogfood.md",
             ],
             "context_happy_path": "Context Happy Path: recent_updates → tasks → L2 entity → L3 documents → read_source → journal fallback",
             "stale_instruction_gate": ["journal_read(limit=20"],
@@ -189,11 +190,12 @@ class TestGetSkillFiles:
         assert "skills/workflows/setup.md" in files
         assert "skills/workflows/governance-loop.md" in files
         assert "skills/workflows/brainstorm.md" in files
+        assert "skills/workflows/dogfood.md" in files
 
     def test_full_selection_returns_expected_file_count(self):
         from zenos.interface.setup_content import get_skill_files
         files = get_skill_files("full")
-        assert len(files) == 19  # 6 governance + 13 workflow (fixture has no role skill dirs)
+        assert len(files) == 20  # 6 governance + 14 workflow (fixture has no role skill dirs)
 
     def test_task_only_excludes_document_governance(self):
         from zenos.interface.setup_content import get_skill_files
@@ -237,7 +239,7 @@ class TestGetSlashCommands:
     def test_returns_all_registered_commands(self):
         from zenos.interface.setup_content import get_slash_commands
         cmds = get_slash_commands()
-        assert len(cmds) == 12  # 4 zenos-* + 3 workflows + 5 marketing workflows
+        assert len(cmds) == 13  # 4 zenos-* + 4 workflows + 5 marketing workflows
 
     def test_all_paths_under_claude_commands(self):
         from zenos.interface.setup_content import get_slash_commands
@@ -340,7 +342,7 @@ class TestSetupToolClaudeCode:
         result = await setup(platform="claude_code")
         data = _ok_data(result)
         assert "slash_commands" in data["payload"]
-        assert len(data["payload"]["slash_commands"]) == 12
+        assert len(data["payload"]["slash_commands"]) == 13
 
     async def test_payload_has_claude_md_addition(self):
         from zenos.interface.mcp import setup
@@ -365,6 +367,7 @@ class TestSetupToolClaudeCode:
         skills = [item["skill"] for item in data["usage_summary"]]
         assert "/zenos-setup" in skills
         assert "/zenos-sync" in skills
+        assert "/dogfood" in skills
 
     async def test_instructions_contain_github_fetch(self):
         """Instructions must tell agent to fetch from GitHub."""
@@ -477,6 +480,7 @@ class TestSetupToolCodex:
         skills = [item["skill"] for item in data["usage_summary"]]
         assert "/zenos-capture" in skills
         assert "/zenos-governance" in skills
+        assert "/dogfood" in skills
 
     async def test_instructions_contain_github_fetch(self):
         from zenos.interface.mcp import setup
@@ -651,6 +655,7 @@ class TestSetupManifestOnly:
         assert "skills/governance/bootstrap-protocol.md" in ssot["governance_files"]
         assert "skills/governance/capture-governance.md" in ssot["governance_files"]
         assert "skills/workflows/brainstorm.md" in ssot["workflow_files"]
+        assert "skills/workflows/dogfood.md" in ssot["workflow_files"]
         assert "workflow_version" in ssot
         assert "Context Happy Path" in ssot["context_happy_path"]
         assert "journal_read(limit=20" in ssot["stale_instruction_gate"]

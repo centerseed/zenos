@@ -43,6 +43,7 @@ L3-Document 是**文件的語意代理**（不是檔案本體），一張 `entit
 6. 專案特例必須明文記錄為 local convention，不靠口頭共識。
 7. 任何影響分類 / 狀態 / 命名 / supersede / ontology 對應的修改，必須同步更新 ontology，否則視為未完成。
 8. 文件治理的完成定義包含「**可被找到**」：使用者與 agent 能從對應 L2 快速找到文件入口，不是只把 metadata 寫進 ontology。
+9. L3 index 必須能作為 retrieval routing，而不是文件清單。Agent 對 L2 搜尋時，必須能用 `search(collection="entities", include=["summary", "documents"])` 一次看到該 L2 的主要 L3 文件入口。
 
 ## 3. Bundle-first Document Entity
 
@@ -100,6 +101,9 @@ CHECK (doc_role = 'single' OR bundle_highlights_json != '[]')
 ```
 - 必須至少一筆 `priority=primary`
 - 必須引用屬於該 bundle 的 `source_id`（不得游離）
+- `headline` 必須說明該 source 回答的具體問題，不得使用「這是目前最直接入口」這類模板句作為唯一內容。
+- `reason_to_read` 必須說明何時先讀此 source，例如 API contract、AC 定義、SSOT、測試覆蓋或歷史決策。
+- `summary` 必須包含使用者可能查詢的自然語言與實作術語，例如功能名稱、常見別名、endpoint、methodology id、target type；不得只用內部文件標題描述。
 
 **`change_summary`**（選填，string）：一段人話，描述最近重要變化。
 
@@ -153,11 +157,20 @@ CHECK (doc_role = 'single' OR bundle_highlights_json != '[]')
 ### 4.4 read_source 合約
 
 ```
-read_source(doc_id, source_id?) → {content, source_status, setup_hint?, alternative_sources?}
+read_source(doc_id, source_id?, preview_chars?) → {
+  content,
+  source_status,
+  setup_hint?,
+  alternative_sources?,
+  preview_chars?,
+  content_truncated?
+}
 ```
 
 - 帶 `source_id` → 讀指定 source
 - 不帶 → 讀 `is_primary=true`；無 primary → 讀第一個 `source_status=valid`
+- 帶 `preview_chars` → 只回前 N 字元，並附 `preview_chars` 與 `content_truncated`
+- `preview_chars` 是低成本初讀路徑；只有 preview 不足以判斷時，agent 才應再讀完整內容
 - 失敗時附 `setup_hint`（如 `"Google Drive MCP"`）+ `alternative_sources`（同 bundle 可用的其他 source）
 
 ## 5. 泛用文件類別系統（`doc_type`）
@@ -381,7 +394,12 @@ Per-source supersede 則透過 `update_source` 設定 `doc_status=superseded` + 
 3. **寫 frontmatter**：`type / id / status / ontology_entity / created / updated`
 4. **掛 ontology**：L2 or L3 `linked_entities`，不確定就標 `TBD` + 建 backlog task
 5. **寫 bundle_highlights**（若 doc_role=index）
-6. **sync journal**：`journal_write` 一行描述動作
+6. **Retrieval 驗證**：用使用者語言執行
+   ```
+   search(collection="entities", query=<使用者語言查詢>, entity_level="L2", include=["summary", "documents"])
+   ```
+   結果必須包含目標 L2，且該 L2 的 `documents` 至少列出 1 個可用 L3 index。
+7. **sync journal**：`journal_write` 一行描述動作與 retrieval 驗證結果
 
 ### 13.2 禁止
 
@@ -389,6 +407,8 @@ Per-source supersede 則透過 `update_source` 設定 `doc_status=superseded` + 
 - `doc_role=single` 未說明例外理由
 - `status=Approved` 但 `ontology_entity=TBD`
 - 寫 frontmatter 但檔名與 `id` 不一致
+- 只用文件名或內部代碼名驗證 retrieval。高頻問題必須用使用者語言驗證，例如「新手 5K/10K 課表」。
+- retrieval 驗證失敗時宣稱治理完成；此時必須先修 `summary` / `bundle_highlights` / source metadata。
 
 ## 14. 合規違規偵測
 
@@ -400,6 +420,8 @@ Per-source supersede 則透過 `update_source` 設定 `doc_status=superseded` + 
 | 孤立 doc entity（無 relationships / 無 parent 掛載）| `find_gaps(gap_type="orphan_entities")`（`governance.py:116`）|
 | doc entity 關聯薄弱（全是 `related_to`）| `find_gaps(gap_type="weak_semantics")`（`governance.py:118`）|
 | Frontmatter 欄位缺漏 / `status=Approved` + `ontology_entity=TBD` | write-time validator reject（`ONTOLOGY_ENTITY_REQUIRED_ON_APPROVED`）|
+| L2 搜尋結果沒有帶出 L3 routing docs | `search(collection="entities", include=["summary", "documents"])` retrieval 驗證 |
+| 使用者語言查不到文件入口 | capture/sync 的 retrieval 驗證查詢（例如「新手 5K/10K 課表」） |
 
 > 合法 `check_type`：`all / health / quality / staleness / blindspot / impacts / document_consistency / permission_risk / invalid_documents / orphaned_relationships / llm_health / consolidate`（`analyze.py:44-48`）。
 > 合法 `gap_type`：`all / orphan_entities / weak_semantics / underconnected`（`governance.py:129`）。
@@ -483,6 +505,8 @@ Agent 偵測到以下情境必須建立 governance task（不得靜默）：
 - `AC-DOC-22` Given L2 detail，When 顯示，Then 直接看到 bundle title + highlights + primary source
 - `AC-DOC-23` Given L2 掛 2 個 doc bundles，When detail 顯示，Then 分開呈現不合併
 - `AC-DOC-24` Given 知識地圖，When 顯示，Then L2 → doc bundle 有穩定 edge
+- `AC-DOC-24b` Given L2 已掛 current L3 index，When agent 執行 `search(collection="entities", query=<使用者語言查詢>, entity_level="L2", include=["summary", "documents"])`，Then 命中的 L2 result 必須帶出 top L3 documents metadata，不需額外 `search(collection="documents")`。
+- `AC-DOC-24c` Given 使用者查詢「新手 5K/10K 課表」且訓練計畫 L3 已治理，When 執行 retrieval 驗證，Then 結果必須命中訓練計畫 L2，且 `documents` 至少包含一個 summary/highlight 明示 beginner / 5K / 10K / complete_5k / complete_10k / target_type 的 L3 index。
 
 **Governance Guide**：
 - `AC-DOC-25` Given `governance_guide(topic="document", level=2)`，When 執行，Then 回傳包含 §3 bundle-first、§5 類別表、§10 路由決策樹
