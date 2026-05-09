@@ -46,9 +46,9 @@ def _make_doc_entity(**overrides) -> Entity:
         parent_id="ent-1",
         confirmed_by_user=True,
         created_at=datetime(2026, 4, 2, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 4, 18, tzinfo=timezone.utc),
+        updated_at=datetime(2026, 5, 8, tzinfo=timezone.utc),
         change_summary="Updated campaign scope for Q2",
-        summary_updated_at=datetime(2026, 4, 18, tzinfo=timezone.utc),
+        summary_updated_at=datetime(2026, 5, 8, tzinfo=timezone.utc),
     )
     defaults.update(overrides)
     return Entity(**defaults)
@@ -68,7 +68,7 @@ def _make_entry(**overrides) -> EntityEntry:
         source_task_id=None,
         superseded_by=None,
         archive_reason=None,
-        created_at=datetime(2026, 4, 19, tzinfo=timezone.utc),
+        created_at=datetime(2026, 5, 8, tzinfo=timezone.utc),
     )
     defaults.update(overrides)
     return EntityEntry(**defaults)

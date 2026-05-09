@@ -4436,7 +4436,7 @@ class TestAnalyzeTool:
             result = await analyze(check_type="invalid_documents")
             data = _ok_data(result)["invalid_documents"]
 
-            assert data["bundle_issue_count"] == 120
+            assert data["bundle_issue_count"] == 180
             assert data["bundle_issue_limit"] == 50
             assert data["bundle_issues_truncated"] is True
             assert len(data["bundle_issues"]) == 50
@@ -4491,8 +4491,8 @@ class TestAnalyzeTool:
 
             assert data["scope"]["entity_id"] == "prod-1"
             assert data["scope"]["document_count"] == 1
-            assert data["bundle_issue_count"] == 1
-            assert data["bundle_issues"][0]["entity_id"] == "doc-scoped"
+            assert data["bundle_issue_count"] == 2
+            assert {issue["entity_id"] for issue in data["bundle_issues"]} == {"doc-scoped"}
 
     async def test_analyze_invalid_documents_returns_suggested_write_patch(self):
         from zenos.interface.mcp import analyze

@@ -92,9 +92,23 @@ async def _collect_subtree_ids_via_parent(entity_repo: object, root_id: str) -> 
     if not root_id:
         return set()
 
+    async def _collect_from_list_all() -> set[str]:
+        list_all = getattr(entity_repo, "list_all", None)
+        if list_all is None:
+            return {root_id}
+        entities = list_all()
+        if inspect.isawaitable(entities):
+            entities = await entities
+        entity_map = {
+            getattr(entity, "id", None): entity
+            for entity in (entities or [])
+            if getattr(entity, "id", None)
+        }
+        return _collect_subtree_ids(root_id, entity_map) if entity_map else {root_id}
+
     list_by_parent = getattr(entity_repo, "list_by_parent", None)
     if list_by_parent is None:
-        return {root_id}
+        return await _collect_from_list_all()
 
     subtree_ids: set[str] = set()
     pending: list[str] = [root_id]
@@ -106,11 +120,13 @@ async def _collect_subtree_ids_via_parent(entity_repo: object, root_id: str) -> 
         children = list_by_parent(current_id)
         if inspect.isawaitable(children):
             children = await children
+        if not isinstance(children, (list, tuple, set)):
+            return await _collect_from_list_all()
         for child in children or []:
             child_id = getattr(child, "id", None)
             if child_id and child_id not in subtree_ids:
                 pending.append(child_id)
-    return subtree_ids
+    return subtree_ids if len(subtree_ids) > 1 else await _collect_from_list_all()
 
 
 async def _resolve_scoped_entity_by_name(
@@ -1231,7 +1247,7 @@ async def search(
                     ]
             if confirmed_only is not None:
                 doc_entities = [d for d in doc_entities if d.confirmed_by_user == confirmed_only]
-                doc_entities = sorted(
+            doc_entities = sorted(
                 doc_entities,
                 key=lambda d: _document_search_sort_key_for_entity(
                     d,

@@ -29,9 +29,23 @@ async def _collect_subtree_ids_via_parent(entity_repo: object, root_id: str) -> 
     if not root_id:
         return set()
 
+    async def _collect_from_list_all() -> set[str]:
+        list_all = getattr(entity_repo, "list_all", None)
+        if list_all is None:
+            return {root_id}
+        entities = list_all()
+        if inspect.isawaitable(entities):
+            entities = await entities
+        entity_map = {
+            getattr(entity, "id", None): entity
+            for entity in (entities or [])
+            if getattr(entity, "id", None)
+        }
+        return _collect_subtree_ids(root_id, entity_map) if entity_map else {root_id}
+
     list_by_parent = getattr(entity_repo, "list_by_parent", None)
     if list_by_parent is None:
-        return {root_id}
+        return await _collect_from_list_all()
 
     subtree_ids: set[str] = set()
     pending: list[str] = [root_id]
@@ -43,11 +57,13 @@ async def _collect_subtree_ids_via_parent(entity_repo: object, root_id: str) -> 
         children = list_by_parent(current_id)
         if inspect.isawaitable(children):
             children = await children
+        if not isinstance(children, (list, tuple, set)):
+            return await _collect_from_list_all()
         for child in children or []:
             child_id = getattr(child, "id", None)
             if child_id and child_id not in subtree_ids:
                 pending.append(child_id)
-    return subtree_ids
+    return subtree_ids if len(subtree_ids) > 1 else await _collect_from_list_all()
 
 
 def _is_entity_visible(entity: object) -> bool:
@@ -120,7 +136,12 @@ async def _guest_allowed_entity_ids() -> set[str]:
 
         allowed: set[str] = set()
         for l1_id in authorized_ids:
-            allowed |= await _collect_subtree_ids_via_parent(_mcp.entity_repo, l1_id)
+            scoped_ids = await _collect_subtree_ids_via_parent(_mcp.entity_repo, l1_id)
+            if len(scoped_ids) <= 1:
+                ontology_entities = getattr(getattr(_mcp, "ontology_service", None), "_entities", None)
+                if ontology_entities is not None:
+                    scoped_ids = await _collect_subtree_ids_via_parent(ontology_entities, l1_id)
+            allowed |= scoped_ids
         return allowed
     except Exception:
         logger.warning("_guest_allowed_entity_ids failed, denying guest access", exc_info=True)
