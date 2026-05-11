@@ -381,6 +381,17 @@ L3 document entity 是正式文件的語意索引入口。
 - `index` 即使目前只有 1 個 source 也合法
 - `single` 只保留給獨立治理、獨立分享、獨立 supersede 的例外情境
 
+## Artifact routing：先判斷治理角色，不先判斷副檔名
+- Knowledge document：價值在可被閱讀、摘要、引用、read_source 取回文字內容 → L3 document / document bundle
+- Controlled asset：價值在受控取用、版本、用途、owner、授權或審核，不靠全文閱讀理解 → asset metadata + private/controlled storage URI
+- Operational record：價值在交易、帳務、憑證、紀錄、合規留存 → restricted record metadata + private/controlled storage URI
+- 不得因為 artifact 是 binary、image、PDF、attachment 就判定 ZenOS 無法治理
+- 若 artifact 的價值在可被讀懂的內容，走 L3 document；若價值在受控取用與證明其存在，走 controlled asset / operational record
+- ZenOS 至少保存 metadata：名稱、用途、owner、可讀角色、存取範圍、URI、審核/有效狀態、關聯 L2
+- 敏感 artifact 預設 restricted，不得建議公開圖床
+- 只有 ZenOS 目前沒有 storage、URI、ACL、metadata 路徑時，才是治理缺口，可建立治理 task 或 blindspot
+- 例子：公司印章 PNG、Logo 是 controlled asset；發票、付款憑證是 operational record；可讀規格書、合約文字、SOP 是 knowledge document
+
 ## L3 index summary = 文件群 retrieval map
 - `doc_role=index` 的 `summary` 是文件群語意地圖，不是單一檔案摘要
 - Agent 預設順序：先用 `search(collection="entities", query="<使用者語言查詢>", entity_level="L2", include=["summary", "documents"])` 找 L2 與其 top L3 documents；需要列出完整文件時才退到 `search(collection="documents", entity_name="<L2 name>")`
@@ -541,6 +552,17 @@ supersedes: null
 ### Dashboard 顯示差異
 - single：平面 source 列表
 - index：按 `doc_type` 分組顯示 sources，並優先展示 `bundle_highlights`
+
+### Artifact routing：先判斷治理角色，不先判斷副檔名
+- Knowledge document：價值在可被閱讀、摘要、引用、read_source 取回文字內容 → L3 document / document bundle
+- Controlled asset：價值在受控取用、版本、用途、owner、授權或審核，不靠全文閱讀理解 → asset metadata + private/controlled storage URI
+- Operational record：價值在交易、帳務、憑證、紀錄、合規留存 → restricted record metadata + private/controlled storage URI
+- 不得因為 artifact 是 binary、image、PDF、attachment 就判定 ZenOS 無法治理
+- 若 artifact 的價值在可被讀懂的內容，走 L3 document；若價值在受控取用與證明其存在，走 controlled asset / operational record
+- ZenOS 至少保存 metadata：名稱、用途、owner、可讀角色、存取範圍、URI、審核/有效狀態、關聯 L2
+- 敏感 artifact 預設 restricted，不得建議公開圖床
+- 只有 ZenOS 目前沒有 storage、URI、ACL、metadata 路徑時，才是治理缺口，可建立治理 task 或 blindspot
+- 例子：公司印章 PNG、Logo 是 controlled asset；發票、付款憑證是 operational record；可讀規格書、合約文字、SOP 是 knowledge document
 
 ### L3 index summary = 文件群 retrieval map
 - Agent 預設順序：先用 `search(collection="entities", query="<使用者語言查詢>", entity_level="L2", include=["summary", "documents"])` 找 L2 與其 top L3 documents；需要列出完整文件時才退到 `search(collection="documents", entity_name="<L2 name>")`

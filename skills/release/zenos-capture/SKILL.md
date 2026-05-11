@@ -98,6 +98,7 @@ version: 3.0.1
 - 所有 `search` / `write` 都帶 product scope。
 - document 一律帶 `linked_entity_ids`。
 - `doc_role=index` 預設成立；同主題第二份文件不要再建平行 single。
+- 任何 artifact 先判斷治理角色，不先看副檔名：可讀內容 → L3 document；受控取用/授權/審核 → controlled asset metadata + private/controlled storage URI；交易/帳務/憑證/合規留存 → operational record metadata + private/controlled storage URI。不要因為 artifact 是 binary、image、PDF、attachment 就說「無法入 ZenOS」、不要建議公開圖床、不要因為副檔名建 blindspot。只有缺少 storage / URI / ACL / metadata 路徑時才建治理 task 或 blindspot。
 - Helper / connector 來源（Notion、GDrive、local、upload、wiki、url）要盡量帶 `snapshot_summary`；它是 10KB 內語意摘要，不是全文 mirror。
 - **本地 md 檔要讓 web 顯示完整內容**：用 `initial_content` 參數（最多 1MB）在建 entity 時直接寫入 GCS revision，不必走 snapshot_summary 截斷。`initial_content` 僅限 create；update 請走 `POST /api/docs/{doc_id}/content`。
 - 新建 bundle 使用 `sources: [...]` 時，要保留 `snapshot_summary`、`external_id`、`external_updated_at`、`last_synced_at`、`retrieval_mode`、`content_access`，否則後續 analyzer 只能產 metadata-aware summary。

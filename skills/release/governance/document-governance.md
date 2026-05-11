@@ -11,6 +11,26 @@ L3 document entity 是正式文件的語意索引入口。
 文件不是 L2（文件是 L2 概念的具體體現），不是 task。
 但對使用者與 agent 而言，**它必須是從 L2 找到正式文件的穩定入口**，不能只是 metadata 容器。
 
+### Artifact routing：先判斷治理角色，不先判斷副檔名
+
+任何 artifact 先判斷「ZenOS 需要治理的是什麼」，不要用副檔名決定能不能進 ZenOS。
+
+| 治理角色 | 判斷標準 | ZenOS 路由 |
+|---|---|---|
+| Knowledge document | 價值在可被閱讀、摘要、引用、`read_source` 取回文字內容 | L3 document / document bundle |
+| Controlled asset | 價值在受控取用、版本、用途、owner、授權或審核，不靠全文閱讀理解 | asset metadata + private/controlled storage URI |
+| Operational record | 價值在交易、帳務、憑證、紀錄、合規留存 | restricted record metadata + private/controlled storage URI |
+
+共通紅線：
+- 不得因為 artifact 是 binary、image、PDF、attachment 就判定 ZenOS 無法治理。
+- 若 artifact 的價值在「可被讀懂的內容」，走 L3 document。
+- 若 artifact 的價值在「受控取用與證明其存在」，走 controlled asset / operational record。
+- ZenOS 至少保存 metadata：名稱、用途、owner、可讀角色、存取範圍、URI、審核/有效狀態、關聯 L2。
+- 敏感 artifact 預設 restricted，不得建議公開圖床。
+- 只有 ZenOS 目前沒有 storage、URI、ACL、metadata 路徑時，才是治理缺口，可建立治理 task 或 blindspot。
+
+例子：公司印章 PNG、Logo 是 controlled asset；發票、付款憑證是 operational record；可讀的規格書、合約文字、SOP 是 knowledge document。
+
 ### L3 index summary = 文件群 retrieval map
 
 L3 `doc_role=index` 的 `summary` 不是單一檔案摘要，而是一組 sources 的語意地圖。

@@ -1109,6 +1109,23 @@ def test_ac_mide_07j_release_capture_skill_requires_capture_journal_for_baseline
     )
 
 
+@pytest.mark.spec("AC-MIDE-07J")
+def test_ac_mide_07j_release_capture_skill_routes_binary_assets_as_controlled_assets():
+    """Release capture skill must route artifacts by governance role, not by extension."""
+    workflow = ROOT / "skills" / "release" / "zenos-capture" / "SKILL.md"
+    if not workflow.exists():
+        pytest.fail(f"{workflow} not found")
+    content = workflow.read_text(encoding="utf-8")
+    assert "任何 artifact 先判斷治理角色" in content
+    assert "不先看副檔名" in content
+    assert "controlled asset metadata" in content
+    assert "operational record metadata" in content
+    assert "binary、image、PDF、attachment" in content
+    assert "說「無法入 ZenOS」" in content
+    assert "不要建議公開圖床" in content
+    assert "不要因為副檔名建 blindspot" in content
+
+
 # --- P0: AC-MIDE-08 ---
 
 

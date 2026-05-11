@@ -472,6 +472,20 @@ write(collection="documents", data={
   結果必須包含目標 L2，且該 L2 的 `documents` 至少列出 1 個可用 L3 index。
 - 若驗證查不到，這次 capture 視為未完成治理；先修 `summary` / `bundle_highlights` / source metadata。例：「新手 5K/10K 課表」必須能命中訓練計畫 L2 並帶出相關 L3。
 
+### Artifact capture 路由
+
+遇到任何 artifact，先判斷治理角色，不先看副檔名：
+- 可被閱讀、摘要、引用、`read_source` 取回文字內容 → L3 document / document bundle。
+- 需要受控取用、版本、用途、owner、授權或審核，但不靠全文閱讀理解 → controlled asset metadata + private/controlled storage URI。
+- 交易、帳務、憑證、紀錄、合規留存 → operational record metadata + private/controlled storage URI。
+
+紅線：
+- 不要因為 artifact 是 binary、image、PDF、attachment 就回報「無法入 ZenOS」。
+- 不要把 controlled asset / operational record 強塞成 L3 document 原文。
+- 不要建議公開圖床。
+- 不要因為副檔名建立 blindspot。
+- 只有缺少 storage / URI / ACL / metadata 路徑時，才建立治理 task 或 blindspot。
+
 Helper / connector 來源（Notion、GDrive、local、upload、wiki、url）必須盡量帶 `snapshot_summary`：
 - `snapshot_summary` 是 10KB 內的語意摘要，不是全文 mirror。
 - 新建 bundle 使用 `sources: [...]` 時也要保留 `snapshot_summary`、`external_id`、`external_updated_at`、`last_synced_at`、`retrieval_mode`、`content_access`。

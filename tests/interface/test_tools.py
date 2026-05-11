@@ -5911,6 +5911,13 @@ class TestGovernanceGuideTool:
         assert "使用者語言" in content
         assert "新手 5K/10K 課表" in content
         assert "bundle_highlights" in content
+        assert "Artifact routing" in content
+        assert "Knowledge document" in content
+        assert "Controlled asset" in content
+        assert "Operational record" in content
+        assert "不先判斷副檔名" in content
+        assert "不得因為 artifact 是 binary" in content
+        assert "不得建議公開圖床" in content
 
     async def test_bundle_rules_require_index_summary_retrieval_map(self):
         """Bundle guide makes index summaries an agent-readable routing map."""
